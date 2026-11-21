@@ -60,6 +60,30 @@ export function unitsForUsd(
   return ((BigInt(asset.units) * amountCents) / valueCents).toString();
 }
 
+/**
+ * The units a first deposit of `amountCents` moves. Confío Dollar+ is a share
+ * whose `valueUsd` the server rounds to the cent (half-even, so it can round
+ * up): shares for exactly the minimum can be worth a fraction of a cent less
+ * than the plan price, and the server refuses that (`first_fee_short`). At
+ * the minimum it therefore asks for one cent more, capped at the whole
+ * position ('max').
+ */
+export function depositUnitsForUsd(
+  amountCents: bigint,
+  minCents: bigint,
+  asset: { key: string; units: string; valueUsd: string | null },
+): string | null {
+  const target = asset.key === 'cusd_plus' && amountCents === minCents ? minCents + 1n : amountCents;
+  return unitsForUsd(target, asset);
+}
+
+/** Confío Dollar+ whose whole balance only rounds to the minimum: it may fall
+ * a fraction of a cent short of the first period. */
+export function mayFallShort(minCents: bigint, asset: { key: string; valueUsd: string | null } | null): boolean {
+  const value = toCents(asset?.valueUsd);
+  return !!asset && asset.key === 'cusd_plus' && value !== null && minCents > 0n && value === minCents;
+}
+
 const parseDate = (iso: string | null | undefined): Date | null => {
   if (!iso) {
     return null;
@@ -103,8 +127,50 @@ export const planName = (key: string): string =>
 export const planPeriod = (key: string): string =>
   key === 'annual' ? 'por año' : key === 'monthly' ? 'por mes' : '';
 
+// Payout rail names. The server's names come first (offer.payoutRailOptions,
+// read on its own by useRailLabels), so a rail switched on by the server is
+// named with no app release; this table is the fallback for an older server,
+// and a rail neither knows is a generic bank account, never its raw key.
 const RAILS: Record<string, string> = { co_breb: 'Bre-B', br_pix: 'Pix', mx_clabe: 'CLABE' };
-export const railLabel = (rail: string | null | undefined): string => (rail ? RAILS[rail] ?? rail : '');
+const serverRailLabels: Record<string, string> = {};
+export const GENERIC_RAIL = 'Cuenta bancaria';
+
+/** Store the server's rail names (useRailLabels). */
+export function registerRailLabels(options: { key: string; label: string }[] | null | undefined): void {
+  (options ?? []).forEach((o) => {
+    if (o && typeof o.key === 'string' && typeof o.label === 'string' && o.label.trim()) {
+      serverRailLabels[o.key] = o.label.trim();
+    }
+  });
+}
+
+/** Test helper: forget the server's names. */
+export function clearRailLabels(): void {
+  Object.keys(serverRailLabels).forEach((k) => { delete serverRailLabels[k]; });
+}
+
+const knownRailLabel = (rail: string): string | null => serverRailLabels[rail] ?? RAILS[rail] ?? null;
+
+export const railLabel = (rail: string | null | undefined): string =>
+  (rail ? knownRailLabel(rail) ?? GENERIC_RAIL : '');
+
+/**
+ * The rails as one phrase after "una cuenta …": "Pix o CLABE". Unknown rails
+ * read "bancaria" (so "una cuenta bancaria"), once.
+ */
+export function railsPhrase(rails: string[], word: 'o' | 'y' | ',' = 'o'): string {
+  const names: string[] = [];
+  rails.forEach((r) => {
+    const name = knownRailLabel(r) ?? 'bancaria';
+    if (!names.includes(name)) {
+      names.push(name);
+    }
+  });
+  if (word === ',') {
+    return names.join(', ');
+  }
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} ${word} ${names[names.length - 1]}`;
+}
 
 /** The viewer holds exactly one Confío dollar; this is its name. Never "Dollar+". */
 export const dollarName = (key: string | null | undefined): string =>
@@ -163,7 +229,7 @@ export function ruleDestination(rule: {
     return rule.payeeName || (rule.payeeHandle ? `@${rule.payeeHandle.replace(/^@/, '')}` : 'Alguien de Confío');
   }
   if (rule.kind === 'payout') {
-    return rule.payoutLabel || railLabel(rule.payoutRail) || 'Cuenta bancaria';
+    return rule.payoutLabel || railLabel(rule.payoutRail) || GENERIC_RAIL;
   }
   return rule.assetName || rule.assetSymbol || 'Inversión';
 }

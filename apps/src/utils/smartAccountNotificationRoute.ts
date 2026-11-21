@@ -11,12 +11,13 @@
 import { knownInheritedSmartAccountId } from './smartAccounts';
 
 export type SmartNotificationTarget =
-  | { screen: 'SmartAccountHome' | 'SmartAccountBilling' | 'SmartAccountRules' | 'BeneficiaryStatus'; params?: undefined }
+  | { screen: 'SmartAccountHome' | 'SmartAccountBilling' | 'SmartAccountRules' | 'SmartAccountWatches' | 'BeneficiaryStatus'; params?: undefined }
   | { screen: 'BeneficiaryInvite' | 'BeneficiaryClaimStatus'; params: { designationId: string } }
   | { screen: 'InheritedAccount'; params?: { inheritedAccountId: string } }
   | { screen: 'BottomTabs'; params: { screen: 'Home' } };
 
-const PLAIN = new Set(['SmartAccountHome', 'SmartAccountBilling', 'SmartAccountRules', 'BeneficiaryStatus']);
+// SmartAccountWatches: an alert the owner set through Confío IA+ was met.
+const PLAIN = new Set(['SmartAccountHome', 'SmartAccountBilling', 'SmartAccountRules', 'SmartAccountWatches', 'BeneficiaryStatus']);
 const WITH_DESIGNATION = new Set(['BeneficiaryInvite', 'BeneficiaryClaimStatus']);
 
 const pick = (data: Record<string, unknown>, key: string): string | null => {

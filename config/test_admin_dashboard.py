@@ -524,3 +524,229 @@ class ActivationTests(TestCase):
         for user in (real, robot):
             UserActivityDay.objects.create(user=user, day=today, first_seen_at=timezone.now())
         self.assertEqual(growth.retention(sections.Window.current())['retention']['active_7d'], 1)
+
+
+class SmartAccountSectionTests(TestCase):
+    """Cuenta inteligente on the Community page: empty, populated, linked."""
+
+    def setUp(self):
+        cache.clear()
+        self.admin = get_user_model().objects.create_superuser(
+            username='smart-dash-admin', email='smart-dash@example.test', password=None)
+        self.admin.is_verified = lambda: True
+        self._addr = iter(range(1, 10_000))
+
+    def address(self):
+        return '0x' + format(next(self._addr), '040x')
+
+    def page(self):
+        request = RequestFactory().get(reverse('confio_admin:dash_community'))
+        request.user = self.admin
+        request.session = SessionStore()
+        view = next(u.callback for u in confio_admin_site.get_urls() if getattr(u, 'name', None) == 'dash_community')
+        return view(request).content.decode()
+
+    def open_link(self, url):
+        """A changelist link resolves and its filters are valid (an invalid
+        filter redirects to ?e=1 instead of listing)."""
+        from urllib.parse import parse_qsl, urlsplit
+        from django.urls import resolve
+
+        parts = urlsplit(url)
+        request = RequestFactory().get(parts.path, dict(parse_qsl(parts.query)))
+        request.user = self.admin
+        request.session = SessionStore()
+        match = resolve(parts.path)
+        return match.func(request, *match.args, **match.kwargs)
+
+    def member(self, name):
+        from users.models import Account
+
+        user = get_user_model().objects.create(username=name, firebase_uid=f'smart-dash-{name}')
+        Account.objects.create(user=user, account_type='personal', account_index=0, bsc_address=self.address())
+        return user
+
+    def smart(self, user, status='active', plan='annual', billing='current', **fields):
+        from users.models import Account
+        from smart_account.models import SmartAccount
+
+        contract = self.address()
+        row = Account.objects.create(user=user, account_type='smart', account_index=0, bsc_address=contract)
+        return SmartAccount.objects.create(
+            owner_user=user, owner_account=Account.objects.get(user=user, account_type='personal'), account=row,
+            contract_address=contract, status=status, billing_status=billing,
+            plan='' if status == 'inherited' else plan, **fields)
+
+    def event(self, account, name, *, applied=True, minutes_ago=0, **args):
+        from smart_account.models import SmartAccountEvent
+
+        now = timezone.now()
+        event = SmartAccountEvent.objects.create(
+            smart_account=account, address=account.contract_address, tx_hash='0x' + format(next(self._addr), '064x'),
+            log_index=0, name=name, args=args, block_number=next(self._addr),
+            block_time=now - timezone.timedelta(minutes=minutes_ago), applied_at=now if applied else None)
+        SmartAccountEvent.objects.filter(pk=event.pk).update(created_at=now - timezone.timedelta(minutes=minutes_ago))
+        return event
+
+    def test_feature_off_and_empty_tables_render(self):
+        from config.admin_dashboard_smart_account import smart_account
+
+        with self.settings(SMART_ACCOUNT_ENABLED=False, SMART_ACCOUNT_FACTORY_ADDRESS='',
+                           SMART_ACCOUNT_PAYOUT_RAILS='', SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=False):
+            data = smart_account(sections.Window.current())['smart_account']
+            html = self.page()
+        self.assertFalse(data['feature']['enabled'])
+        self.assertEqual(data['accounts']['subscribers'], 0)
+        self.assertEqual(data['revenue']['window']['usd'], Decimal('0'))
+        self.assertFalse(data['ops']['needs_action'])
+        self.assertIsNone(data['ops']['oldest_unapplied'])
+        self.assertIn('Cuenta inteligente', html)
+        self.assertIn('Factory not set', html)
+        self.assertIn('No payout rail offered', html)
+        self.assertIn('never scanned', html)
+        self.assertIn('Cuenta inteligente funnel (30d)', html)
+
+    def test_a_failed_build_renders_as_unavailable(self):
+        with mock.patch('config.admin_dashboard_smart_account._build', side_effect=RuntimeError('db')):
+            html = self.page()
+        self.assertIn('Cuenta inteligente figures are unavailable', html)
+
+    def test_populated_section_counts_and_links(self):
+        from config.admin_dashboard_smart_account import smart_account
+        from smart_account.models import (
+            SmartAccountBeneficiary, SmartAccountCharge, SmartAccountClaim, SmartAccountForcedSale,
+            SmartAccountRelayTx, SmartAccountRule, SmartAccountRuleRun)
+
+        now = timezone.now()
+        ana, ben, cai, dan = (self.member(n) for n in ('ana', 'ben', 'cai', 'dan'))
+        annual = self.smart(ana)
+        monthly = self.smart(ben, status='cancel_pending', plan='monthly', billing='notice')
+        self.smart(cai, status='expired')
+        self.smart(dan, status='inherited')
+        subscribed = self.event(annual, 'Subscribed')
+        self.event(monthly, 'SubscriptionCancelled')
+        fee = self.event(monthly, 'FeeCollected')
+        SmartAccountCharge.objects.create(
+            smart_account=annual, event=subscribed, plan='annual', period_start=now, period_end=now,
+            fee_usd=Decimal('149.99'), paid_with='cusd', tx_hash=subscribed.tx_hash, charged_at=now)
+        SmartAccountCharge.objects.create(
+            smart_account=monthly, event=fee, plan='monthly', period_start=now, period_end=now,
+            fee_usd=Decimal('14.99'), paid_with='sale', tx_hash=fee.tx_hash,
+            charged_at=now - timezone.timedelta(days=20))
+        SmartAccountForcedSale.objects.create(smart_account=monthly, period_end=now, status='succeeded',
+                                              dollars_out=str(1499 * 10 ** 16))
+        SmartAccountForcedSale.objects.create(smart_account=annual, period_end=now, status='failed')
+        rule = SmartAccountRule.objects.create(smart_account=annual, kind='send', token_in=self.address(),
+                                               amount=Decimal('10'), frequency='weekly', active=True, state='onchain')
+        SmartAccountRule.objects.create(smart_account=annual, kind='buy', token_in=self.address(),
+                                        amount=Decimal('5'), frequency='daily', active=False, state='cancelled')
+        for hours, status, error in ((1, 'ok', ''), (2, 'skipped', 'insufficient_balance'),
+                                     (3, 'skipped', 'insufficient_balance'), (4, 'failed', 'transaction dropped')):
+            SmartAccountRuleRun.objects.create(rule=rule, scheduled_for=now - timezone.timedelta(hours=hours),
+                                               status=status, error=error)
+        designation = SmartAccountBeneficiary.objects.create(
+            smart_account=annual, beneficiary_user=ben, beneficiary_address=self.address(),
+            challenge_window_seconds=86400, state='active')
+        SmartAccountBeneficiary.objects.create(
+            smart_account=monthly, beneficiary_user=ana, beneficiary_address=self.address(),
+            challenge_window_seconds=86400, state='pending_acceptance')
+        soon = now + timezone.timedelta(days=3)
+        SmartAccountClaim.objects.create(beneficiary_row=designation, initiated_at=now, executable_at=soon,
+                                         initiated_tx='0x01')
+        SmartAccountClaim.objects.create(beneficiary_row=designation, initiated_at=now,
+                                         executable_at=now - timezone.timedelta(hours=1), initiated_tx='0x02')
+        SmartAccountClaim.objects.create(beneficiary_row=designation, initiated_at=now, executable_at=now,
+                                         initiated_tx='0x03', state='cancelled', cancelled_at=now)
+        stuck = SmartAccountRelayTx.objects.create(smart_account=annual, kind='collect', source_id='p1',
+                                                   calldata='0x', signed_tx_hash='0xaa', status='sent')
+        SmartAccountRelayTx.objects.filter(pk=stuck.pk).update(created_at=now - timezone.timedelta(minutes=40))
+        SmartAccountRelayTx.objects.create(smart_account=annual, kind='collect', source_id='p2',
+                                           calldata='0x', signed_tx_hash='0xbb', status='dropped')
+        SmartAccountRelayTx.objects.create(smart_account=annual, kind='collect', source_id='p3',
+                                           calldata='0x', signed_tx_hash='0xcc', status='sent')  # fresh
+        self.event(monthly, 'Withdrawn', applied=False, minutes_ago=90)
+        self.event(monthly, 'Traded', applied=False, minutes_ago=5)
+
+        with self.settings(SMART_ACCOUNT_ENABLED=True, SMART_ACCOUNT_FACTORY_ADDRESS='0x' + 'fa' * 20,
+                           SMART_ACCOUNT_BENEFICIARY_ENABLED=True, SMART_ACCOUNT_PAYOUT_RAILS='bogus_rail',
+                           SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=False, SMART_ACCOUNT_ALLOWED_USER_IDS='1,2'):
+            data = smart_account(sections.Window.current())['smart_account']
+            html = self.page()
+
+        accounts = data['accounts']
+        self.assertEqual({r['label']: r['n'] for r in accounts['rows']}['Active'], 1)
+        self.assertEqual(accounts['own'], 3)
+        self.assertEqual(accounts['subscribers'], 2)
+        self.assertEqual({r['label']: r['n'] for r in accounts['plans']}, {'Annual': 1, 'Monthly': 1})
+        self.assertEqual({r['label']: r['n'] for r in accounts['billing']}['Notice running'], 1)
+        self.assertEqual((accounts['new_subscriptions'], accounts['cancellations']), (1, 1))
+        revenue = data['revenue']
+        self.assertEqual((revenue['window']['n'], revenue['window']['usd']), (1, Decimal('149.99')))
+        self.assertEqual((revenue['rolling_30']['n'], revenue['rolling_30']['usd']), (2, Decimal('164.98')))
+        by_paid = {r['label']: (r['window']['n'], r['rolling_30']['n']) for r in revenue['paid_with']}
+        self.assertEqual(by_paid['cUSD'], (1, 1))
+        self.assertEqual(by_paid['Paid by forced sale'], (0, 1))
+        forced = revenue['forced']
+        self.assertEqual((forced['n'], forced['succeeded'], forced['failed'], forced['dollars']),
+                         (2, 1, 1, Decimal('14.99')))
+        automation = data['automation']
+        self.assertEqual(automation['rules_total'], 1)
+        self.assertEqual({r['label']: r['n'] for r in automation['runs']},
+                         {'Pending': 0, 'Sent': 0, 'Executed': 1, 'Skipped': 2, 'Failed': 1})
+        self.assertEqual(automation['skip_reasons'], [('insufficient_balance', 2)])
+        self.assertEqual(automation['fail_reasons'], [('transaction dropped', 1)])
+        beneficiaries = data['beneficiaries']
+        self.assertEqual({r['label']: r['n'] for r in beneficiaries['rows']}['Accepted'], 1)
+        claims = beneficiaries['claims']
+        self.assertEqual((claims['waiting'], claims['executable'], claims['cancelled'], claims['executed']),
+                         (1, 1, 1, 0))
+        self.assertEqual(claims['soonest'], soon)
+        ops = data['ops']
+        self.assertEqual((ops['stuck_relay'], ops['bad_relay'], ops['unapplied'], ops['unapplied_old']),
+                         (1, 1, 2, 1))
+        self.assertEqual(ops['blocked_accounts'], 1)
+        self.assertGreaterEqual(ops['oldest_unapplied_minutes'], 89)
+        self.assertEqual(ops['failed_sales'], 1)
+        self.assertTrue(ops['needs_action'])
+        feature = data['feature']
+        self.assertEqual((feature['enabled'], feature['canary'], feature['rails_offered']), (True, 2, []))
+        self.assertEqual(feature['rails_configured'], ['bogus_rail'])
+        self.assertIn('not final after 15 min', html)
+        self.assertIn('Next executable'.lower(), html.lower())
+
+        urls = [r['url'] for group in (accounts['rows'], accounts['plans'], accounts['billing'],
+                                       revenue['paid_with'], automation['rules'], automation['runs'],
+                                       beneficiaries['rows']) for r in group]
+        urls += [accounts['all_url'], accounts['events_url'], revenue['window']['url'], forced['url'],
+                 forced['failed_url'], claims['pending_url'], claims['cancelled_url'], claims['executed_url'],
+                 ops['stuck_relay_url'], ops['bad_relay_url'], ops['unapplied_url']]
+        self.assertNotIn(None, urls)
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.open_link(url)
+                self.assertEqual(response.status_code, 200)
+        # The filtered lists hold the rows the counts describe.
+        response = self.open_link(ops['stuck_relay_url'])
+        self.assertEqual(response.context_data['cl'].result_count, 1)
+        response = self.open_link(ops['unapplied_url'])
+        self.assertEqual(response.context_data['cl'].result_count, 2)
+
+    def test_funnel_counts_people_per_stage_without_preview_users(self):
+        from config import admin_dashboard_growth as growth
+        from users.models_analytics import FunnelEvent
+
+        real, staff = self.member('real'), self.member('staff')
+        for user, stage, plan in ((real, 'subscribe_opened', ''), (real, 'subscribe_opened', ''),
+                                  (real, 'subscribed', 'annual'), (staff, 'subscribed', 'monthly')):
+            FunnelEvent.objects.create(event_name='smart_account_funnel', user=user,
+                                       properties={'stage': stage, 'plan': plan})
+        old = FunnelEvent.objects.create(event_name='smart_account_funnel', user=real,
+                                         properties={'stage': 'cancelled', 'plan': 'annual'})
+        FunnelEvent.objects.filter(pk=old.pk).update(created_at=timezone.now() - timezone.timedelta(days=40))
+        with self.settings(PAID_OFFER_PREVIEW_USER_IDS=str(staff.pk)):
+            rows = {r['stage']: r for r in growth.demand(sections.Window.current())['demand_smart_funnel']}
+        self.assertEqual([r for r in rows], [key for key, _label in growth.SMART_FUNNEL_STAGES])
+        self.assertEqual(rows['subscribe_opened']['people'], 1)
+        self.assertEqual((rows['subscribed']['people'], rows['subscribed']['annual'],
+                          rows['subscribed']['monthly']), (1, 1, 0))
+        self.assertEqual(rows['cancelled']['people'], 0)

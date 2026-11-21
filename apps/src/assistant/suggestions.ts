@@ -38,7 +38,7 @@ export const DOCK_ROUTES = new Set([
 
 // Screens with their own pinned action bar where even a docked bubble would
 // cover a button: the bubble steps away entirely there.
-export const HIDDEN_ROUTES = new Set(['PaidOffer']);
+export const HIDDEN_ROUTES = new Set(['SmartAccountOffer']);
 
 const HINTS: Record<string, ScreenHint[]> = {
   Home: [

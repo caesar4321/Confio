@@ -72,6 +72,9 @@ for _name, _task, _schedule in (
     ('smart-account-claim-notices', 'smart_account.claim_notices', crontab(hour=14, minute=5)),
     ('smart-account-sync-entitlements', 'smart_account.sync_entitlements', crontab(hour=6, minute=45)),
     ('smart-account-latch-confio-sale', 'smart_account.latch_confio_sale', crontab(minute=47)),
+    ('smart-account-monthly-review-notes', 'smart_account.monthly_review_notes',
+     crontab(day_of_month=1, hour=14, minute=25)),
+    ('smart-account-evaluate-watches', 'smart_account.evaluate_watches', crontab(minute='*/5')),
 ):
     app.conf.beat_schedule.setdefault(_name, {'task': _task, 'schedule': _schedule})
 

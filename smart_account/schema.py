@@ -68,6 +68,14 @@ class SmartAccountBenefitType(graphene.ObjectType):
     body = graphene.String(required=True)
 
 
+class SmartAccountPayoutRailType(graphene.ObjectType):
+    class Meta:
+        name = 'SmartAccountPayoutRail'
+    key = graphene.String(required=True)
+    label = graphene.String(required=True)
+    hint = graphene.String()
+
+
 class SmartAccountOfferType(graphene.ObjectType):
     class Meta:
         name = 'SmartAccountOffer'
@@ -88,6 +96,9 @@ class SmartAccountOfferType(graphene.ObjectType):
     beneficiary_risk_disclosure = graphene.List(graphene.NonNull(graphene.String), required=True)
     # ADDITION: stable machine code for blockedReason.
     blocked_code = graphene.String()
+    # ADDITION: the payout rails with their names, so a rail turned on by the
+    # server switch is named correctly with no app release.
+    payout_rail_options = graphene.List(graphene.NonNull(SmartAccountPayoutRailType), required=True)
 
 
 class SmartAccountAssetType(graphene.ObjectType):
@@ -278,6 +289,21 @@ class SmartAccountPayoutMethodType(graphene.ObjectType):
     available = graphene.Boolean(required=True)
 
 
+def _pagomovil_method(destination, available: bool) -> 'SmartAccountPayoutMethodType':
+    return SmartAccountPayoutMethodType(
+        payout_method_id=str(destination.internal_id), rail='ve_pagomovil', label=destination.label,
+        holder_name=destination.holder_name or '', available=bool(available))
+
+
+class SmartAccountPagoMovilDestinationResultType(graphene.ObjectType):
+    class Meta:
+        name = 'SmartAccountPagoMovilDestinationResult'
+    success = graphene.Boolean(required=True)
+    error_code = graphene.String()
+    error_message = graphene.String()
+    payout_method = graphene.Field(SmartAccountPayoutMethodType)
+
+
 class SmartAccountBuyableAssetType(graphene.ObjectType):
     class Meta:
         name = 'SmartAccountBuyableAsset'
@@ -310,6 +336,16 @@ class SmartAccountBuyableAssetConnection(graphene.ObjectType):
 class SmartAccountDepositInput(graphene.InputObjectType):
     asset_key = graphene.String(required=True)
     units = graphene.String(required=True)
+
+
+class SmartAccountWatchType(graphene.ObjectType):
+    class Meta:
+        name = 'SmartAccountWatch'
+    watch_id = graphene.String(required=True)
+    text = graphene.String(required=True, description='The alert in plain Spanish')
+    has_action = graphene.Boolean(required=True, description='A buy the owner chose is prepared on trigger')
+    last_triggered_at = graphene.DateTime()
+    created_at = graphene.DateTime(required=True)
 
 
 class SmartAccountSimpleResultType(graphene.ObjectType):
@@ -369,6 +405,10 @@ def _rule_type(rule) -> SmartAccountRuleType:
         if rule.payout_method is not None:
             out.payout_method_id = str(rule.payout_method.internal_id)
             out.payout_label = ' · '.join(p for p in (rule.payout_method.label, rule.payout_method.holder_name) if p)
+        elif rule.pagomovil_destination is not None:
+            out.payout_method_id = str(rule.pagomovil_destination.internal_id)
+            out.payout_label = ' · '.join(p for p in (rule.pagomovil_destination.label,
+                                                      rule.pagomovil_destination.holder_name) if p)
     if rule.kind == 'buy':
         out.asset_key = rule.asset_key or None
         resolved = assets_mod.resolve_asset_key(rule.asset_key) if rule.asset_key else None
@@ -447,6 +487,24 @@ class Query(graphene.ObjectType):
     inherited_accounts = graphene.List(graphene.NonNull(InheritedAccountType))
     beneficiary_designations = graphene.List(graphene.NonNull(BeneficiaryDesignationType))
     smart_account_claim_alert = graphene.Field(SmartAccountClaimAlertType)
+    # ADDITION (decision 34): the owner's alerts, set through Confío IA+.
+    smart_account_watches = graphene.List(graphene.NonNull(SmartAccountWatchType))
+
+    def resolve_smart_account_watches(self, info):
+        viewer = _viewer(info, require_wallet=False)
+        if viewer is None:
+            return None
+        from . import watches
+        from .models import SmartAccountWatch
+        own = context.own_account(viewer.user)
+        if own is None:
+            return []
+        return [SmartAccountWatchType(
+            watch_id=str(w.internal_id), has_action=bool(w.action), last_triggered_at=w.last_triggered_at,
+            created_at=w.created_at,
+            text=watches.describe(w.kind, asset_key=w.asset_key, currency=w.currency, threshold=w.threshold,
+                                  action=w.action or None))
+            for w in SmartAccountWatch.objects.filter(smart_account=own, active=True).order_by('-created_at')]
 
     def resolve_smart_account_offer(self, info):
         user = getattr(info.context, 'user', None)
@@ -458,19 +516,22 @@ class Query(graphene.ObjectType):
         block = offer.subscribe_block(user, personal_context=personal, meta=meta)
         own = context.own_account(user) if personal else None
         has_account = own is not None and own.status != 'none'
-        from users import paid_offers
-        from users.models_product_waitlist import PRODUCT_SMART_ACCOUNT
-        pitch = paid_offers.available(PRODUCT_SMART_ACCOUNT, is_employee=_is_employee_context(info),
-                                      meta=meta, user_id=user.pk) if personal else False
         headline = 'beneficiary_first' if (viewer is not None and viewer.signer_address
                                            and _has_balance(viewer)) else 'automation_first'
         beneficiary_on = offer.beneficiary_enabled(user.pk)
         order = [k for k in offer.HEADLINE_ORDER[headline]]
         plans = offer.plans()
         cheapest = min(Decimal(p['price_usd']) for p in plans)
+        # The full pitch for every personal, non-employee viewer on a build
+        # that has the real screens, whatever SMART_ACCOUNT_ENABLED or the
+        # factory say (founder, 2026-11-21): those gate signing only
+        # (canSubscribe, blockedReason), never what the offer shows.
+        if block is None and personal and offer.subscribe_in_flight(user, own):
+            block = 'opening'
+        can_subscribe = block is None and not (own is not None and own.status in ('active', 'cancel_pending'))
         return SmartAccountOfferType(
-            available=bool(personal and (block is None or has_account or pitch)),
-            can_subscribe=block is None and not (own is not None and own.status in ('active', 'cancel_pending')),
+            available=bool(personal and (offer.build_supported(meta) or has_account)),
+            can_subscribe=can_subscribe,
             blocked_reason=offer.BLOCKED.get(block) if block else None,
             blocked_code=block,
             plans=[SmartAccountPlanType(**p) for p in plans],
@@ -482,6 +543,7 @@ class Query(graphene.ObjectType):
             beneficiary_enabled=beneficiary_on,
             investing_crypto_enabled=offer.crypto_investing_enabled(user, meta),
             payout_rails=offer.payout_rails(),
+            payout_rail_options=[SmartAccountPayoutRailType(**o) for o in offer.payout_rail_options()],
             dollar=offer.viewer_dollar(user, meta),
             min_first_deposit_usd=format(cheapest, 'f'),
         )
@@ -495,8 +557,10 @@ class Query(graphene.ObjectType):
         base = dict(window_options_days=list(offer.WINDOW_OPTIONS_DAYS),
                     default_window_days=offer.DEFAULT_WINDOW_DAYS,
                     beneficiary_enabled=offer.beneficiary_enabled(viewer.user.pk))
+        opening = offer.subscribe_in_flight(viewer.user, own)
         if own is None:
-            return SmartAccountType(status='none', assets=[], rules=[], assistant_plus=False, **base)
+            return SmartAccountType(status='opening' if opening else 'none', assets=[], rules=[],
+                                    assistant_plus=False, **base)
         from . import reconcile
         reconcile.refresh_derived(own)
         # Unknown holdings are an error for this field, never an empty list.
@@ -528,9 +592,9 @@ class Query(graphene.ObjectType):
         if pending is not None and accepted is not None and pending.id < accepted.id:
             pending = None
         rules = (RuleModel.objects.filter(smart_account=own, state='onchain')
-                 .select_related('payee_user', 'payout_method').order_by('id'))
+                 .select_related('payee_user', 'payout_method', 'pagomovil_destination').order_by('id'))
         return SmartAccountType(
-            status=own.status, contract_address=own.contract_address,
+            status='opening' if opening else own.status, contract_address=own.contract_address,
             total_usd=assets_mod.money(assets_mod.total_usd(held)), dollars_usd=assets_mod.money(dollars),
             billing=billing, assets=[_asset_type(a) for a in held], rules=[_rule_type(r) for r in rules],
             beneficiary=_beneficiary_type(accepted), pending_beneficiary=_beneficiary_type(pending),
@@ -571,23 +635,7 @@ class Query(graphene.ObjectType):
         viewer = _viewer(info, require_wallet=False)
         if viewer is None:
             return None
-        from payment_accounts import local_money
-        from payment_accounts.models import PayoutDestination
-        rails = set(offer.payout_rails())
-        out = []
-        for destination in PayoutDestination.objects.filter(
-                confio_account=viewer.personal_account, provider='infinia',
-                status__in=('pending', 'active')).order_by('-created_at'):
-            rail = services.destination_rail(destination)
-            method = local_money.METHODS.get(rail)
-            if method is None or method.direction != 'send' or method.kind == 'qr' or rail.endswith('_qr'):
-                continue  # a QR is a one-time payment intent, not a saved destination
-            if local_money.verification_state((destination.provider_data or {}).get('validation')) != local_money.VERIFIED:
-                continue
-            out.append(SmartAccountPayoutMethodType(
-                payout_method_id=str(destination.internal_id), rail=rail, label=destination.label,
-                holder_name=destination.holder_name or '', available=rail in rails))
-        return out
+        return [SmartAccountPayoutMethodType(**row) for row in services.payout_method_rows(viewer)]
 
     def resolve_smart_account_buyable_assets(self, info, search=None, first=30, after=None):
         viewer = _viewer(info, require_wallet=False)
@@ -709,16 +757,32 @@ def _move(viewer, direction, batch_index=0):
     return services.prepare_move_everything(viewer, direction, batch_index)
 
 
-def _send_rule(viewer, payee_handle, amount_usd, frequency, rule_id=None):
-    return services.prepare_send_rule(viewer, rule_id, payee_handle, amount_usd, frequency)
+def _proposal(proposal_message_id, proposal_step):
+    if proposal_message_id in (None, '') or proposal_step is None:
+        return None
+    return (proposal_message_id, proposal_step)
 
 
-def _payout_rule(viewer, payout_method_id, amount_usd, frequency, rule_id=None):
-    return services.prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency)
+def _send_rule(viewer, payee_handle, amount_usd, frequency, rule_id=None, first_run_at=None,
+               proposal_message_id=None, proposal_step=None):
+    return services.prepare_send_rule(viewer, rule_id, payee_handle, amount_usd, frequency, first_run_at,
+                                      proposal=_proposal(proposal_message_id, proposal_step))
 
 
-def _buy_rule(viewer, asset_key, amount_usd, frequency, rule_id=None):
-    return services.prepare_buy_rule(viewer, rule_id, asset_key, amount_usd, frequency)
+def _payout_rule(viewer, payout_method_id, amount_usd, frequency, rule_id=None, first_run_at=None,
+                 proposal_message_id=None, proposal_step=None):
+    return services.prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency, first_run_at,
+                                        proposal=_proposal(proposal_message_id, proposal_step))
+
+
+def _buy_rule(viewer, asset_key, amount_usd, frequency, rule_id=None, first_run_at=None,
+              proposal_message_id=None, proposal_step=None):
+    return services.prepare_buy_rule(viewer, rule_id, asset_key, amount_usd, frequency, first_run_at,
+                                     proposal=_proposal(proposal_message_id, proposal_step))
+
+
+def _cancel_rule(viewer, rule_id, proposal_message_id=None, proposal_step=None):
+    return services.prepare_cancel_rule(viewer, rule_id, proposal=_proposal(proposal_message_id, proposal_step))
 
 
 def _inherited(viewer, inherited_account_id, destination, asset_keys=None):
@@ -727,6 +791,13 @@ def _inherited(viewer, inherited_account_id, destination, asset_keys=None):
 
 _S, _ID, _I, _B = graphene.String, graphene.ID, graphene.Int, graphene.Boolean
 _DEPOSITS = graphene.List(graphene.NonNull(SmartAccountDepositInput))
+# ADDITION (decision 34): the first run the owner chose, ISO-8601; optional,
+# so builds that never send it are unchanged. Re-validated by the service.
+_FIRST_RUN = _S(description='ISO-8601 first run (a weekday or a day of the month); null = from now')
+# ADDITION: the Confío IA+ proposal step this rule screen came from (the
+# assistant message id + the step's stepIndex), so a re-opened proposal
+# skips the steps already signed. A label only; optional.
+_PROPOSAL = {'proposal_message_id': _ID(), 'proposal_step': _I()}
 
 PrepareSmartAccountSubscribe = _prepare_mutation('PrepareSmartAccountSubscribe', _subscribe, {
     'plan': _S(required=True), 'deposits': _DEPOSITS, 'disclosures_accepted': _B(required=True)})
@@ -745,16 +816,15 @@ PrepareSmartAccountCancel = _prepare_mutation('PrepareSmartAccountCancel', servi
 PrepareSmartAccountUndoCancel = _prepare_mutation('PrepareSmartAccountUndoCancel', services.prepare_undo_cancel, {})
 PrepareSmartAccountSendRule = _prepare_mutation('PrepareSmartAccountSendRule', _send_rule, {
     'rule_id': _ID(), 'payee_handle': _S(required=True), 'amount_usd': _S(required=True),
-    'frequency': _S(required=True)})
+    'frequency': _S(required=True), 'first_run_at': _FIRST_RUN, **_PROPOSAL})
 PrepareSmartAccountPayoutRule = _prepare_mutation('PrepareSmartAccountPayoutRule', _payout_rule, {
     'rule_id': _ID(), 'payout_method_id': _S(required=True), 'amount_usd': _S(required=True),
-    'frequency': _S(required=True)})
+    'frequency': _S(required=True), 'first_run_at': _FIRST_RUN, **_PROPOSAL})
 PrepareSmartAccountBuyRule = _prepare_mutation('PrepareSmartAccountBuyRule', _buy_rule, {
     'rule_id': _ID(), 'asset_key': _S(required=True), 'amount_usd': _S(required=True),
-    'frequency': _S(required=True)})
+    'frequency': _S(required=True), 'first_run_at': _FIRST_RUN, **_PROPOSAL})
 PrepareSmartAccountCancelRule = _prepare_mutation(
-    'PrepareSmartAccountCancelRule', lambda viewer, rule_id: services.prepare_cancel_rule(viewer, rule_id),
-    {'rule_id': _ID(required=True)})
+    'PrepareSmartAccountCancelRule', _cancel_rule, {'rule_id': _ID(required=True), **_PROPOSAL})
 # ADDITION (spec 7.3 lists it; the frozen SDL has no trade mutation): wraps a
 # router call built from the existing quote flow in account.trade(...).
 PrepareSmartAccountTrade = _prepare_mutation(
@@ -812,7 +882,56 @@ class DeclineBeneficiaryDesignation(graphene.Mutation):
         return SmartAccountSimpleResultType(success=True)
 
 
+class SaveSmartAccountPagoMovilDestination(graphene.Mutation):
+    """Server-only: saves a Venezuelan Pago Móvil beneficiary for bank
+    payment rules (the VE send's validation). No transaction; a rule naming
+    it is still created with prepareSmartAccountPayoutRule and Face."""
+    class Arguments:
+        phone = graphene.String(required=True)
+        bank_code = graphene.String(required=True)
+        id_number = graphene.String(required=True, description='Cédula, e.g. V12345678')
+        holder_name = graphene.String(required=True)
+
+    Output = SmartAccountPagoMovilDestinationResultType
+
+    def mutate(self, info, phone, bank_code, id_number, holder_name):
+        result = SmartAccountPagoMovilDestinationResultType
+        try:
+            viewer = context.resolve_viewer(info)
+            row = services.save_pagomovil_destination(viewer, phone, bank_code, id_number, holder_name)
+        except context.ContextError as exc:
+            return result(success=False, error_code=exc.code, error_message=exc.message)
+        except services.PrepareError as exc:
+            return result(success=False, error_code=exc.code, error_message=exc.message)
+        except Exception:  # noqa: BLE001 — nothing saved; the user retries
+            logger.exception('smart account: saving a Pago Móvil destination failed')
+            return result(success=False, error_code='internal_error',
+                          error_message='No pudimos guardar el destino. Inténtalo de nuevo.')
+        return result(success=True, payout_method=_pagomovil_method(row, True))
+
+
+class DeleteSmartAccountWatch(graphene.Mutation):
+    """Server-only: the owner deletes one of their alerts (moves no money)."""
+    class Arguments:
+        watch_id = graphene.String(required=True)
+
+    Output = SmartAccountSimpleResultType
+
+    def mutate(self, info, watch_id):
+        from . import watches
+        try:
+            viewer = context.resolve_viewer(info, require_wallet=False)
+        except context.ContextError as exc:
+            return SmartAccountSimpleResultType(success=False, error_code=exc.code, error_message=exc.message)
+        if not watches.delete(viewer.user, watch_id):
+            return SmartAccountSimpleResultType(success=False, error_code='not_found',
+                                                error_message='Esa alerta ya no existe.')
+        return SmartAccountSimpleResultType(success=True)
+
+
 class Mutation(graphene.ObjectType):
+    delete_smart_account_watch = DeleteSmartAccountWatch.Field()
+    save_smart_account_pago_movil_destination = SaveSmartAccountPagoMovilDestination.Field()
     prepare_smart_account_subscribe = PrepareSmartAccountSubscribe.Field()
     prepare_smart_account_deposit = PrepareSmartAccountDeposit.Field()
     prepare_smart_account_move_everything = PrepareSmartAccountMoveEverything.Field()

@@ -13,7 +13,8 @@ import {
 } from '../components/smartAccount/kit';
 import { HELP_RULES } from '../components/smartAccount/help';
 import { SA } from '../components/smartAccount/tokens';
-import { frequencyLabel, railLabel, ruleTitle, shortDate } from '../components/smartAccount/format';
+import { frequencyLabel, railsPhrase, ruleTitle, shortDate } from '../components/smartAccount/format';
+import { useRailLabels } from '../components/smartAccount/useRailLabels';
 import { useSmartRead } from '../components/smartAccount/useSmartRead';
 import { fetchSmartAccount, fetchSmartAccountOffer, type SmartAccountRule } from '../services/smartAccount';
 
@@ -58,6 +59,7 @@ export function SmartAccountRulesScreen() {
   const navigation = useNavigation<any>();
   const account = useSmartRead(fetchSmartAccount);
   const offer = useSmartRead(fetchSmartAccountOffer);
+  useRailLabels();
   const [choosing, setChoosing] = useState(false);
 
   useEffect(() => {
@@ -152,7 +154,7 @@ export function SmartAccountRulesScreen() {
             divider
             left={<IconDisc icon={RULE_ICONS.payout} />}
             title="Pagar a una cuenta bancaria"
-            subtitle={`A una cuenta que ya guardaste: ${rails.map(railLabel).join(', ')}.`}
+            subtitle={`A una cuenta que ya guardaste: ${railsPhrase(rails, ',')}.`}
             onPress={() => create('payout')}
             chevron
             testID="new-payout"

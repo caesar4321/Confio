@@ -6,7 +6,11 @@ by construction: they close over the viewer resolved from the token, and the
 model never names an account, user or id.
 
 Money never moves here. The strongest thing the model can do is ask the app to
-open a screen; every transfer is still confirmed by the user in-flow.
+open a screen; every transfer is still confirmed by the user in-flow. For a
+Cuenta inteligente subscriber (Confío IA+, spec decision 34) the model can
+also PROPOSE a rule change the person asked for: the proposal is shown with a
+chip that opens the rule screen prefilled, and nothing changes until the
+owner reviews and signs it there (smart_account/assistant_ops.py).
 """
 from __future__ import annotations
 
@@ -73,6 +77,10 @@ class TurnResult:
     writes: list = field(default_factory=list)
     # categorize_transactions proposal awaiting the user's "sí".
     pending_categorization: dict | None = None
+    # Cuenta inteligente rule proposal (steps the app opens prefilled; one per reply).
+    rule_proposal: dict | None = None
+    # Cuenta inteligente alert awaiting the user's "sí".
+    pending_watch: dict | None = None
 
     def add_usage(self, model, usage):
         usage = usage or {}
@@ -132,9 +140,20 @@ def allowed_destinations(viewer: Viewer, *, paid_offers_allowed=True):
         PAID_OFFERS[k], is_employee=viewer.is_employee, meta=viewer.request_meta,
         user_id=getattr(viewer.user, 'pk', None))
         # Cuenta inteligente is sold, not only pitched: whoever can subscribe
-        # keeps the door when the waitlist probe is switched off.
-        or (k == 'cuenta_inteligente' and _smart_account_open(viewer))]
+        # keeps the door when the waitlist probe is switched off, and so does
+        # everyone on a build whose door opens the real screens.
+        or (k == 'cuenta_inteligente' and (smart_account_real_screen(viewer) or _smart_account_open(viewer)))]
     return keys
+
+
+def smart_account_real_screen(viewer) -> bool:
+    """This build's Cuenta inteligente door opens the real offer (never the
+    waitlist probe): a personal, non-employee viewer on a build at or above
+    SMART_ACCOUNT_MIN_APP_VERSION. Older builds keep the probe behaviour."""
+    if viewer.is_employee or viewer.account_type not in ('personal', 'smart'):
+        return False
+    from smart_account import offer
+    return offer.build_supported(viewer.request_meta)
 
 
 def _smart_account_open(viewer) -> bool:
@@ -534,6 +553,9 @@ def general_while_waiting(message):
 
 
 # What a turn may use while the team owns the thread: nothing personal.
+# Confío IA+ on a Cuenta inteligente: never while the team owns the thread.
+SMART_OPS_TOOLS = {'smart_account_rules', 'propose_smart_account_rule', 'propose_target_allocation',
+                   'smart_account_review', 'smart_account_alerts'}
 WAITING_TOOLS = {'navigate', 'read_public_document', 'get_exchange_rate', 'get_stock_quote', 'show_steps'}
 WAITING_FOR_TEAM_NOTE = (
     '\n# Esta conversación está con el equipo de Confío\n'
@@ -916,6 +938,26 @@ class Toolbelt:
         self.can_navigate = can_navigate
         self.destinations = allowed_destinations(viewer, paid_offers_allowed=paid_offers_allowed)
 
+    def smart_ops(self) -> bool:
+        """Confío IA+ operates the Cuenta inteligente: a personal (or smart)
+        non-employee viewer, on a build with the real screens, whose own
+        account carries rules and whose IA+ is current. Asked once per turn."""
+        if not hasattr(self, '_smart_ops'):
+            self._smart_ops = False
+            viewer = self.viewer
+            if viewer.user is not None and not viewer.is_employee and viewer.account_type in ('personal', 'smart'):
+                try:
+                    from smart_account import assistant_ops
+                    self._smart_ops = smart_account_real_screen(viewer) and assistant_ops.entitled(viewer.user)
+                except Exception:  # noqa: BLE001 — no tools is always safe
+                    logger.warning('Confio Assistant: smart account ops check failed', exc_info=True)
+        return self._smart_ops
+
+    def _said(self):
+        # The person's own words this turn and just before: amounts, assets,
+        # percentages and alert levels must come from here, never the model.
+        return f'{self.earlier_user_messages} {self.last_user_message}'
+
     def specs(self):
         from .guide import WALKS
 
@@ -1156,6 +1198,120 @@ class Toolbelt:
                     'strict': True,
                 },
             ]
+        if self.smart_ops():
+            nullable_str = {'type': ['string', 'null']}
+            nullable_int = {'type': ['integer', 'null']}
+            specs += [
+                {
+                    'type': 'function',
+                    'name': 'smart_account_rules',
+                    'description': (
+                        'Las reglas de su Cuenta inteligente: tipo, monto, frecuencia, próxima ejecución, última '
+                        'ejecución y por qué no se ejecutó; sus cuentas bancarias guardadas (con cuenta_id) y su '
+                        'objetivo de inversión si tiene. Úsala antes de proponer un cambio a una regla existente.'),
+                    'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
+                    'strict': True,
+                },
+                {
+                    'type': 'function',
+                    'name': 'propose_smart_account_rule',
+                    'description': (
+                        'Prepara la PROPUESTA de crear, cambiar o detener una regla de su Cuenta inteligente que la '
+                        'persona pidió. No guarda nada ni mueve dinero: agrega un botón para que la revise y la '
+                        'firme. Solo con lo que la persona dijo: el monto, la persona, la cuenta o la inversión. '
+                        'kind: send (a alguien de Confío, payee = su @usuario o número completo), payout (a una cuenta '
+                        'bancaria guardada, payout_method_id de smart_account_rules), buy (inversión, asset = nombre '
+                        'o símbolo que dijo). action=update/cancel necesita rule_id. "Pausar" es detener (cancel). '
+                        'weekday 0=lunes…6=domingo (semanal/quincenal), day_of_month 1-28 (mensual), start_date '
+                        'AAAA-MM-DD. Lo que no se use, null.'),
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'action': {'type': 'string', 'enum': ['create', 'update', 'cancel']},
+                            'kind': {'type': ['string', 'null'], 'enum': ['send', 'payout', 'buy', None]},
+                            'rule_id': nullable_str, 'payee': nullable_str, 'payout_method_id': nullable_str,
+                            'asset': nullable_str, 'amount_usd': nullable_str,
+                            'frequency': {'type': ['string', 'null'],
+                                          'enum': ['daily', 'weekly', 'biweekly', 'monthly', None]},
+                            'weekday': nullable_int, 'day_of_month': nullable_int, 'start_date': nullable_str,
+                        },
+                        'required': ['action', 'kind', 'rule_id', 'payee', 'payout_method_id', 'asset', 'amount_usd',
+                                     'frequency', 'weekday', 'day_of_month', 'start_date'],
+                        'additionalProperties': False,
+                    },
+                    'strict': True,
+                },
+                {
+                    'type': 'function',
+                    'name': 'propose_target_allocation',
+                    'description': (
+                        'Objetivo de reparto de sus inversiones en la Cuenta inteligente ("mantén 70/30"), que se '
+                        'mantiene SOLO con compras nuevas, nunca vendiendo. set: guarda los porcentajes y el total '
+                        'que la persona dijo y propone una regla de compra por inversión (total × porcentaje). '
+                        'next_split: si sus inversiones se alejaron del objetivo, propone repartir las próximas '
+                        'compras (mismo total) hacia lo que quedó abajo. delete: olvida el objetivo. Nunca elijas tú '
+                        'los porcentajes ni las inversiones. Lo que no se use, null.'),
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'action': {'type': 'string', 'enum': ['set', 'next_split', 'delete']},
+                            'assets': {'type': ['array', 'null'], 'items': {
+                                'type': 'object',
+                                'properties': {'asset': {'type': 'string'}, 'percent': {'type': 'number'}},
+                                'required': ['asset', 'percent'], 'additionalProperties': False}},
+                            'total_usd': nullable_str,
+                            'frequency': {'type': ['string', 'null'],
+                                          'enum': ['daily', 'weekly', 'biweekly', 'monthly', None]},
+                            'weekday': nullable_int, 'day_of_month': nullable_int, 'start_date': nullable_str,
+                        },
+                        'required': ['action', 'assets', 'total_usd', 'frequency', 'weekday', 'day_of_month',
+                                     'start_date'],
+                        'additionalProperties': False,
+                    },
+                    'strict': True,
+                },
+                {
+                    'type': 'function',
+                    'name': 'smart_account_review',
+                    'description': (
+                        'Revisión de un mes de su Cuenta inteligente: cobros del plan, entradas y salidas que firmó, '
+                        'qué ejecutó u omitió cada regla y por qué, saldos de hoy y su objetivo de inversión contra '
+                        'lo real. months_back=0 es el mes en curso.'),
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {'months_back': {'type': 'integer', 'minimum': 0, 'maximum': 11}},
+                        'required': ['months_back'], 'additionalProperties': False,
+                    },
+                    'strict': True,
+                },
+                {
+                    'type': 'function',
+                    'name': 'smart_account_alerts',
+                    'description': (
+                        'Alertas de su Cuenta inteligente. create: prepara una alerta que la persona pidió ("avísame '
+                        'si TSLA baja 5%"), con el nivel que ELLA dijo; si pidió dejar lista una compra, action_asset '
+                        'y action_amount_usd. No se guarda hasta que responda "sí" a la pregunta que agrega la app. '
+                        'kind: asset_price_drop_pct / asset_price_rise_pct (porcentaje desde hoy), asset_price_below '
+                        '/ asset_price_above (precio en US$), fx_rate_below / fx_rate_above (su moneda por 1 dólar, '
+                        'currency = código ISO). list: sus alertas. delete: borra una (alert_id). Lo que no se use, '
+                        'null. Nunca sugieras tú un nivel ni una inversión.'),
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'action': {'type': 'string', 'enum': ['create', 'list', 'delete']},
+                            'kind': {'type': ['string', 'null'], 'enum': [
+                                'asset_price_drop_pct', 'asset_price_rise_pct', 'asset_price_below',
+                                'asset_price_above', 'fx_rate_below', 'fx_rate_above', None]},
+                            'asset': nullable_str, 'currency': nullable_str, 'threshold': nullable_str,
+                            'action_asset': nullable_str, 'action_amount_usd': nullable_str, 'alert_id': nullable_str,
+                        },
+                        'required': ['action', 'kind', 'asset', 'currency', 'threshold', 'action_asset',
+                                     'action_amount_usd', 'alert_id'],
+                        'additionalProperties': False,
+                    },
+                    'strict': True,
+                },
+            ]
         if self.waiting_for_team:
             # The team owns the case: no handoff, and no tool that reads it.
             specs = [s for s in specs if s.get('name') in WAITING_TOOLS]
@@ -1176,7 +1332,14 @@ class Toolbelt:
             'get_exchange_rate': self.get_exchange_rate,
             'get_topup_status': self.get_topup_status,
             'search_market_news': self.search_market_news,
+            'smart_account_rules': self.smart_account_rules,
+            'propose_smart_account_rule': self.propose_smart_account_rule,
+            'propose_target_allocation': self.propose_target_allocation,
+            'smart_account_review': self.smart_account_review,
+            'smart_account_alerts': self.smart_account_alerts,
         }.get(name)
+        if name in SMART_OPS_TOOLS and not self.smart_ops():
+            handler = None
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
             handler = None
         if self.waiting_for_team and name not in WAITING_TOOLS:
@@ -1392,6 +1555,96 @@ class Toolbelt:
             # Web text is untrusted: the answer that follows gets no tools.
             self.saw_web = True
         return found
+
+
+    # ── Confío IA+: the assistant operates the Cuenta inteligente ──────────
+
+    def smart_account_rules(self):
+        from smart_account import assistant_ops
+        return assistant_ops.rules_snapshot(self.viewer.user, meta=self.viewer.request_meta, tz=self.viewer.tz)
+
+    def _attach_rule_proposal(self, proposal):
+        steps = proposal.get('steps') or []
+        out = {k: v for k, v in proposal.items() if k != 'steps'}
+        if not steps:
+            return {'ok': True, **out, 'cambios': []}
+        self.result.rule_proposal = {'steps': steps, 'created_at': timezone.now().isoformat()}
+        if self.can_navigate:
+            from smart_account.assistant_ops import rule_chip
+            chip = rule_chip()
+            if chip not in self.result.actions:
+                self.result.actions.append(chip)
+            how = ('La app muestra debajo de tu respuesta el botón "Revisar y firmar": la persona revisa cada '
+                   'cambio en la pantalla de la regla y lo firma.')
+        else:
+            how = ('Esta versión de la app no tiene el botón: dile que lo haga en su Cuenta inteligente → Reglas.')
+        return {'ok': True, **out, 'pendiente_de_firma': True, 'cambios': [s['sentence'] for s in steps],
+                'pasos': len(steps),
+                'instruccion': ('Todavía NO cambió nada. Cuenta la propuesta en español simple con estos cambios, '
+                                'en pocas frases. ' + how + ' Nunca digas que ya quedó hecho.')}
+
+    def _ops_call(self, fn, **kwargs):
+        from smart_account.assistant_ops import OpsRefused
+        try:
+            return fn(self.viewer.user, said=self._said(), meta=self.viewer.request_meta, tz=self.viewer.tz,
+                      **kwargs)
+        except OpsRefused as exc:
+            return {'ok': False, 'motivo': exc.message, '_denied': exc.code == 'not_said'}
+
+    def propose_smart_account_rule(self, action, kind=None, rule_id=None, payee=None, payout_method_id=None,
+                                   asset=None, amount_usd=None, frequency=None, weekday=None, day_of_month=None,
+                                   start_date=None):
+        if self.result.rule_proposal is not None:
+            return {'ok': False, '_denied': True, 'motivo': 'Una propuesta por mensaje.'}
+        from smart_account import assistant_ops
+        proposal = self._ops_call(
+            assistant_ops.propose_rule, action=action, kind=kind, rule_id=rule_id, payee=payee,
+            payout_method_id=payout_method_id, asset=asset, amount_usd=amount_usd, frequency=frequency,
+            weekday=weekday, day_of_month=day_of_month, start_date=start_date)
+        return proposal if proposal.get('ok') is False else self._attach_rule_proposal(proposal)
+
+    def propose_target_allocation(self, action, assets=None, total_usd=None, frequency=None, weekday=None,
+                                  day_of_month=None, start_date=None):
+        if self.result.rule_proposal is not None:
+            return {'ok': False, '_denied': True, 'motivo': 'Una propuesta por mensaje.'}
+        from smart_account import assistant_ops
+        proposal = self._ops_call(
+            assistant_ops.propose_target_allocation, action=action, assets=assets, total_usd=total_usd,
+            frequency=frequency, weekday=weekday, day_of_month=day_of_month, start_date=start_date)
+        return proposal if proposal.get('ok') is False else self._attach_rule_proposal(proposal)
+
+    def smart_account_review(self, months_back=0):
+        from smart_account import assistant_ops
+        data = assistant_ops.review(self.viewer.user, months_back=months_back, tz=self.viewer.tz)
+        target = data.get('objetivo_de_inversion')
+        if isinstance(target, dict) and target.get('fuera_de_objetivo'):
+            data['nota'] = ('Sus inversiones se alejaron de su objetivo: puedes ofrecer repartir las próximas compras '
+                            'con propose_target_allocation(next_split). Nunca vender.')
+        return data
+
+    def smart_account_alerts(self, action, kind=None, asset=None, currency=None, threshold=None, action_asset=None,
+                             action_amount_usd=None, alert_id=None):
+        from smart_account import watches
+        from smart_account.assistant_ops import OpsRefused
+        if action == 'list':
+            return {'alertas': watches.list_for(self.viewer.user)}
+        if action == 'delete':
+            if watches.delete(self.viewer.user, alert_id):
+                return {'ok': True, 'nota': 'Alerta borrada.'}
+            return {'ok': False, 'motivo': 'No encontré esa alerta. Revisa la lista con action=list.'}
+        if self.result.pending_watch is not None:
+            return {'ok': False, '_denied': True, 'motivo': 'Una alerta por mensaje.'}
+        try:
+            draft = watches.propose(self.viewer.user, said=self._said(), kind=kind, asset=asset, currency=currency,
+                                    threshold=threshold, action_asset=action_asset,
+                                    action_amount_usd=action_amount_usd, meta=self.viewer.request_meta)
+        except OpsRefused as exc:
+            return {'ok': False, 'motivo': exc.message, '_denied': exc.code == 'not_said'}
+        self.result.pending_watch = draft
+        return {'pendiente_de_confirmacion': True, 'alerta': draft['texto'],
+                'instruccion': ('Todavía NO está guardada. La app agrega debajo de tu respuesta la pregunta de '
+                                'confirmación exacta; no hagas otra pregunta distinta en este mensaje. Una alerta '
+                                'solo avisa: nunca compra ni vende sola.')}
 
 
 # --------------------------------------------------------------------------- #
@@ -1652,12 +1905,14 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         ia_plus_bundled=('cuenta_inteligente' in belt.destinations and paid_offers.ia_plus_bundled(
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
         smart_account_open=('cuenta_inteligente' in belt.destinations and _smart_account_open(viewer)),
+        smart_account_real=('cuenta_inteligente' in belt.destinations and smart_account_real_screen(viewer)),
         identity=_identity_status(viewer),
         ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
         bo_withdraw=_bo_withdraw(viewer, country),
+        smart_account_ops=belt.smart_ops(),
     )
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE

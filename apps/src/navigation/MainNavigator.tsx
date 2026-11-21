@@ -78,13 +78,13 @@ import PayrollRunsHistoryScreen from '../screens/PayrollRunsHistoryScreen';
 import PayrollRunScreen from '../screens/PayrollRunScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { MonthSummaryScreen } from '../screens/MonthSummaryScreen';
-import { PaidOfferScreen } from '../screens/PaidOfferScreen';
 import { SmartAccountOfferScreen } from '../screens/SmartAccountOfferScreen';
 import { SmartAccountFundScreen } from '../screens/SmartAccountFundScreen';
 import { SmartAccountHomeScreen } from '../screens/SmartAccountHomeScreen';
 import { SmartAccountMoveScreen } from '../screens/SmartAccountMoveScreen';
 import { SmartAccountRulesScreen } from '../screens/SmartAccountRulesScreen';
 import { SmartAccountRuleEditScreen } from '../screens/SmartAccountRuleEditScreen';
+import { SmartAccountWatchesScreen } from '../screens/SmartAccountWatchesScreen';
 import { SmartAccountBillingScreen } from '../screens/SmartAccountBillingScreen';
 import { SmartAccountChargesScreen } from '../screens/SmartAccountChargesScreen';
 import { SmartAccountCancelScreen } from '../screens/SmartAccountCancelScreen';
@@ -703,11 +703,6 @@ export const MainNavigator = () => {
           component={MonthSummaryScreen}
           options={{ headerShown: false }}
         />
-        <Stack.Screen
-          name="PaidOffer"
-          component={PaidOfferScreen}
-          options={{ headerShown: false }}
-        />
         {/* Cuenta inteligente. Each screen draws the shared Header itself. */}
         <Stack.Screen name="SmartAccountOffer" component={SmartAccountOfferScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="SmartAccountFund" component={SmartAccountFundScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
@@ -717,6 +712,7 @@ export const MainNavigator = () => {
         <Stack.Screen name="SmartAccountMove" component={SmartAccountMoveScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="SmartAccountRules" component={SmartAccountRulesScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="SmartAccountRuleEdit" component={SmartAccountRuleEditScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="SmartAccountWatches" component={SmartAccountWatchesScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="SmartAccountBilling" component={SmartAccountBillingScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="SmartAccountCharges" component={SmartAccountChargesScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="SmartAccountCancel" component={SmartAccountCancelScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />

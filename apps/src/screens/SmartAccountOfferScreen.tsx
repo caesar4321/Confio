@@ -3,7 +3,9 @@
 // Everything that can change is the server's: benefits and their order (the
 // headline benefit first), both prices, which plan is preselected, the six
 // disclosures, and whether this person may subscribe at all. This screen
-// only lays it out.
+// only lays it out. Every Cuenta inteligente door of this build lands here
+// (never the old waitlist probe), so the whole pitch always shows; someone
+// the server does not let sign yet sees why next to a disabled Continuar.
 //
 // Layout: the account's deep emerald field with its mark, a white card of
 // benefits rising over it (the first one, the headline, set larger), the two
@@ -27,7 +29,7 @@ import { helpAccount } from '../components/smartAccount/help';
 import { centsToDecimal, cryptoBuyAllowed, planName, planPeriod, shortDate, toCents, usd } from '../components/smartAccount/format';
 import { useSmartRead } from '../components/smartAccount/useSmartRead';
 import {
-  fetchBeneficiaryDesignations, fetchSmartAccountEntry, fetchSmartAccountOffer, isSmartAccountOpen,
+  fetchBeneficiaryDesignations, fetchSmartAccountEntry, fetchSmartAccountOffer, isSmartAccountOpen, isSmartAccountOpening,
   type SmartAccountBenefit, type SmartAccountOffer, type SmartAccountPlan,
 } from '../services/smartAccount';
 import { DEX_TRADING_UI_ENABLED } from '../config/features';
@@ -45,6 +47,8 @@ const HEADLINES: Record<string, string> = {
   beneficiary_first: 'Tu dinero sigue tus reglas y llega a quien tú elijas.',
   automation_first: 'Tu dinero se mueve según tus reglas.',
 };
+
+const BLOCKED_FALLBACK = 'Todavía no puedes abrir tu Cuenta inteligente.';
 
 const STOCKS_ONLY_INVESTING = 'Compra acciones automáticamente, cada día, semana, quincena o mes.';
 
@@ -110,9 +114,11 @@ export function SmartAccountOfferScreen() {
     }
   }, [door, trigger]);
 
-  // Someone who already has the account never sees the pitch again. An
-  // expired one (cancelled and returned) is not open: it may subscribe again.
-  const hasAccount = isSmartAccountOpen(entry.data?.status);
+  // Someone who already has the account never sees the pitch again, nor
+  // does someone whose subscribe is out and not reconciled yet ('opening': a
+  // second subscribe must not be invited). An expired one (cancelled and
+  // returned) is not open: it may subscribe again.
+  const hasAccount = isSmartAccountOpen(entry.data?.status) || isSmartAccountOpening(entry.data?.status);
   useEffect(() => {
     if (hasAccount) {
       navigation.replace('SmartAccountHome');
@@ -125,7 +131,7 @@ export function SmartAccountOfferScreen() {
   const pendingInvite = (designations.data ?? []).find((d) => d.state === 'pending_acceptance');
 
   const onContinue = () => {
-    if (!selected) {
+    if (!selected || !canSubscribe) {
       return;
     }
     if (!accepted) {
@@ -170,12 +176,10 @@ export function SmartAccountOfferScreen() {
           <View style={styles.lift}><ScreenSkeleton /></View>
         ) : offer.failed && !data ? (
           <View style={styles.lift}><Card><LoadError onRetry={offer.reload} busy={offer.loading} /></Card></View>
-        ) : !data || !data.available ? (
+        ) : !data ? (
           <View style={[styles.lift, kitStyles.pad]}>
             <Card style={styles.padded}>
-              <Text style={kitStyles.lead}>
-                {data?.blockedReason || 'Cuenta inteligente todavía no está disponible para ti.'}
-              </Text>
+              <Text style={kitStyles.lead}>{BLOCKED_FALLBACK}</Text>
             </Card>
           </View>
         ) : (
@@ -212,7 +216,7 @@ export function SmartAccountOfferScreen() {
               ))}
             </Rise>
 
-            {canSubscribe ? (
+            {plans.length > 0 ? (
               <>
                 <Text style={styles.section} accessibilityRole="header">Elige tu plan</Text>
                 <View style={styles.side} accessibilityRole="radiogroup">
@@ -251,45 +255,51 @@ export function SmartAccountOfferScreen() {
                     );
                   })}
                 </View>
+              </>
+            ) : null}
 
+            {data.disclosures.length > 0 ? (
+              <>
                 <Text style={styles.section} accessibilityRole="header">Antes de firmar</Text>
                 <View style={styles.side}>
                   <Card style={styles.disclosures}>
                     <NumberedList items={data.disclosures} />
                   </Card>
-                  <View onLayout={(e) => { acceptY.current = e.nativeEvent.layout.y; }} style={styles.acceptBox}>
-                    <AcceptRow
-                      checked={accepted}
-                      onToggle={() => { setAccepted((v) => !v); setMissing(false); }}
-                      label="Leí estas condiciones y las acepto"
-                      highlight={missing}
-                      testID="accept-disclosures"
-                    />
-                    {missing && !accepted ? (
-                      <Text style={styles.missing} accessibilityLiveRegion="polite">
-                        Marca la casilla para continuar.
-                      </Text>
-                    ) : null}
-                  </View>
+                  {canSubscribe ? (
+                    <View onLayout={(e) => { acceptY.current = e.nativeEvent.layout.y; }} style={styles.acceptBox}>
+                      <AcceptRow
+                        checked={accepted}
+                        onToggle={() => { setAccepted((v) => !v); setMissing(false); }}
+                        label="Leí estas condiciones y las acepto"
+                        highlight={missing}
+                        testID="accept-disclosures"
+                      />
+                      {missing && !accepted ? (
+                        <Text style={styles.missing} accessibilityLiveRegion="polite">
+                          Marca la casilla para continuar.
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
                 </View>
               </>
-            ) : (
-              <View style={[styles.side, styles.blocked]}>
-                <Notice
-                  tone="neutral"
-                  body={data.blockedReason || 'Por ahora no puedes abrir una Cuenta inteligente.'}
-                  testID="offer-blocked"
-                />
-              </View>
-            )}
+            ) : null}
           </>
         )}
       </ScrollView>
 
-      {canSubscribe ? (
+      {data ? (
         <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          <ActionButton label="Continuar" onPress={onContinue} testID="offer-continue" />
-          <Text style={styles.barNote}>No se cobra nada hasta que firmes.</Text>
+          {canSubscribe ? null : (
+            <Notice
+              tone="neutral"
+              body={data.blockedReason || BLOCKED_FALLBACK}
+              style={styles.blockedNote}
+              testID="offer-blocked"
+            />
+          )}
+          <ActionButton label="Continuar" onPress={onContinue} disabled={!canSubscribe} testID="offer-continue" />
+          {canSubscribe ? <Text style={styles.barNote}>No se cobra nada hasta que firmes.</Text> : null}
         </View>
       ) : null}
     </View>
@@ -346,7 +356,7 @@ const styles = StyleSheet.create({
   disclosures: { paddingVertical: 8 },
   acceptBox: { marginTop: 12 },
   missing: { fontSize: 14, color: SA.noticeText, marginTop: 8, marginLeft: 4 },
-  blocked: { marginTop: 16 },
+  blockedNote: { marginBottom: 12 },
   bar: {
     paddingHorizontal: 16, paddingTop: 12, backgroundColor: SA.card,
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: SA.line,

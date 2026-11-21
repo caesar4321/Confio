@@ -22,6 +22,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from . import abi, assets as assets_mod, chain, context, offer
@@ -63,10 +64,15 @@ MESSAGES = {
     'payee_no_wallet': 'Esa persona todavía no puede recibir en Confío.',
     'rule_not_found': 'No encontramos esa regla.',
     'rule_kind_mismatch': 'Esa regla es de otro tipo.',
+    'rule_duplicate': 'Ya tienes esta regla. No la repitas.',
+    'rule_duplicate_pending': 'Esta regla se está confirmando. No la repitas.',
     'payout_not_available': 'Los pagos automáticos a cuentas bancarias todavía no están disponibles.',
     'payout_method_not_found': 'No encontramos ese destino guardado.',
     'payout_rail_not_available': 'Ese tipo de cuenta todavía no admite pagos automáticos.',
     'payout_method_unverified': 'Revisa de nuevo a quien recibe antes de programar el pago.',
+    'payout_quote_unavailable': 'No pudimos consultar la tasa del día. Inténtalo de nuevo en unos minutos.',
+    'bad_pagomovil_destination': 'Revisa los datos de Pago Móvil.',
+    'too_many_destinations': 'Ya tienes demasiados destinos guardados.',
     'stock_needs_dollar_plus': 'La compra automática de acciones usa Confío Dollar+.',
     'trade_not_available': 'Esta inversión no está disponible para tu cuenta.',
     'beneficiary_disabled': 'El beneficiario todavía no está disponible.',
@@ -134,6 +140,20 @@ def calls_hash(calls: list) -> str:
 def display_name(user) -> str:
     name = ' '.join(p for p in [(user.first_name or '').strip(), (user.last_name or '').strip()] if p)
     return name or (user.username or 'Usuario Confío')
+
+
+def payee_label(user, clean=None) -> str:
+    """A send rule's payee as the owner must see it before signing: the
+    name AND the @usuario. Names are self-chosen; the handle is unique.
+    `clean(text, limit)` sanitizes each piece separately, so a long name
+    never truncates the handle away."""
+    clean = clean or (lambda text, limit: text)
+    raw_name, handle = display_name(user), (user.username or '').strip()
+    name = clean(raw_name, 40)
+    if not handle:
+        return name
+    handle = clean(handle, 30)
+    return f'@{handle}' if raw_name == (user.username or '').strip() else f'{name} (@{handle})'
 
 
 def _chain(fn, *args):
@@ -225,7 +245,8 @@ def _register(viewer, kind: str, calls: list, *, target: str, smart_account=None
     SmartAccountPreparedAction.objects.create(
         request_id=request_id, user=viewer.user, signer_address=viewer.signer_address,
         target_address=target.lower(), smart_account=smart_account, kind=kind, calls=calls,
-        calls_hash=calls_hash(calls), payload=payload or {}, not_after=not_after,
+        calls_hash=calls_hash(calls), payload={**(payload or {}), 'summary': list(summary or [])},
+        not_after=not_after,
         expires_at=timezone.now() + timedelta(seconds=PREPARED_TTL_SECONDS))
     return PreparedBatch(request_id=request_id, calls=calls, kind=kind, summary=summary or [], not_after=not_after)
 
@@ -329,6 +350,9 @@ def prepare_subscribe(viewer, plan: str, deposits, disclosures_accepted: bool) -
     own = context.own_account(viewer.user)
     if own is not None and own.status in ('active', 'cancel_pending'):
         raise PrepareError('already_subscribed')
+    if offer.subscribe_in_flight(viewer.user, own):
+        # The last subscribe is still being reconciled: never a second one.
+        raise PrepareError('opening', offer.BLOCKED['opening'])
     calls = []
     if own is not None:
         target = own.contract_address
@@ -512,13 +536,14 @@ FREQUENCY_LABELS = {'daily': 'cada día', 'weekly': 'cada semana', 'biweekly': '
 
 def account_dollar_token(own: SmartAccount, user, meta=None) -> str:
     """The dollar the account holds (decision 17: one of the two). The one
-    with a balance; with neither or both, the owner's dollar by eligibility."""
+    with a balance; with both, the one worth more (cUSD dust a cUSD+ payout
+    leaves behind never decides, assets.held_dollar); with neither, the
+    owner's dollar by eligibility."""
     plus, cusd = chain.cusd_plus_address(), chain.cusd_address()
-    plus_balance = _chain(chain.balance_of, plus, own.contract_address) if plus else 0
-    cusd_balance = _chain(chain.balance_of, cusd, own.contract_address) if cusd else 0
-    if plus_balance and not cusd_balance:
+    held = _chain(assets_mod.held_dollar, own.contract_address)
+    if held == 'cusd_plus' and plus:
         return plus
-    if cusd_balance and not plus_balance:
+    if held == 'cusd' and cusd:
         return cusd
     token = plus if offer.viewer_dollar(user, meta) == 'cusd_plus' else cusd
     if not token:
@@ -559,6 +584,36 @@ def _existing_rule(own: SmartAccount, rule_id, kind: str) -> SmartAccountRule | 
     return rule
 
 
+MAX_FIRST_RUN_DAYS = 62
+FREQUENCY_DAYS = {'daily': 1, 'weekly': 7, 'biweekly': 14}
+
+
+def requested_first_run(first_run_at, frequency: str, *, floor: int = 0, now=None) -> int:
+    """A first run the owner chose (a weekday, a day of the month: decision
+    34), as the rule tuple's firstRunAt. ISO-8601 or None. Refused when past
+    or more than MAX_FIRST_RUN_DAYS away. `floor` is an edited rule's current
+    next run: a chosen day earlier than it is moved on by whole periods, so
+    an edit never runs a rule twice inside one period."""
+    from datetime import datetime
+    if first_run_at in (None, ''):
+        return floor
+    if frequency == 'daily':
+        raise PrepareError('bad_first_run', 'Una regla diaria se ejecuta todos los días: no lleva fecha de inicio.')
+    try:
+        when = datetime.fromisoformat(str(first_run_at).replace('Z', '+00:00'))
+    except ValueError as exc:
+        raise PrepareError('bad_first_run', 'La fecha de inicio no es válida.') from exc
+    if timezone.is_naive(when):
+        raise PrepareError('bad_first_run', 'La fecha de inicio no es válida.')
+    now = now or timezone.now()
+    if when < now - timedelta(minutes=5) or when > now + timedelta(days=MAX_FIRST_RUN_DAYS):
+        raise PrepareError('bad_first_run', 'Elige una fecha de inicio entre hoy y los próximos dos meses.')
+    from .automation import next_slot
+    while floor and int(when.timestamp()) < floor:
+        when = next_slot(frequency, when)
+    return max(int(when.timestamp()), floor)
+
+
 def _first_run_at(own: SmartAccount, existing: SmartAccountRule | None) -> int:
     """firstRunAt for the rule tuple. 0 for a new rule (runs from now). For
     an edit, the rule's CURRENT next run, so editing never moves a run
@@ -578,7 +633,8 @@ def _first_run_at(own: SmartAccount, existing: SmartAccountRule | None) -> int:
     return first
 
 
-def _rule_batch(viewer, own, existing, draft_fields: dict, rule_tuple: tuple, summary: list) -> PreparedBatch:
+def _rule_batch(viewer, own, existing, draft_fields: dict, rule_tuple: tuple, summary: list,
+                proposal=None) -> PreparedBatch:
     with transaction.atomic():
         draft = SmartAccountRule.objects.create(
             smart_account=own, state='draft', active=False, replaces=existing, **draft_fields)
@@ -588,7 +644,8 @@ def _rule_batch(viewer, own, existing, draft_fields: dict, rule_tuple: tuple, su
             data = abi.encode_call('createRule', rule_tuple)
         return _register(viewer, 'smart_rule', [abi.call(own.contract_address, data)],
                          target=own.contract_address, smart_account=own, summary=summary,
-                         payload={'rule_pk': draft.pk, 'replaces_pk': existing.pk if existing else None})
+                         payload={'rule_pk': draft.pk, 'replaces_pk': existing.pk if existing else None,
+                                  **_proposal_payload(proposal)})
 
 
 def _check_frequency(frequency: str):
@@ -596,14 +653,149 @@ def _check_frequency(frequency: str):
         raise PrepareError('bad_frequency')
 
 
-def prepare_send_rule(viewer, rule_id, payee_handle: str, amount_usd, frequency: str) -> PreparedBatch:
+# ── duplicate creates and Confío IA+ proposal progress ──────────────────
+# A create the owner already signed (on the wire, or final) must not be
+# prepared again: re-opening a proposal, or an unknown outcome on the
+# client, would otherwise sign the same createRule twice.
+
+DUPLICATE_RULE_WINDOW = timedelta(hours=24)
+MAX_PROPOSAL_STEPS = 8
+
+
+def _proposal_payload(proposal) -> dict:
+    """The proposal step a prepared rule action came from (assistant
+    message id + step index), when the client named one. Only a label for
+    the resolver: never authority, and garbage is dropped."""
+    if not proposal:
+        return {}
+    try:
+        message_id, step = proposal
+        message_id, step = int(str(message_id)), int(step)
+    except (TypeError, ValueError):
+        return {}
+    if message_id <= 0 or not 0 <= step < MAX_PROPOSAL_STEPS:
+        return {}
+    return {'proposal': {'message_id': str(message_id), 'step': step}}
+
+
+def signed_rule_actions(user, *, since, kinds=('smart_rule',)):
+    """This user's prepared rule actions, prepared since `since`, that were
+    signed and whose batch is on the wire or final (not dropped, reverted,
+    reorged or a no-op: those did nothing and may be signed again)."""
+    from blockchain.models import LIVE_SPONSORED_BATCH_STATUSES
+    return SmartAccountPreparedAction.objects.filter(
+        user=user, kind__in=kinds, consumed=True, created_at__gte=since,
+        sponsored_batch__status__in=LIVE_SPONSORED_BATCH_STATUSES).order_by('id')
+
+
+def _rule_identity(rule) -> tuple:
+    return (rule.kind, Decimal(rule.amount).quantize(Decimal('0.01')), rule.frequency,
+            (rule.payee_address or '').lower(), (rule.payout_ref or '').lower(), (rule.token_out or '').lower())
+
+
+def duplicate_create(own: SmartAccount, user, kind: str, amount, frequency: str, *, payee_address: str = '',
+                     payout_ref: str = '', token_out: str = '', exclude_rule_pk=None) -> str:
+    """'rule_duplicate' when a rule of this account with the same kind,
+    payee / bank destination / asset, amount and frequency, made in the last
+    24 hours, is active; 'rule_duplicate_pending' when such a rule's signed
+    create is still confirming (the draft has not turned into an on-chain
+    rule yet); '' otherwise. Updates and stops never ask."""
+    since = timezone.now() - DUPLICATE_RULE_WINDOW
+    wanted = (kind, Decimal(amount).quantize(Decimal('0.01')), frequency, (payee_address or '').lower(),
+              (payout_ref or '').lower(), (token_out or '').lower())
+    pending = [pk for pk in (
+        (action.payload or {}).get('rule_pk')
+        for action in signed_rule_actions(user, since=since).filter(smart_account=own)
+        if not (action.payload or {}).get('replaces_pk')) if pk]
+    rules = SmartAccountRule.objects.filter(smart_account=own, kind=kind).filter(
+        Q(state='onchain', active=True, created_at__gte=since) | Q(state='draft', pk__in=pending))
+    if exclude_rule_pk is not None:
+        rules = rules.exclude(pk=exclude_rule_pk)
+    states = {rule.state for rule in rules if _rule_identity(rule) == wanted}
+    if 'onchain' in states:
+        return 'rule_duplicate'
+    return 'rule_duplicate_pending' if states else ''
+
+
+def _refuse_duplicate_create(viewer, own, existing, kind, amount, frequency, **identity):
+    code = '' if existing is not None else duplicate_create(own, viewer.user, kind, amount, frequency, **identity)
+    if code:
+        raise PrepareError(code)
+
+
+def _step_matches_action(action, step: dict) -> bool:
+    """An untagged signed action (a build that does not send the proposal
+    step) is that step when it does the same thing to the same rule."""
+    payload = action.payload or {}
+    verb, kind, rule_id = step.get('action'), step.get('kind'), str(step.get('rule_id') or '')
+    if verb == 'cancel':
+        rule = (SmartAccountRule.all_objects.filter(pk=payload.get('cancel_rule_pk')).first()
+                if action.kind == 'smart_rule_cancel' and payload.get('cancel_rule_pk') else None)
+        return rule is not None and str(rule.internal_id) == rule_id
+    if action.kind != 'smart_rule' or not payload.get('rule_pk') or verb not in ('create', 'update'):
+        return False
+    draft = SmartAccountRule.all_objects.filter(pk=payload['rule_pk']).first()
+    if draft is None or draft.kind != kind:
+        return False
+    replaces = payload.get('replaces_pk')
+    if verb == 'create' and replaces:
+        return False
+    if verb == 'update':
+        target = SmartAccountRule.all_objects.filter(pk=replaces).first() if replaces else None
+        if target is None or str(target.internal_id) != rule_id:
+            return False
+    try:
+        if step.get('amount_usd') not in (None, '') and Decimal(str(step['amount_usd'])) != draft.amount:
+            return False
+    except (InvalidOperation, ValueError):
+        return False
+    if step.get('frequency') and step['frequency'] != draft.frequency:
+        return False
+    if kind == 'send' and step.get('payee_handle'):
+        payee = resolve_handle(step['payee_handle'])
+        return payee is not None and payee.pk == draft.payee_user_id
+    if kind == 'payout' and step.get('payout_method_id'):
+        ids = {str(r.internal_id) for r in (draft.payout_method, draft.pagomovil_destination) if r is not None}
+        return str(step['payout_method_id']) in ids
+    if kind == 'buy' and step.get('asset_key'):
+        return draft.asset_key == step['asset_key']
+    return True
+
+
+def proposal_signed_steps(user, message_id, steps: list, since) -> list[bool]:
+    """Per step of an assistant rule proposal: True when the owner already
+    signed it (its batch is on the wire or final). Steps are matched by the
+    proposal tag the prepare recorded, else by what the signed action does."""
+    done = [False] * len(steps)
+    actions = list(signed_rule_actions(user, since=since, kinds=('smart_rule', 'smart_rule_cancel')))
+    untagged = []
+    for action in actions:
+        tag = (action.payload or {}).get('proposal')
+        if not isinstance(tag, dict):
+            untagged.append(action)
+        elif tag.get('message_id') == str(message_id) and isinstance(tag.get('step'), int) \
+                and 0 <= tag['step'] < len(steps):
+            done[tag['step']] = True
+    for index, step in enumerate(steps):
+        if done[index] or not isinstance(step, dict):
+            continue
+        for action in untagged:
+            if _step_matches_action(action, step):
+                done[index] = True
+                untagged.remove(action)
+                break
+    return done
+
+
+def prepare_send_rule(viewer, rule_id, payee_handle: str, amount_usd, frequency: str,
+                      first_run_at=None, proposal=None) -> PreparedBatch:
     _require_enabled()
     own = _own_active(viewer)
     _require_no_identity_hold(viewer.user)
     _check_frequency(frequency)
     amount = _parse_usd(amount_usd)
     existing = _existing_rule(own, rule_id, 'send')
-    first_run_at = _first_run_at(own, existing)
+    first_run_at = requested_first_run(first_run_at, frequency, floor=_first_run_at(own, existing))
     payee = resolve_handle(payee_handle)
     if payee is None:
         raise PrepareError('payee_not_found')
@@ -613,10 +805,11 @@ def prepare_send_rule(viewer, rule_id, payee_handle: str, amount_usd, frequency:
     if payee_account is None or not payee_account.bsc_address:
         raise PrepareError('payee_no_wallet')
     payee_address = payee_account.bsc_address.lower()
+    _refuse_duplicate_create(viewer, own, existing, 'send', amount, frequency, payee_address=payee_address)
     token_in = account_dollar_token(own, viewer.user, viewer.meta)
     rule_tuple = abi.rule_input('send', frequency, token_in, payee=payee_address,
                                 amount_usd_wei=int(amount * WAD), first_run_at=first_run_at)
-    summary = [f'Enviar {usd_text(amount)} a {display_name(payee)} {FREQUENCY_LABELS[frequency]}']
+    summary = [f'Enviar {usd_text(amount)} a {payee_label(payee)} {FREQUENCY_LABELS[frequency]}']
     # Money leaves to another person with nobody present: Face once, at
     # creation or edit, bound to payee, amount and frequency (the personal
     # send flow's step-up; payouts.create_send_authorization).
@@ -625,7 +818,8 @@ def prepare_send_rule(viewer, rule_id, payee_handle: str, amount_usd, frequency:
         viewer, account=own, payee_address=payee_address, amount=amount, frequency=frequency)
     return _rule_batch(viewer, own, existing, dict(
         kind='send', token_in=token_in, payee_address=payee_address, payee_user=payee,
-        standing_authorization=authorization, amount=amount, frequency=frequency), rule_tuple, summary)
+        standing_authorization=authorization, amount=amount, frequency=frequency), rule_tuple, summary,
+        proposal)
 
 
 def payout_ref_for(destination) -> bytes:
@@ -656,7 +850,115 @@ def owned_payout_destination(viewer, payout_method_id):
     return destination
 
 
-def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency: str) -> PreparedBatch:
+def owned_pagomovil_destination(viewer, payout_method_id):
+    """The viewer's saved Pago Móvil beneficiary by id, or None."""
+    from .models import SmartAccountPagoMovilDestination
+    try:
+        internal_id = uuid.UUID(str(payout_method_id))
+    except (ValueError, TypeError) as exc:
+        raise PrepareError('payout_method_not_found') from exc
+    return SmartAccountPagoMovilDestination.objects.filter(internal_id=internal_id, user=viewer.user).first()
+
+
+MAX_PAGOMOVIL_DESTINATIONS = 20
+
+
+def pagomovil_destinations(user) -> list:
+    from .models import SmartAccountPagoMovilDestination
+    return list(SmartAccountPagoMovilDestination.objects.filter(user=user).order_by('-created_at'))
+
+
+def payout_method_rows(viewer) -> list[dict]:
+    """The viewer's saved bank destinations a payment rule may name (verified
+    Infinia destinations that are not QR intents, and saved Pago Móvil
+    beneficiaries), each with whether its rail is live for unattended
+    payouts. Shared by the GraphQL list and the assistant's rule tools."""
+    from payment_accounts import local_money
+    from payment_accounts.models import PayoutDestination
+    from . import payouts
+    rails = set(offer.payout_rails())
+    out = []
+    for destination in PayoutDestination.objects.filter(
+            confio_account=viewer.personal_account, provider='infinia',
+            status__in=('pending', 'active')).order_by('-created_at'):
+        rail = destination_rail(destination)
+        method = local_money.METHODS.get(rail)
+        if method is None or method.direction != 'send' or method.kind == 'qr' or rail.endswith('_qr'):
+            continue  # a QR is a one-time payment intent, not a saved destination
+        if local_money.verification_state((destination.provider_data or {}).get('validation')) != local_money.VERIFIED:
+            continue
+        out.append(dict(payout_method_id=str(destination.internal_id), rail=rail, label=destination.label,
+                        holder_name=destination.holder_name or '', available=rail in rails))
+    for destination in pagomovil_destinations(viewer.user):
+        out.append(dict(payout_method_id=str(destination.internal_id), rail=payouts.VE_PAGOMOVIL,
+                        label=destination.label, holder_name=destination.holder_name or '',
+                        available=payouts.VE_PAGOMOVIL in rails))
+    return out
+
+
+def save_pagomovil_destination(viewer, phone, bank_code, id_number, holder_name):
+    """Save a Venezuelan Pago Móvil beneficiary for payment rules, with the
+    VE send's own validation (ramps.ve_pagomovil). The same beneficiary
+    saved again is the same row."""
+    from ramps import ve_pagomovil
+    from .models import SmartAccountPagoMovilDestination
+    from . import payouts
+    _require_enabled()
+    _require_no_identity_hold(viewer.user)
+    if payouts.VE_PAGOMOVIL not in offer.payout_rails():
+        raise PrepareError('payout_not_available')
+    try:
+        phone = ve_pagomovil.normalize_phone(phone)
+        bank = ve_pagomovil.normalize_bank(bank_code)
+        cedula = ve_pagomovil.normalize_cedula(id_number)
+    except ve_pagomovil.VePagoMovilError as exc:
+        raise PrepareError('bad_pagomovil_destination', str(exc)) from exc
+    name = ' '.join(str(holder_name or '').split())[:120]
+    if len(name) < 2:
+        raise PrepareError('bad_pagomovil_destination', 'Escribe el nombre de quien recibe.')
+    saved = pagomovil_destinations(viewer.user)
+    for row in saved:
+        if (row.phone, row.bank_code, row.id_number) == (phone, bank, cedula):
+            return row
+    if len(saved) >= MAX_PAGOMOVIL_DESTINATIONS:
+        raise PrepareError('too_many_destinations')
+    label = f'Pago Móvil · {ve_pagomovil.BANK_NAMES[bank]} · {phone[-4:]}'[:100]
+    return SmartAccountPagoMovilDestination.objects.create(
+        user=viewer.user, phone=phone, bank_code=bank, id_number=cedula, holder_name=name, label=label)
+
+
+def _prepare_pagomovil_rule(viewer, own, existing, first_run_at, destination, rails, amount, frequency,
+                            proposal=None):
+    from . import payouts
+    rail = payouts.VE_PAGOMOVIL
+    if rail not in rails:
+        raise PrepareError('payout_rail_not_available')
+    # Either dollar: a cUSD+ run exits an exact USDT amount too
+    # (payouts.payout_exit), so the order's deposit is exact.
+    token_in = account_dollar_token(own, viewer.user, viewer.meta)
+    try:
+        reference = payouts.reference_ves_rate()
+    except Exception as exc:  # noqa: BLE001 — no rule without its FX reference
+        logger.warning('Pago ASAP rate unavailable for a payment rule', exc_info=True)
+        raise PrepareError('payout_quote_unavailable') from exc
+    ref = payouts.pagomovil_ref_for(destination)
+    _refuse_duplicate_create(viewer, own, existing, 'payout', amount, frequency, payout_ref='0x' + ref.hex())
+    # Face, once, at rule creation: bound to phone + bank + cédula, amount
+    # and frequency (spec 7.5).
+    authorization = payouts.create_pagomovil_authorization(
+        viewer, destination=destination, amount=amount, frequency=frequency, reference_fx_rate=reference)
+    rule_tuple = abi.rule_input('payout', frequency, token_in, payout_ref=ref, amount_usd_wei=int(amount * WAD),
+                                first_run_at=first_run_at)
+    summary = [f'Pagar {usd_text(amount)} por Pago Móvil a {destination.holder_name} {FREQUENCY_LABELS[frequency]}',
+               'El monto en dólares es fijo; los bolívares siguen la tasa del día.']
+    return _rule_batch(viewer, own, existing, dict(
+        kind='payout', token_in=token_in, payout_method=None, pagomovil_destination=destination,
+        payout_ref='0x' + ref.hex(), payout_rail=rail, standing_authorization=authorization, amount=amount,
+        frequency=frequency), rule_tuple, summary, proposal)
+
+
+def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency: str,
+                        first_run_at=None, proposal=None) -> PreparedBatch:
     _require_enabled()
     own = _own_active(viewer)
     rails = offer.payout_rails()
@@ -665,7 +967,11 @@ def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency
     _check_frequency(frequency)
     amount = _parse_usd(amount_usd)
     existing = _existing_rule(own, rule_id, 'payout')
-    first_run_at = _first_run_at(own, existing)
+    first_run_at = requested_first_run(first_run_at, frequency, floor=_first_run_at(own, existing))
+    pagomovil = owned_pagomovil_destination(viewer, payout_method_id)
+    if pagomovil is not None:
+        return _prepare_pagomovil_rule(viewer, own, existing, first_run_at, pagomovil, rails, amount, frequency,
+                                       proposal)
     destination = owned_payout_destination(viewer, payout_method_id)
     rail = destination_rail(destination)
     if rail not in rails:
@@ -677,6 +983,7 @@ def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency
     from . import payouts
     token_in = account_dollar_token(own, viewer.user, viewer.meta)
     ref = payout_ref_for(destination)
+    _refuse_duplicate_create(viewer, own, existing, 'payout', amount, frequency, payout_ref='0x' + ref.hex())
     # Face, once, at rule creation: the standing authorization (spec 7.5).
     authorization = payouts.create_standing_authorization(
         viewer, destination=destination, rail=rail, amount=amount, frequency=frequency)
@@ -687,7 +994,7 @@ def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency
     return _rule_batch(viewer, own, existing, dict(
         kind='payout', token_in=token_in, payout_method=destination, payout_ref='0x' + ref.hex(),
         payout_rail=rail, standing_authorization=authorization, amount=amount, frequency=frequency),
-        rule_tuple, summary)
+        rule_tuple, summary, proposal)
 
 
 def buyable_assets(viewer, search: str = '') -> list[dict]:
@@ -726,13 +1033,14 @@ def _stock_buy_allowed(viewer) -> bool:
     return bool(check_stock_buy_eligibility(viewer.user, viewer.meta))
 
 
-def prepare_buy_rule(viewer, rule_id, asset_key: str, amount_usd, frequency: str) -> PreparedBatch:
+def prepare_buy_rule(viewer, rule_id, asset_key: str, amount_usd, frequency: str,
+                     first_run_at=None, proposal=None) -> PreparedBatch:
     _require_enabled()
     own = _own_active(viewer)
     _check_frequency(frequency)
     amount = _parse_usd(amount_usd)
     existing = _existing_rule(own, rule_id, 'buy')
-    first_run_at = _first_run_at(own, existing)
+    first_run_at = requested_first_run(first_run_at, frequency, floor=_first_run_at(own, existing))
     resolved = assets_mod.resolve_asset_key(asset_key)
     if resolved is None or resolved[0] not in ('stock', 'crypto'):
         raise PrepareError('bad_asset')
@@ -760,13 +1068,14 @@ def prepare_buy_rule(viewer, rule_id, asset_key: str, amount_usd, frequency: str
     # The store-review amount cap trade_gate applies to every trade entry.
     if review_cap_exceeded(viewer.user, amount):
         raise PrepareError('review_amount_cap')
+    _refuse_duplicate_create(viewer, own, existing, 'buy', amount, frequency, token_out=token_out)
     rule_tuple = abi.rule_input('buy', frequency, token_in, token_out=token_out,
                                 amount_usd_wei=int(amount * WAD), first_run_at=first_run_at)
     summary = [f'Comprar {usd_text(amount)} de {symbol.removesuffix("on") if kind == "stock" else symbol} '
                f'{FREQUENCY_LABELS[frequency]}']
     return _rule_batch(viewer, own, existing, dict(
         kind='buy', token_in=token_in, token_out=token_out, asset_key=asset_key,
-        amount=amount, frequency=frequency), rule_tuple, summary)
+        amount=amount, frequency=frequency), rule_tuple, summary, proposal)
 
 
 def _require_stock_minimum(amount: Decimal) -> None:
@@ -785,7 +1094,7 @@ def _require_stock_minimum(amount: Decimal) -> None:
         f'El monto mínimo para comprar acciones automáticamente es {usd_text(minimum)}.')
 
 
-def prepare_cancel_rule(viewer, rule_id) -> PreparedBatch:
+def prepare_cancel_rule(viewer, rule_id, proposal=None) -> PreparedBatch:
     _require_configured()
     own = _own_any(viewer)
     try:
@@ -797,7 +1106,7 @@ def prepare_cancel_rule(viewer, rule_id) -> PreparedBatch:
     return _register(viewer, 'smart_rule_cancel',
                      [abi.call(own.contract_address, abi.encode_call('cancelRule', int(rule.onchain_id)))],
                      target=own.contract_address, smart_account=own, summary=['Cancelar esta regla'],
-                     payload={'cancel_rule_pk': rule.pk})
+                     payload={'cancel_rule_pk': rule.pk, **_proposal_payload(proposal)})
 
 
 # ── trade inside the account ────────────────────────────────────────────

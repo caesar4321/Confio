@@ -151,7 +151,11 @@ interface IConfioSmartAccount {
 
     /// `data` by rule kind:
     ///   Send    abi.encode(uint8 payeeDollar, uint256 minOut)
-    ///   Payout  abi.encode(address destination, uint256 minUsdtOut)
+    ///   Payout  cUSD:  abi.encode(address destination, uint256 minUsdtOut)
+    ///           cUSD+: abi.encode(address destination, uint256 usdtOut, uint256 grossCusd)
+    ///           grossCusd <= the rule's amountUsd is redeemed through cUSD's
+    ///           0.9% exit after a fee-free unwrap; usdtOut must be exactly
+    ///           the USDT the destination receives (grossCusd less the fee).
     ///   Buy     abi.encode(address venue, bytes venueCalldata, uint256 minOut)
     function executeRule(uint256 id, bytes calldata data, address referrer, uint256 shareBps) external;
 

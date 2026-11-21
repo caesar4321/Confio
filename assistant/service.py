@@ -230,13 +230,15 @@ def send_team_notice(conversation, body, tag, *, user_id, hand_back=True):
     return message, True
 
 
-def post_system_note(user, body, tag):
+def post_system_note(user, body, tag, *, actions=None, rule_proposal=None):
     """A server-side notice in the user's PERSONAL assistant thread (the
     support thread Confio Assistant answers), e.g. a claim on their Cuenta
     inteligente. Shown as a system line, like the greeting: never as the
     team (no staff user, no hand-back) and never as an AI reply. Idempotent
     on ``tag`` per thread, so a retried caller does not post twice. No push:
-    the caller's own notification carries one. Returns (message, created),
+    the caller's own notification carries one. ``actions`` are chips written
+    by code; ``rule_proposal`` is a Cuenta inteligente rule proposal the app
+    opens through assistantRuleProposal. Returns (message, created),
     or (None, False) for a user without a personal account."""
     from users.models import Account
     if not isinstance(tag, str) or not tag.strip():
@@ -255,7 +257,8 @@ def post_system_note(user, body, tag):
             return existing, False
         message = SupportMessage.objects.create(
             conversation=conversation, sender_type='SYSTEM', message_type='TEXT', body=body,
-            metadata={'notice': tag, 'system_note': True})
+            metadata={'notice': tag, 'system_note': True, 'actions': list(actions or []),
+                      **({'rule_proposal': rule_proposal} if rule_proposal else {})})
         conversation.last_message_at = message.created_at
         conversation.save(update_fields=['last_message_at', 'updated_at'])
     return message, True
@@ -358,11 +361,13 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                     .filter(Q(reply_message__isnull=False) | Q(error='pending')).exists()):
                 return None
             user_message, proposal, wants_human = pending_message, None, False
+            pending_watch = None
         else:
             user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
                                    metadata={'modality': modality, 'screen': screen})
             # A proposal lives for exactly one user message, whatever path it takes.
             proposal = take_pending_categorization(conversation)
+            pending_watch = take_pending_watch(conversation)
         if turn is not None:
             turn.user_message = user_message
             turn.save(update_fields=['user_message'])
@@ -396,11 +401,15 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name,
                      request_meta=request_meta)
     confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
+    confirmed_tool = 'categorize_transactions:confirmed'
+    if confirmed is None:
+        confirmed = confirm_pending_watch(conversation, viewer, clean, pending_watch, user_message)
+        confirmed_tool = 'smart_account_alerts:confirmed'
     if confirmed is not None:
         applied, reply_text = confirmed
         reply = _append(conversation, sender_type='AGENT', body=reply_text, metadata={'ai': True})
         turn.reply_message = reply
-        turn.tools = [{'name': 'categorize_transactions:confirmed', 'ok': applied > 0}]
+        turn.tools = [{'name': confirmed_tool, 'ok': applied > 0}]
         turn.error = ''
         turn.save(update_fields=['reply_message', 'tools', 'error'])
         return AskOutcome(user_message=user_message, reply_message=reply, remaining_turns=remaining - 1,
@@ -467,13 +476,15 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     # At most one paid-offer chip, chosen and capped by the server.
     paid_chip = None
-    if waiting:
-        # No offers while a person is handling their case.
+    if waiting or result.rule_proposal:
+        # No offers while a person is handling their case, and none beside a
+        # Cuenta inteligente proposal (its chip is the reply's one chip). The
+        # proposal chip targets 'smart_account_rule', so it stays.
         result.actions = [a for a in result.actions if a.get('target') not in ('ia_plus', 'cuenta_inteligente')]
     try:
         from . import paid_chips
         from .engine import allowed_destinations
-        if not waiting:
+        if not waiting and not result.rule_proposal:
             paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)))
     except Exception:  # noqa: BLE001 - a probe must never break the answer
         logger.exception('Confio Assistant: paid chip selection failed')
@@ -483,8 +494,12 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         # The question the user answers is written by code from the stored
         # proposal, never by the model.
         body = f'{body}\n\n{confirmation_question(result.pending_categorization)}'
-    reply = _append(conversation, sender_type='AGENT', body=body,
-                    metadata={'ai': True, 'actions': result.actions})
+    elif result.pending_watch:
+        body = f'{body}\n\n{watch_confirmation_question(result.pending_watch)}'
+    metadata = {'ai': True, 'actions': result.actions}
+    if result.rule_proposal:
+        metadata['rule_proposal'] = result.rule_proposal
+    reply = _append(conversation, sender_type='AGENT', body=body, metadata=metadata)
     if paid_chip is not None:
         try:
             paid_chips.log_shown(viewer, paid_chip)
@@ -492,6 +507,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             logger.exception('Confio Assistant: paid chip logging failed')
     if result.pending_categorization:
         _store_pending_categorization(conversation, viewer, result.pending_categorization, reply)
+    elif result.pending_watch:
+        _store_pending_watch(conversation, viewer, result.pending_watch, reply)
     turn.reply_message = reply
     turn.models_used = result.models_used
     turn.input_tokens = result.input_tokens
@@ -581,6 +598,50 @@ def confirm_pending_categorization(conversation, viewer, text, proposal, user_me
     noun = 'movimiento' if count == 1 else 'movimientos'
     scope = ' También aplica a los pagos futuros a esos contactos.' if proposal['apply_to'] == 'counterparty' else ''
     return count, f'Listo, clasifiqué {count} {noun} como {result["categoria"]}.{scope} Puedes verlo en Tu mes.'
+
+
+# A Cuenta inteligente alert (smart_account/watches.py) is saved the same way:
+# the model only drafts it, the question is written by code, and the row is
+# written here on the person's own "sí" to that very message.
+
+def _pending_watch_key(conversation):
+    return f'assistant:pending-watch:{conversation.id}'
+
+
+def watch_confirmation_question(draft):
+    return f'¿Guardo esta alerta? {draft["texto"]} Responde "sí" para guardarla.'
+
+
+def _store_pending_watch(conversation, viewer, draft, reply):
+    cache.set(_pending_watch_key(conversation), {**draft, 'user_id': viewer.user.pk, 'reply_id': reply.id},
+              PENDING_CATEGORIZATION_SECONDS)
+
+
+def take_pending_watch(conversation):
+    key = _pending_watch_key(conversation)
+    draft = cache.get(key)
+    if draft is not None:
+        cache.delete(key)
+    return draft
+
+
+def confirm_pending_watch(conversation, viewer, text, draft, user_message):
+    """Save the drafted alert if this message is the yes to it. Returns
+    (saved, reply) or None."""
+    if draft is None or draft.get('user_id') != viewer.user.pk or not is_affirmative(text):
+        return None
+    previous = (conversation.messages.filter(sender_type='AGENT', created_at__lte=user_message.created_at)
+                .exclude(pk=user_message.pk).order_by('-created_at', '-pk').values_list('pk', flat=True).first())
+    if previous != draft.get('reply_id'):
+        return None
+    from smart_account import watches
+    from smart_account.assistant_ops import OpsRefused
+    try:
+        watches.save(viewer.user, draft)
+    except OpsRefused as exc:
+        return 0, exc.message
+    return 1, (f'Listo, guardé tu alerta. {draft["texto"]} Solo te aviso: nada se compra ni se vende sin tu firma. '
+               'La ves en tu Cuenta inteligente → Alertas.')
 
 
 def _team_took_over(user, conversation, user_message):

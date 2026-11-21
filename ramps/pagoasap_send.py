@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 PROVIDER = 'pagoasap'
 # Several sends of one person may share a Relay deposit route: tag amounts.
+# A contract-funded send (ve_send.CONTRACT_FUNDING) is untagged and may share
+# the route with an earlier order of the same account for the same amount, so
+# ve_send proves it only by the reported executeRule hash (never by a log
+# scan) and refuses a second open one of the same account and amount.
 SHARED_DEPOSIT_TARGET = True
 TARGET_AT_CLAIM = True
 SOURCE, DESTINATION = 'BSC:USDT', 'POL:USDC'
@@ -140,7 +144,18 @@ def settle(ramp) -> Settlement:
                               destination_address=bridge['recipient']),
         binding={'request_id': bridge['request_id'], 'response': bridge['response']},
         deadline=int(bridge['deadline']), source_tx_hash=section['funding_tx_hash'],
-        deposit_address=section['deposit_address'], funding_mode='wallet',
+        deposit_address=section['deposit_address'],
+        # A contract-funded send (ve_send.CONTRACT_FUNDING): the vault, not
+        # source_address, sent the deposit; ve_send already proved that
+        # Transfer from funding_sender. Any mode other than 'wallet' makes
+        # relay_settlement match the funding without a sender; refunds still
+        # go to source_address (the account contract).
+        funding_mode='contract' if section.get('funding_sender') else 'wallet',
+        # A contract-funded order may be funded above deposit_wei (a vault
+        # exit, ve_send._check_receipt; recorded as funding_excess_wei): the
+        # proven funded amount is what Relay's sweep collects, so the
+        # reconciler matches that instead of failing on the exact quote.
+        funded_units=(str(section.get('funded_wei') or '') or None) if section.get('funding_sender') else None,
         amount_out_min=bridge['amount_out_min'], status='bridging', failure_code='',
         actual_out_units=None, destination_tx_hash='')
     try:

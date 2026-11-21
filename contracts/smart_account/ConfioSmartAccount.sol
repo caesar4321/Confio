@@ -47,7 +47,6 @@ interface ISmartAccountCusdPlus {
     function accrue() external;
     function pPlus() external view returns (uint256);
     function subscribeAndMint(uint256 usdtIn, uint256 minUsdyOut, address recipient) external;
-    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to) external;
     function wrapCusd(uint256 cusdIn, uint256 minUsdyOut, address recipient) external;
     function unwrapToCusd(uint256 shares, uint256 minCusdOut, address recipient) external;
 }
@@ -173,6 +172,10 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     uint256 internal constant MAX_CONVERSION_FEE_BPS = 90;
     /// A Buy rule may leave at most one cent of USDT behind (stock rounding).
     uint256 internal constant USDT_EXCESS_MAX = 1e16;
+    /// A cUSD+ Payout unwraps this much more than the gross cUSD it redeems,
+    /// so rounding and a small gap between the vault's and Ondo's price
+    /// cannot leave the unwrap short. The excess stays here as cUSD.
+    uint256 internal constant PAYOUT_UNWRAP_MARGIN_BPS = 5;
 
     /// A factory read may burn at most this much gas, so a broken or hostile
     /// factory cannot starve an owner call (invariant 20).
@@ -658,7 +661,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         if (r.kind == RuleKind.Send) {
             _runSend(id, tokenIn, r.payee, limit, data);
         } else if (r.kind == RuleKind.Payout) {
-            _runPayout(id, tokenIn, r.payoutRef, limit, data);
+            _runPayout(id, r, limit, data);
         } else {
             _runBuy(id, tokenIn, r.tokenOut, limit, data);
         }
@@ -1067,24 +1070,39 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         emit RuleExecuted(id, tokenIn, tokenOut, spent, got);
     }
 
-    /// Payout (4.7): exit `limit` of tokenIn to USDT through the normal
-    /// fee-bearing exit, paid to the address the relayer names for this run.
-    /// That address is a per-transfer bridge deposit address and is the one
-    /// exit this contract does not bind (decision 29, C7).
-    function _runPayout(uint256 id, address tokenIn, bytes32 payoutRef, uint256 limit, bytes calldata data) private {
+    /// Payout (4.7): exit tokenIn to USDT through cUSD's normal fee-bearing
+    /// exit, paid to the address the relayer names for this run. That
+    /// address is a per-transfer bridge deposit address and is the one exit
+    /// this contract does not bind (decision 29, C7).
+    /// cUSD: redeems `limit` (the rule amount). cUSD+: the bridge needs an
+    /// exact USDT amount, which a cUSD+ exit priced at inclusion cannot
+    /// give. So the relayer names a gross cUSD amount up to the rule amount;
+    /// the account unwraps (fee-free) shares computed here to cover it plus
+    /// the margin, never more than `limit`, then redeems exactly that gross,
+    /// and the USDT delivered must equal the relayer's figure. The unwrap
+    /// excess stays here as cUSD; the owner's own cUSD is never spent.
+    function _runPayout(uint256 id, Rule storage r, uint256 limit, bytes calldata data) private {
         (address destination, uint256 minUsdtOut) = abi.decode(data, (address, uint256));
         if (destination == address(0) || destination == address(this)) revert BadDestination();
+        address tokenIn = r.tokenIn;
+        bool plusIn = tokenIn == CUSD_PLUS;
         uint256 inBefore = _balance(tokenIn);
         uint256 outBefore = IERC20(USDT).balanceOf(destination);
-        if (tokenIn == CUSD_PLUS) {
-            ISmartAccountCusdPlus(CUSD_PLUS).redeemToUsdt(limit, minUsdtOut, destination);
-        } else {
-            ISmartAccountCusd(CUSD).redeemWithFee(limit, minUsdtOut, destination);
+        uint256 gross = limit;
+        uint256 cusdBefore;
+        if (plusIn) {
+            (,, gross) = abi.decode(data, (address, uint256, uint256));
+            if (gross == 0 || gross > r.amountUsd) revert BadAmount();
+            cusdBefore = _balance(CUSD);
+            uint256 shares = _toShares(gross + (gross * PAYOUT_UNWRAP_MARGIN_BPS) / BPS, _pPlus());
+            ISmartAccountCusdPlus(CUSD_PLUS).unwrapToCusd(shares > limit ? limit : shares, gross, address(this));
         }
+        ISmartAccountCusd(CUSD).redeemWithFee(gross, minUsdtOut, destination);
+        if (_balance(CUSD) < cusdBefore) revert BalanceFell();
         uint256 spent = _spent(tokenIn, inBefore, limit);
         uint256 usdtOut = IERC20(USDT).balanceOf(destination) - outBefore;
-        if (usdtOut == 0 || usdtOut < minUsdtOut) revert Slippage();
-        emit PayoutSent(id, payoutRef, destination, tokenIn, spent, usdtOut);
+        if (usdtOut == 0 || usdtOut < minUsdtOut || (plusIn && usdtOut != minUsdtOut)) revert Slippage();
+        emit PayoutSent(id, r.payoutRef, destination, tokenIn, spent, usdtOut);
         emit RuleExecuted(id, tokenIn, USDT, spent, usdtOut);
     }
 

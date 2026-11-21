@@ -78,7 +78,7 @@ import { usePolygonReturn } from '../hooks/usePolygonReturn';
 import { HeroMonthSlot } from '../components/HeroMonthLine';
 import { useMonthHeroLine } from '../hooks/useMonthHeroLine';
 import { AnalyticsService } from '../services/analyticsService';
-import { logDoorShown, usePaidOffers } from '../services/paidOffers';
+import { logDoorShown } from '../services/paidOffers';
 import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
 import { useSmartAccountEntry } from '../hooks/useSmartAccountEntry';
 import { formatUsdAmount } from '../utils/numberLocale';
@@ -224,19 +224,14 @@ export const HomeScreen = () => {
   // The Emergency Exit remembers every token seen held here (covers stocks
   // listed after this build).
   useRememberExitTokens();
-  // Cuenta inteligente probe row (waitlist only): the server decides who sees
-  // it (flag on, never employees, this build or newer).
-  const smartAccountProbeRow = usePaidOffers().smart_account?.rowVisible === true;
-  // The real account (docs/designs/cuenta-inteligente-spec.md 8.1): a
-  // subscriber's row shows the account's balance and opens the account;
-  // someone who may subscribe gets the sign-up; a named beneficiary gets
-  // their invitation. Personal, non-employee contexts only. When none of it
-  // applies (or the server does not know these queries yet) the row stays
-  // the probe: same visibility, same pitch.
-  const smartEntry = useSmartAccountEntry(
-    activeAccount?.type === 'personal' && !activeAccount?.isEmployee,
-  );
-  const smartAccountRow = smartAccountProbeRow || smartEntry.target !== null;
+  // Cuenta inteligente (docs/designs/cuenta-inteligente-spec.md 8.1): always
+  // shown to personal, non-employee viewers, and always a real screen: a
+  // subscriber's row shows the account's balance and opens the account; a
+  // named beneficiary gets their invitation or claim; everyone else gets the
+  // real offer, where the server says whether they may sign. Never the old
+  // waitlist probe and never gated on a server flag (founder, 2026-11-21).
+  const smartAccountRow = activeAccount?.type === 'personal' && !activeAccount?.isEmployee;
+  const smartEntry = useSmartAccountEntry(smartAccountRow);
   useEffect(() => {
     if (smartAccountRow) {
       logDoorShown('smart_account', 'billeteras');
@@ -598,14 +593,20 @@ export const HomeScreen = () => {
   // cUSD/cUSD+ conversion), plus the Inversiones row's known value
   // (stocks, Bitcoin, gold) as exactly one term. Deltas and red days
   // still live one tap away in Invertir, never on Home.
+  // The person's own Cuenta inteligente is their money too: its known total
+  // (the same number its row shows) is one more term. Unknown adds nothing.
+  const smartAccountUsd = React.useMemo(() => {
+    const n = smartEntry.totalUsd === null ? NaN : Number(smartEntry.totalUsd);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }, [smartEntry.totalUsd]);
   const totalUSDValue = React.useMemo(
     () =>
       cUSDBalance + usdcBalance + confioUsdValue +
       savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd +
-      savingsPortfolio.usdtBalanceUsd + investments.totalUsd,
+      savingsPortfolio.usdtBalanceUsd + investments.totalUsd + smartAccountUsd,
     [cUSDBalance, usdcBalance, confioUsdValue,
      savingsPortfolio.savings.balanceUsd, savingsPortfolio.cusdBalanceUsd,
-     savingsPortfolio.usdtBalanceUsd, investments.totalUsd]
+     savingsPortfolio.usdtBalanceUsd, investments.totalUsd, smartAccountUsd]
   );
 
   // Use real exchange rate from API only - no fallbacks
@@ -877,7 +878,8 @@ export const HomeScreen = () => {
   // nothing to send, the useful door is Recibir, so it is the filled one.
   const balancesLoaded = !myBalancesLoading && !savingsPortfolio.loading;
   const primaryAction: 'send' | 'receive' =
-    balancesLoaded && totalUSDValue < 0.01 ? 'receive' : 'send';
+    // Cuenta inteligente money is not sent from this wallet's Enviar.
+    balancesLoaded && totalUSDValue - smartAccountUsd < 0.01 ? 'receive' : 'send';
 
   const quickActions = React.useMemo(() => {
     const send = {
@@ -1647,10 +1649,9 @@ export const HomeScreen = () => {
                 </Pressable>
               )}
 
-              {/* Cuenta inteligente — a probe, not a wallet yet: no money can be
-                  put in it before launch, so the balance slot is empty, never a
-                  number (eng review D8). No "Próximamente" here: it truncated
-                  the name, and the pitch screen says it. */}
+              {/* Cuenta inteligente: only a subscriber's row has a number (the
+                  account's own total); for everyone else the balance slot stays
+                  empty, never a zero (eng review D8). */}
               {smartAccountRow && (
                 <Pressable
                   style={({ pressed }) => [
@@ -1659,9 +1660,7 @@ export const HomeScreen = () => {
                   ]}
                   onPress={() => {
                     const target = smartEntry.target;
-                    if (!target) {
-                      navigation.navigate('PaidOffer', { offer: 'smart_account', door: 'billeteras' });
-                    } else if (target.screen === 'SmartAccountHome') {
+                    if (target.screen === 'SmartAccountHome') {
                       navigation.navigate('SmartAccountHome');
                     } else if (target.screen === 'SmartAccountOffer') {
                       navigation.navigate('SmartAccountOffer', target.params);

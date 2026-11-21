@@ -25,8 +25,8 @@ import { logSmartAccountFunnel } from '../services/paidOffers';
 import { useSmartRead } from '../components/smartAccount/useSmartRead';
 import { HELP_MOVE } from '../components/smartAccount/help';
 import {
-  assetTitle, centsToInput, dollarName, isDollarAsset, isZeroUnits, planLabel, planPeriod, toCents, typedCents, unitsForUsd, usd, centsToDecimal,
-  viewerDollarKey,
+  assetTitle, centsToInput, dollarName, isDollarAsset, isZeroUnits, planLabel, planPeriod, toCents, typedCents, usd, centsToDecimal,
+  depositUnitsForUsd, mayFallShort, viewerDollarKey,
 } from '../components/smartAccount/format';
 import {
   fetchSmartAccountMovePreview, fetchSmartAccountOffer, prepareSmartAccountSubscribe,
@@ -60,6 +60,13 @@ export function SmartAccountFundScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<MainStackParamList, 'SmartAccountFund'>>();
   const planKey = route.params?.plan ?? 'annual';
+  // Signed (or maybe signed): the account row appears only after the server
+  // reconciles the chain, so the account screen waits for it instead of
+  // offering the sign-up again.
+  const openingDone = () => navigation.reset({
+    index: 1,
+    routes: [{ name: 'BottomTabs' }, { name: 'SmartAccountHome', params: { justSubscribed: true } }],
+  });
 
   const offer = useSmartRead(fetchSmartAccountOffer);
   const preview = useSmartRead(() => fetchSmartAccountMovePreview('in'));
@@ -120,7 +127,7 @@ export function SmartAccountFundScreen() {
     if (amountError || cents === null || !dollar) {
       return;
     }
-    const units = unitsForUsd(cents, dollar);
+    const units = depositUnitsForUsd(cents, minCents, dollar);
     if (!units) {
       return;
     }
@@ -178,6 +185,11 @@ export function SmartAccountFundScreen() {
                 error={touched ? amountError : ''}
                 testID="fund-amount"
               />
+              {mayFallShort(minCents, dollar) ? (
+                <Text style={styles.under} testID="fund-may-fall-short">
+                  {`Tu ${dollarName(dollarKey)} apenas llega a ${minUsd} y su valor se redondea al centavo: puede no alcanzar para el primer período. Si no alcanza, recarga un poco más.`}
+                </Text>
+              ) : null}
               <View style={styles.chips}>
                 <Chip
                   label="Mínimo"
@@ -249,10 +261,8 @@ export function SmartAccountFundScreen() {
           successBody: 'Ya puedes crear tus reglas.',
           successLabel: 'Ir a mi cuenta',
         }}
-        onDone={() => navigation.reset({
-          index: 1,
-          routes: [{ name: 'BottomTabs' }, { name: 'SmartAccountHome' }],
-        })}
+        onDone={openingDone}
+        onUnknownDone={openingDone}
       />
     </SmartScreen>
   );

@@ -353,7 +353,38 @@ def demand(w):
     probes = list(ProbeAnswer.objects.order_by().values('probe_id', 'answer').annotate(
         n=Count('id'), funded_n=Count('id', filter=Q(funded=True))).order_by('-n')[:12])
     return {'demand_offers': offers, 'demand_stages': ('Saw it', 'Opened', 'Avísame'),
+            'demand_smart_funnel': smart_account_funnel(w, preview),
             'demand_probes': probes, 'rail_interest': rail_interest, 'rail_interest_totals': totals}
+
+
+# The paid Cuenta inteligente funnel (event smart_account_funnel, spec 7.9):
+# the client writes the first two stages, the server the rest from chain events.
+SMART_FUNNEL_STAGES = (
+    ('subscribe_opened', 'Opened subscribe'), ('subscribe_signed', 'Signed'), ('subscribed', 'Subscribed'),
+    ('first_deposit', 'First deposit'), ('rule_created', 'Rule created'), ('beneficiary_set', 'Beneficiary set'),
+    ('cancelled', 'Cancelled'),
+)
+
+
+def smart_account_funnel(w, preview):
+    """Distinct people per stage in the last 30 days, by plan. Canary users
+    are real usage; only the preview (staff) ids are left out, as for the
+    paid-offer doors."""
+    from users.models_analytics import FunnelEvent
+
+    reached = defaultdict(set)
+    for user, props in FunnelEvent.objects.filter(
+            event_name='smart_account_funnel', user__isnull=False,
+            created_at__gte=w.rolling_30_start).exclude(user_id__in=preview).order_by().values_list(
+                'user_id', 'properties'):
+        props = props or {}
+        stage = props.get('stage')
+        reached[(stage, '')].add(user)
+        if props.get('plan') in ('annual', 'monthly'):
+            reached[(stage, props['plan'])].add(user)
+    return [{'stage': key, 'label': label, 'people': len(reached.get((key, ''), ())),
+             'annual': len(reached.get((key, 'annual'), ())), 'monthly': len(reached.get((key, 'monthly'), ()))}
+            for key, label in SMART_FUNNEL_STAGES]
 
 
 # Money sitting on the way to or from Hyperliquid, by state.

@@ -1,7 +1,7 @@
 # Cuenta inteligente: final specification
 
 Date: 2026-11-20
-Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 32 from the founder's answers to the drafts, same day). What is still open is listed in section 9.3.
+Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 32 from the founder's answers to the drafts, same day; rows 33 and 34 from 2026-11-21). What is still open is listed in section 9.3.
 Supersedes: the section "For Build B (launch only; nothing below is built for the probe)" and every other launch-only note in [`cuenta-inteligente-fake-door.md`](cuenta-inteligente-fake-door.md). That document remains the record of the waitlist probe (2026-10-11 to 2026-11-20). Where the two disagree, this document wins. In particular the probe's merchant subscriptions and debit control, its price (US$9.99), its "cUSD+ is unwrapped to cUSD to pay the charge" rule and its `ConfioPayrollVault`-style shared escrow are all replaced.
 
 The repository is public. This document contains no user identifiers, names, interview material, revenue or user counts, and none may be added.
@@ -22,7 +22,7 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 |---|---|
 | Automatic payments and transfers | Recurring rules executed by the contract, daily, weekly, every two weeks or monthly: sends to another Confío user, and payments to a saved bank destination (CLABE, Pix, Bre-B) |
 | Automatic investing | Periodic buys (DCA) of stocks, bitcoin and gold on the same schedules |
-| IA+ | The assistant benefit, described as part of the account service (it analyses the account's movements, alerts, follows goals). Never described as more AI usage |
+| Confío IA+ | The assistant operates the account for the owner (decision 34): the owner creates, changes or stops rules by talking, keeps a target split of investments with new buys, sets alerts, and gets a monthly review. Every change takes effect only after the owner reviews and signs it. Free Confío IA answers and advises; Confío IA+ executes on the owner's own account, always with the owner's confirmation. Never described as more usage, a better model or "unlimited" |
 | Beneficiary | One named beneficiary who can take ownership of the account after a long challenge window during which the owner can cancel with any signed action |
 
 **Explicitly not included.**
@@ -50,7 +50,7 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | 3 | The 0.9% entry/exit conversion fee stays. No waiver or discount for subscribers | The conversion fee is existing revenue and must not be discounted by a membership | FINAL |
 | 4 | Included: (a) contract automation: scheduled sends, automatic payments to bank destinations, DCA of stocks, bitcoin, gold (revised by rows 17 and 18: "saving" removed, bank payments added); (b) IA+ as part of the account service; (c) one family beneficiary ("beneficiario" in store and legal copy) | These three are the paid job; IA+ is part of the account service | FINAL |
 | 5 | A separate smart-contract account owned by the user's personal wallet (EOA with the EIP-7702 `ConfioBatchDelegate`, Confío's KMS sponsor as `tx.origin`). Only assets inside it are automated and inheritable. Rejected: ERC-20 approvals from the personal wallet; inheritance logic in the 7702 delegate | A separate contract bounds what automation and inheritance can touch; the delegate stays minimal and immutable | FINAL |
-| 6 | The fee is taken from inside the account: cUSD first, then cUSD+ shares in kind (no conversion to cUSD first). If neither covers it, the contract sells stock/bitcoin/gold: one period's fee only, after several days of notices, proceeds land only inside the contract | Converting cUSD+ to pay would charge 0.9% again; forced sale closes free riding for non-dollar holders | FINAL |
+| 6 | The fee is taken from inside the account: cUSD first, then cUSD+ shares in kind (no conversion to cUSD first). If neither covers it, the contract sells stock/bitcoin/gold: one period's fee only, after several days of notices, proceeds land only inside the contract | Taking the user's own dollar avoids a conversion step in the account (cUSD↔cUSD+ is itself free, but `unwrapToCusd` is sponsor-gated); forced sale closes free riding for non-dollar holders | FINAL |
 | 7 | Cancellation is user-signed. At the end of the paid period every asset returns to the owner's personal wallet. A failed payment or failed sale never returns assets: it pauses automation and retries. The expiry return is callable by anyone, destination fixed to the owner's wallet, executable per asset. Futures/perps are excluded from the account | A dead owner's assets must not bounce back to a wallet nobody can open; one failing token must not block the rest | FINAL |
 | 8 | No free riding: no "beneficiary stays after lapse", no settlement fee at claim | Forced sale (6) makes the subscription the only way to keep coverage | FINAL |
 | 9 | Inheritance is an ownership transfer of the account. Beneficiary initiates, a challenge window runs (default 180 days, user-selectable), beneficiary executes and becomes owner. No heartbeat, no Confío liveness ping. Any owner-signed transaction cancels a pending claim; the relayer's fee deduction does not. Cooldown after a cancel; the owner can remove the beneficiary. The beneficiary can call the functions directly on-chain | Ownership transfer avoids per-token logic; only the owner's own signature proves the owner is alive | FINAL |
@@ -61,7 +61,7 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | 14 | UI: a third account in the existing personal/business switcher, an inherited-account view, a "move everything" action. Headline benefit depends on balance (beneficiary first with a balance, automation first otherwise) | Reuses the account model users already know | FINAL |
 | 15 | Rollout: automation + IA+ first with small amounts; the founder runs the full claim and return flow with his own funds; then the beneficiary feature is switched on. The Codex audit loop applies, with a separate pass for the inheritance path | The inheritance path is the one that cannot be fixed after a user dies | FINAL |
 | 16 | A scheduled send is allowed as an exit from the account when its payee, token, amount and schedule were stored on-chain by an owner-signed call. The relayer can only trigger that exact transfer | Reconciles decisions 4 and 12 (former conflict C1) | FINAL |
-| 17 | No automatic "saving" and no cUSD/cUSD+ conversion in the account. A user holds cUSD or cUSD+ by Ondo eligibility and sees one dollar balance, never both. Automation means payments, transfers and investing | There is nothing to convert between; income cannot be pulled from the personal wallet under decision 5 (former conflict C3) | FINAL |
+| 17 | No automatic "saving" and no cUSD/cUSD+ conversion in the account. A user holds cUSD or cUSD+ by Ondo eligibility and sees one dollar balance, never both. Automation means payments, transfers and investing. One narrow exception: a cUSD+ `Payout` run unwraps 5 bps more than it redeems, so up to `grossCusd * 5 / 10000 + 2 wei` of cUSD dust can stay in a cUSD+ account; it is counted in the one dollar balance, used first by `collectFee`, withdrawable, and never makes the account's dollar cUSD | There is nothing to convert between; income cannot be pulled from the personal wallet under decision 5 (former conflict C3) | FINAL |
 | 18 | Automatic payments to a saved bank destination (CLABE, Pix, Bre-B) are included, daily, weekly, every two weeks or monthly. Merchant subscriptions are not | The probe promised automatic payments; that promise is kept. Merchant subscriptions need merchants (former conflict C5) | FINAL |
 | 19 | Stock tokens and cUSD+ in a Cuenta inteligente are held at the user's own account address, with the relayer limited as in decision 12. A new owner who is not eligible can only withdraw | Closes former open point O1 | FINAL |
 | 20 | The move from US$9.99 to US$14.99 is not announced separately to waitlist members | The launch price is simply the price shown (former O2) | FINAL |
@@ -78,6 +78,7 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | 31 | USDT that reaches the account is converted automatically into the owner's Confío dollar (cUSD+ if Ondo-eligible, cUSD otherwise), as in the personal wallet | A user never holds raw USDT in Confío; the same rule applies inside the account | FINAL |
 | 32 | `CusdVault` is changed so that a Cuenta inteligente can arm the fee referral for its owner. Automated activity (rules, forced sales, USDT conversion) then pays the referrer's share like owner-signed activity | The referral share should not depend on whether the owner or the relayer triggered the conversion (former C4) | FINAL |
 | 33 | An owner whose account passed to a beneficiary can open a new account from the same wallet; the factory keeps one current account per owner (generation in the CREATE2 salt) | A living owner who missed the window must be able to start again | FINAL |
+| 34 | Confío IA+ means "the assistant executes", not "more AI". Free Confío IA answers and advises. For a subscriber, the assistant proposes rule changes the owner asks for (create, change, stop; send, bank payment, buy), keeps an owner-set target split of investments by new buys only (never by selling), produces the monthly review (in the thread every month and on request), and keeps owner-set alerts on prices and exchange rates. Every rule change takes effect only after the owner reviews it on the rule screen and signs it through the existing prepare and sign flow; an alert only tells the owner. The assistant never moves money on its own judgement and never chooses what to buy, how much, a split or an alert level. No contract change (section 3.5) | The paid benefit is the account operated for the owner, with the owner's signature on every change; usage-based benefits read as an AI unlock | FINAL |
 
 ---
 
@@ -115,7 +116,7 @@ An owner whose account passed to their beneficiary through an executed claim can
 | Futures/perps positions | No | — | — | — | Excluded (decision 7) |
 | BNB | No | — | — | — | The account has no `receive()`; it never needs gas |
 
-A given user holds one of the two dollars, not both (decision 17). The contract still handles both tokens, in the order of decision 6, because it cannot know the owner's eligibility and eligibility can change; it never converts one into the other.
+A given user holds one of the two dollars, not both (decision 17), except for the cUSD dust a cUSD+ payout's unwrap margin leaves (4.7). The contract still handles both tokens, in the order of decision 6, because it cannot know the owner's eligibility and eligibility can change; it never converts one into the other.
 
 The account does not keep an on-chain list of tokens. Every asset function takes the token address as a parameter; the backend enumerates what the account holds (section 7.6).
 
@@ -133,6 +134,41 @@ The account does not keep an on-chain list of tokens. Every asset function takes
 - **Out of the account.** `withdrawAll(tokens[])`, owner-signed, sends each listed token's full balance to `owner`.
 - **Out of an inherited account.** `withdrawAll(tokens[], to)` with the same destination rule as `withdraw`.
 - Not moved in either direction: locked presale allocations, perps positions, and any asset the account does not support.
+
+### 3.5 Assistant operation (Confío IA+, decision 34)
+
+Who: a subscriber (current subscription, IA+ entitlement through `assistant/billing.has_plus`) in a personal or `smart` context, never an employee or a business context, on a build at or above `SMART_ACCOUNT_MIN_APP_VERSION`. Non-subscribers who ask for automation get the existing Cuenta inteligente offer chip.
+
+What the assistant does:
+
+| It can | How |
+|---|---|
+| Read the rules | Kind, amount, frequency, next run, last run and why it did not run; saved bank destinations; the target split |
+| Propose a rule change | Create, change or stop a rule. The proposal is validated like the prepare it leads to (payee by the same handle resolution, asset among the buyable assets, bank destination among the viewer's saved destinations whose rail is enabled for payouts, amount limits including the stock minimum, frequency, first run date). It is shown in plain Spanish with one chip that opens the rule screen prefilled. Nothing is prepared or signed by the assistant |
+| Keep a target split | The owner states the split and the total per period ("70/30 entre SPY y bitcoin con 100 al mes"). It is saved as the owner's preference and becomes one Buy rule per asset, amount = total × weight, each signed by the owner. When holdings drift from the split by more than `SMART_ACCOUNT_ALLOCATION_DRIFT_PP` (default 5 points), the assistant proposes re-splitting the next buys toward the underweight assets, same total, every asset keeping at least its minimum. Never a sale. If the total is too small to move the split in a reasonable time, it says so |
+| Review a month | Plan charges, signed moves in and out, what each rule executed or skipped and why, balances now, target versus actual. Posted in the assistant thread once a month and produced on request |
+| Keep alerts | "Avísame si TSLA baja 5% y prepárame una compra de 100". Price drop or rise by a percentage, price below or above, exchange rate below or above. At most 10 active per account, at most one trigger per alert per 24 hours. A trigger sends a push and a thread note; a buy the owner attached arrives as a chip that opens it prefilled for review and signature |
+
+Limits that do not move:
+
+- Every amount, payee, asset, percentage and alert level comes from the owner's own words; the server checks that they appear in what the owner wrote and refuses otherwise. The existing no-advice rules stand.
+- An alert is saved only after the owner answers "sí" to a confirmation question written by code (the same pattern as categorizing movements). It moves no money, so it needs no signature.
+- One proposal and one chip per reply. Proposals are data; the server's prepare re-validates everything and the owner signs.
+
+How requests map to what the contract has (no new contract capability):
+
+| The owner says | It becomes |
+|---|---|
+| "compra US$10 de bitcoin cada mes" | `Buy` rule, monthly |
+| "manda US$50 a mamá el día 1" | `Send` rule, monthly, `firstRunAt` on the next 1st (days 1 to 28 only, so the day repeats every month) |
+| "págale 100 dólares a mi casero por Bre-B cada mes" | `Payout` rule to a saved Bre-B destination |
+| A weekday ("los viernes") | Weekly or every-two-weeks rule with `firstRunAt` on that weekday |
+| "pausa la regla" | Stop (`cancelRule`). There is no pause; the owner can create the rule again. The assistant says so |
+| "guarda / ahorra US$X al mes" | Not possible: there is no saving rule (decision 17). The owner's dollar already is the balance; the assistant offers what exists |
+| "mantén 70/30" | Target split kept by new buys only, as above |
+| "vende cuando…" | Not possible: the account does not automate sales |
+
+`firstRunAt` is an existing field of the rule tuple. The prepare mutations take an optional `firstRunAt`; it must be between now and 62 days ahead, is refused for daily rules, and on an edit is moved on by whole periods so it is never earlier than the rule's current next run (an edit never runs a rule twice in one period).
 
 ---
 
@@ -294,10 +330,19 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 | Kind | What the relayer may do | Enforced on-chain |
 |---|---|---|
 | `Send` | Deliver `amount` dollars from `tokenIn` (cUSD or cUSD+) to `payee`, in the payee's own dollar. The existing send flow already follows this rule (`send/bsc_flow.py`: eligible recipients receive cUSD+, ineligible ones cUSD through the fee-free wrap/unwrap). The relayer passes which dollar the payee holds; the account then either transfers `tokenIn` in kind, or calls `CUSD_PLUS.unwrapToCusd(shares, minOut, payee)` / `CUSD_PLUS.wrapCusd(cusd, minOut, payee)` so the converted dollar is minted straight to the payee. The account itself never ends up holding the other dollar, so decision 17 stands | `payee`, `tokenIn`, `amount` and `frequency` come from the stored rule (decision 16). The relayer chooses only the delivery form; the recipient of every form is the stored `payee`, the conversion is the vault's fee-free one, and `tokenIn` falls by at most the token equivalent of `amount` |
-| `Payout` | Exit up to `amount` dollars' worth of `tokenIn` to USDT (`CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee`, both sponsor-less, both paying the normal 0.9% exit fee) with the USDT sent to the address the relayer names for this run; the bridge and the provider then pay the bank destination behind `payoutRef` (CLABE, Pix, Bre-B) | `tokenIn`, `amount`, `frequency` and `payoutRef` come from the stored rule; `tokenIn` falls by at most the token equivalent of `amount`; at most one run per minimum gap; the event carries `payoutRef` and the destination. The destination address itself is **not** bound: it is a bridge deposit address created per transfer (section 9.2, C7). There is no allowlist |
+| `Payout` | Exit up to `amount` dollars' worth of `tokenIn` to USDT with the USDT sent to the address the relayer names for this run; the bridge and the provider then pay the destination behind `payoutRef` (CLABE, Pix, Bre-B, Venezuelan Pago Móvil). cUSD exits through `CUSD.redeemWithFee(amount, minUsdtOut, destination)` (the normal 0.9% exit fee; `minUsdtOut` is a floor). cUSD+ exits through the fee-free `CUSD_PLUS.unwrapToCusd` of `ceil((grossCusd + grossCusd * 5 / 10000) / pPlus)` shares (capped at the run's share limit) and then `CUSD.redeemWithFee(grossCusd, usdtOut, destination)` with an **exact** `usdtOut = grossCusd - CusdVault.feeFor(grossCusd)`: one wei under and the account refuses, one over and the vault does. The exact amount lets a fixed-amount bridge order (Pago Móvil) take a cUSD+ run like a cUSD one. The backend keeps `grossCusd + grossCusd * 5 / 10000 <= amount`, so the unwrap never reaches the share limit wherever pPlus lands, and picks the smallest `grossCusd` whose net equals the target USDT (the largest allowed net floored to six decimals). The unwrap margin left over stays as cUSD dust (decision 17) | `tokenIn`, `amount`, `frequency` and `payoutRef` come from the stored rule; `tokenIn` falls by at most the token equivalent of `amount`; at most one run per minimum gap; the event carries `payoutRef` and the destination. The destination address itself is **not** bound: it is a bridge deposit address created per transfer (section 9.2, C7). There is no allowlist |
 | `Buy` | Spend up to `amount` dollars' worth of `tokenIn` on `tokenOut`: a stock through `STOCK_ROUTER.buyWithSavings`, which takes cUSD+ only, or bitcoin or gold (the tokens with a feed constant, nothing else) through `SWAP_ROUTER.buy`, which takes cUSD+ or cUSD | Venue and selector fixed; `tokenIn` falls by at most the token equivalent of `amount`; `tokenOut` rises by at least the relayer-supplied `minOut` and by more than zero; no other token balance passed in the check list falls. Worst case per run is the rule's `amount` |
 
 There is no saving rule and no conversion function (decision 17).
+
+`executeRule` `data` by rule kind (`IConfioSmartAccount.executeRule`):
+
+| Kind | `data` |
+|---|---|
+| `Send` | `abi.encode(uint8 payeeDollar, uint256 minOut)` |
+| `Payout`, cUSD rule | `abi.encode(address destination, uint256 minUsdtOut)`; `minUsdtOut` is a floor |
+| `Payout`, cUSD+ rule | `abi.encode(address destination, uint256 usdtOut, uint256 grossCusd)`; `0 < grossCusd <= amount`, `usdtOut == grossCusd - CusdVault.feeFor(grossCusd)` exactly. The two-word form reverts on a cUSD+ rule |
+| `Buy` | `abi.encode(address venue, bytes venueCalldata, uint256 minOut)` |
 
 `Buy` through the stock router needs an Ondo-signed quote in `data`; the relayer obtains it (section 7.5).
 
@@ -365,7 +410,7 @@ No transition out of `PaymentDue`, `Notice` or `SaleAllowed` returns assets to t
 
 Each is a testable statement. Section 10.2 maps them to tests.
 
-1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee`, `subscribe` or `forcedSale`; a transfer to a `Send` rule's stored `payee` inside `executeRule`, or a burn by `CUSD_PLUS.unwrapToCusd` / a pull by `CUSD_PLUS.wrapCusd` in that rule whose minted dollar goes to the same stored `payee`; a burn by `CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee` inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of CONFIO by the `confioSale` venue inside `forcedSale`, once that venue is set; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or to a clone of the account implementation (same code hash) that `owner` owns and that is not inherited (in practice `FACTORY.accountOf(owner)`).
+1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee`, `subscribe` or `forcedSale`; a transfer to a `Send` rule's stored `payee` inside `executeRule`, or a burn by `CUSD_PLUS.unwrapToCusd` / a pull by `CUSD_PLUS.wrapCusd` in that rule whose minted dollar goes to the same stored `payee`; a burn by `CUSD.redeemWithFee` (after, for cUSD+, a burn by `CUSD_PLUS.unwrapToCusd` minting cUSD back to the account) inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of CONFIO by the `confioSale` venue inside `forcedSale`, once that venue is set; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or to a clone of the account implementation (same code hash) that `owner` owns and that is not inherited (in practice `FACTORY.accountOf(owner)`).
 2. `owner` changes only in `executeClaim`, and only to the `beneficiary` stored at that moment.
 3. `collectFee` succeeds at most once for any value of `paidUntil`, and each success moves `paidUntil` forward by exactly the period length of the plan charged, from the block time. The total collected by one success never exceeds `feeUsd()` in value (cUSD at par, cUSD+ at `pPlus`, rounding up by at most one share unit), and `feeUsd()` never exceeds the implementation's hard-coded maximum for the plan whatever the factory returns.
 4. The relayer cannot change the fee, `plan` (it changes only to the `nextPlan` the owner signed, at renewal), `nextPlan`, `owner`, `pendingBeneficiary`, `beneficiary`, `challengeWindow` or any rule field other than `nextRunAt`, which `executeRule` advances. The price changes only through the factory's delayed `scheduleFee`, which is Safe-only. The 30-day delay lives in the factory, which the Safe can upgrade; what the account itself enforces is the hard-coded maximum per plan. An upgraded factory could raise a renewal to that maximum without notice.
@@ -400,7 +445,7 @@ What the invariants do not cover: the Safe can upgrade `ConfioStockRouter`, `Con
 2. If a remainder `r` is left, call `CUSD_PLUS.accrue()` (ignoring a revert), read `pPlus`, and transfer `ceil(r * 1e18 / pPlus)` cUSD+ shares to `FEE_COLLECTOR`.
 3. If the shares needed exceed the balance, revert. Nothing is taken partially.
 
-The shares are transferred, not redeemed. No `unwrapToCusd` and no `redeemToUsdt` runs on the user's side, so the user pays no conversion fee on the subscription fee. Confío converts collected shares on its own side later.
+The shares are transferred, not redeemed: the account needs no conversion call (moving between cUSD and cUSD+ is free anyway, but `unwrapToCusd` is sponsor-gated and would add a dependency). The user pays no fee on the subscription fee beyond the fee itself. The collector sends what it receives to the Safe, which converts cUSD+ on Confío's side when it wants.
 
 In practice a user holds only one of the two dollars (decision 17), so one of the two steps does all the work; the order matters only if an account ever holds both.
 
@@ -577,6 +622,13 @@ All soft-deletable where they represent user-visible records, and all registered
 | `SmartAccountClaim` | `beneficiary_row`, `initiated_at`, `executable_at`, `initiated_tx`, `cancelled_at`, `cancelled_tx`, `executed_at`, `executed_tx`, `state` | |
 | `SmartAccountRelayTx` | `smart_account`, `kind`, `calldata`, `signed_tx_hash`, `status`, `source_id`, timestamps | Durability row for relayer-originated transactions (7.4) |
 
+Added for decision 34:
+
+| Model | Key fields | Notes |
+|---|---|---|
+| `SmartAccountTargetAllocation` | `smart_account`, `weights` (list of `asset_key`, `weight_bps`, summing to 10000), `total_usd`, `frequency`, timestamps, soft delete | The owner's split, one live row per account. A preference, not chain state: it moves no money. Executed only through owner-signed Buy rules |
+| `SmartAccountWatch` | `smart_account`, `user`, `kind` (`asset_price_drop_pct`, `asset_price_rise_pct`, `asset_price_below`, `asset_price_above`, `fx_rate_below`, `fx_rate_above`), `asset_key` or `currency`, `threshold`, `reference_price` (base of the percentage kinds, reset at each trigger), `action` (an owner-chosen buy: asset and amount, or empty), `active`, `cooldown_hours` (24), `last_triggered_at`, `last_value`, timestamps, soft delete | Prices from existing sources only: Ondo GM market data for stocks, the crypto snapshot prices for bitcoin and gold, the reference exchange rate Home shows (refused when older than two days) |
+
 IA+ entitlement: `assistant/billing.py:has_plus` returns true when an `AssistantSubscription` is entitled. A current Cuenta inteligente subscription must make `has_plus` true. Either issue an `AssistantSubscription` row with a source marking it as coming from the account and an expiry equal to `paid_until`, renewed on each `FeeCollected`, or have `has_plus` consult `SmartAccount`. The first keeps one entitlement source. The entitlement ends at `paid_until` and is not granted on an inherited account.
 
 ### 7.2 Account context
@@ -701,8 +753,26 @@ Review flags must not gate users: a notification failure or a pending review nev
 | `smart_account.return_expired` | Hourly | `returnAsset` per token for `Expired` accounts until empty; a failing token is recorded and retried without blocking others |
 | `smart_account.claim_notices` | Daily | The owner notice schedule for pending claims |
 | `smart_account.sync_entitlements` | On `FeeCollected` and daily | IA+ entitlement in line with `paid_until` |
+| `smart_account.monthly_review_notes` | 1st of each month | Decision 34: last month's review as a thread note (`assistant.service.post_system_note`) for each subscriber whose IA+ is current. Idempotent per account and month by the note's tag. Behind `SMART_ACCOUNT_ENABLED` |
+| `smart_account.evaluate_watches` | Every 5 minutes | Decision 34: evaluates active alerts of current subscribers; a trigger is a compare-and-set on `last_triggered_at`, so two workers never notify twice; then a push and a thread note. An unknown price is skipped and counted, never read as a trigger. Behind `SMART_ACCOUNT_ENABLED` |
 
 Every task that sends a transaction is idempotent on (`account`, `kind`, period or rule run) and fails closed: an exception leaves state unchanged and is retried. A catch that turns an error into "nothing to do" is a defect.
+
+### 7.8a Assistant tools (decision 34)
+
+In `assistant/engine.py`, available only to the viewers listed in 3.5 and never while the team owns the thread. Logic in `smart_account/assistant_ops.py` and `smart_account/watches.py`.
+
+| Tool | Arguments | Returns / effect |
+|---|---|---|
+| `smart_account_rules` | none | Rules (`regla_id`, kind, amount, frequency, active, next run, destination, last run with status and reason), saved bank destinations (`cuenta_id`, whether payouts are enabled for the rail), the target split |
+| `propose_smart_account_rule` | `action` (`create`, `update`, `cancel`), `kind`, `rule_id`, `payee`, `payout_method_id`, `asset`, `amount_usd`, `frequency`, `weekday` (0 = Monday), `day_of_month` (1 to 28), `start_date` | A proposal of one step (`action`, `kind`, `rule_id`, `amount_usd`, `frequency`, `first_run_at`, payee, destination or asset, and a Spanish sentence). Stored on the reply message's metadata; adds the chip |
+| `propose_target_allocation` | `action` (`set`, `next_split`, `delete`), `assets` (asset and percent), `total_usd`, `frequency`, first-run fields | `set` saves the split and proposes one Buy step per asset; `next_split` proposes the drift re-split with its estimated periods; `delete` forgets the split (rules stay) |
+| `smart_account_review` | `months_back` | The month's review (3.5) |
+| `smart_account_alerts` | `action` (`create`, `list`, `delete`), `kind`, `asset`, `currency`, `threshold`, `action_asset`, `action_amount_usd`, `alert_id` | `create` drafts the alert; the reply ends with a code-written confirmation question and the alert is saved on the owner's "sí". `delete` acts on the owner's own alert by opaque id |
+
+The chip is `{type: navigate, target: smart_account_rule, destination: cuenta_inteligente}`: builds that know `smart_account_rule` open the proposal; older builds open the Cuenta inteligente door. It replaces any offer chip in that reply (one chip per reply). The app reads the steps with the isolated query `assistantRuleProposal(messageId)` (owner's own messages only; marked expired after 7 days), so the shared thread query is unchanged. Alerts are listed with `smartAccountWatches` and deleted with `deleteSmartAccountWatch(watchId)`.
+
+Copy: `offer.BENEFITS['assistant']`, `assistant/prompts.py` (`IA_PLUS_IN_SMART_ACCOUNT`, the Confío IA+ waitlist section, and `SMART_ACCOUNT_OPS_SECTION` for subscribers) and the `ia_plus` destination describe the assistant operating the account with the owner's confirmation; never more usage, a better model or "unlimited".
 
 ### 7.9 Changes to the probe code
 
@@ -751,11 +821,13 @@ React Native, no Expo. Identifiers in English; every user-facing string in Spani
 | Claim (beneficiary side) | `BeneficiaryClaimScreen` (start), `BeneficiaryClaimStatusScreen` (countdown, executable date), execute | Also reachable when the server is unreachable, through the Emergency Exit transport without its heartbeat gate (6.7). This is new work, not an existing path |
 | Inherited account | `InheritedAccountScreen` | Shows assets and two actions: move to my wallet, move to my Cuenta inteligente (offered only if the user has one). No trade, no rules, no plan |
 | Payment problem | Banner and `SmartAccountBillingScreen` | Shows the amount due, the notice date, which asset would be sold and when, and an "add dollars" action |
+| Assistant proposal (decision 34) | Chip "Revisar y firmar" in the assistant thread → `SmartAccountRuleEditScreen` prefilled | The chip is opened by a tap only, never by an answer moving the app. The proposal (kind, rule id for an edit, payee handle, saved destination id or asset key, amount, frequency, first run) fills the form; every field stays editable; the proposal's sentence is shown above the form; the first run is shown and can be removed. A stop proposal opens that rule's stop confirmation. A proposal of several steps (a target split) is signed one screen at a time. The normal Face and signing flow applies; the prepare re-validates everything |
+| Alerts (decision 34) | `SmartAccountWatchesScreen` (from the account's Automation card) | Lists the owner's alerts in the server's words, with delete. A trigger notification opens it (`screen: SmartAccountWatches`) |
 
 ### 8.3 Copy constraints
 
 - Product name: "Cuenta inteligente". No "Bóveda". The benefit may be called "Herencia Digital" in marketing; store listings, terms and legal text use "beneficiario".
-- IA+ is described as the account's assistant service (analysis of the account's movements, alerts, goals). Never as more usage, a better model or new chat features.
+- Confío IA+ is described as the assistant operating the account for the owner, who confirms every change (decision 34). Never as more usage, a better model, new chat features or "unlimited". Account screens may call it "el asistente de tu cuenta"; they do not use the word IA.
 - Screens describe financial functions only. "Inteligente" must not read as an AI unlock. No violet, sparkle or padlock marks (carried over from the probe's design review).
 - Nothing the product cannot deliver: no merchant subscriptions and no debit control in copy; a bank rail is named only where payment rules are live for it.
 - No "saving" benefit and no mention of converting between dollars. The user sees one dollar balance.
@@ -844,6 +916,10 @@ Each is a place where a decision and the code, or two decisions, did not fit as 
 | C4 | The user pays the same 0.9% everywhere; this is only about the referrer's half of it. That share is paid when `CusdVault.armReferral` is the first call of the transaction, and `armReferral` accepts only a 7702-delegated EOA as caller. In an owner-signed batch the owner's EOA can arm before calling the account, so trades and deposits the owner signs still pay the referrer. In a relayer-originated transaction (`executeRule` buys and bank payments, `forcedSale`, `convertUsdt`) no EOA is in the call chain, nothing is armed, and Confío keeps the whole fee | `CusdVault.sol:282-284, 315-319, 330-342`; `cusd_plus/fee_referral.py` | **Resolved (decision 32).** `CusdVault` is extended as described in section 7.4 |
 | C5 | The probe told users a different product: bank-rail automatic payments, merchant subscriptions and debit control at US$9.99 | `assistant/prompts.py:155-162`; `apps/src/screens/PaidOfferScreen.tsx`; probe plan "The two offers" | **Resolved (decisions 2, 18, 20).** Automatic payments to CLABE, Pix and Bre-B are built; merchant subscriptions are dropped; the price is the launch price with no separate notice |
 | C6 | A user-signed cancellation returns assets to the owner's wallet at period end. If the owner cancels and then dies before the period ends, the assets go to a wallet nobody can open, and a pending claim cannot stop it without letting an unpaid account keep coverage | Decisions 7, 8 and 9 | **Not answered; default kept.** The return wins, which is what decisions 7 and 8 say as written. The cancel screen states that cancelling ends beneficiary coverage |
+| C8 | New with decision 34. Owners ask to "pause" a rule; the contract has `cancelRule` and `updateRule`, no pause | `ConfioSmartAccount.sol` (`cancelRule`) | **Mapped, no contract change.** "Pausar" is a stop; the assistant says the rule can be created again |
+| C9 | New with decision 34. Owners ask to "save X a month"; there is no saving rule | Decision 17 | **Mapped.** The assistant explains that the owner's dollar already is the balance and offers send, payment or buy |
+| C10 | New with decision 34. An alert's attached buy is a one-time intent, but the app has no manual trade inside the account yet (8.1) | Section 8.1; `prepareSmartAccountTrade` exists on the server only | **Open.** The trigger chip opens the rule screen with a monthly Buy prefilled and the note says to stop the rule after the first run if only one purchase was wanted. When the account's trade screen is wired, the chip should open it instead |
+| C11 | New with decision 34. A day of the month above 28 does not repeat every month (the backend's calendar clamps to the month's last day and then stays there) | `smart_account/automation.py:next_slot` | **Mapped.** Days 1 to 28 only; the assistant asks for another day |
 | C7 | New with decision 18. A payment rule pays a bank account, but the contract can only see an on-chain address, and that address cannot be fixed in advance | Decisions 12 and 18; `payment_accounts/local_money.py`, `bridge.py:66-86`, `relay.py`, `infinia_journeys.py:88-95` | **Resolved (decision 29): option (a).** The BSC-side recipient of a bank payout is a bridge deposit address created for each transfer, so no fixed list of addresses, in the Safe or anywhere, can describe it. What the contract binds is the rule the owner signed: token, amount, frequency. Consequence, stated plainly: for an account that has a payment rule, a compromised relayer key could send up to that rule's amount, once per period, to an address of its choosing. Accounts without payment rules are not exposed, and send rules are not exposed (their payee is fixed). Ways to narrow it that were considered: (a) accept it, with the exposure equal to what each owner chose to automate; (b) the owner also sets a monthly cap for all payment rules together, stored on-chain; (c) replace the deposit-address bridge with a bridge contract call whose Polygon recipient is a call parameter, store the user's own provider funding address in the rule, and have the account build the call, so funds can only reach the user's own provider account. Whether such a bridge call exists for this route was not verified. The founder chose (a); (b) and (c) are not built |
 
 ### 9.3 Open points
@@ -879,6 +955,12 @@ Still open:
 | C2 | Match the two feed addresses against Chainlink's published list before they are hard-coded | Design resolved (9.2); tolerance and feed age are in the numbers table | Engineering, in the contract audit |
 | C6 | A claim pending when a signed cancellation expires | Default kept: the return wins (9.2). Not answered by the founder | Founder, if he wants it otherwise |
 | P1 | Which rails are live for payment rules at launch. All three run on the same provider path, so the question is the provider's terms and limits (X9), not three separate integrations | Not started | Founder |
+
+Positioning for store review (decision 34), stated as facts about the product:
+
+- The free assistant answers questions and gives general guidance. It moves nothing.
+- Cuenta inteligente is a paid financial account. Its subscription is charged on-chain from inside the account (section 5), not through the stores. Nothing is sold in the app as a digital unlock and there is no in-app purchase.
+- What the subscription adds to the assistant is the execution of automated transactions on the subscriber's own account: rules the owner signs, a target split kept by new purchases, alerts the owner sets, and a monthly review. Every transaction is authorised by the owner's signature.
 
 Numbers (O6), all confirmed by the founder on 2026-11-20:
 
@@ -1009,6 +1091,7 @@ Property tests (fuzzed sequences of calls by owner, beneficiary, relayer and str
 - Re-open (decision 33): a previous owner whose account was inherited sees the plans again; the subscribe batch creates the account at `factory.predictAddress(signer)` and the policy accepts exactly that address and refuses the inherited one; reconcile gives the second `AccountCreated` index 0 without an ops alert (an `AccountCreated` while the owner's current account is still theirs on chain is still alerted); the new subscription grants IA+; an inherited withdraw can go to the heir's own new account.
 - App: subscribe, move everything, rule creation, cancel, claim and inherited withdrawal on a real device; the claim-pending banner appears in every account context; older builds never receive the new GraphQL fields in shared queries.
 - Local tests must patch the Telegram alert path (they otherwise reach the real channel).
+- Assistant operation (decision 34), in `smart_account/tests/test_assistant_ops.py`: tools offered only to subscribers, never to employees or free users; one proposal and one chip per reply; amounts, assets and percentages must be the owner's own words (the assistant refuses to choose a split); proposals validate payee, asset, minimums and first-run days; a stop proposal is a cancel; target split: the parts add up to the total, the drift re-split sends new money to the underweight asset, keeps every asset at its minimum, never proposes a sale, and says when the total is too small; nothing inside the threshold proposes nothing; the monthly review counts runs and reasons and the monthly note is posted once per month; both new tasks are off without `SMART_ACCOUNT_ENABLED`; first-run bounds and the edit floor; alerts need the owner's level, are saved only on the owner's "sí" to that message, trigger once per cooldown with a signable prefilled buy and nothing on chain, stay quiet above the level, cap at 10, and delete only for the owner; `assistantRuleProposal` returns only the owner's own message. App: the proposal chip is tap-only with a fallback, the proposal maps to rule-screen params and drops malformed values, the rule screen opens prefilled and editable, passes the first run, drops it for daily rules, opens the stop confirmation, and chains multi-step proposals; the alerts list and the trigger notification route.
 
 ### 10.4 Audit gates
 
@@ -1042,5 +1125,6 @@ Property tests (fuzzed sequences of calls by owner, beneficiary, relayer and str
 - A heartbeat or any Confío-run liveness signal.
 - A settlement fee at claim; beneficiary coverage after the subscription lapses.
 - Store billing or in-app purchase.
+- Automated selling of any kind, including to keep a target split (decision 34 keeps it with new buys only); a pause state for rules.
 - Portuguese or other non-Spanish UI strings.
 - Changes to `CusdPlusVault`, `ConfioStockRouter`, `ConfioSwapRouter` or `ConfioBatchDelegate`. The feature is built on their current interfaces. The one change to an existing contract is `CusdVault.armReferral` (decision 32).

@@ -5,6 +5,7 @@ jest.mock('../../services/smartAccount', () => ({
   fetchBeneficiaryDesignations: jest.fn(),
   // The real predicate: an expired account is not a subscriber.
   isSmartAccountOpen: (s: string) => jest.requireActual('../../services/smartAccount').isSmartAccountOpen(s),
+  isSmartAccountOpening: (s: string) => jest.requireActual('../../services/smartAccount').isSmartAccountOpening(s),
 }));
 const mockOffline = jest.fn();
 jest.mock('../../services/smartAccountDirect', () => ({ loadOfflineDesignations: () => mockOffline() }));
@@ -56,8 +57,10 @@ describe('where the Cuenta inteligente wallet row goes', () => {
     expect(smartEntryTarget(true, false, designation(), null, 2)).toEqual({ screen: 'SmartAccountHome' });
   });
 
-  it('everyone else keeps the probe pitch', () => {
-    expect(smartEntryTarget(false, false, null)).toBeNull();
+  it('everyone else opens the real offer, never the old probe (whatever the server flags say)', () => {
+    const OFFER = { screen: 'SmartAccountOffer', params: { door: 'billeteras' } };
+    expect(smartEntryTarget(false, false, null)).toEqual(OFFER);
+    expect(smartEntryTarget(false, true, null)).toEqual(OFFER);
   });
 });
 
@@ -94,7 +97,8 @@ describe('useSmartAccountEntry with the server down', () => {
     await renderer.act(async () => { renderer.create(React.createElement(Probe)); });
     await flushAll();
     expect(mockOffline).not.toHaveBeenCalled();
-    expect(state.target).toBeNull();
+    // The server's gate is null (flag off, unknown): still the real offer.
+    expect(state.target).toEqual({ screen: 'SmartAccountOffer', params: { door: 'billeteras' } });
   });
 
   it('an expired (cancelled and returned) account is not a subscriber: the row opens the offer', async () => {
@@ -175,5 +179,26 @@ describe('one row per account', () => {
     const active = designation({ designationId: 'a1', state: 'active' });
     const other = designation({ designationId: 'p2', state: 'pending_acceptance', ownerHandle: 'ana', ownerName: 'Ana P.' });
     expect(distinctOpenDesignations([active, other]).map((d) => d.designationId)).toEqual(['a1', 'p2']);
+  });
+});
+
+describe('every read failing', () => {
+  it('still opens the real offer (which shows its own load error)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const React = require('react');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const renderer = require('react-test-renderer');
+    const api = require('../../services/smartAccount');
+    const { useSmartAccountEntry } = require('../useSmartAccountEntry');
+    const flushAll = async () => { for (let i = 0; i < 5; i++) { await renderer.act(async () => { await Promise.resolve(); }); } };
+    api.fetchSmartAccountEntry.mockResolvedValue({ ok: false });
+    api.fetchSmartAccountOfferGate.mockResolvedValue({ ok: false });
+    api.fetchBeneficiaryDesignations.mockResolvedValue({ ok: false });
+    mockOffline.mockResolvedValue([]);
+    let state: any;
+    const Probe = () => { state = useSmartAccountEntry(true); return null; };
+    await renderer.act(async () => { renderer.create(React.createElement(Probe)); });
+    await flushAll();
+    expect(state.target).toEqual({ screen: 'SmartAccountOffer', params: { door: 'billeteras' } });
   });
 });

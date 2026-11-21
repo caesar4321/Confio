@@ -568,6 +568,25 @@ def face_refusal(action, user) -> str | None:
         return FACE_STEP_UP_MESSAGE
 
 
+def duplicate_create_refusal(action) -> str:
+    """Submit-time twin of the prepare check (services.duplicate_create):
+    two identical creates prepared before either was signed are refused
+    once the first one is signed. The refusal code ('rule_duplicate' or
+    'rule_duplicate_pending'), or '' when there is none."""
+    from .models import SmartAccountRule
+    from .services import duplicate_create
+    payload = action.payload or {}
+    if action.kind != 'smart_rule' or not payload.get('rule_pk') or payload.get('replaces_pk') \
+            or action.smart_account is None:
+        return ''
+    draft = SmartAccountRule.all_objects.filter(pk=payload['rule_pk'], state='draft').first()
+    if draft is None:
+        return ''
+    return duplicate_create(action.smart_account, action.user, draft.kind, draft.amount, draft.frequency,
+                            payee_address=draft.payee_address, payout_ref=draft.payout_ref,
+                            token_out=draft.token_out, exclude_rule_pk=draft.pk)
+
+
 def validate_batch(calls: list, user, user_addr: str, request_id: str | None = None):
     """Raise PolicyError unless `calls` is exactly a batch the server
     prepared for this user. Returns the prepared action."""
@@ -586,6 +605,9 @@ def validate_batch(calls: list, user, user_addr: str, request_id: str | None = N
         # Only the exact replay of the recorded request outlives the TTL; a
         # retry after a failed batch is a new broadcast of a stale prepare.
         raise _error('smart_action_expired')
+    duplicate = '' if action.consumed else duplicate_create_refusal(action)
+    if duplicate:
+        raise _error(duplicate)
     try:
         _check_shape(action, calls, user, signer)
     except chain.ChainError as exc:
@@ -604,10 +626,26 @@ def validate_batch(calls: list, user, user_addr: str, request_id: str | None = N
 def consume(action, batch) -> None:
     """Mark the action consumed by this batch. Called inside the SAME
     database transaction that writes the SponsoredBatch row, before the
-    broadcast (send_sponsored_batch's persist_signed)."""
+    broadcast (send_sponsored_batch's persist_signed).
+
+    A rule create re-runs the duplicate check on a fresh read: two
+    identical creates submitted at once both pass validate_batch, but
+    send_sponsored_batch runs this under the global sponsor nonce lock and
+    commits it before releasing that lock, so the second sees the first
+    signed and is refused (rolling back its batch row before broadcast).
+    No row lock on the account: this runs under a 15 s Redis lock, and the
+    reconciler may hold that row through slow RPC."""
+    from django.db import transaction
+
     from .models import SmartAccountPreparedAction
-    SmartAccountPreparedAction.objects.filter(pk=action.pk).update(
-        consumed=True, consumed_at=timezone.now(), sponsored_batch=batch)
+    with transaction.atomic():
+        if action.kind == 'smart_rule' and action.smart_account_id is not None:
+            fresh = SmartAccountPreparedAction.objects.get(pk=action.pk)
+            code = '' if fresh.consumed else duplicate_create_refusal(fresh)
+            if code:
+                raise _error(code)
+        SmartAccountPreparedAction.objects.filter(pk=action.pk).update(
+            consumed=True, consumed_at=timezone.now(), sponsored_batch=batch)
 
 
 def persist_signed_for(action):

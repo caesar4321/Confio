@@ -34,12 +34,14 @@ DESTINATIONS = {
     'achievements': 'Logros y recompensas.',
     'pending_incoming': 'Dinero por recibir: transferencias a tu cuenta local que esperan tu confirmación con Confío Face.',
     # Paid offers. Confío IA+ is a pitch with "Sí, avísame". Cuenta inteligente
-    # opens the subscribe screen for whoever can subscribe (paid_offers.can_subscribe)
-    # and the waitlist pitch otherwise. Chips are capped by the server.
-    'ia_plus': 'Confío IA+: la versión más avanzada de Confío IA que estamos preparando (lista de espera).',
+    # opens the real offer on builds >= SMART_ACCOUNT_MIN_APP_VERSION (it says
+    # whether this person may sign) and, on older builds, the subscribe screen
+    # for whoever can subscribe and the waitlist pitch otherwise. Chips are
+    # capped by the server.
+    'ia_plus': 'Confío IA+: el asistente opera tu Cuenta inteligente por ti; tú confirmas cada cambio.',
     'cuenta_inteligente': ('Cuenta inteligente: cuenta de pago con pagos y transferencias automáticas, inversión '
-                           'automática y beneficiario. Abre la pantalla para suscribirse a quien ya puede, y la '
-                           'lista de espera a los demás.'),
+                           'automática y beneficiario. Abre su pantalla con los planes y si la persona ya puede '
+                           'abrirla.'),
 }
 
 # Paid-offer probe keys and the waitlist product each one opens.
@@ -63,4 +65,11 @@ FALLBACKS = {
     'comprar': 'home',
     'my_store': 'profile',
     'market_orders': 'home',
+    # Confío IA+ rule proposal chip (smart_account.assistant_ops.rule_chip):
+    # never a `navigate` target the model picks, only attached by the tool.
+    # Builds without it land on the Cuenta inteligente door.
+    'smart_account_rule': 'cuenta_inteligente',
 }
+# Keys the app opens that are never a `navigate` choice of the model: only a
+# tool attaches them (the Confío IA+ rule proposal chip).
+CHIP_ONLY = {'smart_account_rule'}

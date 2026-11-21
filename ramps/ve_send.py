@@ -101,10 +101,36 @@ MAX_CHUNKS_PER_SCAN = 20
 MICRO_CHUNK_BLOCKS = 50  # the strictest pool endpoint's eth_getLogs cap
 # Distinct amount tags per sender on a shared target (≤ 0.009999 USDT).
 MAX_AMOUNT_TAG = 9999
+# A send may be funded by a contract instead of the sender of record's wallet
+# (the Cuenta inteligente payout: CusdVault.redeemWithFee sends the USDT to
+# the deposit address claimed for the order). That address is NOT the
+# order's own: Relay may hand the same deposit route to every order of one
+# source address, and the amount is untagged, so an earlier order of the
+# same account can look identical on chain. A contract-funded order is
+# therefore proven ONLY through the executeRule hash the payout path reports
+# (report_funding), by the Transfer in that transaction's receipt; it is never
+# matched by a log scan, nor by the late-funding watch's scan.
+# reserve(funding_sender=...) records the Transfer `from` that proof expects;
+# the bridge refund still returns to actor_address. smart_account.payouts
+# reads this flag before offering or running that rail.
+CONTRACT_FUNDING = True
+# Closed without any funding having been possible to see: the late-funding
+# watch keeps these (wallet sends by scan, contract-funded by reported hash).
+CLOSED_UNFUNDED = ('expired_unfunded', 'cancelled_by_user', 'payout_not_sent')
 
 
 class VeSendError(VePagoMovilError):
     """User-facing refusal (Spanish)."""
+
+
+class VeSendLimitError(VeSendError):
+    """A send limit refused the amount. `passing`: a rolling daily cap that
+    frees up by itself (a scheduled payout may retry its slot); otherwise a
+    per-send minimum or maximum that the same amount never passes."""
+
+    def __init__(self, message: str, *, passing: bool):
+        super().__init__(message)
+        self.passing = passing
 
 
 @dataclass(frozen=True)
@@ -188,6 +214,18 @@ def _sends():
     return RampTransaction.objects.filter(provider__in=_providers(), direction=DIRECTION)
 
 
+_FUNDING_SENDER_KEY = {f'metadata__{SECTION}__has_key': 'funding_sender'}
+
+
+def _own_sends():
+    """Sends the person funds from their own wallet (not contract-funded)."""
+    return _sends().exclude(**_FUNDING_SENDER_KEY)
+
+
+def _contract_funded_sends():
+    return _sends().filter(**_FUNDING_SENDER_KEY)
+
+
 def check_limits(user, gross_usd: Decimal, provider: str = 'pagoasap') -> None:
     from django.db.models import Q
     # No caps by default: the quote shows what a small send delivers, the
@@ -201,9 +239,9 @@ def check_limits(user, gross_usd: Decimal, provider: str = 'pagoasap') -> None:
 
     minimum, maximum = limit('MIN_USD'), limit('MAX_USD')
     if minimum is not None and gross_usd < minimum:
-        raise VeSendError(f'El monto mínimo es ${minimum}.')
+        raise VeSendLimitError(f'El monto mínimo es ${minimum}.', passing=False)
     if maximum is not None and gross_usd > maximum:
-        raise VeSendError(f'El monto máximo por envío es ${maximum}.')
+        raise VeSendLimitError(f'El monto máximo por envío es ${maximum}.', passing=False)
     user_cap = limit('USER_DAILY_USD')
     global_cap = limit('GLOBAL_DAILY_USD')
     if user_cap is None and global_cap is None:
@@ -215,10 +253,10 @@ def check_limits(user, gross_usd: Decimal, provider: str = 'pagoasap') -> None:
     ).exclude(status='FAILED'))
     user_total = sum((counted_usd(r) for r in recent if r.actor_user_id == user.pk), Decimal('0'))
     if user_cap is not None and user_total + gross_usd > user_cap:
-        raise VeSendError('Alcanzaste tu límite diario de envíos. Intenta mañana.')
+        raise VeSendLimitError('Alcanzaste tu límite diario de envíos. Intenta mañana.', passing=True)
     global_total = sum((counted_usd(r) for r in recent), Decimal('0'))
     if global_cap is not None and global_total + gross_usd > global_cap:
-        raise VeSendError('Los envíos alcanzaron su cupo de hoy. Intenta más tarde.')
+        raise VeSendLimitError('Los envíos alcanzaron su cupo de hoy. Intenta más tarde.', passing=True)
 
 
 def _advisory_lock(name: str) -> None:
@@ -311,21 +349,42 @@ def _watched_amounts(sender: str) -> set[int]:
 
 @transaction.atomic
 def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: dict, gross_wei: int | None,
-            deposit_wei: int, created_block: int, estimate: dict) -> RampTransaction:
+            deposit_wei: int, created_block: int, estimate: dict,
+            funding_sender: str | None = None) -> RampTransaction:
     """Persist the send before any provider call, under the reservation lock
-    the limits need and the Account lock the wallet re-enrollment gate uses."""
+    the limits need and the Account lock the wallet re-enrollment gate uses.
+
+    funding_sender: the contract whose USDT Transfer funds the order (see
+    CONTRACT_FUNDING), when it is not the wallet of record. Its amount is
+    exact (no tag) and its deposit address is the order's own."""
     from users.models import Account
 
+    if funding_sender is not None:
+        funding_sender = funding_sender.strip().lower()
+        if (not EVM_ADDRESS_RE.fullmatch(funding_sender)
+                or funding_sender in (USDT_BSC, '0x' + '0' * 40)):
+            raise VeSendError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.')
     _advisory_lock(RESERVE_LOCK)
     locked = Account.objects.select_for_update().filter(pk=account.pk, deleted_at__isnull=True).first()
     address = (getattr(locked, 'bsc_address', '') or '').strip().lower()
     if not locked or not address or address != (account.bsc_address or '').strip().lower():
         raise VeSendError('Tu billetera cambió. Vuelve a intentarlo.')
     country = _country(provider)
-    if _sends().filter(actor_user=user, status='PENDING', country_code=country).exists():
-        raise VeSendError('Ya tienes un envío pendiente. Termínalo o cancélalo.')
+    if funding_sender is None:
+        # One open send of the person's own at a time. A contract-funded
+        # order (a Cuenta inteligente payout) is not theirs to finish or
+        # cancel: it neither blocks nor is blocked by their own sends. Both
+        # still count toward the limits below.
+        if _own_sends().filter(actor_user=user, status='PENDING', country_code=country).exists():
+            raise VeSendError('Ya tienes un envío pendiente. Termínalo o cancélalo.')
+    elif _contract_funded_sends().filter(
+            status='PENDING', actor_address__iexact=address,
+            **{f'metadata__{SECTION}__deposit_wei': str(deposit_wei)}).exists():
+        # Another open contract-funded order of this account for the same
+        # amount may be handed the same deposit route: never two at once.
+        raise VeSendError('Ya hay un pago igual en curso. Lo intentaremos de nuevo en unos minutos.')
     check_limits(user, gross_usd, provider)
-    if adapter(provider).SHARED_DEPOSIT_TARGET:
+    if adapter(provider).SHARED_DEPOSIT_TARGET and not funding_sender:
         # One deposit address for every send: a per-sender tag in the last
         # micro-units keeps each send's transfer distinguishable.
         taken = _watched_amounts(address)
@@ -377,13 +436,34 @@ def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: di
         'created_block': created_block,
         'payout_attempt': 0,
     }}
+    if funding_sender:
+        ramp.metadata[SECTION]['funding_sender'] = funding_sender
     ramp.save()
     return ramp
 
 
+def _funding_sender(ramp: RampTransaction) -> str:
+    """The `from` of the funding Transfer: the contract named at reserve, or
+    the wallet of record."""
+    return (_section(ramp).get('funding_sender') or ramp.actor_address or '').lower()
+
+
+def _contract_funded(ramp: RampTransaction) -> bool:
+    return bool(_section(ramp).get('funding_sender'))
+
+
+def _funded_by_vault(ramp: RampTransaction) -> bool:
+    """The funding sender is the configured cUSD vault (the only contract
+    whose exit may carry more than the order's amount: redeemWithFee pays
+    usdtOut >= minUsdtOut)."""
+    vault = (getattr(settings, 'CUSD_VAULT_ADDRESS', '') or '').strip().lower()
+    return bool(vault) and EVM_ADDRESS_RE.fullmatch(vault) is not None and _funding_sender(ramp) == vault
+
+
 def _valid_target(ramp: RampTransaction, target: str) -> bool:
     return (EVM_ADDRESS_RE.fullmatch(target or '') is not None
-            and target.lower() not in (USDT_BSC, '0x' + '0' * 40, (ramp.actor_address or '').lower()))
+            and target.lower() not in (USDT_BSC, '0x' + '0' * 40, (ramp.actor_address or '').lower(),
+                                       _funding_sender(ramp)))
 
 
 def prepare(ramp: RampTransaction) -> RampTransaction:
@@ -417,6 +497,19 @@ def fail_unfunded(ramp: RampTransaction, detail: str) -> RampTransaction:
     return updated or RampTransaction.objects.get(pk=ramp.pk)
 
 
+def close_unsent(ramp: RampTransaction) -> RampTransaction:
+    """A contract-funded order whose payout run ended without broadcasting
+    the executeRule that would fund it: closed now instead of lingering to
+    UNFUNDED_EXPIRY. Never one with a reported hash. Should that call land
+    after all, its reported hash still proves it, into ops review
+    (report_funding accepts it on a closed order; sync's late watch)."""
+    updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _contract_funded(c)
+                      and _phase(c) in ('preparing', 'awaiting_funding', 'funding_reported')
+                      and not _section(c).get('funding_tx_hashes'),
+                      status='FAILED', detail='payout_not_sent')
+    return updated or RampTransaction.objects.get(pk=ramp.pk)
+
+
 def funding_details(ramp: RampTransaction) -> dict | None:
     """The vouched funding target, served only in the answer of the single
     start_funding claim, never on a read."""
@@ -436,9 +529,24 @@ def funding_details(ramp: RampTransaction) -> dict | None:
     }
 
 
-def start_funding(ramp: RampTransaction) -> RampTransaction:
+CONTRACT_FUNDED_REFUSAL = 'Este pago lo hace tu Cuenta inteligente automáticamente; no se cambia desde aquí.'
+
+
+def _refuse_owner_on_contract_funded(ramp: RampTransaction, by_payout: bool) -> None:
+    """A contract-funded order (a Cuenta inteligente payout) is driven only
+    by the payout path (smart_account.payouts, by_payout=True). Its owner
+    reaches the same functions through the app's order mutations
+    (ve_pagomovil.owned_order matches actor_user): there they could claim
+    the funding, push the real executeRule hash out of the five kept with
+    junk ones, or cancel an order the contract is about to fund."""
+    if _contract_funded(ramp) and not by_payout:
+        raise VeSendError(CONTRACT_FUNDED_REFUSAL)
+
+
+def start_funding(ramp: RampTransaction, *, by_payout: bool = False) -> RampTransaction:
     """The single right to fund this order: from here it can never be funded
     again, nor cancelled while a broadcast may still land."""
+    _refuse_owner_on_contract_funded(RampTransaction.objects.get(pk=ramp.pk), by_payout)
     values, row = {}, None
     if getattr(adapter(ramp), 'TARGET_AT_CLAIM', False):
         if not can_fund(RampTransaction.objects.get(pk=ramp.pk)):
@@ -469,24 +577,37 @@ def start_funding(ramp: RampTransaction) -> RampTransaction:
     return updated
 
 
-def report_funding(ramp: RampTransaction, tx_hash: str | None) -> RampTransaction:
+def report_funding(ramp: RampTransaction, tx_hash: str | None, *, by_payout: bool = False) -> RampTransaction:
     """The broadcast hash of the claimed funding (or none when its outcome is
-    unknown). The chain decides; this only tells the poller where to look."""
+    unknown). The chain decides; this only tells the poller where to look.
+    A contract-funded order takes hashes only from the payout path."""
     tx_hash = (tx_hash or '').strip().lower()
     if tx_hash and not TX_HASH_RE.fullmatch(tx_hash):
         raise VeSendError('Referencia de transacción no válida.')
     current = RampTransaction.objects.get(pk=ramp.pk)
+    _refuse_owner_on_contract_funded(current, by_payout)
     hashes = list(_section(current).get('funding_tx_hashes') or [])
     if tx_hash and tx_hash not in hashes:
         hashes = (hashes + [tx_hash])[-5:]
-    updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'funding_reported',
-                      funding_tx_hashes=hashes, funding_reported_at=_now_iso())
+
+    def accepts(c):
+        if c.status == 'PENDING' and _phase(c) == 'funding_reported':
+            return True
+        # A contract-funded order closed before its funding call was seen:
+        # the call's hash is its only proof, so it is still recorded (sync's
+        # late watch proves it into review).
+        return (bool(tx_hash) and _contract_funded(c) and c.status == 'FAILED'
+                and c.status_detail in CLOSED_UNFUNDED and bool(_section(c).get('funding_started_at')))
+    updated = _update(ramp.pk, require=accepts, funding_tx_hashes=hashes, funding_reported_at=_now_iso())
     return updated or RampTransaction.objects.get(pk=ramp.pk)
 
 
-def cancel(ramp: RampTransaction, rpc=None) -> RampTransaction:
+def cancel(ramp: RampTransaction, rpc=None, *, by_payout: bool = False) -> RampTransaction:
     """The user backs out before funding. A last chain scan first: a
-    broadcast whose report was lost must not be cancelled away."""
+    broadcast whose report was lost must not be cancelled away. Never a
+    contract-funded order from the app (the payout path closes those with
+    close_unsent / fail_unfunded)."""
+    _refuse_owner_on_contract_funded(RampTransaction.objects.get(pk=ramp.pk), by_payout)
     if not can_cancel(ramp):
         raise VeSendError('Este envío ya se está procesando y no se puede cancelar.')
     if _phase(ramp) == 'funding_reported':
@@ -581,12 +702,21 @@ def _check_receipt(ramp: RampTransaction, rpc, tx_hash: str):
             or str(canonical.get('hash') or '').lower() != str(receipt.get('blockHash')).lower():
         return None
     expected = int(section['deposit_wei'])
-    sender = (ramp.actor_address or '').lower()
+    sender = _funding_sender(ramp)
     recipient = section['deposit_address']
+    # Only here (a reported hash), only for the vault's exit: the contract
+    # takes usdtOut >= minUsdtOut, so more than the order's amount still
+    # funds it; _mark_funded records the excess for ops.
+    over_allowed = _contract_funded(ramp) and _funded_by_vault(ramp)
+    over = None
     for log in receipt.get('logs') or []:
         amount = _transfer_amount(log, sender, recipient)
         if amount is not None and int(amount) == expected:
             return tx_hash, expected
+        if over_allowed and amount is not None and int(amount) > expected and over is None:
+            over = int(amount)
+    if over is not None:
+        return tx_hash, over
     return None
 
 
@@ -614,6 +744,8 @@ def _scan_logs(ramp: RampTransaction, rpc):
     head (the watch itself is bounded by time), so a late transfer is still
     seen and each poll reads only new blocks. "Not found" only once caught up.
     """
+    if _contract_funded(ramp):
+        return None  # never matched by scan (see CONTRACT_FUNDING)
     section = _section(ramp)
     created = section.get('created_block')
     if not isinstance(created, int):
@@ -627,7 +759,7 @@ def _scan_logs(ramp: RampTransaction, rpc):
     # been reorged in after that read.
     cursor = max(scanned_to - 20, floor) if isinstance(scanned_to, int) else floor
     scanned = cursor - 1
-    sender = (ramp.actor_address or '').lower()
+    sender = _funding_sender(ramp)
     recipient = section['deposit_address']
     expected = int(section['deposit_wei'])
     params = {'address': USDT_BSC,
@@ -673,6 +805,10 @@ def _find_funding(ramp: RampTransaction, rpc=None):
             unknown = True
         elif found and not _hash_claimed_elsewhere(ramp, found[0]):
             return found
+    if _contract_funded(ramp):
+        # Proven by its reported executeRule hash or not at all: a scan
+        # could hand it another order's identical transfer.
+        return _UNKNOWN if unknown else None
     try:
         found = _scan_logs(RampTransaction.objects.get(pk=ramp.pk), rpc)
     except Exception:  # noqa: BLE001 — RPC outage: try again next poll
@@ -688,24 +824,35 @@ def _find_funding(ramp: RampTransaction, rpc=None):
 def _mark_funded(ramp: RampTransaction, tx_hash: str, wei: int, *, late: bool = False) -> RampTransaction:
     def allowed(current):
         if late:
-            return current.status == 'FAILED' and current.status_detail in ('expired_unfunded', 'cancelled_by_user')
+            return current.status == 'FAILED' and current.status_detail in CLOSED_UNFUNDED
         return (current.status in ('PENDING', 'PROCESSING')
                 and _phase(current) in ('awaiting_funding', 'funding_reported'))
     detail = 'needs_review:late_funding' if late else 'funded'
     # Late money is ops' to route, never paid out automatically: it lands
     # straight in review, in the same write.
     phase = 'payout_review' if late else 'funded'
+    values = {}
+    try:
+        excess = int(wei) - int(_section(ramp).get('deposit_wei') or 0) if _contract_funded(ramp) else 0
+    except (TypeError, ValueError):
+        excess = 0
+    if excess > 0:
+        # Only a vault exit proven by its reported hash gets here
+        # (_check_receipt): the bridge was quoted for deposit_wei.
+        values['funding_excess_wei'] = str(excess)
     with transaction.atomic():
         # One transfer funds one order, decided under a lock on the hash.
         _advisory_lock(f've_send:tx:{tx_hash}')
         if _hash_claimed_elsewhere(ramp, tx_hash):
             return RampTransaction.objects.get(pk=ramp.pk)
         updated = _update(ramp.pk, require=allowed, status='PROCESSING', detail=detail, phase=phase,
-                          funding_tx_hash=tx_hash, funded_wei=str(wei), funded_at=_now_iso())
+                          funding_tx_hash=tx_hash, funded_wei=str(wei), funded_at=_now_iso(), **values)
     if updated is None:
         return RampTransaction.objects.get(pk=ramp.pk)
     if late:
         _alert(updated, detail)
+    if excess > 0:
+        _alert(updated, 'funding_excess')
     return updated
 
 
@@ -1068,6 +1215,17 @@ def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
             return _mark_funded(ramp, *found)
         section = _section(ramp)
         started = _parse_time(section.get('funding_started_at')) or ramp.created_at
+        deadline = (section.get('bridge') or {}).get('deadline')
+        if (found is None and _contract_funded(ramp) and not section.get('funding_tx_hashes')
+                and str(deadline or '').isdigit()
+                and int(deadline) < int((now - CLAIMED_FUNDING_QUIET).timestamp())):
+            # The payout's quote is long dead and no executeRule hash was
+            # reported: that run will not fund this order. Closed now; a
+            # late reported hash still proves it into review.
+            updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'funding_reported'
+                              and not _section(c).get('funding_tx_hashes'),
+                              status='FAILED', detail='expired_unfunded')
+            return updated or RampTransaction.objects.get(pk=ramp.pk)
         if found is _UNKNOWN and started < now - UNVERIFIABLE_AFTER:
             updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'funding_reported',
                               status='PROCESSING', detail='needs_review:funding_unverifiable')
@@ -1089,7 +1247,8 @@ def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
                 return updated
         return RampTransaction.objects.get(pk=ramp.pk)
     if ramp.status == 'FAILED':
-        if ramp.status_detail in ('expired_unfunded', 'cancelled_by_user') and _section(ramp).get('funding_started_at'):
+        # Contract-funded: only a reported hash is checked (_find_funding).
+        if ramp.status_detail in CLOSED_UNFUNDED and _section(ramp).get('funding_started_at'):
             found = _find_funding(ramp, rpc)
             if found not in (None, _UNKNOWN):
                 return _mark_funded(ramp, *found, late=True)
@@ -1120,7 +1279,7 @@ def open_sends():
     now = timezone.now()
     return _sends().filter(
         Q(status__in=OPEN_STATUSES)
-        | Q(status='FAILED', status_detail__in=['expired_unfunded', 'cancelled_by_user'],
+        | Q(status='FAILED', status_detail__in=list(CLOSED_UNFUNDED),
             created_at__gte=now - LATE_FUNDING_WATCH, **{f'metadata__{SECTION}__has_key': 'funding_started_at'})
     ).order_by('created_at')
 
@@ -1136,10 +1295,12 @@ def due_for_sync(ramp: RampTransaction) -> bool:
 
 
 def active_order(user, provider: str) -> RampTransaction | None:
+    """The person's own open send (a contract-funded Cuenta inteligente
+    payout is not theirs to resume or cancel, and never blocks a new one)."""
     return RampTransaction.objects.filter(
         provider=provider, direction=DIRECTION, country_code=_country(provider), actor_user=user,
         status__in=OPEN_STATUSES,
-    ).order_by('-created_at').first()
+    ).exclude(**_FUNDING_SENDER_KEY).order_by('-created_at').first()
 
 
 def _beneficiary_view(ramp: RampTransaction, beneficiary: dict) -> dict:

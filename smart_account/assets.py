@@ -178,6 +178,26 @@ def assets_of(address: str, *, include_zero_dollars: bool = False,
     return out
 
 
+def held_dollar(address: str) -> str | None:
+    """'cusd_plus' or 'cusd': the dollar `address` holds, or None with
+    neither. With both, the one worth more: a cUSD+ payout leaves a little
+    cUSD behind (its unwrap margin, decision 17's one exception), and that
+    dust must never make the account's dollar look like cUSD."""
+    plus, cusd = chain.cusd_plus_address(), chain.cusd_address()
+    shares = chain.balance_of(plus, address) if plus else 0
+    units = chain.balance_of(cusd, address) if cusd else 0
+    if shares and not units:
+        return 'cusd_plus'
+    if units and not shares:
+        return 'cusd'
+    if not shares and not units:
+        return None
+    plus_usd = shares * chain.p_plus_wad() // 10 ** 18
+    if plus_usd == units:
+        return None
+    return 'cusd_plus' if plus_usd > units else 'cusd'
+
+
 def total_usd(assets: list[Asset]) -> Decimal:
     return sum((a.value_usd for a in assets if a.value_usd is not None), Decimal(0))
 

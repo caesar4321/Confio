@@ -23,7 +23,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, TextInput } from '../components/common/AppText';
 import { useAccount } from '../contexts/AccountContext';
 import { navigationRef } from '../navigation/RootNavigation';
-import { logDoorShown, usePaidOffers } from '../services/paidOffers';
+import { logDoorShown } from '../services/paidOffers';
+import { useSmartRead } from '../components/smartAccount/useSmartRead';
+import { fetchSmartAccountEntry, isSmartAccountOpen, isSmartAccountOpening } from '../services/smartAccount';
 import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
 import { MARK_MESSAGE_CHANNEL_SEEN } from '../apollo/mutations';
 import { GET_DIRECT_UNREAD_SUMMARY, GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
@@ -45,7 +47,7 @@ import {
 } from './api';
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
-import { PAID_OFFER_KEYS, openDestination, resolveNavigate } from './destinations';
+import { TAP_ONLY_KEYS, openDestination, resolveNavigate } from './destinations';
 import { requestGuideWalk } from './guidePointer';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
@@ -86,7 +88,7 @@ function formatClock(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-type OpenTarget = { key: string; ticker?: string; label: string };
+type OpenTarget = { key: string; ticker?: string; label: string; messageId?: string };
 
 function WalkChips({ actions, onClose }: { actions: AssistantAction[]; onClose: () => void }) {
   const walks = actions.filter((a) => a.type === 'walk' && a.target);
@@ -113,11 +115,15 @@ function WalkChips({ actions, onClose }: { actions: AssistantAction[]; onClose: 
   );
 }
 
-function ActionChips({ actions, onPress }: { actions: AssistantAction[]; onPress: (target: OpenTarget) => void }) {
+function ActionChips({ actions, messageId, onPress }: {
+  actions: AssistantAction[]; messageId?: string; onPress: (target: OpenTarget) => void;
+}) {
   const known = actions
     .filter((a) => a.type === 'navigate')
     .map(resolveNavigate)
-    .filter((t): t is OpenTarget => t !== null);
+    .filter((t): t is OpenTarget => t !== null)
+    // A rule proposal is opened from the message that carries it.
+    .map((t) => (t.key === 'smart_account_rule' ? { ...t, messageId } : t));
   if (!known.length) {
     return null;
   }
@@ -194,7 +200,7 @@ function Bubble({ message, onAction, onWalk, pet }: { message: AssistantMessage;
         </Text>
         {message.pending ? <ActivityIndicator size="small" color="#D1FAE5" style={styles.pending} /> : null}
       </View>
-      {!mine ? <ActionChips actions={message.actions} onPress={onAction} /> : null}
+      {!mine ? <ActionChips actions={message.actions} messageId={message.id} onPress={onAction} /> : null}
       {!mine ? <WalkChips actions={message.actions} onClose={onWalk} /> : null}
     </View>
     </View>
@@ -431,11 +437,15 @@ export default function AssistantSheet() {
     queuedVoice.current = null;
   }, [activeAccount?.id]);
 
-  // Cuenta inteligente strip (waitlist only): it names the account, not the
-  // AI (Confío IA+ is one of its benefits, never the headline), opens its
-  // pitch, and the server's Cuenta inteligente flag decides who sees it.
-  const smartAccountOffer = usePaidOffers().smart_account;
-  const showSmartAccountStrip = smartAccountOffer?.available === true && !plan?.isPlus;
+  // Cuenta inteligente strip: it names the account, not the AI (Confío IA+
+  // is one of its benefits, never the headline) and opens the real offer.
+  // Personal, non-employee viewers who do not have the account yet; shown
+  // only once that is known (a failed read hides it), never by a flag.
+  const personalViewer = (activeAccount?.type || '').toLowerCase() === 'personal' && !activeAccount?.isEmployee;
+  const smartEntry = useSmartRead(fetchSmartAccountEntry, { skip: !personalViewer || !isOpen });
+  const showSmartAccountStrip = personalViewer && !plan?.isPlus && !smartEntry.failed
+    && smartEntry.data !== undefined && !isSmartAccountOpen(smartEntry.data?.status)
+    && !isSmartAccountOpening(smartEntry.data?.status);
   // Counted only when the pill is actually on screen (Confio Assistant's own
   // header, with the AI on), never for Soporte or Julian's channel.
   useEffect(() => {
@@ -447,8 +457,8 @@ export default function AssistantSheet() {
     close();
     setTimeout(
       () => (navigationRef as any).navigate('Main', {
-        screen: 'PaidOffer',
-        params: { offer: 'smart_account', door: 'assistant_header' },
+        screen: 'SmartAccountOffer',
+        params: { door: 'assistant_header' },
       }),
       250,
     );
@@ -467,14 +477,14 @@ export default function AssistantSheet() {
   );
 
   const runAction = useCallback(
-    ({ key, ticker }: { key: string; ticker?: string }) => {
+    ({ key, ticker, messageId }: { key: string; ticker?: string; messageId?: string }) => {
       if (key === 'messages') {
         // Mensajes lives here: show Julian's channel instead of leaving.
         setChannel('julian');
         return;
       }
       close();
-      setTimeout(() => openDestination(key, { isBusiness, ticker }), 250);
+      setTimeout(() => openDestination(key, { isBusiness, ticker, messageId }), 250);
     },
     [close, isBusiness],
   );
@@ -545,7 +555,7 @@ export default function AssistantSheet() {
         const navigateTo = (payload.actions as AssistantAction[])
           .filter((a) => a.type === 'navigate')
           .map(resolveNavigate)
-          .find((t) => t !== null && !PAID_OFFER_KEYS.has(t.key));
+          .find((t) => t !== null && !TAP_ONLY_KEYS.has(t.key));
         if (navigateTo) {
           setTimeout(() => {
             // Closed, switched channel or reopened since asking: leave the
@@ -1012,14 +1022,14 @@ export default function AssistantSheet() {
             onPress={openSmartAccount}
             style={({ pressed }) => [styles.smartStrip, pressed && styles.smartStripPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Conoce Cuenta inteligente, próximamente"
+            accessibilityLabel="Conoce Cuenta inteligente"
           >
             <View style={styles.smartStripMark}>
               <CuentaInteligenteMark size={34} />
             </View>
             <View style={styles.smartStripText}>
               <Text style={styles.smartStripTitle} numberOfLines={1}>Conoce Cuenta inteligente</Text>
-              <Text style={styles.smartStripSub} numberOfLines={1}>Próximamente · tu dinero según tus reglas</Text>
+              <Text style={styles.smartStripSub} numberOfLines={1}>Tu dinero se mueve según tus reglas</Text>
             </View>
             <Icon name="chevron-right" size={18} color="#065F46" />
           </Pressable>

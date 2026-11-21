@@ -173,6 +173,37 @@ describe('funnel', () => {
     expect(logSmartAccountFunnel).toHaveBeenCalledWith('subscribe_signed', 'annual');
   });
 
+  it('after signing, the account screen opens waiting for the account (never the sign-up)', async () => {
+    setRouteParams({ plan: 'annual' });
+    await mount(<SmartAccountFundScreen />);
+    await tap(tree, 'fund-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'sign-done');
+    await flush();
+    expect(nav.reset).toHaveBeenCalledWith({
+      index: 1,
+      routes: [{ name: 'BottomTabs' }, { name: 'SmartAccountHome', params: { justSubscribed: true } }],
+    });
+  });
+
+  it('an unknown outcome also opens the waiting account screen', async () => {
+    setRouteParams({ plan: 'annual' });
+    api.signAndSubmitPrepared.mockResolvedValue({ status: 'unknown' } as any);
+    await mount(<SmartAccountFundScreen />);
+    await tap(tree, 'fund-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'sign-unknown-done');
+    await flush();
+    expect(nav.reset).toHaveBeenCalledWith({
+      index: 1,
+      routes: [{ name: 'BottomTabs' }, { name: 'SmartAccountHome', params: { justSubscribed: true } }],
+    });
+  });
+
   it('does not log subscribe_signed when the signature does not go through', async () => {
     setRouteParams({ plan: 'annual' });
     api.signAndSubmitPrepared.mockResolvedValue({ status: 'not_sent', code: 'x' });

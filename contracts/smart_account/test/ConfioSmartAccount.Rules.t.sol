@@ -383,15 +383,142 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         assertEq(cusd.balanceOf(address(acct)), 800e18);
     }
 
-    function test_payout_fromCusdPlus() public {
+    /// cUSD+ Payout data: the exact USDT the destination receives and the
+    /// gross cUSD redeemed for it (the relayer's figures).
+    function _plusPayout(address destination, uint256 gross) internal view returns (bytes memory) {
+        return abi.encode(destination, gross - cusd.feeFor(gross), gross);
+    }
+
+    function _assertNoAllowance() internal view {
+        assertEq(cusd.allowance(address(acct), address(plus)), 0);
+        assertEq(cusd.allowance(address(acct), address(cusd)), 0);
+        assertEq(plus.allowance(address(acct), address(plus)), 0);
+        assertEq(plus.allowance(address(acct), address(cusd)), 0);
+    }
+
+    function test_payout_fromCusdPlus_exactUsdt_withinLimit_dustBounded() public {
         _growPPlus(150);
         uint256 id = _payoutRule(address(plus), 100e18);
         address bridge = makeAddr("bridgeDepositAddress");
-        uint256 shares = _sharesFor(100e18);
-        _run(id, abi.encode(bridge, uint256(99e18)));
-        assertApproxEqAbs(usdt.balanceOf(bridge), 99.1e18, 1e6);
-        assertEq(plus.balanceOf(address(acct)), 1_000e18 - shares);
-        assertEq(cusd.balanceOf(address(acct)), 1_000e18);
+        uint256 gross = 60e18;
+        uint256 net = gross - cusd.feeFor(gross);
+        uint256 plusBefore = plus.balanceOf(address(acct));
+        uint256 cusdBefore = cusd.balanceOf(address(acct));
+        uint256 shares = _sharesFor(gross + (gross * 5) / 10_000);
+        uint256 fees = cusd.accruedExitFees();
+
+        vm.expectEmit(true, true, false, true, address(acct));
+        emit PayoutSent(id, PAYOUT_REF, bridge, address(plus), shares, net);
+        _run(id, abi.encode(bridge, net, gross));
+
+        assertEq(usdt.balanceOf(bridge), net, "exact USDT");
+        assertEq(net, 59.46e18);
+        assertEq(plus.balanceOf(address(acct)), plusBefore - shares);
+        assertLe(shares, _sharesFor(100e18), "within the rule's share limit");
+        uint256 dust = cusd.balanceOf(address(acct)) - cusdBefore;
+        assertGt(dust, 0);
+        assertLe(dust, (gross * 5) / 10_000 + 2, "dust at most the margin");
+        assertEq(usdt.balanceOf(address(acct)), 0);
+        assertEq(cusd.accruedExitFees() - fees, cusd.feeFor(gross), "one 0.9% exit, the unwrap is free");
+        _assertNoAllowance();
+    }
+
+    /// A gross near the rule amount: the margin would exceed the limit, so
+    /// the unwrap is capped at exactly the share limit and still covers.
+    function test_payout_fromCusdPlus_grossNearAmount_unwrapCappedAtLimit() public {
+        _growPPlus(150);
+        uint256 id = _payoutRule(address(plus), 100e18);
+        address bridge = makeAddr("bridgeDepositAddress");
+        uint256 plusBefore = plus.balanceOf(address(acct));
+        bytes memory data = _plusPayout(bridge, 99.99e18);
+        _run(id, data);
+        assertEq(usdt.balanceOf(bridge), 99.99e18 - cusd.feeFor(99.99e18));
+        assertEq(plus.balanceOf(address(acct)), plusBefore - _sharesFor(100e18), "exactly the limit");
+        _assertNoAllowance();
+    }
+
+    function test_payout_fromCusdPlus_guards() public {
+        _growPPlus(150);
+        uint256 id = _payoutRule(address(plus), 100e18);
+        address bridge = makeAddr("bridgeDepositAddress");
+        // The gross is bounded by the rule's amount.
+        _runReverts(ConfioSmartAccount.BadAmount.selector, id, abi.encode(bridge, uint256(1), uint256(100e18 + 1)));
+        _runReverts(ConfioSmartAccount.BadAmount.selector, id, abi.encode(bridge, uint256(0), uint256(0)));
+        bytes memory toSelf = _plusPayout(address(acct), 50e18);
+        bytes memory toZero = _plusPayout(address(0), 50e18);
+        _runReverts(ConfioSmartAccount.BadDestination.selector, id, toSelf);
+        _runReverts(ConfioSmartAccount.BadDestination.selector, id, toZero);
+        uint256 net = 50e18 - cusd.feeFor(50e18);
+        // Exact means exact: one wei under the delivered amount is refused
+        // by the account, one over by the vault.
+        _runReverts(ConfioSmartAccount.Slippage.selector, id, abi.encode(bridge, net - 1, uint256(50e18)));
+        vm.prank(relayer, relayer);
+        vm.expectRevert(bytes("insufficient out"));
+        acct.executeRule(id, abi.encode(bridge, net + 1, uint256(50e18)), address(0), 0);
+        // The pre-change two-word form has no gross: refused.
+        vm.prank(relayer, relayer);
+        vm.expectRevert();
+        acct.executeRule(id, abi.encode(bridge, net), address(0), 0);
+        // A gross equal to the amount whose unwrap at the share limit falls
+        // short is refused by the vault's floor; nothing moved.
+        im.setRedeemHaircutBps(1);
+        bytes memory full = _plusPayout(bridge, 100e18);
+        vm.prank(relayer, relayer);
+        vm.expectRevert();
+        acct.executeRule(id, full, address(0), 0);
+        assertEq(usdt.balanceOf(bridge), 0);
+    }
+
+    /// Ondo paying below the vault's price: within the margin the unwrap
+    /// still covers the gross; beyond it the run is refused.
+    function test_payout_fromCusdPlus_unwrapCannotCover_refused() public {
+        _growPPlus(150);
+        uint256 id = _payoutRule(address(plus), 100e18);
+        address bridge = makeAddr("bridgeDepositAddress");
+        uint256 plusBefore = plus.balanceOf(address(acct));
+        uint256 cusdBefore = cusd.balanceOf(address(acct));
+        im.setRedeemHaircutBps(10);
+        bytes memory data = _plusPayout(bridge, 50e18);
+        vm.prank(relayer, relayer);
+        vm.expectRevert(bytes("im slippage"));
+        acct.executeRule(id, data, address(0), 0);
+        assertEq(plus.balanceOf(address(acct)), plusBefore);
+        assertEq(cusd.balanceOf(address(acct)), cusdBefore, "the owner's cUSD is never spent");
+
+        im.setRedeemHaircutBps(3);
+        _run(id, _plusPayout(bridge, 50e18));
+        assertEq(usdt.balanceOf(bridge), 50e18 - cusd.feeFor(50e18));
+        assertGe(cusd.balanceOf(address(acct)), cusdBefore);
+        assertLe(cusd.balanceOf(address(acct)) - cusdBefore, (50e18 * 5) / 10_000 + 2);
+    }
+
+    /// The relayer's figures do not depend on pPlus: when the price moves
+    /// between quoting and inclusion (here accrued inside the run itself),
+    /// the USDT is still exact and the shares are computed at the new price.
+    function test_payout_fromCusdPlus_movingPPlus_stillExact() public {
+        _growPPlus(150);
+        uint256 id = _payoutRule(address(plus), 100e18);
+        address bridge = makeAddr("bridgeDepositAddress");
+        bytes memory data = _plusPayout(bridge, 80e18);
+        uint256 net = 80e18 - cusd.feeFor(80e18);
+        uint256 stale = plus.pPlus();
+
+        oracle.setPrice((oracle.price() * 10_100) / 10_000); // not accrued yet
+        uint256 plusBefore = plus.balanceOf(address(acct));
+        uint256 cusdBefore = cusd.balanceOf(address(acct));
+        _run(id, data);
+        uint256 p = plus.pPlus();
+        assertGt(p, stale, "accrued inside the run");
+        assertEq(usdt.balanceOf(bridge), net);
+        assertEq(plus.balanceOf(address(acct)), plusBefore - _sharesFor(80e18 + (80e18 * 5) / 10_000));
+        assertLe(cusd.balanceOf(address(acct)) - cusdBefore, (80e18 * 5) / 10_000 + 2);
+
+        // Next period, price moved again: same data, same exact USDT.
+        vm.warp(block.timestamp + 7 days);
+        _growPPlus(40);
+        _run(id, data);
+        assertEq(usdt.balanceOf(bridge), 2 * net);
+        _assertNoAllowance();
     }
 
     function test_payout_guards() public {

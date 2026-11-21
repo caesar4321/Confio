@@ -344,17 +344,44 @@ export type MainStackParamList = {
   PayrollRun: undefined;
   // "Tu mes": month summary and the movement lists behind each number
   MonthSummary: { year?: number; month?: number; masked?: boolean } | undefined;
-  // Paid-offer probe pitch (waitlist only): which offer, and where it was opened.
-  PaidOffer: { offer: 'ia_plus' | 'smart_account'; door?: 'billeteras' | 'assistant_header' | 'chip'; trigger?: string };
   // Cuenta inteligente (docs/designs/cuenta-inteligente-spec.md, section 8.2).
   // No account id or address travels in a route: the JWT names the viewer, and
   // designationId / inheritedAccountId are opaque ids the server issued.
   SmartAccountOffer: { door?: 'billeteras' | 'assistant_header' | 'chip'; trigger?: string } | undefined;
   SmartAccountFund: { plan: string };
-  SmartAccountHome: undefined;
+  // justSubscribed: the subscribe was just signed; the account row appears
+  // after async reconciliation, so the screen waits instead of re-offering.
+  SmartAccountHome: { justSubscribed?: boolean } | undefined;
   SmartAccountMove: { direction?: 'in' | 'out' } | undefined;
   SmartAccountRules: undefined;
-  SmartAccountRuleEdit: { ruleId?: string; kind?: 'send' | 'payout' | 'buy' } | undefined;
+  SmartAccountRuleEdit: {
+    ruleId?: string;
+    kind?: 'send' | 'payout' | 'buy';
+    // Confío IA+ proposal (assistant/ruleProposal.ts): data to prefill the
+    // form, never authority. The server's prepare re-validates everything.
+    prefill?: {
+      amountUsd?: string;
+      frequency?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
+      firstRunAt?: string;
+      payeeHandle?: string;
+      payeeName?: string;
+      payoutMethodId?: string;
+      assetKey?: string;
+      assetName?: string;
+    };
+    /** Open the stop confirmation of `ruleId` (a "detener / pausar" proposal). */
+    stop?: boolean;
+    /** The proposal in one sentence, shown above the form. */
+    proposal?: string;
+    /** The Confío IA+ proposal this step came from (assistant message id and
+     *  the step's stepIndex), sent with the prepare so a re-opened proposal
+     *  skips the steps already signed. A label only, never authority. */
+    proposalMessageId?: string;
+    proposalStep?: number;
+    /** Further steps of the same proposal, signed one after another. */
+    next?: Array<Omit<NonNullable<MainStackParamList['SmartAccountRuleEdit']>, 'next'>>;
+  } | undefined;
+  SmartAccountWatches: undefined;
   SmartAccountBilling: undefined;
   SmartAccountCharges: undefined;
   SmartAccountCancel: undefined;

@@ -1,13 +1,15 @@
 // What the Cuenta inteligente wallet row on Inicio needs: does the viewer
 // have the account (then its one number), may they open one, or were they
-// named a beneficiary. Three isolated reads; any of them failing leaves the
-// row exactly as the probe had it (never a broken Home, never a guessed
-// balance).
+// named a beneficiary. Three isolated reads; any of them failing still opens
+// a real screen (the offer, which shows its own load error), never a broken
+// Home and never a guessed balance. The row never opens the old waitlist
+// probe: this build always has the real screens.
 import { useEffect, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useSmartRead } from '../components/smartAccount/useSmartRead';
 import {
   fetchBeneficiaryDesignations, fetchSmartAccountEntry, fetchSmartAccountOfferGate, isSmartAccountOpen,
+  isSmartAccountOpening,
   type BeneficiaryDesignation,
 } from '../services/smartAccount';
 import type { DirectClaimEntry } from '../services/emergencyExit/directClaimStore';
@@ -17,8 +19,7 @@ export type SmartAccountEntryTarget =
   | { screen: 'SmartAccountOffer'; params: { door: 'billeteras' } }
   | { screen: 'BeneficiaryInvite' | 'BeneficiaryClaim' | 'BeneficiaryClaimStatus'; params: { designationId: string } }
   | { screen: 'BeneficiaryClaim'; params: { designationId: string; account: string } }
-  | { screen: 'BeneficiaryDesignations' }
-  | null;
+  | { screen: 'BeneficiaryDesignations' };
 
 type DesignationScreen = 'BeneficiaryInvite' | 'BeneficiaryClaim' | 'BeneficiaryClaimStatus';
 
@@ -77,7 +78,7 @@ export interface SmartAccountEntryState {
    * path is offered plainly.
    */
   offlineDesignation: DirectClaimEntry | null;
-  /** Where the row goes; null = keep the probe's own behaviour. */
+  /** Where the row goes: always a real Cuenta inteligente screen. */
   target: SmartAccountEntryTarget;
 }
 
@@ -118,7 +119,9 @@ export function smartEntryTarget(
   if (offline?.designationId) {
     return { screen: 'BeneficiaryClaim', params: { designationId: offline.designationId, account: offline.account } };
   }
-  return null;
+  // Everyone else gets the real pitch. Whether they may sign is the
+  // server's answer, shown on that screen (canSubscribe / blockedReason).
+  return { screen: 'SmartAccountOffer', params: { door: 'billeteras' } };
 }
 
 /**
@@ -161,7 +164,9 @@ export function useSmartAccountEntry(enabled: boolean): SmartAccountEntryState {
   }, [enabled, navigation]);
 
   // Expired (cancelled and returned) is not a subscriber: the row leads to the offer.
-  const subscriber = enabled && isSmartAccountOpen(entry.data?.status);
+  // An account still opening (subscribe out, not reconciled) opens the
+  // account screen too, which waits for it: never the sign-up again.
+  const subscriber = enabled && (isSmartAccountOpen(entry.data?.status) || isSmartAccountOpening(entry.data?.status));
   const canSubscribe = enabled && !!gate.data?.available && !!gate.data?.canSubscribe;
   const list = enabled ? designations.data ?? [] : [];
   const designation = pickDesignation(list);

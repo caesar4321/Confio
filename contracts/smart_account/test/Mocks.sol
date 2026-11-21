@@ -74,9 +74,18 @@ contract MockInstantManager {
         usdy.transfer(msg.sender, out);
     }
 
+    /// Models Ondo's redemption paying below the vault's price (a fee, or
+    /// the two oracles drifting apart).
+    uint256 public redeemHaircutBps;
+
+    function setRedeemHaircutBps(uint256 v) external {
+        redeemHaircutBps = v;
+    }
+
     function redeem(uint256 rwaAmount, address, uint256 minimumTokenReceived) external returns (uint256 out) {
         usdy.transferFrom(msg.sender, address(this), rwaAmount);
         out = (rwaAmount * oracle.price()) / 1e18;
+        out -= (out * redeemHaircutBps) / 10_000;
         require(out >= minimumTokenReceived, "im slippage");
         usdt.transfer(msg.sender, out);
     }

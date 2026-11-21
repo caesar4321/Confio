@@ -36,6 +36,7 @@ from payments.models import PaymentTransaction
 from inbox.models import ContentPlatformClick
 from config import admin_dashboard_sections as sections
 from config import admin_dashboard_growth as growth
+from config import admin_dashboard_smart_account as smart_account_section
 from config.admin_dashboard_sections import get_fcm_reachability_metrics  # noqa: F401 — re-exported for tests
 
 
@@ -783,10 +784,12 @@ ConfioAdminSite.DASH_PAGES = [
     )}),
     ('community', 'Community', [
         _w(growth.demand),
+        _w(smart_account_section.smart_account),
         _w(growth.community),
         _w(sections.content),
     ], [
         'admin/dash/_demand.html',
+        'admin/dash/_smart_account.html',
         'admin/dash/_community.html',
         'admin/dash/_content.html',
     ], {'tools': (
@@ -796,6 +799,9 @@ ConfioAdminSite.DASH_PAGES = [
         ('Guide steps', 'assistant_assistantguidestep_changelist', ''),
         ('Guide events', 'assistant_assistantguideevent_changelist', ''),
         ('Assistant turns', 'assistant_assistantturn_changelist', ''),
+        ('Cuenta inteligente accounts', 'smart_account_smartaccount_changelist', ''),
+        ('Cuenta inteligente events', 'smart_account_smartaccountevent_changelist', ''),
+        ('Cuenta inteligente relay txs', 'smart_account_smartaccountrelaytx_changelist', ''),
     )}),
     ('comprar', 'Comprar', [
         _w(sections.comprar),

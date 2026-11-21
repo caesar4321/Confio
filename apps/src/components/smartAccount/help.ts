@@ -36,6 +36,16 @@ export const HELP_RULES: HelpContent = {
     'Tú firmas cada regla una vez, con su monto, su destino y su frecuencia. Confío solo puede ejecutar exactamente eso, y puedes detenerla cuando quieras.',
     'Si un día no hay saldo suficiente en la cuenta, esa ejecución se omite y te avisamos. Nunca se toma dinero de tu billetera personal.',
     'En los pagos a cuenta bancaria el monto en dólares es fijo. Lo que llega en moneda local depende del tipo de cambio de ese día.',
+    'Con Confío IA+ también puedes pedirlas por chat. El asistente te deja el cambio listo y tú lo revisas y lo firmas aquí. Detener una regla la borra; puedes crearla de nuevo cuando quieras.',
+  ],
+};
+
+export const HELP_WATCHES: HelpContent = {
+  title: 'Tus alertas',
+  paragraphs: [
+    'Una alerta te avisa cuando un precio o el tipo de cambio llega al nivel que tú elegiste. Las creas hablando con Confío IA+.',
+    'Si pediste dejar lista una compra, al cumplirse te la mostramos para que la revises y la firmes. Se guarda como una regla que se repite hasta que la detengas. Si solo querías una compra, detenla después de la primera. Una alerta nunca compra ni vende sola.',
+    'Cada alerta avisa como máximo una vez al día.',
   ],
 };
 

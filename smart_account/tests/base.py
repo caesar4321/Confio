@@ -38,6 +38,16 @@ SETTINGS = dict(
 _addresses = itertools.count(1)
 
 
+def vault_preview(fee_bps: int = 90):
+    """cusd_plus.cusd_vault.preview_redeem_wei with CusdVault's real
+    arithmetic: fee = mulDiv(gross, feeBps, 10000, Ceil), net = gross - fee."""
+    def preview(gross_wei):
+        gross = int(gross_wei)
+        fee = -(-gross * fee_bps // 10_000) if gross and fee_bps else 0
+        return SimpleNamespace(gross_wei=gross, fee_wei=fee, net_wei=gross - fee, fee_bps=fee_bps)
+    return preview
+
+
 def new_address() -> str:
     return '0x' + format(next(_addresses), 'x').rjust(40, '0').replace('0', 'e', 1)
 

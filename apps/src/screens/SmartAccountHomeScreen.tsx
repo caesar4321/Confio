@@ -15,9 +15,9 @@
 //   - "Tu plan": the plan row and the account's assistant.
 // The asset list is the FlatList itself, so every holding is reachable and
 // virtualised; the sections above and below are its header and footer.
-import React, { useCallback, useEffect, useMemo } from 'react';
-import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { Text } from '../components/common/AppText';
 import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
 import { AccountSwitcherHost, useReturnToPersonal } from '../components/smartAccount/AccountSwitcherHost';
@@ -38,7 +38,7 @@ import { HIDDEN_AMOUNT, useBalanceHidden } from '../components/smartAccount/useB
 import { useHeader } from '../contexts/HeaderContext';
 import {
   fetchBeneficiaryDesignations, fetchSmartAccount, fetchSmartAccountBeneficiaryEnabled, fetchSmartAccountOffer,
-  hasOwnSmartAccount,
+  hasOwnSmartAccount, isSmartAccountOpen, isSmartAccountOpening,
   type SmartAccount, type SmartAccountAsset, type SmartAccountBilling,
 } from '../services/smartAccount';
 
@@ -119,8 +119,42 @@ export function billingBanner(account: SmartAccount): {
   };
 }
 
+/** How long a just-signed subscribe is waited for before a manual retry,
+ * and how often it is re-read meanwhile (mutable for tests only). */
+export const OPENING_TIMING = { waitMs: 120_000, pollMs: 4_000 };
+
+/**
+ * While `active`, re-reads every few seconds for a bounded time; then stops
+ * (`timedOut`) until `restart`.
+ */
+function useOpeningWatch(active: boolean, reload: () => void): { timedOut: boolean; restart: () => void } {
+  const [round, setRound] = useState(0);
+  const [timedOut, setTimedOut] = useState(false);
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+    setTimedOut(false);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - started >= OPENING_TIMING.waitMs) {
+        clearInterval(timer);
+        setTimedOut(true);
+        return;
+      }
+      reloadRef.current();
+    }, OPENING_TIMING.pollMs);
+    return () => clearInterval(timer);
+  }, [active, round]);
+  return { timedOut, restart: () => { setRound((r) => r + 1); reloadRef.current(); } };
+}
+
 export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const justSubscribed = !asTab && route?.params?.justSubscribed === true;
   const { profileMenu } = useHeader();
   const account = useSmartRead(fetchSmartAccount);
   // SmartAccount.beneficiaryEnabled, read on its own: an older server fails
@@ -164,12 +198,19 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
   // to subscribe again.
   const open = hasOwnSmartAccount(data?.status);
 
+  // Just signed, or the server says the subscribe is out and not reconciled
+  // yet: wait for the account (bounded, then a manual retry), never send the
+  // person back to the sign-up. Re-subscribing after expiry waits too.
+  const status = data?.status;
+  const opening = !isSmartAccountOpen(status) && (justSubscribed || isSmartAccountOpening(status));
+  const watch = useOpeningWatch(opening, () => { void account.reload(); });
+
   // Opened from Inicio by someone without an account: the offer is the entry.
   useEffect(() => {
-    if (!asTab && account.data !== undefined && !account.failed && !open) {
+    if (!asTab && !opening && account.data !== undefined && !account.failed && !open) {
       navigation.replace('SmartAccountOffer', { door: 'billeteras' });
     }
-  }, [asTab, account.data, account.failed, open, navigation]);
+  }, [asTab, opening, account.data, account.failed, open, navigation]);
 
   const holdings = useMemo(() => (data?.assets ?? []).filter((a) => !isDollarAsset(a)), [data]);
   // The viewer's dollar (the server's answer first), never just the first
@@ -198,6 +239,26 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
     avatar: 'C',
     scroll: false,
   };
+
+  if (opening) {
+    return (
+      <SmartScreen {...screenProps}>
+        <View style={styles.openingBox} testID="smart-opening">
+          {watch.timedOut ? null : <ActivityIndicator color={SA.deep} size="large" />}
+          <Text style={styles.openingTitle}>Abriendo tu cuenta…</Text>
+          <Text style={styles.openingBody}>
+            {watch.timedOut
+              ? 'Está tardando más de lo normal. Tu pago no se repite: vuelve a consultar en un momento.'
+              : 'Estamos confirmando tu firma en la red. Puede tardar un minuto.'}
+          </Text>
+          {watch.timedOut ? (
+            <ActionButton label="Reintentar" onPress={watch.restart} style={styles.openingButton} testID="smart-opening-retry" />
+          ) : null}
+        </View>
+        {asTab ? <AccountSwitcherHost /> : null}
+      </SmartScreen>
+    );
+  }
 
   if (account.loading && !data) {
     return (
@@ -338,6 +399,17 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
           chevron
           testID="home-rules"
         />
+        {data.assistantPlus ? (
+          <Row
+            divider
+            left={<IconDisc icon="bell" />}
+            title="Alertas"
+            subtitle="Las que le pediste al asistente."
+            onPress={() => navigation.navigate('SmartAccountWatches')}
+            chevron
+            testID="home-watches"
+          />
+        ) : null}
       </Card>
 
       {beneficiaryVisible ? (
@@ -442,7 +514,7 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
             divider
             left={<IconDisc icon="message-circle" />}
             title="El asistente de tu cuenta"
-            subtitle="Analiza tus movimientos, te avisa y sigue tus metas."
+            subtitle="Pídele por chat crear o cambiar tus reglas. Tú confirmas cada cambio."
           />
         ) : null}
       </Card>
@@ -498,6 +570,10 @@ export function SmartAccountHomeTab() {
 
 const styles = StyleSheet.create({
   listContent: { paddingBottom: 40 },
+  openingBox: { alignItems: 'center', paddingHorizontal: 32, paddingTop: 72 },
+  openingTitle: { fontSize: 20, fontWeight: '700', color: SA.text, marginTop: 18, textAlign: 'center' },
+  openingBody: { fontSize: 15, lineHeight: 22, color: SA.muted, marginTop: 8, textAlign: 'center' },
+  openingButton: { marginTop: 20, alignSelf: 'stretch' },
   side: { paddingHorizontal: 16 },
   lift: { marginTop: -28 },
   heroLoading: { height: 150, backgroundColor: SA.deep, borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },

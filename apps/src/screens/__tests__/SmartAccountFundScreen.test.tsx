@@ -39,9 +39,10 @@ it('prepares the minimum by default and shows the server summary before signing'
   await mount();
   await tap(tree, 'fund-review');
   await flush();
-  // 149.99 of a 500.00 position of 500e18 units
+  // 149.99 of a 500.00 position of 500e18 units, plus one cent: Confío
+  // Dollar+'s cent-rounded value must never leave the minimum short.
   expect(api.prepareSmartAccountSubscribe).toHaveBeenCalledWith(
-    'annual', [{ assetKey: 'cusd_plus', units: '149990000000000000000' }], true,
+    'annual', [{ assetKey: 'cusd_plus', units: '150000000000000000000' }], true,
   );
   expect(text(tree)).toContain('Mover a tu Cuenta inteligente: US$149.99');
   expect(api.signAndSubmitPrepared).not.toHaveBeenCalled();
@@ -50,7 +51,9 @@ it('prepares the minimum by default and shows the server summary before signing'
   expect(api.signAndSubmitPrepared).toHaveBeenCalledTimes(1);
   expect(text(tree)).toContain('Tu Cuenta inteligente está abierta');
   await tap(tree, 'sign-done');
-  expect(nav.reset).toHaveBeenCalledWith({ index: 1, routes: [{ name: 'BottomTabs' }, { name: 'SmartAccountHome' }] });
+  expect(nav.reset).toHaveBeenCalledWith({
+    index: 1, routes: [{ name: 'BottomTabs' }, { name: 'SmartAccountHome', params: { justSubscribed: true } }],
+  });
 });
 
 it('adds a ticked asset whole and "Todo" as the whole dollar balance', async () => {
@@ -179,7 +182,7 @@ describe('the minimum follows the chosen plan, not the cheapest one', () => {
     await tap(tree, 'fund-review');
     await flush();
     expect(api.prepareSmartAccountSubscribe).toHaveBeenCalledWith(
-      'annual', [{ assetKey: 'cusd_plus', units: '149990000000000000000' }], true,
+      'annual', [{ assetKey: 'cusd_plus', units: '150000000000000000000' }], true,
     );
   });
 
@@ -200,7 +203,7 @@ describe('the minimum follows the chosen plan, not the cheapest one', () => {
     await tap(tree, 'fund-review');
     await flush();
     expect(api.prepareSmartAccountSubscribe).toHaveBeenCalledWith(
-      'monthly', [{ assetKey: 'cusd_plus', units: '14990000000000000000' }], true,
+      'monthly', [{ assetKey: 'cusd_plus', units: '15000000000000000000' }], true,
     );
   });
 
@@ -267,4 +270,13 @@ describe('the funding dollar is the one the person holds', () => {
     expect(out).toContain('Hoy tienes US$20.00 en tu billetera');
     expect(out).not.toContain('US$0.00');
   });
+});
+
+it('Confío Dollar+ that only rounds to the minimum says it may not be enough', async () => {
+  setRouteParams({ plan: 'annual' });
+  api.fetchSmartAccountMovePreview.mockResolvedValue(ok(movePreview({
+    assets: [{ key: 'cusd_plus', symbol: 'cUSD+', name: 'cUSD+', units: '149990000000000000000', decimals: 18, valueUsd: '149.99', included: true, reason: null }],
+  })));
+  await mount();
+  expect(text(tree)).toContain('puede no alcanzar para el primer período');
 });

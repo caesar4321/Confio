@@ -8,6 +8,8 @@ export const nav = {
   navigate: jest.fn(),
   goBack: jest.fn(),
   replace: jest.fn(),
+  popTo: jest.fn(),
+  push: jest.fn(),
   reset: jest.fn(),
   addListener: jest.fn(() => () => {}),
 };
@@ -105,7 +107,7 @@ jest.mock('../../../services/smartAccount', () => {
   const actual = jest.requireActual('../../../services/smartAccount');
   const mocked: Record<string, unknown> = { ...actual };
   Object.keys(actual).forEach((key) => {
-    if (/^(fetch|prepare|decline|signAndSubmit)/.test(key)) {
+    if (/^(fetch|prepare|decline|delete|signAndSubmit)/.test(key)) {
       mocked[key] = jest.fn();
     }
   });

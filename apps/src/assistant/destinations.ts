@@ -7,6 +7,7 @@
 // never skip the ramp-country / blocked-country checks those screens run.
 import { navigationRef } from '../navigation/RootNavigation';
 import { isBalanceHidden } from '../utils/balanceVisibility';
+import { openRuleProposal } from './ruleProposal';
 
 type Target =
   | { tab: string; params?: object }
@@ -42,15 +43,24 @@ export const DESTINATION_TARGETS: Record<string, Target> = {
   month_summary: { screen: 'MonthSummary' },
   emergency_exit: { screen: 'EmergencyExit' },
   tokenomics: { screen: 'ConfioTokenomics' },
-  // Paid-offer probes (waitlist pitches); the server only offers them on
-  // builds that have this screen.
-  // Confío IA+ comes with Cuenta inteligente (2026-10-17): same pitch.
-  ia_plus: { screen: 'PaidOffer', params: { offer: 'smart_account' } },
-  cuenta_inteligente: { screen: 'PaidOffer', params: { offer: 'smart_account' } },
+  // Cuenta inteligente: this build always opens the real offer (which sends
+  // a subscriber on to the account). Confío IA+ comes with Cuenta inteligente
+  // (2026-10-17): same screen.
+  ia_plus: { screen: 'SmartAccountOffer' },
+  cuenta_inteligente: { screen: 'SmartAccountOffer' },
+  // Confío IA+ rule proposal ("Revisar y firmar"): the rule screen, prefilled
+  // from the proposal on that message (openRuleProposal). Without a message
+  // id, the rules list. The server's fallback for older builds is
+  // `cuenta_inteligente`.
+  smart_account_rule: { screen: 'SmartAccountRules' },
 };
 
-// Keys whose screen is a paid-offer pitch: opened only by a tap, never by a
-// voice answer moving the app on its own.
+// Opened only by a tap, never by an answer moving the app on its own: the
+// offer, and a rule change the owner has to review and sign.
+export const TAP_ONLY_KEYS = new Set(['ia_plus', 'cuenta_inteligente', 'smart_account_rule']);
+
+// Keys whose screen is the Cuenta inteligente offer: opened only by a tap,
+// never by a voice answer moving the app on its own.
 export const PAID_OFFER_KEYS = new Set(['ia_plus', 'cuenta_inteligente']);
 
 export const DESTINATION_LABELS: Record<string, string> = {
@@ -78,6 +88,7 @@ export const DESTINATION_LABELS: Record<string, string> = {
   // Opens Cuenta inteligente (Confío IA+ is one of its benefits).
   ia_plus: 'Conoce Cuenta inteligente',
   cuenta_inteligente: 'Conoce Cuenta inteligente',
+  smart_account_rule: 'Revisar y firmar',
 };
 
 export type NavigateAction = { destination?: string | null; target?: string | null; ticker?: string | null; label?: string | null };
@@ -103,7 +114,17 @@ export function isKnownDestination(key?: string | null): key is string {
   return !!key && Object.prototype.hasOwnProperty.call(DESTINATION_TARGETS, key);
 }
 
-export function openDestination(key: string, opts: { isBusiness?: boolean; ticker?: string } = {}): boolean {
+export function openDestination(
+  key: string,
+  opts: { isBusiness?: boolean; ticker?: string; messageId?: string } = {},
+): boolean {
+  if (key === 'smart_account_rule') {
+    if (!navigationRef.isReady()) {
+      return false;
+    }
+    void openRuleProposal(opts.messageId);
+    return true;
+  }
   let target = isKnownDestination(key) ? DESTINATION_TARGETS[key] : undefined;
   if (key === 'stock') {
     target = opts.ticker ? { screen: 'StockDetail', params: { ticker: opts.ticker } } : undefined;

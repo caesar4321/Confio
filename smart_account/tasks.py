@@ -9,7 +9,8 @@ Two classes, by what switching the feature flag off must still allow:
   never lose an account, or find assets trapped, because the flag is off;
 - everything that starts new activity also needs SMART_ACCOUNT_ENABLED:
   fee collection, payment notices, forced sales, USDT conversion, rules,
-  the CONFIO latch and entitlement sync."""
+  the CONFIO latch, entitlement sync, and Confío IA+'s monthly review notes
+  and alerts."""
 from __future__ import annotations
 
 import logging
@@ -96,6 +97,26 @@ def sync_entitlements():
     from . import automation, entitlements
     automation.check_price_settings()
     return {'synced': entitlements.sync_all()}
+
+
+@shared_task(name='smart_account.monthly_review_notes', ignore_result=True)
+def monthly_review_notes():
+    """Confío IA+ (decision 34): last month's review as an assistant-thread
+    note for each subscriber. Idempotent per (account, month) by the note's
+    tag, so a second run posts nothing."""
+    if not chain.enabled():
+        return {'skipped': 'disabled'}
+    from . import assistant_ops
+    return _single('monthly_review_notes', 3600, assistant_ops.post_monthly_notes)
+
+
+@shared_task(name='smart_account.evaluate_watches', ignore_result=True)
+def evaluate_watches():
+    """Owner-set alerts: at most one trigger per watch per cooldown."""
+    if not chain.enabled():
+        return {'skipped': 'disabled'}
+    from . import watches
+    return _single('evaluate_watches', 280, watches.evaluate)
 
 
 @shared_task(name='smart_account.latch_confio_sale', ignore_result=True)

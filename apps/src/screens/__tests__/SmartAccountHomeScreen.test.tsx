@@ -1,11 +1,11 @@
-import { nav, profileMenu, resetMocks, returnToPersonal, setBalanceHidden } from '../../components/smartAccount/testing/mocks';
+import { nav, profileMenu, resetMocks, returnToPersonal, setBalanceHidden, setRouteParams } from '../../components/smartAccount/testing/mocks';
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import * as service from '../../services/smartAccount';
 import {
   account, beneficiary, designation, failedRead, flush, hasTappable, offer, ok, rule, tap, text,
 } from '../../components/smartAccount/testing/fixtures';
-import { SmartAccountHomeScreen, billingBanner } from '../SmartAccountHomeScreen';
+import { OPENING_TIMING, SmartAccountHomeScreen, billingBanner } from '../SmartAccountHomeScreen';
 
 const api = service as jest.Mocked<typeof service>;
 let tree: renderer.ReactTestRenderer;
@@ -180,6 +180,55 @@ it('opens the offer for someone without an account', async () => {
   expect(nav.replace).toHaveBeenCalledWith('SmartAccountOffer', { door: 'billeteras' });
 });
 
+describe('a subscribe just signed (the account row comes after reconciliation)', () => {
+  const none = () => ok(account({ status: 'none', billing: null, assets: [] }));
+  const saved = { ...OPENING_TIMING };
+  const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+  beforeEach(() => { OPENING_TIMING.pollMs = 20; OPENING_TIMING.waitMs = 120; });
+  afterEach(() => { Object.assign(OPENING_TIMING, saved); });
+
+  it('waits with "Abriendo tu cuenta…", re-reads, and never re-offers the sign-up', async () => {
+    OPENING_TIMING.waitMs = 10_000;
+    setRouteParams({ justSubscribed: true });
+    api.fetchSmartAccount.mockResolvedValue(none());
+    await mount();
+    expect(text(tree)).toContain('Abriendo tu cuenta…');
+    expect(nav.replace).not.toHaveBeenCalled();
+    const calls = api.fetchSmartAccount.mock.calls.length;
+    await wait(50);
+    await flush();
+    expect(api.fetchSmartAccount.mock.calls.length).toBeGreaterThan(calls);
+    api.fetchSmartAccount.mockResolvedValue(ok(account()));
+    await wait(50);
+    await flush();
+    expect(text(tree)).toContain('Total en tu cuenta');
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it('stops after the bounded wait with a manual retry', async () => {
+    setRouteParams({ justSubscribed: true });
+    api.fetchSmartAccount.mockResolvedValue(none());
+    await mount();
+    await wait(200);
+    await flush();
+    expect(text(tree)).toContain('Está tardando más de lo normal');
+    const calls = api.fetchSmartAccount.mock.calls.length;
+    await wait(60);
+    expect(api.fetchSmartAccount.mock.calls.length).toBe(calls); // stopped polling
+    await tap(tree, 'smart-opening-retry');
+    await flush();
+    expect(api.fetchSmartAccount.mock.calls.length).toBe(calls + 1);
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it("the server's 'opening' status waits the same way, even without the route flag", async () => {
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ status: 'opening', billing: null, assets: [] })));
+    await mount();
+    expect(text(tree)).toContain('Abriendo tu cuenta…');
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+});
+
 it('as the Home tab: the avatar opens the switcher and a closed account leads back to the wallet', async () => {
   await mount(true);
   await tap(tree, 'Perfil y cuentas');
@@ -204,7 +253,10 @@ it('describes the assistant as the account service', async () => {
   await mount();
   const out = text(tree);
   expect(out).toContain('El asistente de tu cuenta');
+  // Confío IA+ = the assistant operates the account; the owner confirms.
+  expect(out).toContain('Pídele por chat crear o cambiar tus reglas. Tú confirmas cada cambio.');
   expect(out).not.toMatch(/\bIA\b/);
+  expect(out).not.toMatch(/ilimitad|más uso|modelo/i);
 });
 
 describe('the dollar row names the viewer\'s dollar', () => {

@@ -313,3 +313,55 @@ export const ANSWER_ASSISTANT_PROBE = gql`
 
 export type AssistantSuggestion = { id: string; text: string; prompt: string; kind: 'prompt' | 'probe' | 'picker' | string };
 export type AssistantProbe = { id: string; question: string; answers: { key: string; label: string }[] };
+
+// Confío IA+ (Cuenta inteligente): the rule proposal behind a "Revisar y
+// firmar" chip. Its own document, asked only when the chip is tapped, so a
+// server without it fails this read alone.
+// It asks for the proposal's progress too (each step's place in the plan,
+// `done`, `message`); a server that predates those fields rejects this
+// document, and the client asks GET_ASSISTANT_RULE_PROPOSAL_LEGACY instead.
+export const GET_ASSISTANT_RULE_PROPOSAL = gql`
+  query AssistantRuleProposal($messageId: ID!) {
+    assistantRuleProposal(messageId: $messageId) {
+      expired
+      done
+      message
+      steps {
+        action kind ruleId amountUsd frequency firstRunAt payeeHandle payeeName
+        payoutMethodId payoutLabel assetKey assetName sentence stepIndex
+      }
+    }
+  }
+`;
+
+// The fields every server with the proposal knows (no progress).
+export const GET_ASSISTANT_RULE_PROPOSAL_LEGACY = gql`
+  query AssistantRuleProposalLegacy($messageId: ID!) {
+    assistantRuleProposal(messageId: $messageId) {
+      expired
+      steps {
+        action kind ruleId amountUsd frequency firstRunAt payeeHandle payeeName
+        payoutMethodId payoutLabel assetKey assetName sentence
+      }
+    }
+  }
+`;
+
+export type AssistantRuleStep = {
+  action: 'create' | 'update' | 'cancel' | string;
+  kind: 'send' | 'payout' | 'buy' | string;
+  ruleId?: string | null;
+  amountUsd?: string | null;
+  frequency?: string | null;
+  firstRunAt?: string | null;
+  payeeHandle?: string | null;
+  payeeName?: string | null;
+  payoutMethodId?: string | null;
+  payoutLabel?: string | null;
+  assetKey?: string | null;
+  assetName?: string | null;
+  sentence: string;
+  /** The step's place in the whole proposal (signed steps are left out, so
+   *  not the list position); sent back with the prepare as proposalStep. */
+  stepIndex?: number | null;
+};

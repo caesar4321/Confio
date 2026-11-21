@@ -47,6 +47,7 @@ SCREENS = {
     'cancelled': 'SmartAccountHome', 'assets_returned': 'SmartAccountHome', 'price_change': 'SmartAccountBilling',
     'rule_ok': 'SmartAccountRules', 'rule_skipped': 'SmartAccountRules', 'rule_failed': 'SmartAccountRules',
     'payout_delivered': 'SmartAccountRules', 'rule_deactivated': 'SmartAccountRules',
+    'payout_resumed': 'SmartAccountRules',
     'beneficiary_named': 'BeneficiaryInvite', 'beneficiary_removed': 'BeneficiaryInvite',
     'beneficiary_accepted': 'BeneficiaryStatus', 'beneficiary_declined': 'BeneficiaryStatus',
     'beneficiary_stale_address': 'BeneficiaryStatus',
@@ -55,6 +56,7 @@ SCREENS = {
     'claim_initiated_beneficiary': 'BeneficiaryClaimStatus', 'claim_cancelled_beneficiary': 'BeneficiaryClaimStatus',
     'claim_executable': 'BeneficiaryClaimStatus',
     'claim_executed_new_owner': 'InheritedAccount',
+    'watch_triggered': 'SmartAccountWatches',
 }
 
 
@@ -158,10 +160,30 @@ def rule_run(run):
 
 
 def payout_delivered(run, fiat_amount, currency):
-    account = run.rule.smart_account
-    return _send(account.owner_user, 'Tu pago automático llegó',
-                 f'Enviamos {fiat_amount} {currency} a {run.rule.payout_method.label if run.rule.payout_method else "tu destino"}.',
-                 kind='payout_delivered', account=account)
+    rule = run.rule
+    account = rule.smart_account
+    destination = rule.payout_method or rule.pagomovil_destination
+    if rule.pagomovil_destination is not None:
+        label = ' · '.join(p for p in (rule.pagomovil_destination.holder_name, rule.pagomovil_destination.label) if p)
+    else:
+        label = destination.label if destination is not None else 'tu destino'
+    if fiat_amount:
+        amount = f'{currency} {fiat_amount}' if currency == 'Bs.' else f'{fiat_amount} {currency}'
+        body = f'Enviamos {amount} a {label}.'
+    else:
+        body = f'Tu pago llegó a {label}.'
+    return _send(account.owner_user, 'Tu pago automático llegó', body, kind='payout_delivered', account=account)
+
+
+def payout_resumed(run):
+    """A payout the owner was told did not happen left the account after all
+    (its call landed late): it is on its way, under review."""
+    rule = run.rule
+    account = rule.smart_account
+    return _send(account.owner_user, 'Tu pago automático sí salió',
+                 f'Tu pago automático de {_usd(rule.amount)} salió de tu Cuenta inteligente. '
+                 'Lo estamos revisando y te avisaremos cuando llegue.',
+                 kind='payout_resumed', account=account, data={'rule_id': str(rule.internal_id)})
 
 
 def rule_deactivated(rule, reason: str):

@@ -40,3 +40,12 @@ describe('smartNotificationSwitchTarget', () => {
     expect(smartNotificationSwitchTarget({ route: 'InheritedAccount' }, business)).toBe('personal_0');
   });
 });
+
+describe('alert triggered (Confío IA+)', () => {
+  const { smartNotificationRoute: route } = require('../smartAccountNotificationRoute');
+  it('opens the alerts list, from the in-app row or a push', () => {
+    expect(route({ smart_account_event: 'watch_triggered', screen: 'SmartAccountWatches' }))
+      .toEqual({ screen: 'SmartAccountWatches' });
+    expect(route({ data_screen: 'SmartAccountWatches' })).toEqual({ screen: 'SmartAccountWatches' });
+  });
+});

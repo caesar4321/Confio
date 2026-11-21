@@ -220,7 +220,95 @@ class AssistantWalkType(graphene.ObjectType):
     trail = graphene.List(graphene.NonNull(AssistantGuideTrailStopType), required=True)
 
 
+class AssistantRuleStepType(graphene.ObjectType):
+    """One rule change Confío IA+ proposed. Data for prefilling the rule
+    screen, never authority: the screen's prepare re-validates everything
+    and nothing changes until the owner signs."""
+    action = graphene.String(required=True, description='create | update | cancel')
+    kind = graphene.String(required=True, description='send | payout | buy')
+    rule_id = graphene.String()
+    amount_usd = graphene.String()
+    frequency = graphene.String()
+    first_run_at = graphene.String(description='ISO-8601; null = from now')
+    payee_handle = graphene.String()
+    payee_name = graphene.String()
+    payout_method_id = graphene.String()
+    payout_label = graphene.String()
+    asset_key = graphene.String()
+    asset_name = graphene.String()
+    sentence = graphene.String(required=True)
+    # The step's place in the whole proposal (signed steps are left out, so
+    # it is not the list position): sent back with the prepare as
+    # proposalStep.
+    step_index = graphene.Int()
+
+
+class AssistantRuleProposalType(graphene.ObjectType):
+    # Only the steps still to sign: one the owner already signed (on the
+    # wire or final) is never offered again.
+    steps = graphene.List(graphene.NonNull(AssistantRuleStepType), required=True)
+    expired = graphene.Boolean(required=True)
+    signed_steps = graphene.Int(description='Steps of this proposal already signed')
+    done = graphene.Boolean(description='Every step is already signed: nothing is left to sign')
+    message = graphene.String(description='Spanish, for the owner, when done')
+
+
+RULE_PROPOSAL_DONE_MESSAGE = ('Ya firmaste este plan. Puedes verlo en tus reglas; '
+                              'si algo todavía se está confirmando, espera a que aparezca.')
+RULE_PROPOSAL_UNREADABLE_MESSAGE = 'No pudimos revisar este plan. Ábrelo de nuevo en un momento.'
+
+
+RULE_PROPOSAL_TTL_DAYS = 7
+
+
 class Query(graphene.ObjectType):
+    # Own field (isolated from the thread query): only builds that open the
+    # proposal chip ask for it.
+    assistant_rule_proposal = graphene.Field(
+        AssistantRuleProposalType, message_id=graphene.ID(required=True),
+        description="The Cuenta inteligente rule proposal on one of the viewer's own assistant messages.")
+
+    @login_required
+    def resolve_assistant_rule_proposal(self, info, message_id):
+        from datetime import datetime, timedelta
+
+        from django.utils import timezone
+        from inbox.models import SupportMessage
+
+        user = info.context.user
+        try:
+            message = SupportMessage.objects.filter(
+                pk=int(message_id), conversation__user=user, sender_type__in=('AGENT', 'SYSTEM')).first()
+        except (TypeError, ValueError):
+            message = None
+        proposal = (message.metadata or {}).get('rule_proposal') if message is not None else None
+        if not isinstance(proposal, dict) or not proposal.get('steps'):
+            return None
+        expired, created = True, None
+        try:
+            created = datetime.fromisoformat(proposal.get('created_at') or '')
+            expired = created < timezone.now() - timedelta(days=RULE_PROPOSAL_TTL_DAYS)
+        except ValueError:
+            pass
+        steps = [step for step in proposal['steps'] if isinstance(step, dict)]
+        signed = [False] * len(steps)
+        if created is not None and not expired:
+            from smart_account.services import proposal_signed_steps
+            try:
+                signed = proposal_signed_steps(user, message.pk, steps, created)
+            except Exception:  # noqa: BLE001 — fails closed: nothing offered to sign
+                logger.exception('assistant rule proposal progress failed')
+                return AssistantRuleProposalType(expired=expired, steps=[], signed_steps=0, done=False,
+                                                 message=RULE_PROPOSAL_UNREADABLE_MESSAGE)
+        fields = set(AssistantRuleStepType._meta.fields) - {'step_index'}
+        open_steps = [
+            AssistantRuleStepType(step_index=index, **{k: v for k, v in step.items() if k in fields})
+            for index, step in enumerate(steps) if not signed[index]]
+        done = bool(steps) and not open_steps
+        return AssistantRuleProposalType(
+            expired=expired, steps=open_steps, signed_steps=sum(signed), done=done,
+            message=RULE_PROPOSAL_DONE_MESSAGE if done else None)
+
     assistant_walk = graphene.Field(
         AssistantWalkType, key=graphene.String(required=True),
         description='The steps of a walk the person asked for. Null when they can\'t do it now.')

@@ -53,7 +53,8 @@ BENEFITS = {
     'beneficiary': ('Beneficiario', 'Nombra a una persona que recibe la cuenta si dejas de usarla.'),
     'payments': ('Pagos y envíos automáticos', 'Programa envíos y pagos diarios, semanales, quincenales o mensuales.'),
     'investing': ('Inversión automática', 'Compra acciones, bitcoin y oro de forma periódica.'),
-    'assistant': ('Confío IA+', 'Tu asistente analiza los movimientos de la cuenta, te avisa y sigue tus metas.'),
+    'assistant': ('Confío IA+', 'Pídele por chat crear o cambiar tus pagos e inversiones automáticas. Tú confirmas '
+                                'cada cambio.'),
 }
 HEADLINE_ORDER = {
     'beneficiary_first': ['beneficiary', 'payments', 'investing', 'assistant'],
@@ -169,24 +170,92 @@ def payout_rails() -> list[str]:
     """Rails confirmed for unattended payouts. Empty = payment rules are
     neither offered nor run."""
     from payment_accounts import local_money
-    if not getattr(settings, 'SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED', False):
-        # The unattended provider path is not verified yet (payouts.ProviderAdapter):
-        # no rail is offered, whatever the list says.
-        return []
+    from . import payouts
     rails = [r.strip() for r in str(getattr(settings, 'SMART_ACCOUNT_PAYOUT_RAILS', '') or '').split(',')]
-    return [r for r in rails if r in local_money.METHODS and local_money.METHODS[r].direction == 'send']
+    out = []
+    for r in rails:
+        if not r or r in out:
+            continue
+        # The unattended provider path of the rail's adapter must be verified
+        # (payouts.rail_ready): Infinia's flag for local_money rails,
+        # SMART_ACCOUNT_PAYOUT_VERIFIED_ADAPTERS for the others.
+        if not payouts.rail_ready(r):
+            continue
+        if r == payouts.VE_PAGOMOVIL:
+            out.append(r)
+            continue
+        # A QR is a one-off payment, never a saved recurring destination.
+        if (r in local_money.METHODS and local_money.METHODS[r].direction == 'send'
+                and not r.endswith('_qr') and local_money.METHODS[r].kind != 'qr'):
+            out.append(r)
+    return out
+
+
+def payout_rail_options() -> list[dict]:
+    """{key, label, hint} for exactly the rails payout_rails() offers, named
+    as the rest of Confío names them (local_money.METHODS; Pago Móvil as the
+    VE screens name it). A rail turned on by the server switch is named by
+    the server: no app release."""
+    from payment_accounts import local_money
+    from . import payouts
+    out = []
+    for r in payout_rails():
+        if r == payouts.VE_PAGOMOVIL:
+            out.append({'key': r, 'label': payouts.VE_PAGOMOVIL_LABEL, 'hint': payouts.VE_PAGOMOVIL_HINT})
+        else:
+            out.append({'key': r, 'label': local_money.METHODS[r].title,
+                        'hint': local_money.METHODS[r].subtitle or None})
+    return out
+
+
+def rail_names() -> list[str]:
+    """The offered rails' names for Spanish copy ("Pix", "CLABE")."""
+    return [o['label'] for o in payout_rail_options()]
+
+
+def join_es(names: list[str], word: str = 'y') -> str:
+    """'A', 'A y B', 'A, B y C'."""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return ''.join(names)
+    return ', '.join(names[:-1]) + f' {word} ' + names[-1]
 
 
 BLOCKED = {
-    'disabled': 'La Cuenta inteligente todavía no está disponible.',
-    'canary': 'La Cuenta inteligente todavía no está disponible para tu cuenta.',
+    # Flag off / not on the canary list: the real pitch is shown to everyone on
+    # a supported build (founder, 2026-11-21); only signing waits.
+    'disabled': 'Todavía no puedes abrir tu Cuenta inteligente.',
+    'canary': 'Todavía no puedes abrir tu Cuenta inteligente.',
     'build': 'Actualiza Confío para abrir tu Cuenta inteligente.',
     'personal_only': 'La Cuenta inteligente solo está disponible para cuentas personales.',
     'identity': 'Verifica tu identidad para abrir tu Cuenta inteligente.',
     'identity_hold': 'Tu cuenta está en revisión. Escríbenos por soporte para continuar.',
     'minor': 'La Cuenta inteligente está disponible para mayores de 18 años.',
     'chain_unavailable': 'No pudimos consultar la red. Inténtalo de nuevo en unos minutos.',
+    'opening': 'Tu Cuenta inteligente se está abriendo. Espera unos minutos.',
 }
+
+
+OPENING_WINDOW_MINUTES = 30
+
+
+def subscribe_in_flight(user, own) -> bool:
+    """True while this person's subscribe batch went out (signed, sent or
+    mined) but the account row does not show it yet: reconciliation is
+    asynchronous. The account then reads 'opening' and no second subscribe
+    is offered or prepared. Bounded: after the window the row speaks; a
+    reverted batch drops out at once."""
+    if user is None or (own is not None and own.status in ('active', 'cancel_pending')):
+        return False
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from .models import SmartAccountPreparedAction
+    since = timezone.now() - timedelta(minutes=OPENING_WINDOW_MINUTES)
+    return SmartAccountPreparedAction.objects.filter(
+        user=user, kind='smart_subscribe', consumed=True, consumed_at__gte=since,
+        sponsored_batch__status__in=('signed', 'sent', 'confirmed')).exists()
 
 
 def subscribe_block(user, *, personal_context: bool, meta) -> str | None:

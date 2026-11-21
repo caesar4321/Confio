@@ -148,9 +148,10 @@ NO_NAVIGATION_NOTE = (
 PAID_OFFER_SECTIONS = {
     'ia_plus': (
         '\n## Confío IA+ (lista de espera)\n'
-        '- Confío IA+ es una versión más avanzada de Confío IA que estamos preparando: respuestas más avanzadas, '
-        'conversación por voz en tiempo real (como una llamada; los audios ya están en Confío IA), más uso cada día, análisis de tus gastos, ahorros e inversiones y seguimiento de tus '
-        'metas{price}. Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame".\n'
+        '- Confío IA+ es el asistente que opera tu cuenta por ti: creas, cambias o detienes pagos, envíos e '
+        'inversiones automáticas hablando, y tú confirmas cada cambio{price}. Confío IA gratis responde y orienta. '
+        'Todavía no está disponible y no tiene fecha; si te interesa, toca "Sí, avísame". Nunca lo describas como '
+        'más uso, un modelo mejor o funciones ilimitadas.\n'
         '- Si preguntan por Confío IA+, responde con esto y abre `ia_plus`. Nunca des una fecha, nunca prometas '
         'beneficios fuera de esta lista y nunca digas que se puede pagar o reservar ahora.\n'),
     # The real product (docs/designs/cuenta-inteligente-spec.md). This wording is
@@ -166,6 +167,22 @@ PAID_OFFER_SECTIONS = {
         'mueva solo, o que le preocupa qué pasa con su dinero si le ocurre algo, menciónala en una frase y abre '
         '`cuenta_inteligente`. Si pregunta por ella, responde con esto y ábrela. Nunca des una fecha, nunca prometas '
         'beneficios fuera de esta lista y nunca digas que esta persona puede pagarla o abrirla ahora.\n'),
+    # A build whose door opens the real screen (>= SMART_ACCOUNT_MIN_APP_VERSION)
+    # for someone who cannot sign yet: the real product, no waitlist. The
+    # screen itself says why they cannot open it now.
+    'cuenta_inteligente_real': (
+        '\n## Cuenta inteligente\n'
+        '- Cuenta inteligente es una cuenta de pago dentro de Confío: pagos y transferencias automáticas'
+        '{rails} (diarias, semanales, quincenales o mensuales), inversión automática en acciones, bitcoin y oro, y '
+        'un beneficiario que recibe la cuenta si la persona deja de usarla{price}.{ia_plus} Solo lo que la persona '
+        'mueve dentro de la cuenta se automatiza y queda cubierto; su cuenta personal no cambia. Se cobra desde '
+        'adentro de la cuenta, no hay reembolsos y la comisión de conversión de 0.9% es la misma de siempre.\n'
+        '- Si la persona cuenta que paga a mano cada mes (alquiler, familia, servicios), que quiere que su dinero se '
+        'mueva solo, que quiere invertir un poco cada cierto tiempo, o que le preocupa qué pasa con su dinero si le '
+        'ocurre algo, menciónala en una frase y abre `cuenta_inteligente`. Si pregunta por ella, responde con esto y '
+        'ábrela: la pantalla le muestra los planes y, si todavía no puede abrirla, por qué. No hay lista de espera: '
+        'nunca digas "Sí, avísame", nunca des una fecha y nunca digas que ya puede abrirla. Nunca prometas beneficios '
+        'fuera de esta lista y nunca digas un precio distinto al de aquí.\n'),
     # For someone who can open it now (users/paid_offers.can_subscribe).
     'cuenta_inteligente_live': (
         '\n## Cuenta inteligente\n'
@@ -184,26 +201,42 @@ PAID_OFFER_SECTIONS = {
 
 # Only where the person's pitch lists IA+ as a benefit and the standalone offer is off.
 IA_PLUS_IN_SMART_ACCOUNT = (
-    ' Uno de sus beneficios es Confío IA+: el asistente financiero de la cuenta, que analiza tus movimientos, te '
-    'alerta de lo importante y sigue tus metas. Descríbelo siempre así, como parte del servicio de la cuenta: nunca '
-    'como más uso de Confío IA, un modelo mejor o funciones nuevas del chat. Confío IA+ no se ofrece por separado: '
-    'si preguntan por Confío IA+, dilo así y abre `cuenta_inteligente`.')
+    ' Incluye Confío IA+: el asistente opera tu Cuenta inteligente por ti. Le dices "compra US$10 de bitcoin cada '
+    'mes" o "manda US$50 a mamá el día 1" y te deja el cambio listo; tú lo revisas y lo firmas. También te hace la '
+    'revisión de cada mes y te avisa cuando un precio llega al nivel que tú elegiste. Confío IA gratis responde y '
+    'orienta; Confío IA+ ejecuta en tu cuenta, siempre con tu confirmación. Descríbelo siempre así: nunca como más '
+    'uso, un modelo mejor o funciones ilimitadas. Confío IA+ no se ofrece por separado: si preguntan por Confío IA+, '
+    'dilo así y abre `cuenta_inteligente`.')
 
 
-# Bank rails are named only where payment rules are live for them.
-_RAIL_NAMES = {'mx_clabe': 'CLABE', 'br_pix': 'Pix', 'co_breb': 'Bre-B'}
+# For a Cuenta inteligente subscriber whose IA+ is current (engine
+# Toolbelt.smart_ops): the assistant operates the account, within limits.
+SMART_ACCOUNT_OPS_SECTION = """
+## Confío IA+: operas su Cuenta inteligente (la persona confirma cada cambio)
+- Esta persona tiene Cuenta inteligente con Confío IA+. Cuando pide crear, cambiar, detener o pausar una regla ("compra US$10 de bitcoin cada mes", "manda US$50 a mamá el día 1", "págale 100 dólares a mi casero por Bre-B cada mes"), usa `propose_smart_account_rule`. Para cambiar o detener una regla existente, primero `smart_account_rules` para su regla_id; para pagar a una cuenta bancaria, el cuenta_id de sus cuentas guardadas.
+- La herramienta solo prepara la propuesta: la app agrega el botón "Revisar y firmar" y el cambio existe solo cuando la persona lo revisa en la pantalla de la regla y lo firma. Cuenta la propuesta en una o dos frases simples y nunca digas que ya quedó hecho.
+- Solo propones lo que la persona dijo, con sus palabras: el monto, la persona, la cuenta, la inversión, el día, los porcentajes y el nivel de una alerta. Si falta un dato, pregúntalo. Nunca elijas tú qué comprar, cuánto, un reparto ni un nivel de alerta, aunque te lo pida: puedes explicar opciones y riesgos, pero la decisión y las cifras son suyas. Nunca propongas vender: la cuenta no automatiza ventas.
+- Tipos de regla: enviar a alguien de Confío (le llega en su dólar), pagar a una cuenta bancaria guardada, invertir (acciones; bitcoin y oro donde estén disponibles). Frecuencias: cada día, semana, dos semanas o mes; un día de la semana o del mes es el inicio de la regla (mensual: día 1 a 28).
+- "Pausar" una regla: no existe pausa; se detiene y después se puede crear de nuevo. Dilo así.
+- "Ahorra / guarda X cada mes": no hay regla de ahorro. Su dólar de Confío ya es su saldo dentro de la cuenta; ofrece lo que sí existe (enviar, pagar, invertir).
+- Objetivo de reparto ("mantén 70/30 entre SPY y bitcoin"): `propose_target_allocation` con los porcentajes y el total que ELLA dijo. Se mantiene solo con compras nuevas, nunca vendiendo. Si se aleja del objetivo, puedes ofrecer repartir las próximas compras (next_split). Si el monto es muy chico para mover la proporción, dilo tal cual.
+- Revisión del mes (qué entró y salió, cobros del plan, qué ejecutó u omitió cada regla y por qué, saldos): `smart_account_review`.
+- Alertas ("avísame si TSLA baja 5% y prepárame una compra de 100"): `smart_account_alerts`. La alerta se guarda solo cuando responde "sí" a la pregunta que agrega la app; cuando se cumple, le avisamos y, si pidió una compra, se la dejamos lista para revisar y firmar. Una alerta nunca compra ni vende sola.
+"""
 
 
+# Bank rails are named only where payment rules are live for them, by the
+# server's own names for exactly the offered rails (a rail turned on by the
+# SMART_ACCOUNT_PAYOUT_RAILS switch is named here with no code change).
 def _smart_account_rails():
     from smart_account import offer
-    names = [_RAIL_NAMES[r] for r in offer.payout_rails() if r in _RAIL_NAMES]
+    names = offer.rail_names()
     if not names:
         return ' a otras personas en Confío'
-    joined = names[0] if len(names) == 1 else ', '.join(names[:-1]) + ' y ' + names[-1]
-    return f' a otras personas en Confío y a cuentas guardadas de {joined}'
+    return f' a otras personas en Confío y a cuentas guardadas de {offer.join_es(names)}'
 
 
-def _paid_offer_sections(destinations, ia_plus_bundled=False, smart_account_open=False):
+def _paid_offer_sections(destinations, ia_plus_bundled=False, smart_account_open=False, smart_account_real=False):
     from users import paid_offers
 
     from .destinations import PAID_OFFERS
@@ -219,8 +252,12 @@ def _paid_offer_sections(destinations, ia_plus_bundled=False, smart_account_open
             parts = [f'US${annual} al año' if annual else '', f'US${monthly} al mes' if monthly else '']
             parts = [p for p in parts if p]
             price = (', por ' + ' o '.join(parts)) if parts else ''
-            section = PAID_OFFER_SECTIONS['cuenta_inteligente_live' if smart_account_open else key]
-            bundled = (smart_account_open or ia_plus_bundled) and 'ia_plus' not in destinations
+            # Who can open it now: the live wording. A newer build whose door
+            # opens the real screen: the real product, the screen says why
+            # they can't sign yet. Older builds: the waitlist pitch.
+            section = PAID_OFFER_SECTIONS['cuenta_inteligente_live' if smart_account_open
+                                          else 'cuenta_inteligente_real' if smart_account_real else key]
+            bundled = (smart_account_open or smart_account_real or ia_plus_bundled) and 'ia_plus' not in destinations
             out += section.format(price=price, rails=_smart_account_rails(),
                                   ia_plus=IA_PLUS_IN_SMART_ACCOUNT if bundled else '')
         else:
@@ -334,10 +371,12 @@ IDENTITY_NOTES = {
 
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
                         ia_plus_bundled=False, identity=None, ve_topup=None, ve_send=None, dex=True,
-                        local_account_topup='', bo_withdraw=None, smart_account_open=False):
+                        local_account_topup='', bo_withdraw=None, smart_account_open=False,
+                        smart_account_real=False, smart_account_ops=False):
     lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text(dex=dex))
-              + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open)
+              + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open, smart_account_real)
+              + (SMART_ACCOUNT_OPS_SECTION if smart_account_ops else '')
               + DESTINATIONS_SECTION.format(destinations=lines))
     if not can_navigate:
         prompt += NO_NAVIGATION_NOTE

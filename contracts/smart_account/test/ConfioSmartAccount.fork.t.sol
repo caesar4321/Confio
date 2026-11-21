@@ -521,11 +521,58 @@ contract ConfioSmartAccountForkTest is Test {
 
         _run(fromCusd, abi.encode(bridge, uint256(49.5e18)));
         assertEq(_bal(USDT, bridge), 49.55e18, "cUSD exit: 0.9% fee");
-        _run(fromPlus, abi.encode(bridge, uint256(49e18)));
+        // cUSD+: live unwrapToCusd (fee-free) then the same cUSD exit.
+        _run(fromPlus, abi.encode(bridge, 49.95e18 - CusdVault(CUSD).feeFor(49.95e18), uint256(49.95e18)));
         uint256 second = _bal(USDT, bridge) - 49.55e18;
-        console2.log("payout of US$50 of cUSD+ -> USDT:", second);
-        assertApproxEqRel(second, 49.55e18, 0.005e18, "cUSD+ exit: 0.9% fee");
+        console2.log("payout of US$49.95 gross of cUSD+ -> USDT:", second);
+        assertEq(second, 49.95e18 - CusdVault(CUSD).feeFor(49.95e18), "cUSD+ exit: exact, 0.9% fee");
         assertEq(_bal(USDT, address(acct)), 0);
+    }
+
+    /// The Pago Movil / Relay case: a deposit address that needs an EXACT
+    /// USDT amount, funded from cUSD+ through the live vaults.
+    function test_fork_payout_fromCusdPlus_exactUsdtToFreshAddress() public {
+        if (!_forked()) return;
+        _giveCusd(address(acct), MONTHLY);
+        _givePlus(address(acct), 200e18);
+        _subscribe();
+        IConfioSmartAccount.RuleInput memory r = _rule(IConfioSmartAccount.RuleKind.Payout, CUSD_PLUS, 100e18);
+        r.payoutRef = keccak256("ve_pagomovil:destination");
+        uint256 id = _createRule(r);
+        address deposit = makeAddr("freshRelayDepositAddress");
+        assertEq(_bal(USDT, deposit), 0);
+
+        // The relayer's quote: a round USDT figure and the gross behind it.
+        uint256 exactUsdt = 73.21e18;
+        uint256 feeBps = CusdVault(CUSD).feeBps();
+        uint256 gross = (exactUsdt * 10_000 + (10_000 - feeBps) - 1) / (10_000 - feeBps);
+        while (gross - CusdVault(CUSD).feeFor(gross) > exactUsdt) gross--;
+        while (gross - CusdVault(CUSD).feeFor(gross) < exactUsdt) gross++;
+        require(gross - CusdVault(CUSD).feeFor(gross) == exactUsdt, "no gross for this net");
+
+        uint256 plusBefore = _bal(CUSD_PLUS, address(acct));
+        uint256 cusdBefore = _bal(CUSD, address(acct));
+        uint256 fees = CusdVault(CUSD).accruedEntryFees() + CusdVault(CUSD).accruedExitFees();
+        _run(id, abi.encode(deposit, exactUsdt, gross));
+
+        uint256 p = ILivePlus(CUSD_PLUS).pPlus();
+        uint256 spent = plusBefore - _bal(CUSD_PLUS, address(acct));
+        uint256 dust = _bal(CUSD, address(acct)) - cusdBefore;
+        console2.log("gross cUSD:", gross);
+        console2.log("USDT at the deposit address:", _bal(USDT, deposit));
+        console2.log("cUSD+ shares spent:", spent);
+        console2.log("cUSD dust kept by the account:", dust);
+        assertEq(_bal(USDT, deposit), exactUsdt, "exact USDT");
+        assertLe(spent, (100e18 * 1e18 + p - 1) / p, "within the rule's share limit");
+        assertLe(dust, (gross * 5) / 10_000 + 2, "dust at most the margin");
+        assertEq(_bal(USDT, address(acct)), 0);
+        assertEq(
+            CusdVault(CUSD).accruedEntryFees() + CusdVault(CUSD).accruedExitFees() - fees,
+            gross - exactUsdt,
+            "one exit fee, the unwrap is free"
+        );
+        assertEq(IERC20(CUSD).allowance(address(acct), CUSD_PLUS), 0);
+        assertEq(IERC20(CUSD_PLUS).allowance(address(acct), CUSD), 0);
     }
 
     function test_fork_buyRule_bitcoin_withReferral() public {

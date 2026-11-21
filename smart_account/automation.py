@@ -316,15 +316,14 @@ def _sale_leg(account, asset, notional: Decimal, dollar: int) -> dict | None:
 
 def _account_dollar(account) -> int:
     """Which dollar a relayer conversion mints for this account: the one it
-    already holds, else the owner's by eligibility (no request: phone)."""
+    already holds (with both, the one worth more: payout dust never
+    decides), else the owner's by eligibility (no request: phone)."""
     from cusd_plus.crypto_policy import DOLLAR, DOLLAR_PLUS
     from cusd_plus.eligibility import is_ondo_eligible
-    plus, cusd = chain.cusd_plus_address(), chain.cusd_address()
-    plus_balance = chain.balance_of(plus, account.contract_address) if plus else 0
-    cusd_balance = chain.balance_of(cusd, account.contract_address) if cusd else 0
-    if plus_balance and not cusd_balance:
+    held = assets_mod.held_dollar(account.contract_address)
+    if held == 'cusd_plus':
         return DOLLAR_PLUS
-    if cusd_balance and not plus_balance:
+    if held == 'cusd':
         return DOLLAR
     return DOLLAR_PLUS if is_ondo_eligible(account.owner_user) else DOLLAR
 
@@ -637,8 +636,15 @@ def build_rule_call(rule, onchain: dict | None = None) -> tuple[str, int, str]:
     fee_bps = chain.conversion_fee_bps()
     usdt_estimate = amount_wei * (BPS - fee_bps) // BPS
     run = rule.runs.filter(scheduled_for=rule.scheduled_for).first()
-    plan = payouts.plan_run(rule, run, usdt_estimate)
-    data = abi.payout_rule_data(plan.deposit_address, plan.min_usdt_out)
+    plan = payouts.plan_run(rule, run, usdt_estimate, window=prices.window() if in_plus else None)
+    if in_plus:
+        # cUSD+: exact usdtOut and the grossCusd that nets it (payouts.payout_exit);
+        # the two-word cUSD form reverts on a cUSD+ rule.
+        if not plan.gross_wei:
+            raise payouts.PayoutSkip('provider_path_unverified', payouts.EXIT_UNAVAILABLE)
+        data = abi.payout_plus_rule_data(plan.deposit_address, plan.min_usdt_out, plan.gross_wei)
+    else:
+        data = abi.payout_rule_data(plan.deposit_address, plan.min_usdt_out)
     return (abi.encode_call('executeRule', int(rule.onchain_id), data, referrer, share),
             abi.RELAY_GAS_RULE['payout'], 'Pago en camino.')
 
@@ -689,13 +695,19 @@ def due_rules():
                     smart_account__status__in=('active', 'cancel_pending'),
                     smart_account__billing_status='current')
             .select_related('smart_account', 'smart_account__owner_user', 'smart_account__owner_account',
-                            'payee_user', 'payout_method', 'standing_authorization'))
+                            'payee_user', 'payout_method', 'pagomovil_destination', 'standing_authorization'))
 
 
 def run_rules() -> dict:
     out = {'sent': 0, 'skipped': 0, 'waiting': 0, 'errors': 0}
     if not _ready():
         return {'skipped': 'disabled'}
+    # Mirror the Pago Móvil sends already under way (no transaction).
+    try:
+        from . import payouts
+        payouts.mirror_ramp_payouts()
+    except Exception:  # noqa: BLE001 — retried next run
+        logger.exception('payout mirror failed')
     if chain.relayer_paused():
         return {'skipped': 'relayer_paused'}
     for rule in due_rules():
@@ -714,7 +726,27 @@ def _finish_run(rule, run, status: str, message: str, error: str = '', *, final:
     if SmartAccountRuleRun.objects.filter(pk=run.pk, notified_at__isnull=True).update(notified_at=timezone.now()):
         notifications.safe(notifications.rule_run, run)
     if final:
+        _close_unsent_payout(rule, run)
         schedule_next(rule)
+
+
+def _close_unsent_payout(rule, run) -> None:
+    """A payout slot that ends without its executeRule on the wire closes
+    its own VE send now (it would otherwise linger PENDING to ramps' expiry).
+    Not while any relayer transaction of the slot may still land."""
+    if rule.kind != 'payout':
+        return
+    from .models import SmartAccountRelayTx
+    source_id = f'rule:{rule.pk}:{int(run.scheduled_for.timestamp())}'
+    if SmartAccountRelayTx.objects.filter(
+            smart_account=rule.smart_account, kind='smart_execute_rule', source_id=source_id,
+            status__in=SmartAccountRelayTx.LIVE_STATUSES + ('reorged',)).exists():
+        return
+    try:
+        from . import payouts
+        payouts.close_unsent_order(run)
+    except Exception:  # noqa: BLE001 — ramps' own expiry still closes it
+        logger.exception('closing the order of run %s failed', run.pk)
 
 
 def _supersede_slot(rule, run, now) -> None:
@@ -733,6 +765,7 @@ def _supersede_slot(rule, run, now) -> None:
         if reason and SmartAccountRuleRun.objects.filter(
                 pk=run.pk, notified_at__isnull=True).update(notified_at=now):
             notifications.safe(notifications.rule_run, run)
+        _close_unsent_payout(rule, run)
     slot = run.scheduled_for
     while next_slot(rule.frequency, slot) <= now:
         slot = next_slot(rule.frequency, slot)
@@ -803,6 +836,16 @@ def _run_rule(rule, out: dict) -> None:
         from .payouts import PayoutSkip
         if not isinstance(exc, PayoutSkip):
             raise
+        if exc.deactivate:
+            # The Face authorization no longer matches what the rule pays:
+            # stopped until the owner signs it again (spec 7.1).
+            SmartAccountRule.objects.filter(pk=rule.pk).update(active=False, deactivated_reason=exc.deactivate)
+        if getattr(exc, 'retry_later', False) and not exc.deactivate:
+            # A passing refusal (e.g. an identical payout still open):
+            # retried within the slot until it gives up.
+            _finish_run(rule, run, 'failed', exc.message, exc.code, final=expired)
+            out['errors'] += 1
+            return
         _finish_run(rule, run, 'skipped', exc.message, exc.code, final=True)
         out['skipped'] += 1
         return

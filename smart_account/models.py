@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from users.fields import EncryptedCharField
 from users.models import SoftDeleteModel
 
 
@@ -202,9 +203,35 @@ class SmartAccountStandingAuthorization(models.Model):
     max_bridge_cost_bps = models.PositiveIntegerField(default=150)
     fx_tolerance_bps = models.PositiveIntegerField(default=300)
     reference_fx_rate = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+    # Venezuelan Pago Móvil rules (rail 've_pagomovil'): the saved beneficiary
+    # the authorization is bound to (phone + bank + cédula, in binding_hash).
+    pagomovil_destination = models.ForeignKey(
+        'smart_account.SmartAccountPagoMovilDestination', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='+')
     authorized_at = models.DateTimeField(default=timezone.now)
     revoked_at = models.DateTimeField(null=True, blank=True)
     revoked_reason = models.CharField(max_length=40, blank=True, default='')
+
+
+class SmartAccountPagoMovilDestination(SoftDeleteModel):
+    """A Venezuelan Pago Móvil beneficiary saved for bank payment rules
+    (ramps has no saved-beneficiary model: a VE send carries its beneficiary
+    in the order). Same validation as the VE send (ramps.ve_pagomovil
+    normalize_*). Phone and cédula are encrypted at rest; a removed row is
+    soft-deleted, and any rule bound to it stops (payouts.authorization_problem)."""
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    # 58 + 10 digits (ve_pagomovil.normalize_phone).
+    phone = EncryptedCharField(max_length=255)
+    # SUDEBAN code (ve_pagomovil.normalize_bank).
+    bank_code = models.CharField(max_length=4)
+    # V/E/J/P/G + digits (ve_pagomovil.normalize_cedula).
+    id_number = EncryptedCharField(max_length=255)
+    holder_name = models.CharField(max_length=120)
+    label = models.CharField(max_length=100)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'deleted_at'], name='smart_pm_dest_user_idx')]
 
 
 class SmartAccountRule(SoftDeleteModel):
@@ -228,6 +255,10 @@ class SmartAccountRule(SoftDeleteModel):
         'payment_accounts.PayoutDestination', on_delete=models.PROTECT, null=True, blank=True, related_name='+')
     payout_ref = models.CharField(max_length=66, blank=True, default='')
     payout_rail = models.CharField(max_length=24, blank=True, default='')
+    # Rail 've_pagomovil': the saved Pago Móvil beneficiary (payout_method is
+    # then empty; payout_ref hashes this row's identity).
+    pagomovil_destination = models.ForeignKey(
+        SmartAccountPagoMovilDestination, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
     standing_authorization = models.ForeignKey(
         SmartAccountStandingAuthorization, on_delete=models.PROTECT, null=True, blank=True, related_name='rules')
     amount = models.DecimalField(max_digits=18, decimal_places=2)  # US dollars
@@ -275,6 +306,10 @@ class SmartAccountPayout(models.Model):
     journey = models.ForeignKey(
         'payment_accounts.InfiniaJourney', on_delete=models.PROTECT, null=True, blank=True, related_name='+')
     provider = models.CharField(max_length=20, default='infinia')
+    # Pago ASAP (rail 've_pagomovil'): the VE send order (ramps.ve_send) the
+    # owner is sender of record of; its own poller pays and polls it.
+    ramp = models.OneToOneField(
+        'ramps.RampTransaction', on_delete=models.PROTECT, null=True, blank=True, related_name='+')
     rail = models.CharField(max_length=24)
     deposit_address = models.CharField(max_length=42, blank=True, default='')
     usdt_amount = models.CharField(max_length=80, blank=True, default='')
@@ -417,3 +452,61 @@ class SmartAccountScanCursor(models.Model):
     key = models.CharField(max_length=40, unique=True)
     block_number = models.BigIntegerField()
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class SmartAccountTargetAllocation(SoftDeleteModel):
+    """The owner's target split of the account's investments (decision 34),
+    kept by NEW buys only: one Buy rule per asset, amount = total x weight,
+    each one owner-signed. Never kept by selling, and never set by the
+    assistant on its own: the weights are the owner's own words.
+
+    A preference record, not chain state: it moves no money. `weights` is
+    a list of {"asset_key": "stock:SPYon" | "crypto:BTCB", "weight_bps": int}
+    summing to 10000. One live row per account (older rows soft-deleted)."""
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    smart_account = models.ForeignKey(SmartAccount, on_delete=models.PROTECT, related_name='target_allocations')
+    weights = models.JSONField(default=list)
+    total_usd = models.DecimalField(max_digits=18, decimal_places=2)  # per period, all buy rules together
+    frequency = models.CharField(max_length=10, choices=SmartAccountRule.FREQUENCY_CHOICES)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['smart_account'], condition=Q(deleted_at__isnull=True),
+                name='smart_target_allocation_live_uniq'),
+        ]
+
+
+class SmartAccountWatch(SoftDeleteModel):
+    """A conditional alert the owner set through Confío IA+ (decision 34):
+    "avísame si TSLA baja 5%". When it triggers the owner gets a push and an
+    assistant-thread note; if the owner attached an action (a buy they chose:
+    asset and amount), the note carries a chip that opens it prefilled for
+    the owner to review and sign. Nothing executes on its own, and the
+    assistant never suggests a threshold or an asset."""
+    KIND_CHOICES = [
+        ('asset_price_drop_pct', 'Asset price drops by N%'),
+        ('asset_price_rise_pct', 'Asset price rises by N%'),
+        ('asset_price_below', 'Asset price below'),
+        ('asset_price_above', 'Asset price above'),
+        ('fx_rate_below', 'Local currency per USD below'),
+        ('fx_rate_above', 'Local currency per USD above'),
+    ]
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    smart_account = models.ForeignKey(SmartAccount, on_delete=models.PROTECT, related_name='watches')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    kind = models.CharField(max_length=24, choices=KIND_CHOICES)
+    asset_key = models.CharField(max_length=64, blank=True, default='')  # price watches
+    currency = models.CharField(max_length=3, blank=True, default='')    # FX watches: local currency per 1 USD
+    threshold = models.DecimalField(max_digits=24, decimal_places=8)     # a percent for *_pct, else a price/rate
+    # The price when the watch was set (or last triggered): the base of the *_pct kinds.
+    reference_price = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+    # {"kind": "buy", "asset_key": ..., "amount_usd": "100.00"}: the owner's own choice, or {}.
+    action = models.JSONField(default=dict, blank=True)
+    active = models.BooleanField(default=True)
+    cooldown_hours = models.PositiveIntegerField(default=24)
+    last_triggered_at = models.DateTimeField(null=True, blank=True)
+    last_value = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['active', 'deleted_at'], name='smart_watch_active_idx')]

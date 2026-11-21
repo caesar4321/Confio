@@ -11,7 +11,7 @@ from smart_account.models import (
     SmartAccountRuleRun, SmartAccountStandingAuthorization,
 )
 
-from .base import BUILD, CUSD, FACTORY, VAULT, SmartAccountTestCase, WAD
+from .base import BUILD, CUSD, FACTORY, VAULT, SmartAccountTestCase, WAD, vault_preview
 
 
 class OfferTests(SmartAccountTestCase):
@@ -438,7 +438,14 @@ class PayoutRuleTests(SmartAccountTestCase):
         rule.refresh_from_db()
         run = SmartAccountRuleRun.objects.create(rule=rule, scheduled_for=rule.scheduled_for)
         plan = payouts.PayoutPlan(deposit_address='0x' + '44' * 20, min_usdt_out=1, bridge_cost_bps=400)
-        with mock.patch.object(payouts.ProviderAdapter, 'open', return_value=plan):
+
+        def opened(rule, run, usdt, exit_=None, window=None):
+            # A cUSD+ rule (this account's dollar): the adapter sizes its
+            # deposit from the exact exit it is handed.
+            plan.min_usdt_out = usdt
+            return plan
+        with mock.patch.object(payouts.ProviderAdapter, 'open', side_effect=opened), \
+                mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=vault_preview()):
             with self.assertRaises(payouts.PayoutSkip) as raised:
                 payouts.plan_run(rule, run, 49 * WAD)
             self.assertEqual(raised.exception.code, 'bridge_cost_above_limit')
@@ -447,13 +454,19 @@ class PayoutRuleTests(SmartAccountTestCase):
                 payouts.plan_run(rule, run, 49 * WAD)
             self.assertEqual(raised.exception.code, 'fx_rate_below_limit')
             plan.fx_rate = Decimal('3990')
-            self.assertEqual(payouts.plan_run(rule, run, 49 * WAD).deposit_address, '0x' + '44' * 20)
+            planned = payouts.plan_run(rule, run, 49 * WAD)
+            self.assertEqual(planned.deposit_address, '0x' + '44' * 20)
+            # The Infinia rail's cUSD+ run carries the exact exit too.
+            self.assertEqual((planned.min_usdt_out, planned.gross_wei),
+                             (payouts.net_for_gross(planned.gross_wei, 90), planned.gross_wei))
+            self.assertLessEqual(planned.gross_wei, 50 * WAD)
 
     @override_settings(**PAYOUTS_ON)
     def test_the_unverified_provider_path_refuses_to_run(self):
         rule = self._onchain_rule()
         run = SmartAccountRuleRun.objects.create(rule=rule, scheduled_for=rule.scheduled_for)
-        with self.assertRaises(payouts.PayoutSkip) as raised:
+        with self.assertRaises(payouts.PayoutSkip) as raised, \
+                mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=vault_preview()):
             payouts.plan_run(rule, run, 49 * WAD)
         self.assertEqual(raised.exception.code, 'provider_path_unverified')
         with override_settings(SMART_ACCOUNT_PAYOUT_RAILS=''):

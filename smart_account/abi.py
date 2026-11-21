@@ -240,7 +240,15 @@ def send_rule_data(payee_dollar: int, min_out: int) -> bytes:
 
 
 def payout_rule_data(destination: str, min_usdt_out: int) -> bytes:
+    """cUSD rule: abi.encode(destination, minUsdtOut), a floor."""
     return abi_encode(['address', 'uint256'], [destination, int(min_usdt_out)])
+
+
+def payout_plus_rule_data(destination: str, usdt_out: int, gross_cusd: int) -> bytes:
+    """cUSD+ rule: abi.encode(destination, usdtOut, grossCusd). usdtOut is
+    EXACT (grossCusd - CusdVault.feeFor(grossCusd)); the two-word cUSD form
+    reverts on a cUSD+ rule (ConfioSmartAccount._runPayout)."""
+    return abi_encode(['address', 'uint256', 'uint256'], [destination, int(usdt_out), int(gross_cusd)])
 
 
 def buy_rule_data(venue: str, venue_calldata: str, min_out: int) -> bytes:

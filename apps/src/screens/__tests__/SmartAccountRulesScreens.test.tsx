@@ -7,8 +7,9 @@ import {
   account, failedRead, flush, hasTappable, offer, ok, prepared, rule, tap, text,
 } from '../../components/smartAccount/testing/fixtures';
 import { SmartAccountRulesScreen, ruleNote, ruleSubtitle } from '../SmartAccountRulesScreen';
-import { SmartAccountRuleEditScreen, cryptoBuyAllowed } from '../SmartAccountRuleEditScreen';
+import { SmartAccountRuleEditScreen, cryptoBlockedMessage, cryptoBuyAllowed } from '../SmartAccountRuleEditScreen';
 import { DEX_TRADING_UI_ENABLED } from '../../config/features';
+import { HELP_WATCHES } from '../../components/smartAccount/help';
 
 const api = service as jest.Mocked<typeof service>;
 let tree: renderer.ReactTestRenderer;
@@ -78,6 +79,22 @@ describe('rules list', () => {
     expect(nav.navigate).toHaveBeenCalledWith('SmartAccountRuleEdit', { kind: 'payout' });
   });
 
+  it('names a rail switched on by the server with the server name, never its key', async () => {
+    const { clearRailLabels } = require('../../components/smartAccount/format');
+    clearRailLabels();
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ payoutRails: ['ar_cvu', 'pe_cci'] })));
+    api.fetchSmartAccountPayoutRailOptions.mockResolvedValue(ok([
+      { key: 'ar_cvu', label: 'CVU o CBU', hint: 'Mercado Pago, Ualá, Naranja X y bancos' },
+    ]));
+    await mount(<SmartAccountRulesScreen />);
+    await tap(tree, 'rules-new');
+    const out = text(tree);
+    expect(out).toContain('A una cuenta que ya guardaste: CVU o CBU, bancaria.');
+    expect(out).not.toContain('ar_cvu');
+    expect(out).not.toContain('pe_cci');
+    clearRailLabels();
+  });
+
   it('says the rules are paused when the plan is not current', async () => {
     const base = account();
     api.fetchSmartAccount.mockResolvedValue(ok(account({ billing: { ...base.billing!, status: 'payment_due' } })));
@@ -108,7 +125,7 @@ describe('rule edit', () => {
     await tap(tree, 'rule-review');
     await flush();
     expect(api.prepareSmartAccountSendRule).toHaveBeenCalledWith({
-      ruleId: null, payeeHandle: 'ana', amountUsd: '25.00', frequency: 'biweekly',
+      ruleId: null, payeeHandle: 'ana', amountUsd: '25.00', frequency: 'biweekly', firstRunAt: null,
     });
     await tap(tree, 'sign-confirm');
     await flush();
@@ -181,7 +198,7 @@ describe('rule edit', () => {
     await tap(tree, 'rule-review');
     await flush();
     expect(api.prepareSmartAccountSendRule).toHaveBeenCalledWith({
-      ruleId: 'r1', payeeHandle: 'ana', amountUsd: '50.00', frequency: 'monthly',
+      ruleId: 'r1', payeeHandle: 'ana', amountUsd: '50.00', frequency: 'monthly', firstRunAt: null,
     });
   });
 
@@ -190,5 +207,427 @@ describe('rule edit', () => {
     expect(cryptoBuyAllowed(undefined)).toBe(false);
     expect(cryptoBuyAllowed(true)).toBe(DEX_TRADING_UI_ENABLED);
     expect(DEX_TRADING_UI_ENABLED).toBe(Platform.OS !== 'ios');
+  });
+});
+
+describe('a Confío IA+ proposal (decision 34)', () => {
+  it('opens prefilled, stays editable, and signs through the normal flow with the chosen first run', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    setRouteParams({
+      kind: 'buy',
+      prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '10.00', frequency: 'monthly',
+        firstRunAt: '2026-12-01T10:00:00+00:00' },
+      proposal: 'Nueva regla: invierte US$10.00 en SPY cada mes, el día 1.',
+    });
+    await mount(<SmartAccountRuleEditScreen />);
+    const out = text(tree);
+    expect(out).toContain('Propuesta de Confío IA+');
+    expect(out).toContain('nada cambia hasta que firmes');
+    expect(out).toContain('Tu cuenta invierte US$10.00 en SPY cada mes.');
+    expect(out).toContain('Primera ejecución:');
+    await type('rule-amount', '12');
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountBuyRule).toHaveBeenCalledWith({
+      ruleId: null, assetKey: 'stock:SPYon', amountUsd: '12.00', frequency: 'monthly',
+      firstRunAt: '2026-12-01T10:00:00+00:00',
+    });
+    expect(api.signAndSubmitPrepared).not.toHaveBeenCalled();  // nothing signed before the owner confirms
+  });
+
+  it('sends the proposal step (message + stepIndex) with the prepare, and hands the next step its own', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    const second = { kind: 'buy' as const, prefill: { assetKey: 'stock:QQQon', amountUsd: '30.00', frequency: 'monthly' as const },
+      proposalMessageId: '42', proposalStep: 3 };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo.', proposalMessageId: '42', proposalStep: 1, next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountBuyRule).toHaveBeenCalledWith({
+      ruleId: null, assetKey: 'stock:SPYon', amountUsd: '70.00', frequency: 'monthly', firstRunAt: null,
+      proposalMessageId: '42', proposalStep: 1,
+    });
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'sign-done');
+    expect(nav.replace).toHaveBeenCalledWith('SmartAccountRuleEdit', second);
+  });
+
+  it('a stop proposal step tags its cancel; a send step its send', async () => {
+    setRouteParams({ ruleId: 'r1', stop: true, proposal: 'Detener la regla.', proposalMessageId: '42', proposalStep: 0 });
+    await mount(<SmartAccountRuleEditScreen />);
+    await flush();
+    expect(api.prepareSmartAccountCancelRule).toHaveBeenCalledWith('r1', { proposalMessageId: '42', proposalStep: 0 });
+    await act(async () => tree.unmount());
+    setRouteParams({ ruleId: 'r1', prefill: { amountUsd: '60.00' }, proposal: 'Subir.', proposalMessageId: '42', proposalStep: 2 });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountSendRule).toHaveBeenCalledWith(expect.objectContaining({
+      ruleId: 'r1', amountUsd: '60.00', proposalMessageId: '42', proposalStep: 2 }));
+  });
+
+  it('drops the start day when the owner switches to daily', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '10.00',
+      frequency: 'weekly', firstRunAt: '2026-12-01T10:00:00+00:00' } });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'Diario');
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountBuyRule).toHaveBeenCalledWith(expect.objectContaining({ firstRunAt: null }));
+  });
+
+  it('a stop proposal opens the stop confirmation of that rule', async () => {
+    setRouteParams({ ruleId: 'r1', stop: true, proposal: 'Detener la regla.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await flush();
+    expect(api.prepareSmartAccountCancelRule).toHaveBeenCalledWith('r1');
+    expect(api.signAndSubmitPrepared).not.toHaveBeenCalled();
+  });
+
+  it('a dismissed stop proposal offers only "Detener esta regla", never an update', async () => {
+    setRouteParams({ ruleId: 'r1', stop: true, proposal: 'Detener la regla.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await flush();
+    const sheet = tree.root.findAll((n) => typeof n.props.onDone === 'function' && n.props.flow)[0];
+    await act(async () => { sheet.props.flow.reset(); });
+    expect(hasTappable(tree, 'rule-review')).toBe(false);
+    expect(hasTappable(tree, 'rule-stop')).toBe(true);
+    expect(api.prepareSmartAccountSendRule).not.toHaveBeenCalled();
+  });
+
+  it('a new proposal on the open screen gets a fresh form (values and stop confirmation)', async () => {
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ rules: [rule(), rule({ id: 'r2' })] })));
+    setRouteParams({ ruleId: 'r1', stop: true, proposal: 'Detener la regla.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(api.prepareSmartAccountCancelRule).toHaveBeenLastCalledWith('r1');
+    // B: a buy proposal replaces A's params on the same screen.
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Comprar SPY.' });
+    await act(async () => { tree.update(<SmartAccountRuleEditScreen />); });
+    await flush();
+    expect(text(tree)).toContain('Tu cuenta invierte US$70.00 en SPY cada mes.');
+    // C: a stop proposal for another rule opens its own stop confirmation.
+    setRouteParams({ ruleId: 'r2', stop: true, proposal: 'Detener la otra regla.' });
+    await act(async () => { tree.update(<SmartAccountRuleEditScreen />); });
+    await flush();
+    expect(api.prepareSmartAccountCancelRule).toHaveBeenLastCalledWith('r2');
+    // D: a send proposal never keeps the amount typed for an earlier one.
+    setRouteParams({ kind: 'send', prefill: { payeeHandle: 'luis', payeeName: 'Luis R.', amountUsd: '15.00',
+      frequency: 'weekly' }, proposal: 'Enviar a Luis.' });
+    await act(async () => { tree.update(<SmartAccountRuleEditScreen />); });
+    await flush();
+    await type('rule-amount', '99');
+    setRouteParams({ kind: 'send', prefill: { payeeHandle: 'eva', payeeName: 'Eva M.', amountUsd: '20.00',
+      frequency: 'monthly' }, proposal: 'Enviar a Eva.' });
+    await act(async () => { tree.update(<SmartAccountRuleEditScreen />); });
+    await flush();
+    const out = text(tree);
+    expect(out).toContain('Tu cuenta envía US$20.00 a Eva M. cada mes.');
+    expect(out).not.toContain('Luis');
+  });
+
+  it('a proposed bitcoin / gold buy is never signed where they are not offered', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ investingCryptoEnabled: false })));
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'crypto:BTCB', assetName: 'Bitcoin', amountUsd: '10.00',
+      frequency: 'monthly' }, proposal: 'Nueva regla: invierte US$10.00 en Bitcoin cada mes.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    const out = text(tree);
+    expect(out).toContain(cryptoBlockedMessage());
+    expect(out).not.toContain('Bitcoin cada mes');  // neither the form nor the banner names it
+    expect(hasTappable(tree, 'rule-review')).toBe(false);
+    expect(api.prepareSmartAccountBuyRule).not.toHaveBeenCalled();
+  });
+
+  it('an existing bitcoin / gold rule where they are not offered: gate message, no Revisar, can still stop', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ investingCryptoEnabled: false })));
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ rules: [rule({
+      kind: 'buy', payeeName: null, payeeHandle: null, assetKey: 'crypto:BTCB', assetSymbol: 'BTC', assetName: 'Bitcoin',
+    })] })));
+    // From the Rules list.
+    setRouteParams({ ruleId: 'r1' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).toContain(cryptoBlockedMessage());
+    expect(hasTappable(tree, 'rule-review')).toBe(false);
+    expect(hasTappable(tree, 'rule-stop')).toBe(true);
+    await act(async () => tree.unmount());
+    // An update proposal that changes only the amount.
+    setRouteParams({ ruleId: 'r1', prefill: { amountUsd: '20.00' }, proposal: 'Subir la regla a US$20.00.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).toContain(cryptoBlockedMessage());
+    expect(hasTappable(tree, 'rule-review')).toBe(false);
+    expect(hasTappable(tree, 'rule-stop')).toBe(true);
+    await tap(tree, 'rule-stop');
+    await flush();
+    expect(api.prepareSmartAccountCancelRule).toHaveBeenCalledWith('r1');
+    expect(api.prepareSmartAccountBuyRule).not.toHaveBeenCalled();
+  });
+
+  it('an existing stock rule keeps Revisar even where bitcoin / gold are off', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ investingCryptoEnabled: false })));
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ rules: [rule({
+      kind: 'buy', payeeName: null, payeeHandle: null, assetKey: 'stock:SPYon', assetSymbol: 'SPY', assetName: 'SPY',
+    })] })));
+    setRouteParams({ ruleId: 'r1' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).not.toContain(cryptoBlockedMessage());
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountBuyRule).toHaveBeenCalledWith(expect.objectContaining({ ruleId: 'r1', assetKey: 'stock:SPYon' }));
+  });
+
+  it('the gate message names bitcoin / gold only in builds that offer them', () => {
+    expect(cryptoBlockedMessage(false)).toBe('Esa inversión no está disponible en esta versión de la app. Elige otra.');
+    expect(cryptoBlockedMessage(true)).toBe('Oro y Bitcoin no están disponibles para tu cuenta. Elige otra inversión.');
+    expect(cryptoBlockedMessage(false)).not.toMatch(/Bitcoin|Oro/);
+  });
+
+  it('after signing one step, opens the next step of the same proposal', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    const second = { kind: 'buy', prefill: { assetKey: 'crypto:BTCB', amountUsd: '30.00', frequency: 'monthly' } };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo: nueva regla de SPY.', next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).toContain('quedan 1 más');
+    await tap(tree, 'rule-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'sign-done');
+    expect(nav.replace).toHaveBeenCalledWith('SmartAccountRuleEdit', second);
+    expect(nav.goBack).not.toHaveBeenCalled();
+  });
+
+  it('an unknown outcome on one step never opens the next: it stays and says how to finish the plan', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    api.signAndSubmitPrepared.mockResolvedValue({ status: 'unknown' } as any);
+    const second = { kind: 'buy', prefill: { assetKey: 'crypto:BTCB', amountUsd: '30.00', frequency: 'monthly' } };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo: nueva regla de SPY.', next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'sign-unknown-done');
+    expect(nav.replace).not.toHaveBeenCalled();
+    expect(nav.goBack).not.toHaveBeenCalled();
+    const out = text(tree);
+    expect(out).toContain('Este paso todavía se está confirmando');
+    expect(out).toContain('No lo repitas. Cuando aparezca en tus reglas, vuelve a abrir la propuesta de Confío IA+ para seguir con el resto del plan.');
+    expect(out).not.toContain('continuarlo');  // re-opening the chip restarts at step 1: never promise a resume
+    expect(hasTappable(tree, 'rule-review')).toBe(false);  // no second signature of a step that may have gone through
+    await tap(tree, 'rule-step-pending');
+    // Back to the rules already under this screen, never a second Rules screen on top.
+    expect(nav.popTo).toHaveBeenCalledWith('SmartAccountRules');
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it('while a step is unconfirmed, nothing else is signed and the plan never moves on', async () => {
+    api.prepareSmartAccountSendRule.mockResolvedValue(prepared());
+    api.signAndSubmitPrepared.mockResolvedValue({ status: 'unknown' } as any);
+    const second = { kind: 'buy', prefill: { assetKey: 'stock:SPYon', amountUsd: '30.00', frequency: 'monthly' } };
+    setRouteParams({ ruleId: 'r1', prefill: { amountUsd: '60.00', frequency: 'weekly' },
+      proposal: 'Subir la regla a US$60.00.', next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(hasTappable(tree, 'rule-stop')).toBe(true);
+    await tap(tree, 'rule-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'sign-unknown-done');
+    expect(text(tree)).toContain('Este paso todavía se está confirmando');
+    expect(hasTappable(tree, 'rule-stop')).toBe(false);
+    // Even if the sheet reports a signed step now, the next one never opens.
+    const sheet = tree.root.findAll((n) => typeof n.props.onDone === 'function' && n.props.flow)[0];
+    await act(async () => { sheet.props.onDone(); });
+    expect(nav.replace).not.toHaveBeenCalled();
+    expect(nav.goBack).not.toHaveBeenCalled();
+    expect(api.prepareSmartAccountCancelRule).not.toHaveBeenCalled();
+  });
+
+  it('a step refused as a duplicate at prepare offers "Seguir con el plan" to the next step, with its own tags', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue({ success: false, errorCode: 'rule_duplicate', errorMessage: '' } as any);
+    const second = { kind: 'buy', prefill: { assetKey: 'crypto:BTCB', amountUsd: '30.00', frequency: 'monthly' },
+      proposalMessageId: '42', proposalStep: 2 };
+    const third = { kind: 'buy', prefill: { assetKey: 'stock:QQQon', amountUsd: '10.00', frequency: 'monthly' },
+      proposalMessageId: '42', proposalStep: 3 };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo.', proposalMessageId: '42', proposalStep: 1, next: [second, third] });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(text(tree)).toContain('Ya tienes esta regla. No la repitas. No se movió nada.');
+    expect(hasTappable(tree, 'rule-duplicate-rules')).toBe(false);
+    expect(text(tree)).toContain('Seguir con el plan');
+    await tap(tree, 'rule-duplicate-continue');
+    expect(nav.replace).toHaveBeenCalledTimes(1);
+    expect(nav.replace).toHaveBeenCalledWith('SmartAccountRuleEdit', { ...second, next: [third] });
+    expect(nav.goBack).not.toHaveBeenCalled();
+  });
+
+  it('a duplicate refused at submit also moves the plan on', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    api.signAndSubmitPrepared.mockResolvedValue({ status: 'not_sent', code: 'rule_duplicate' } as any);
+    const second = { kind: 'buy', prefill: { assetKey: 'crypto:BTCB', amountUsd: '30.00', frequency: 'monthly' },
+      proposalMessageId: '42', proposalStep: 2 };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo.', proposalMessageId: '42', proposalStep: 1, next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'rule-duplicate-continue');
+    expect(nav.replace).toHaveBeenCalledWith('SmartAccountRuleEdit', second);
+  });
+
+  it.each([
+    ['at prepare', () => {
+      api.prepareSmartAccountBuyRule.mockResolvedValue({ success: false, errorCode: 'rule_duplicate_pending', errorMessage: '' } as any);
+    }, false],
+    ['at submit', () => {
+      api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+      api.signAndSubmitPrepared.mockResolvedValue({ status: 'not_sent', code: 'rule_duplicate_pending' } as any);
+    }, true],
+  ])('a step whose rule is still confirming (%s) never moves the plan on and turns into the pending notice', async (_label, arrange, signs) => {
+    (arrange as () => void)();
+    const second = { kind: 'buy', prefill: { assetKey: 'crypto:BTCB', amountUsd: '30.00', frequency: 'monthly' },
+      proposalMessageId: '42', proposalStep: 2 };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo.', proposalMessageId: '42', proposalStep: 1, next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    if (signs) {
+      await tap(tree, 'sign-confirm');
+      await flush();
+    }
+    expect(text(tree)).toContain('Esta regla se está confirmando. No la repitas. No se movió nada.');
+    expect(text(tree)).not.toContain('Seguir con el plan');
+    expect(hasTappable(tree, 'rule-duplicate-continue')).toBe(false);
+    // The screen is the pending-step notice: no "Revisar", nothing else signed.
+    expect(text(tree)).toContain('Este paso todavía se está confirmando');
+    expect(hasTappable(tree, 'rule-review')).toBe(false);
+    const sheet = tree.root.findAll((n) => typeof n.props.onDone === 'function' && n.props.flow)[0];
+    await act(async () => { sheet.props.onDone(); });
+    expect(nav.replace).not.toHaveBeenCalled();
+    await tap(tree, 'rule-duplicate-pending-rules');
+    expect(nav.popTo).toHaveBeenCalledWith('SmartAccountRules');
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it('a duplicate on the last step shows the message and "Ir a tus reglas" only', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue({ success: false, errorCode: 'rule_duplicate', errorMessage: '' } as any);
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo.', proposalMessageId: '42', proposalStep: 1 });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(text(tree)).toContain('Ya tienes esta regla');
+    expect(text(tree)).not.toContain('Seguir con el plan');
+    expect(hasTappable(tree, 'rule-duplicate-continue')).toBe(false);
+    await tap(tree, 'rule-duplicate-rules');
+    expect(nav.popTo).toHaveBeenCalledWith('SmartAccountRules');
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it('any other refusal never offers to move the plan on', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue({ success: false, errorCode: 'insufficient_balance', errorMessage: '' } as any);
+    const second = { kind: 'buy', prefill: { assetKey: 'crypto:BTCB', amountUsd: '30.00', frequency: 'monthly' } };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo.', next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(text(tree)).toContain('No tienes saldo suficiente');
+    expect(text(tree)).not.toContain('Seguir con el plan');
+    expect(hasTappable(tree, 'rule-duplicate-continue')).toBe(false);
+    expect(hasTappable(tree, 'rule-duplicate-rules')).toBe(false);
+  });
+
+  it('a duplicate is never offered as a way on while the step is unconfirmed', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    api.signAndSubmitPrepared.mockResolvedValue({ status: 'unknown' } as any);
+    const second = { kind: 'buy', prefill: { assetKey: 'crypto:BTCB', amountUsd: '30.00', frequency: 'monthly' } };
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:SPYon', assetName: 'SPY', amountUsd: '70.00',
+      frequency: 'monthly' }, proposal: 'Tu objetivo.', next: [second] });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    await tap(tree, 'sign-unknown-done');
+    expect(text(tree)).toContain('Este paso todavía se está confirmando');
+    // Even a duplicate refusal arriving now offers no way on.
+    const sheet = tree.root.findAll((n) => typeof n.props.onDone === 'function' && n.props.flow)[0];
+    await act(async () => {
+      await sheet.props.flow.start({ prepare: async () => ({ success: false, errorCode: 'rule_duplicate', errorMessage: '' }) });
+    });
+    await flush();
+    expect(text(tree)).toContain('Ya tienes esta regla');
+    expect(hasTappable(tree, 'rule-duplicate-continue')).toBe(false);
+    expect(hasTappable(tree, 'rule-duplicate-rules')).toBe(false);
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it('a proposed bank account that is no longer usable is never swapped for the current one', async () => {
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ rules: [rule({
+      kind: 'payout', payeeName: null, payeeHandle: null, payoutMethodId: 'pm9', payoutLabel: 'Bre-B · Vieja', payoutRail: 'co_breb',
+    })] })));
+    setRouteParams({ ruleId: 'r1', prefill: { payoutMethodId: 'pmGone', amountUsd: '40.00', frequency: 'monthly' },
+      proposal: 'Cambiar el destino a Bre-B · Nueva.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    let out = text(tree);
+    expect(out).toContain('Esa cuenta ya no está disponible. Elige un destino.');
+    expect(out).not.toContain('Bre-B · Nueva');  // the banner names no account that is not selected
+    expect(out).not.toContain('Bre-B · Vieja');  // nor does the form fall back to the current one
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountPayoutRule).not.toHaveBeenCalled();
+    await tap(tree, 'rule-destination');
+    await act(async () => {
+      tree.root.findAll((n) => n.props.title === 'Bre-B · Ana P.' && typeof n.props.onPress === 'function')[0].props.onPress();
+    });
+    out = text(tree);
+    expect(out).not.toContain('Esa cuenta ya no está disponible.');
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountPayoutRule).toHaveBeenCalledWith(expect.objectContaining({ ruleId: 'r1', payoutMethodId: 'pm1' }));
+  });
+
+  it('a proposed bank account still usable is selected and named', async () => {
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ rules: [rule({
+      kind: 'payout', payeeName: null, payeeHandle: null, payoutMethodId: 'pm9', payoutLabel: 'Bre-B · Vieja', payoutRail: 'co_breb',
+    })] })));
+    setRouteParams({ ruleId: 'r1', prefill: { payoutMethodId: 'pm1', amountUsd: '40.00', frequency: 'monthly' },
+      proposal: 'Cambiar el destino a Bre-B · Ana P.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    const out = text(tree);
+    expect(out).toContain('Cambiar el destino a Bre-B · Ana P.');
+    expect(out).not.toContain('Esa cuenta ya no está disponible.');
+    await tap(tree, 'rule-review');
+    await flush();
+    expect(api.prepareSmartAccountPayoutRule).toHaveBeenCalledWith(expect.objectContaining({ payoutMethodId: 'pm1' }));
+  });
+
+  it('a proposed buy (an alert\'s prepared purchase) says it repeats until stopped', async () => {
+    api.prepareSmartAccountBuyRule.mockResolvedValue(prepared());
+    setRouteParams({ kind: 'buy', prefill: { assetKey: 'stock:TSLAon', assetName: 'Tesla', amountUsd: '100.00',
+      frequency: 'monthly' }, proposal: 'Comprar US$100.00 de Tesla desde tu Cuenta inteligente.' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-review');
+    await flush();
+    await tap(tree, 'sign-confirm');
+    await flush();
+    expect(text(tree)).toContain('se repite cada mes hasta que la detengas. Si solo querías una compra, detenla después de la primera.');
+    expect(HELP_WATCHES.paragraphs[1]).toContain('una regla que se repite hasta que la detengas');
+    expect(HELP_WATCHES.paragraphs[1]).toContain('Si solo querías una compra, detenla después de la primera.');
+    expect(HELP_WATCHES.paragraphs[1]).not.toContain('mensual');
   });
 });

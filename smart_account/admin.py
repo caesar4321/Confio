@@ -5,9 +5,10 @@ from django.contrib import admin
 
 from .models import (
     SmartAccount, SmartAccountBeneficiary, SmartAccountCharge, SmartAccountClaim, SmartAccountEvent,
-    SmartAccountForcedSale, SmartAccountForcedSaleLeg, SmartAccountPayout, SmartAccountPreparedAction,
+    SmartAccountForcedSale, SmartAccountForcedSaleLeg, SmartAccountPagoMovilDestination, SmartAccountPayout,
+    SmartAccountPreparedAction,
     SmartAccountRelayTx, SmartAccountRule, SmartAccountRuleRun, SmartAccountScanCursor,
-    SmartAccountStandingAuthorization,
+    SmartAccountStandingAuthorization, SmartAccountTargetAllocation, SmartAccountWatch,
 )
 
 
@@ -72,7 +73,8 @@ class SmartAccountRuleAdmin(ReadOnlyAdmin):
                     'scheduled_for', 'next_run_at', 'deactivated_reason')
     list_filter = ('kind', 'state', 'active', 'frequency')
     search_fields = ('smart_account__contract_address', 'smart_account__owner_user__username', 'payee_address')
-    raw_id_fields = ('smart_account', 'payee_user', 'payout_method', 'standing_authorization', 'replaces')
+    raw_id_fields = ('smart_account', 'payee_user', 'payout_method', 'pagomovil_destination',
+                     'standing_authorization', 'replaces')
 
     def get_queryset(self, request):
         return SmartAccountRule.all_objects.select_related('smart_account')
@@ -86,10 +88,21 @@ class SmartAccountRuleRunAdmin(ReadOnlyAdmin):
 
 
 class SmartAccountPayoutAdmin(ReadOnlyAdmin):
-    list_display = ('rule_run', 'rail', 'status', 'usdt_amount', 'fiat_amount', 'fiat_currency',
-                    'deposit_address', 'created_at')
-    list_filter = ('rail', 'status')
-    search_fields = ('deposit_address',)
+    list_display = ('rule_run', 'provider', 'rail', 'status', 'usdt_amount', 'fiat_amount', 'fiat_currency',
+                    'deposit_address', 'ramp', 'created_at')
+    list_filter = ('provider', 'rail', 'status')
+    search_fields = ('deposit_address', 'ramp__internal_id')
+    raw_id_fields = ('rule_run', 'journey', 'ramp')
+
+
+class SmartAccountPagoMovilDestinationAdmin(ReadOnlyAdmin):
+    """Phone and cédula are encrypted and not listed; the label carries the
+    bank and the phone's last digits."""
+    list_display = ('internal_id', 'user', 'label', 'bank_code', 'holder_name', 'created_at', 'deleted_at')
+    list_filter = ('bank_code', ('deleted_at', admin.EmptyFieldListFilter))
+    search_fields = ('user__username', 'holder_name', 'label')
+    raw_id_fields = ('user',)
+    exclude = ('phone', 'id_number')
 
 
 class SmartAccountStandingAuthorizationAdmin(ReadOnlyAdmin):
@@ -97,7 +110,7 @@ class SmartAccountStandingAuthorizationAdmin(ReadOnlyAdmin):
                     'face_required', 'authorized_at', 'revoked_at', 'revoked_reason')
     list_filter = ('kind', 'rail', 'frequency', ('revoked_at', admin.EmptyFieldListFilter))
     search_fields = ('user__username', 'binding_hash', 'payee_address')
-    raw_id_fields = ('user', 'payout_destination')
+    raw_id_fields = ('user', 'payout_destination', 'pagomovil_destination')
 
 
 class SmartAccountBeneficiaryAdmin(ReadOnlyAdmin):
@@ -136,6 +149,27 @@ class SmartAccountPreparedActionAdmin(ReadOnlyAdmin):
     date_hierarchy = 'created_at'
 
 
+class SmartAccountTargetAllocationAdmin(ReadOnlyAdmin):
+    list_display = ('smart_account', 'total_usd', 'frequency', 'weights', 'created_at', 'updated_at', 'deleted_at')
+    list_filter = ('frequency',)
+    search_fields = ('smart_account__contract_address', 'smart_account__owner_user__username')
+    raw_id_fields = ('smart_account',)
+
+    def get_queryset(self, request):
+        return SmartAccountTargetAllocation.all_objects.select_related('smart_account')
+
+
+class SmartAccountWatchAdmin(ReadOnlyAdmin):
+    list_display = ('smart_account', 'kind', 'asset_key', 'currency', 'threshold', 'active',
+                    'last_triggered_at', 'created_at', 'deleted_at')
+    list_filter = ('kind', 'active')
+    search_fields = ('smart_account__contract_address', 'user__username', 'asset_key')
+    raw_id_fields = ('smart_account', 'user')
+
+    def get_queryset(self, request):
+        return SmartAccountWatch.all_objects.select_related('smart_account', 'user')
+
+
 class SmartAccountScanCursorAdmin(ReadOnlyAdmin):
     list_display = ('key', 'block_number', 'updated_at')
 
@@ -149,9 +183,12 @@ REGISTRY = (
     (SmartAccountRuleRun, SmartAccountRuleRunAdmin),
     (SmartAccountPayout, SmartAccountPayoutAdmin),
     (SmartAccountStandingAuthorization, SmartAccountStandingAuthorizationAdmin),
+    (SmartAccountPagoMovilDestination, SmartAccountPagoMovilDestinationAdmin),
     (SmartAccountBeneficiary, SmartAccountBeneficiaryAdmin),
     (SmartAccountClaim, SmartAccountClaimAdmin),
     (SmartAccountRelayTx, SmartAccountRelayTxAdmin),
     (SmartAccountPreparedAction, SmartAccountPreparedActionAdmin),
+    (SmartAccountTargetAllocation, SmartAccountTargetAllocationAdmin),
+    (SmartAccountWatch, SmartAccountWatchAdmin),
     (SmartAccountScanCursor, SmartAccountScanCursorAdmin),
 )

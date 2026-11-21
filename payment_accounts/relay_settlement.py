@@ -61,11 +61,21 @@ def _source_evidence(transfer, inputs):
     except (KeyError, TypeError, ValueError):
         raise RelayError('Relay collection ordering is unavailable')
     sender = q.source_address if transfer.funding_mode == 'wallet' else None
+    # What the deposit actually received. Exactly the quote, except a
+    # contract-funded send (ramps.pagoasap_send) whose already-proven funding
+    # carried more (the cUSD vault exits usdtOut >= minUsdtOut): it passes
+    # `funded_units`, never below the quote, and the sweep moves that whole
+    # balance. Every other caller has no such attribute and is unchanged.
+    funded = int(q.amount_units)
+    extra = getattr(transfer, 'funded_units', None)
+    if transfer.funding_mode == 'contract' and extra is not None and str(extra).isdigit() \
+            and int(extra) > funded:
+        funded = int(extra)
     if (not ordered
             or chain.received_units(funding, q.source_token_id, transfer.deposit_address,
-                                    sender=sender) != int(q.amount_units)
+                                    sender=sender) != funded
             or chain.received_units(collection, q.source_token_id, depository,
-                                    sender=transfer.deposit_address) != int(q.amount_units)):
+                                    sender=transfer.deposit_address) != funded):
         raise RelayError('Relay collection does not match funded deposit')
     return True
 

@@ -22,7 +22,7 @@ jest.mock('../evmWallet', () => ({
 
 import {
   fetchSmartAccount, fetchSmartAccountCharges, fetchSmartAccountClaimAlert, hasOwnSmartAccount, isSmartAccountOpen,
-  prepareSmartAccountSubscribe, prepareClaimCancel, signAndSubmitPrepared, toBatchCalls,
+  prepareSmartAccountSubscribe, prepareClaimCancel, prepareSmartAccountBuyRule, prepareSmartAccountCancelRule, signAndSubmitPrepared, toBatchCalls,
   IDENTITY_RESTRICTED_CODE, sponsorErrorCode,
   type SmartAccountPreparedBatch,
 } from '../smartAccount';
@@ -175,4 +175,53 @@ it('treats active and cancel-pending as open; expired is not a subscriber but st
   expect(['expired', 'none', 'inherited', undefined, null].some((s) => isSmartAccountOpen(s as any))).toBe(false);
   expect(['active', 'cancel_pending', 'expired'].every(hasOwnSmartAccount)).toBe(true);
   expect(['none', 'inherited', undefined, null].some((s) => hasOwnSmartAccount(s as any))).toBe(false);
+});
+
+describe('rule prepares carry the Confío IA+ proposal step', () => {
+  const opName = (call: any[]) => call[0].mutation.definitions[0].name.value;
+  const unknownArg = () => Object.assign(new Error('Unknown argument "proposalMessageId" on field "prepareSmartAccountBuyRule".'),
+    { graphQLErrors: [] });
+
+  it('sends no proposal variables when the step is not tagged', async () => {
+    mockMutate.mockResolvedValue({ data: { prepareSmartAccountBuyRule: batch() } });
+    await prepareSmartAccountBuyRule({ ruleId: null, assetKey: 'stock:SPYon', amountUsd: '10.00', frequency: 'monthly' });
+    expect(opName(mockMutate.mock.calls[0])).toBe('PrepareSmartAccountBuyRule');
+    expect(mockMutate.mock.calls[0][0].variables).toEqual({
+      ruleId: null, assetKey: 'stock:SPYon', amountUsd: '10.00', frequency: 'monthly' });
+  });
+
+  it('sends proposalMessageId + proposalStep when tagged', async () => {
+    mockMutate.mockResolvedValue({ data: { prepareSmartAccountBuyRule: batch() } });
+    const out = await prepareSmartAccountBuyRule({ ruleId: null, assetKey: 'stock:SPYon', amountUsd: '10.00', frequency: 'monthly',
+      firstRunAt: '2026-12-01T10:00:00+00:00', proposalMessageId: '42', proposalStep: 1 });
+    expect(out.success).toBe(true);
+    expect(mockMutate).toHaveBeenCalledTimes(1);
+    expect(opName(mockMutate.mock.calls[0])).toBe('PrepareSmartAccountBuyRuleAtProposal');
+    expect(mockMutate.mock.calls[0][0].variables).toEqual({ ruleId: null, assetKey: 'stock:SPYon', amountUsd: '10.00',
+      frequency: 'monthly', firstRunAt: '2026-12-01T10:00:00+00:00', proposalMessageId: '42', proposalStep: 1 });
+  });
+
+  it('an older server rejecting the arguments: retried once without them', async () => {
+    mockMutate.mockRejectedValueOnce(unknownArg()).mockResolvedValueOnce({ data: { prepareSmartAccountBuyRule: batch() } });
+    const out = await prepareSmartAccountBuyRule({ ruleId: 'r1', assetKey: 'stock:SPYon', amountUsd: '10.00', frequency: 'monthly',
+      proposalMessageId: '42', proposalStep: 0 });
+    expect(out.success).toBe(true);
+    expect(mockMutate).toHaveBeenCalledTimes(2);
+    expect(opName(mockMutate.mock.calls[1])).toBe('PrepareSmartAccountBuyRule');
+    expect(mockMutate.mock.calls[1][0].variables).not.toHaveProperty('proposalStep');
+  });
+
+  it('a stop step: tagged, and retried untagged on an older server; a network failure is not retried', async () => {
+    mockMutate.mockRejectedValueOnce(unknownArg()).mockResolvedValueOnce({ data: { prepareSmartAccountCancelRule: batch() } });
+    const out = await prepareSmartAccountCancelRule('r1', { proposalMessageId: '42', proposalStep: 2 });
+    expect(out.success).toBe(true);
+    expect(opName(mockMutate.mock.calls[0])).toBe('PrepareSmartAccountCancelRuleProposal');
+    expect(mockMutate.mock.calls[0][0].variables).toEqual({ ruleId: 'r1', proposalMessageId: '42', proposalStep: 2 });
+    expect(mockMutate.mock.calls[1][0].variables).toEqual({ ruleId: 'r1' });
+    mockMutate.mockReset();
+    mockMutate.mockRejectedValue(new Error('Network request failed'));
+    const failed = await prepareSmartAccountCancelRule('r1', { proposalMessageId: '42', proposalStep: 2 });
+    expect(failed.errorCode).toBe('network');
+    expect(mockMutate).toHaveBeenCalledTimes(1);
+  });
 });

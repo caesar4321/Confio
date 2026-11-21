@@ -1,6 +1,7 @@
 import {
   assetTitle, centsToDecimal, daysLabel, daysUntil, dollarName, frequencyLabel, railLabel, ruleTitle,
-  toCents, typedCents, unitsForUsd, usd,
+  toCents, typedCents, unitsForUsd, usd, depositUnitsForUsd, mayFallShort,
+  clearRailLabels, railsPhrase, registerRailLabels,
 } from '../format';
 
 it('formats dollars with US$ and never invents a zero', () => {
@@ -56,4 +57,50 @@ it('writes a rule as what it does', () => {
   expect(ruleTitle({ ...base, kind: 'send', amountUsd: '50', payeeName: 'Ana' })).toBe('Enviar US$50.00 a Ana');
   expect(ruleTitle({ ...base, kind: 'payout', amountUsd: '20', payoutLabel: 'Bre-B · Ana P.' })).toBe('Pagar US$20.00 a Bre-B · Ana P.');
   expect(ruleTitle({ ...base, kind: 'buy', amountUsd: '10', assetName: 'Apple' })).toBe('Invertir US$10.00 en Apple');
+});
+
+describe('a Confío Dollar+ first deposit at the minimum', () => {
+  // 149.99 rounded half-even from a value a fraction of a cent lower.
+  const plus = { key: 'cusd_plus', units: '1000000000000000000000', valueUsd: '1000.00' };
+  it('asks for one cent more than the minimum, so rounding never leaves it short', () => {
+    expect(depositUnitsForUsd(14999n, 14999n, plus)).toBe(unitsForUsd(15000n, plus));
+    // Above the minimum the typed amount is used as is.
+    expect(depositUnitsForUsd(20000n, 14999n, plus)).toBe(unitsForUsd(20000n, plus));
+    // Confío Dollar (1:1) needs no margin.
+    expect(depositUnitsForUsd(14999n, 14999n, { ...plus, key: 'cusd' })).toBe(unitsForUsd(14999n, plus));
+  });
+  it('caps at the whole position', () => {
+    expect(depositUnitsForUsd(14999n, 14999n, { ...plus, valueUsd: '149.99' })).toBe('max');
+  });
+  it('flags a whole balance that only rounds to the minimum', () => {
+    expect(mayFallShort(14999n, { key: 'cusd_plus', valueUsd: '149.99' })).toBe(true);
+    expect(mayFallShort(14999n, { key: 'cusd_plus', valueUsd: '150.00' })).toBe(false);
+    expect(mayFallShort(14999n, { key: 'cusd', valueUsd: '149.99' })).toBe(false);
+    expect(mayFallShort(14999n, null)).toBe(false);
+  });
+});
+
+describe('payout rail names', () => {
+  afterEach(() => clearRailLabels());
+
+  it('uses the server names first, then the built-in table, never the raw key', () => {
+    expect(railLabel('ar_cvu')).toBe('Cuenta bancaria');
+    expect(railLabel('br_pix')).toBe('Pix');
+    registerRailLabels([{ key: 'ar_cvu', label: 'CVU o CBU' }, { key: 'co_breb', label: 'Llave Bre-B' }]);
+    expect(railLabel('ar_cvu')).toBe('CVU o CBU');
+    expect(railLabel('co_breb')).toBe('Llave Bre-B');
+    expect(railLabel(null)).toBe('');
+    expect(ruleTitle({
+      kind: 'payout', amountUsd: '10', payeeName: null, payeeHandle: null,
+      payoutLabel: null, payoutRail: 'pe_cci', assetName: null, assetSymbol: null,
+    } as any)).not.toContain('pe_cci');
+  });
+
+  it('builds sentences from the same names', () => {
+    expect(railsPhrase(['br_pix', 'mx_clabe'])).toBe('Pix o CLABE');
+    expect(railsPhrase(['br_pix', 'mx_clabe', 'co_breb'], ',')).toBe('Pix, CLABE, Bre-B');
+    expect(railsPhrase(['pe_cci'])).toBe('bancaria');
+    registerRailLabels([{ key: 'ar_cvu', label: 'CVU o CBU' }]);
+    expect(railsPhrase(['br_pix', 'ar_cvu'], 'y')).toBe('Pix y CVU o CBU');
+  });
 });

@@ -32,13 +32,21 @@ export interface SignFlowCopy {
   successLabel?: string;
 }
 
-export function SignFlowSheet({ flow, copy = {}, onDone, onUnknownDone }: {
+export interface SignFlowFailedAction {
+  label: string;
+  onPress: () => void;
+  testID?: string;
+}
+
+export function SignFlowSheet({ flow, copy = {}, onDone, onUnknownDone, failedAction }: {
   flow: SignFlow;
   copy?: SignFlowCopy;
   /** After the user closes the success state. */
   onDone?: () => void;
   /** After the user closes the "confirming" state. Defaults to onDone. */
   onUnknownDone?: () => void;
+  /** A way forward shown on the failed state (the sheet closes first). */
+  failedAction?: SignFlowFailedAction | null;
 }) {
   const { state, confirm, reset } = flow;
   const { phase } = state;
@@ -131,6 +139,14 @@ export function SignFlowSheet({ flow, copy = {}, onDone, onUnknownDone }: {
             <View style={[styles.badge, styles.badgeFail]}><Icon name="x" size={28} color={SA.muted} /></View>
             <Text style={styles.title}>No se realizó</Text>
             <Text style={styles.body}>{state.error}</Text>
+            {failedAction ? (
+              <ActionButton
+                label={failedAction.label}
+                onPress={() => { reset(); failedAction.onPress(); }}
+                style={styles.wide}
+                testID={failedAction.testID ?? 'sign-failed-action'}
+              />
+            ) : null}
             <ActionButton label="Cerrar" variant="secondary" onPress={close} style={styles.wide} testID="sign-failed-close" />
           </View>
         ) : null}

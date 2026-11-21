@@ -11,6 +11,12 @@
 //              amount follows the day's rate, and the screen says so.
 //   buy     -> a stock, or bitcoin / gold where this build and the server
 //              both offer them (iOS builds compile without those surfaces).
+//
+// Confío IA+ (spec decision 34) opens this screen with a proposal: `prefill`
+// fills the form (every field stays editable), `stop` opens the stop
+// confirmation of `ruleId`, and `next` holds the proposal's further steps,
+// opened one after another once this one is signed. Params are data from the
+// server, never authority: the prepare re-validates everything.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -26,11 +32,12 @@ import {
 } from '../components/smartAccount/kit';
 import { SignFlowSheet } from '../components/smartAccount/SignFlowSheet';
 import { useSignFlow } from '../components/smartAccount/useSignFlow';
+import { useRailLabels } from '../components/smartAccount/useRailLabels';
 import { useSmartRead } from '../components/smartAccount/useSmartRead';
 import { HELP_RULES } from '../components/smartAccount/help';
 import { SA, HIT } from '../components/smartAccount/tokens';
 import {
-  centsToDecimal, centsToInput, cryptoBuyAllowed, frequencyEvery, frequencyLabel, railLabel, shortDate, toCents, typedCents, usd,
+  centsToDecimal, centsToInput, cryptoBuyAllowed, frequencyEvery, frequencyLabel, railLabel, railsPhrase, shortDate, toCents, typedCents, usd,
 } from '../components/smartAccount/format';
 import {
   SMART_FREQUENCIES, fetchSmartAccount, fetchSmartAccountBuyableAssets, fetchSmartAccountOffer,
@@ -39,6 +46,7 @@ import {
   type SmartAccountBuyableAsset, type SmartAccountPayoutMethod, type SmartFrequency, type SmartRuleKind,
 } from '../services/smartAccount';
 import type { MainStackParamList } from '../types/navigation';
+import { DEX_TRADING_UI_ENABLED } from '../config/features';
 
 const TITLES: Record<SmartRuleKind, string> = {
   send: 'Enviar a alguien',
@@ -51,6 +59,12 @@ const ASSET_ROW = 68;
 // Bitcoin and gold are offered only where the build AND the server say so
 // (shared with the offer, which must not promise them either).
 export { cryptoBuyAllowed };
+
+// Why a bitcoin / gold buy cannot be signed. A build without those surfaces
+// (iOS) never names them; otherwise the server / country gate says so.
+export const cryptoBlockedMessage = (dexUi: boolean = DEX_TRADING_UI_ENABLED): string => (dexUi
+  ? 'Oro y Bitcoin no están disponibles para tu cuenta. Elige otra inversión.'
+  : 'Esa inversión no está disponible en esta versión de la app. Elige otra.');
 
 function BuyAssetPicker({ visible, allowCrypto, onClose, onPick }: {
   visible: boolean; allowCrypto: boolean; onClose: () => void; onPick: (asset: SmartAccountBuyableAsset) => void;
@@ -208,26 +222,74 @@ function BuyAssetPicker({ visible, allowCrypto, onClose, onPick }: {
   );
 }
 
+// Opening this screen while it is already focused (another Confío IA+
+// proposal, the next rule) only swaps its params. Every new params object is
+// a new proposal or rule: it gets a fresh form, never the previous one's
+// person, amount, pending step or stop confirmation.
 export function SmartAccountRuleEditScreen() {
+  const route = useRoute<RouteProp<MainStackParamList, 'SmartAccountRuleEdit'>>();
+  const params = route.params;
+  const generation = useRef<{ params: unknown; n: number }>({ params, n: 0 });
+  if (generation.current.params !== params) {
+    generation.current = { params, n: generation.current.n + 1 };
+  }
+  return <RuleEditForm key={generation.current.n} />;
+}
+
+function RuleEditForm() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<MainStackParamList, 'SmartAccountRuleEdit'>>();
   const ruleId = route.params?.ruleId ?? null;
+  const prefill = route.params?.prefill;
+  const nextSteps = route.params?.next ?? [];
 
   const account = useSmartRead(fetchSmartAccount);
   const offer = useSmartRead(fetchSmartAccountOffer);
+  useRailLabels();
   const existing = ruleId ? (account.data?.rules ?? []).find((r) => String(r.id) === ruleId) ?? null : null;
   const kind = ((existing?.kind ?? route.params?.kind ?? 'send') as SmartRuleKind);
   const methods = useSmartRead(fetchSmartAccountPayoutMethods, { skip: kind !== 'payout' });
   const flow = useSignFlow();
   const [stopping, setStopping] = useState(false);
 
-  const [person, setPerson] = useState<PickedPerson | null>(null);
+  const [person, setPerson] = useState<PickedPerson | null>(() => (prefill?.payeeHandle
+    ? { handle: prefill.payeeHandle, name: prefill.payeeName || `@${prefill.payeeHandle.replace(/^@/, '')}` }
+    : null));
   const [method, setMethod] = useState<SmartAccountPayoutMethod | null>(null);
-  const [asset, setAsset] = useState<SmartAccountBuyableAsset | null>(null);
-  const [amount, setAmount] = useState<string | null>(null);
-  const [frequency, setFrequency] = useState<SmartFrequency | null>(null);
+  const [asset, setAsset] = useState<SmartAccountBuyableAsset | null>(() => (prefill?.assetKey
+    ? {
+      assetKey: prefill.assetKey,
+      kind: prefill.assetKey.startsWith('crypto:') ? 'crypto' : 'stock',
+      symbol: prefill.assetName || prefill.assetKey.replace(/^[a-z]+:/, ''),
+      name: prefill.assetName || prefill.assetKey.replace(/^[a-z]+:/, ''),
+    }
+    : null));
+  const [amount, setAmount] = useState<string | null>(() => {
+    const c = toCents(prefill?.amountUsd);
+    return c !== null ? centsToInput(c) : null;
+  });
+  const [frequency, setFrequency] = useState<SmartFrequency | null>(prefill?.frequency ?? null);
+  const [firstRunAt, setFirstRunAt] = useState<string | null>(prefill?.firstRunAt ?? null);
+  const stopOpened = useRef(false);
   const [picker, setPicker] = useState(false);
   const [touched, setTouched] = useState(false);
+  // A step of a multi-step proposal whose outcome is still unknown: the rest
+  // of the plan must not open on top of it (it may not have gone through).
+  const [pendingStep, setPendingStepState] = useState(false);
+  const pendingRef = useRef(false);
+  const setPendingStep = (v: boolean) => {
+    pendingRef.current = v;
+    setPendingStepState(v);
+  };
+  // A stop proposal is signed with "Detener esta regla", never as an update.
+  const stopProposal = !!route.params?.stop;
+  // The Confío IA+ proposal step this screen signs (message id + stepIndex):
+  // sent with this step's own prepare only, never when unset.
+  const proposalMessageId = route.params?.proposalMessageId;
+  const proposalStep = route.params?.proposalStep;
+  const proposalTag = proposalMessageId && typeof proposalStep === 'number'
+    ? { proposalMessageId, proposalStep }
+    : null;
 
   const rails = offer.data?.payoutRails ?? [];
   const usableMethods = useMemo(
@@ -235,6 +297,35 @@ export function SmartAccountRuleEditScreen() {
     [methods.data, rails],
   );
   const allowCrypto = cryptoBuyAllowed(offer.data?.investingCryptoEnabled);
+  // A bitcoin / gold buy where this build or the server does not offer them:
+  // never signed; the owner picks another investment. Either a proposed /
+  // picked asset, or (none picked) the existing rule's own crypto asset, e.g.
+  // opened from the Rules list or an amount-only update proposal.
+  const cryptoBlocked = kind === 'buy' && !allowCrypto && (asset
+    ? asset.kind === 'crypto'
+    : !!existing?.assetKey?.startsWith('crypto:'));
+  const pickedAsset = cryptoBlocked ? null : asset;
+
+  // A proposed bank account is picked once the saved list is known (only one
+  // that is the viewer's and usable here).
+  useEffect(() => {
+    if (!method && prefill?.payoutMethodId) {
+      const found = usableMethods.find((m) => m.payoutMethodId === prefill.payoutMethodId && m.available);
+      if (found) {
+        setMethod(found);
+      }
+    }
+  }, [method, prefill?.payoutMethodId, usableMethods]);
+
+  // A proposed bank account must be the one signed, never silently swapped
+  // for the rule's current one. Once the saved list is known and it is not
+  // there (deleted, rail off), the owner picks a destination explicitly.
+  const proposedMethodId = kind === 'payout' ? prefill?.payoutMethodId : undefined;
+  const proposedGone = !!proposedMethodId && !method && !!methods.data && !!offer.data
+    && !usableMethods.some((m) => m.payoutMethodId === proposedMethodId && m.available);
+  // The proposal's sentence names its account: shown only while that account
+  // is the one selected.
+  const proposalMatchesForm = !cryptoBlocked && (!proposedMethodId || method?.payoutMethodId === proposedMethodId);
 
   // An existing rule fills the form until the user changes a field.
   const destination: { label: string; sub?: string } | null = (() => {
@@ -245,10 +336,11 @@ export function SmartAccountRuleEditScreen() {
     }
     if (kind === 'payout') {
       if (method) { return { label: method.label, sub: `${railLabel(method.rail)} · ${method.holderName}` }; }
-      if (existing?.payoutMethodId) { return { label: existing.payoutLabel || railLabel(existing.payoutRail) }; }
+      if (existing?.payoutMethodId && !proposedMethodId) { return { label: existing.payoutLabel || railLabel(existing.payoutRail) }; }
       return null;
     }
-    if (asset) { return { label: asset.name, sub: asset.symbol }; }
+    if (cryptoBlocked) { return null; }
+    if (pickedAsset) { return { label: pickedAsset.name, sub: pickedAsset.symbol }; }
     if (existing?.assetKey) { return { label: existing.assetName || existing.assetSymbol || '' , sub: existing.assetSymbol || undefined }; }
     return null;
   })();
@@ -257,8 +349,14 @@ export function SmartAccountRuleEditScreen() {
   const text = amount ?? (existingCents !== null ? centsToInput(existingCents) : '');
   const cents = typedCents(text);
   const freq = (frequency ?? (existing?.frequency as SmartFrequency | undefined) ?? 'monthly');
+  // A daily rule has no start day (the server refuses one).
+  const startAt = freq === 'daily' ? null : firstRunAt;
   const amountError = cents === null || cents <= 0n ? 'Escribe un monto.' : '';
-  const destinationError = destination ? '' : 'Elige un destino.';
+  const destinationError = cryptoBlocked
+    ? cryptoBlockedMessage()
+    : proposedGone
+    ? 'Esa cuenta ya no está disponible. Elige un destino.'
+    : destination ? '' : 'Elige un destino.';
   const amountUsd = cents !== null ? centsToDecimal(cents) : '';
 
   const sentence = destination && cents !== null && cents > 0n
@@ -269,7 +367,7 @@ export function SmartAccountRuleEditScreen() {
 
   const onReview = () => {
     setTouched(true);
-    if (amountError || destinationError || cents === null) {
+    if (pendingRef.current || stopProposal || amountError || destinationError || cents === null) {
       return;
     }
     setStopping(false);
@@ -280,28 +378,99 @@ export function SmartAccountRuleEditScreen() {
       prepare: () => {
         if (kind === 'send') {
           return prepareSmartAccountSendRule({
-            ruleId, payeeHandle: person?.handle ?? existing?.payeeHandle ?? '', amountUsd, frequency: freq,
+            ruleId, payeeHandle: person?.handle ?? existing?.payeeHandle ?? '', amountUsd, frequency: freq, firstRunAt: startAt,
+            ...proposalTag,
           });
         }
         if (kind === 'payout') {
           return prepareSmartAccountPayoutRule({
             ruleId, payoutMethodId: method?.payoutMethodId ?? existing?.payoutMethodId ?? '', amountUsd, frequency: freq,
+            firstRunAt: startAt, ...proposalTag,
           });
         }
         return prepareSmartAccountBuyRule({
-          ruleId, assetKey: asset?.assetKey ?? existing?.assetKey ?? '', amountUsd, frequency: freq,
+          ruleId, assetKey: pickedAsset?.assetKey ?? existing?.assetKey ?? '', amountUsd, frequency: freq, firstRunAt: startAt,
+          ...proposalTag,
         });
       },
     });
   };
 
   const onStop = () => {
-    if (!ruleId) {
+    // A step whose outcome is unknown: nothing else is signed on top of it.
+    if (!ruleId || pendingRef.current) {
       return;
     }
     setStopping(true);
-    void flow.start({ prepare: () => prepareSmartAccountCancelRule(ruleId) });
+    // Tagged only when this step IS the proposal's stop (not a manual
+    // "Detener esta regla" on an update step).
+    const stopTag = stopProposal ? proposalTag : null;
+    void flow.start({
+      prepare: () => (stopTag ? prepareSmartAccountCancelRule(ruleId, stopTag) : prepareSmartAccountCancelRule(ruleId)),
+    });
   };
+
+  // A "detener / pausar" proposal opens the stop confirmation once the rule is known.
+  useEffect(() => {
+    if (route.params?.stop && existing && !stopOpened.current) {
+      stopOpened.current = true;
+      onStop();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.stop, existing]);
+
+  // The proposal's next step, carrying its own params (and proposal tags).
+  const openNextStep = () => {
+    const [following, ...rest] = nextSteps;
+    navigation.replace('SmartAccountRuleEdit', rest.length ? { ...following, next: rest } : following);
+  };
+
+  // After a signed step, the proposal's next step (if any), else back.
+  const afterSigned = () => {
+    if (pendingRef.current) {
+      return;  // the rest of the plan never opens over an unconfirmed step
+    }
+    if (nextSteps.length > 0) {
+      openNextStep();
+      return;
+    }
+    navigation.goBack();
+  };
+
+  // This step's rule is still confirming (signed earlier, not on chain yet):
+  // the screen turns into the pending-step notice, so nothing else of the
+  // plan is signed on top of it.
+  const duplicatePending = flow.state.phase === 'failed' && flow.state.errorCode === 'rule_duplicate_pending';
+  useEffect(() => {
+    if (duplicatePending && !pendingRef.current) {
+      setPendingStep(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duplicatePending]);
+
+  // This step was refused as a duplicate of an ACTIVE rule: nothing to sign
+  // here, so the owner moves on with the plan, or to their rules when this
+  // was the last step. Never over an unconfirmed step, and only for this one
+  // refusal.
+  const duplicateAction = duplicatePending
+    ? { label: 'Ir a tus reglas', onPress: () => navigation.popTo('SmartAccountRules'), testID: 'rule-duplicate-pending-rules' }
+    : flow.state.phase === 'failed' && flow.state.errorCode === 'rule_duplicate' && !pendingStep
+    ? nextSteps.length > 0
+      ? {
+        label: 'Seguir con el plan',
+        onPress: () => { if (!pendingRef.current) { openNextStep(); } },
+        testID: 'rule-duplicate-continue',
+      }
+      : { label: 'Ir a tus reglas', onPress: () => navigation.popTo('SmartAccountRules'), testID: 'rule-duplicate-rules' }
+    : null;
+
+  // An unknown outcome on a step with more to come: stay here, never open the
+  // next step on top of one that may not have gone through.
+  const afterUnknown = nextSteps.length > 0 ? () => setPendingStep(true) : undefined;
+
+  // A rule saved from an alert's prepared purchase (or any proposed buy): it
+  // repeats, so say so plainly.
+  const proposedBuy = kind === 'buy' && !existing && !!route.params?.proposal;
 
   const loading = (!!ruleId && account.loading && !account.data) || (offer.loading && !offer.data);
   const failed = (!!ruleId && account.failed && !account.data) || (offer.failed && !offer.data);
@@ -314,7 +483,7 @@ export function SmartAccountRuleEditScreen() {
     <SmartScreen
       title={existing ? 'Tu regla' : TITLES[kind]}
       help={HELP_RULES}
-      footer={!loading && !failed && !missingRule && !noMethods ? (
+      footer={!loading && !failed && !missingRule && !noMethods && !pendingStep && !stopProposal && !cryptoBlocked ? (
         <ActionButton label="Revisar" onPress={onReview} testID="rule-review" />
       ) : undefined}
     >
@@ -327,11 +496,33 @@ export function SmartAccountRuleEditScreen() {
           icon="home"
           title="Aún no guardaste una cuenta bancaria"
           body={rails.length > 0
-            ? `Guarda primero una cuenta ${rails.map(railLabel).join(' o ')} desde Enviar. Después podrás pagarle de forma automática.`
+            ? `Guarda primero una cuenta ${railsPhrase(rails)} desde Enviar. Después podrás pagarle de forma automática.`
             : 'Los pagos automáticos a cuenta bancaria todavía no están disponibles para ti.'}
         />
       ) : (
         <View style={kitStyles.pad}>
+          {pendingStep ? (
+            <Notice
+              icon="clock"
+              tone="notice"
+              title="Este paso todavía se está confirmando"
+              body="No lo repitas. Cuando aparezca en tus reglas, vuelve a abrir la propuesta de Confío IA+ para seguir con el resto del plan."
+              actionLabel="Ir a tus reglas"
+              onPress={() => navigation.popTo('SmartAccountRules')}
+              style={styles.proposal}
+              testID="rule-step-pending"
+            />
+          ) : route.params?.proposal ? (
+            <Notice
+              icon="message-circle"
+              title={nextSteps.length > 0 ? `Propuesta de Confío IA+ · quedan ${nextSteps.length} más` : 'Propuesta de Confío IA+'}
+              body={proposalMatchesForm
+                ? `${route.params.proposal} Revisa y cambia lo que quieras: nada cambia hasta que firmes.`
+                : 'Revisa y cambia lo que quieras: nada cambia hasta que firmes.'}
+              style={styles.proposal}
+              testID="rule-proposal"
+            />
+          ) : null}
           {existing && existing.nextRunAt && existing.active ? (
             <Notice icon="calendar" body={`Próxima ejecución: ${shortDate(existing.nextRunAt)}`} style={styles.next} />
           ) : null}
@@ -348,7 +539,9 @@ export function SmartAccountRuleEditScreen() {
               testID="rule-destination"
             />
           </Card>
-          {touched && destinationError ? <Text style={styles.fieldError}>{destinationError}</Text> : null}
+          {(touched || proposedGone || cryptoBlocked) && destinationError ? (
+            <Text style={styles.fieldError} testID="rule-destination-error">{destinationError}</Text>
+          ) : null}
 
           <SectionTitle>¿Cuánto?</SectionTitle>
           <AmountField
@@ -367,6 +560,17 @@ export function SmartAccountRuleEditScreen() {
             ))}
           </View>
 
+          {startAt ? (
+            <Notice
+              icon="calendar"
+              body={`Primera ejecución: ${shortDate(startAt)}`}
+              actionLabel="Quitar"
+              onPress={() => setFirstRunAt(null)}
+              style={styles.gap}
+              testID="rule-first-run"
+            />
+          ) : null}
+
           {kind === 'payout' ? (
             <Notice
               icon="info"
@@ -383,7 +587,7 @@ export function SmartAccountRuleEditScreen() {
             </Card>
           ) : null}
 
-          {existing ? (
+          {existing && !pendingStep ? (
             <ActionButton label="Detener esta regla" variant="danger" onPress={onStop} style={styles.stop} testID="rule-stop" />
           ) : null}
         </View>
@@ -404,7 +608,7 @@ export function SmartAccountRuleEditScreen() {
           ) : usableMethods.length === 0 ? (
             <Text style={kitStyles.small} testID="payout-no-methods">
               {rails.length > 0
-                ? `Guarda primero una cuenta ${rails.map(railLabel).join(' o ')} desde Enviar. Después podrás elegirla aquí.`
+                ? `Guarda primero una cuenta ${railsPhrase(rails)} desde Enviar. Después podrás elegirla aquí.`
                 : 'Los pagos automáticos a cuenta bancaria todavía no están disponibles para ti.'}
             </Text>
           ) : usableMethods.map((m, i) => (
@@ -443,9 +647,13 @@ export function SmartAccountRuleEditScreen() {
           confirmNote: 'Confío solo puede ejecutar esta regla tal como la firmas. Puedes detenerla cuando quieras.',
           signingMessage: 'Guardando tu regla…',
           successTitle: existing ? 'Regla actualizada' : 'Regla creada',
-          successBody: 'Te avisamos cada vez que se ejecute.',
+          successBody: proposedBuy
+            ? `Quedó guardada como regla: se repite ${frequencyEvery(freq)} hasta que la detengas. Si solo querías una compra, detenla después de la primera.`
+            : 'Te avisamos cada vez que se ejecute.',
         }}
-        onDone={() => navigation.goBack()}
+        onDone={afterSigned}
+        onUnknownDone={afterUnknown}
+        failedAction={duplicateAction}
       />
     </SmartScreen>
   );
@@ -453,6 +661,7 @@ export function SmartAccountRuleEditScreen() {
 
 const styles = StyleSheet.create({
   next: { marginBottom: -8 },
+  proposal: { marginBottom: 8 },
   gap: { marginTop: 12 },
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
   fieldError: { fontSize: 13, color: SA.noticeText, marginTop: 8, marginLeft: 4 },

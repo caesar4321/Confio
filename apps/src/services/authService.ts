@@ -2751,7 +2751,15 @@ export class AuthService {
 
         // Clear stored Algorand addresses - pass accounts for efficient cleanup
         const { clearAllStoredAlgorandAddresses } = await import('../utils/clearStoredAddresses');
-        await clearAllStoredAlgorandAddresses(accounts);
+        // StoredAccount names these type/index; a Cuenta inteligente has no
+        // address of its own to clear.
+        await clearAllStoredAlgorandAddresses(accounts
+          .filter((a) => a.type === 'personal' || a.type === 'business')
+          .map((a) => ({
+            accountType: a.type as 'personal' | 'business',
+            accountIndex: a.index,
+            business: a.business?.id ? { id: String(a.business.id) } : undefined,
+          })));
       } catch (error) {
         console.error('Error clearing Algorand wallet:', error);
         // Continue with sign out even if Algorand clearing fails

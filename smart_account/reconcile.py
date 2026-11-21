@@ -641,6 +641,7 @@ def _rule_from_chain(account, onchain_id: int, rule: SmartAccountRule | None, dr
     # often the very row being written (a draft, or the row keeping its id).
     carried = None if source is None else {
         'payout_method': source.payout_method, 'payout_ref': source.payout_ref, 'payout_rail': source.payout_rail,
+        'pagomovil_destination': source.pagomovil_destination,
         'standing_authorization': source.standing_authorization, 'amount': source.amount,
         'frequency': source.frequency}
     if rule is None:
@@ -665,6 +666,7 @@ def _rule_from_chain(account, onchain_id: int, rule: SmartAccountRule | None, dr
     # when it describes the SAME rule that is on chain.
     rule.payee_user = None
     rule.payout_method = None
+    rule.pagomovil_destination = None
     rule.payout_rail = ''
     rule.standing_authorization = None
     rule.asset_key = ''
@@ -682,10 +684,12 @@ def _rule_from_chain(account, onchain_id: int, rule: SmartAccountRule | None, dr
             rule.active = False
             rule.deactivated_reason = 'no_standing_authorization'
     elif rule.kind == 'payout':
-        if (carried is not None and carried['payout_method'] is not None
+        if (carried is not None
+                and (carried['payout_method'] is not None or carried['pagomovil_destination'] is not None)
                 and carried['payout_ref'] == rule.payout_ref
                 and carried['amount'] == rule.amount and carried['frequency'] == rule.frequency):
             rule.payout_method = carried['payout_method']
+            rule.pagomovil_destination = carried['pagomovil_destination']
             rule.payout_rail = carried['payout_rail']
             rule.standing_authorization = carried['standing_authorization']
         else:
@@ -737,7 +741,8 @@ def _rule_updated(account, event):
     keep_slot = existing.scheduled_for if existing is not None and existing.state == 'onchain' else None
     if existing is not None and draft is not None:
         # Carry the draft's off-chain attributes onto the row that keeps the id.
-        for name in ('payout_method', 'payout_ref', 'payout_rail', 'standing_authorization', 'amount', 'frequency'):
+        for name in ('payout_method', 'pagomovil_destination', 'payout_ref', 'payout_rail', 'standing_authorization',
+                     'amount', 'frequency'):
             setattr(existing, name, getattr(draft, name))
         rule = _rule_from_chain(account, onchain_id, existing, existing, keep_slot=keep_slot)
         draft.replaces = None
@@ -797,23 +802,113 @@ def _rule_executed(account, event):
     return [_after]
 
 
+# A payout the chain may still show paid: not yet seen sent, or given up.
+_UNSENT_PAYOUT = ('reserving', 'prepared', 'pending', 'cancelled')
+
+
+def _unmatched_payout(account, rule, event):
+    """A PayoutSent whose transaction is not a run's recorded hash (the
+    relayer's hash was lost or replaced, or RuleExecuted made a bare run for
+    it). Matched by the bridge address the contract paid: the rule's one
+    payout not yet seen sent whose deposit_address is that destination and
+    whose run has no hash or this one: a run already holding another
+    transaction's hash is that transaction's payout (an open one before a
+    given-up one: Relay may reuse one route per source).
+    The hash is attached to that payout's run so ramps can prove it. Anything
+    else is ops', never silently dropped."""
+    destination = str(event.args.get('destination') or '').lower()
+    payout = None
+    if rule is not None and destination:
+        candidates = list(SmartAccountPayout.objects.select_related('rule_run').filter(
+            rule_run__rule=rule, deposit_address__iexact=destination, status__in=_UNSENT_PAYOUT))
+        # A run already carrying ANOTHER transaction's hash is that
+        # transaction's payout (B prepared and submitted while A's late
+        # PayoutSent arrives): never overwrite it with this event's hash.
+        candidates = [p for p in candidates
+                      if (p.rule_run.tx_hash or '').lower() in ('', event.tx_hash.lower())]
+        for group in ([p for p in candidates if p.status != 'cancelled'],
+                      [p for p in candidates if p.status == 'cancelled']):
+            if group:
+                payout = group[0] if len(group) == 1 else None
+                break
+    if payout is None:
+        from config.ops_alerts import send_ops_alert
+        send_ops_alert(f'Cuenta inteligente: PayoutSent sin pago que le corresponda (cuenta {account.pk}, regla '
+                       f'{_args_id(event)}, destino {destination or "?"}, tx {event.tx_hash}). Revisar a mano.',
+                       dedupe_key=f'smart_payout_unmatched_{event.tx_hash}', dedupe_seconds=86400)
+        return None
+    run = payout.rule_run
+    if (run.tx_hash or '').lower() != event.tx_hash.lower():
+        logger.warning('PayoutSent %s matched payout %s by destination (run hash %r)',
+                       event.tx_hash, payout.pk, run.tx_hash)
+        SmartAccountRuleRun.objects.filter(pk=run.pk).update(tx_hash=event.tx_hash, updated_at=timezone.now())
+        run.tx_hash = event.tx_hash
+    return payout
+
+
+def _args_id(event):
+    try:
+        return int(event.args.get('id'))
+    except (TypeError, ValueError):
+        return '?'
+
+
 def _payout_sent(account, event):
     args = event.args
     rule = SmartAccountRule.all_objects.filter(smart_account=account, onchain_id=int(args['id'])).first()
     run = rule.runs.filter(tx_hash__iexact=event.tx_hash).first() if rule is not None else None
-    if run is None:
-        return []
-    payout = SmartAccountPayout.objects.filter(rule_run=run).first()
+    payout = SmartAccountPayout.objects.filter(rule_run=run).first() if run is not None else None
     if payout is None:
-        return []
+        payout = _unmatched_payout(account, rule, event)
+        if payout is None:
+            return []
+        run = payout.rule_run
     if payout.deposit_address and payout.deposit_address.lower() != args['destination']:
         from config.ops_alerts import send_ops_alert
         send_ops_alert(f'Cuenta inteligente: PayoutSent a {args["destination"]} no coincide con el puente '
                        f'esperado (run {run.pk})', dedupe_key=f'smart_payout_dest_{run.pk}', dedupe_seconds=86400)
     payout.usdt_amount = str(args['usdtOut'])
-    payout.status = 'onchain_sent'
+    # 'cancelled' too: a payout given up (its order closed) that the chain
+    # shows paid after all is on its way, and the mirror follows its ramp.
+    revived = payout.status == 'cancelled'
+    if payout.status in ('reserving', 'prepared', 'pending', 'cancelled'):
+        payout.status = 'onchain_sent'
     payout.save(update_fields=['usdt_amount', 'status', 'updated_at'])
-    return []
+    if payout.ramp_id is None:
+        return []
+    _check_ramp_amount(payout, run, args)
+    from . import payouts
+    payout_pk, tx_hash = payout.pk, event.tx_hash
+    effects = []
+    if revived:
+        # The owner was told this run did not happen: tell them it left.
+        effects.append(lambda: notifications.safe(notifications.payout_resumed, run))
+    # Pago Móvil: ramps proves this funding and pays the beneficiary.
+    effects.append(lambda: payouts.after_payout_sent(payout_pk, tx_hash))
+    return effects
+
+
+def _check_ramp_amount(payout, run, args) -> None:
+    """The contract takes usdtOut >= minUsdtOut; ramps waits for the exact
+    deposit_wei it quoted the bridge for. Ops hear of any difference (more
+    is still proven from the reported hash and recorded as excess; less is
+    never proven)."""
+    from ramps.models import RampTransaction
+    try:
+        ramp = RampTransaction.objects.get(pk=payout.ramp_id)
+        expected = int(((ramp.metadata or {}).get('ve_send') or {}).get('deposit_wei'))
+        sent = int(args['usdtOut'])
+    except (RampTransaction.DoesNotExist, TypeError, ValueError, KeyError):
+        expected, sent = None, None
+    if expected is not None and sent == expected:
+        return
+    try:
+        from config.ops_alerts import send_ops_alert
+        send_ops_alert(f'Cuenta inteligente: PayoutSent usdtOut {args.get("usdtOut")} no coincide con el '
+                       f'depósito del envío ({expected}) (run {run.pk}, payout {payout.pk})',
+                       dedupe_key=f'smart_payout_amount_{run.pk}', dedupe_seconds=86400)
+    except Exception:  # noqa: BLE001
+        logger.exception('ops alert failed')
 
 
 def _beneficiary_named(account, event):

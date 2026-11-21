@@ -64,12 +64,41 @@ it('shows the six disclosures and does not continue without the acceptance', asy
   expect(nav.navigate).toHaveBeenCalledWith('SmartAccountFund', { plan: 'monthly' });
 });
 
-it('says why when the viewer cannot subscribe, with no way to continue', async () => {
+it('a viewer who cannot subscribe still sees the whole pitch, and why, next to a disabled Continuar', async () => {
   api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ canSubscribe: false, blockedReason: 'Verifica tu identidad primero.' })));
   await mount();
-  expect(text(tree)).toContain('Verifica tu identidad primero.');
-  expect(hasTappable(tree, 'offer-continue')).toBe(false);
+  const out = text(tree);
+  expect(out).toContain('Verifica tu identidad primero.');
+  expect(out).toContain('US$149.99');
+  expect(out).toContain('US$14.99');
+  ['Uno.', 'Dos.', 'Tres.', 'Cuatro.', 'Cinco.', 'Seis.'].forEach((d) => expect(out).toContain(d));
+  expect(out).not.toContain('Próximamente');
   expect(hasTappable(tree, 'accept-disclosures')).toBe(false);
+  expect(tree.root.findAll((n) => n.props.testID === 'offer-continue' && n.props.accessibilityState?.disabled === true).length)
+    .toBeGreaterThan(0);
+  await act(async () => { tappable(tree, 'offer-continue').props.onPress(); });
+  expect(nav.navigate).not.toHaveBeenCalled();
+});
+
+it('the server flag off: the real pitch with its prices, and the server reason', async () => {
+  api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({
+    available: true, canSubscribe: false,
+    blockedReason: 'Todavía no puedes abrir tu Cuenta inteligente.',
+  })));
+  await mount();
+  const out = text(tree);
+  expect(out).toContain('Elige tu plan');
+  expect(out).toContain('Antes de firmar');
+  expect(out).toContain('Todavía no puedes abrir tu Cuenta inteligente.');
+  expect(out).not.toContain('Te avisaremos');
+});
+
+it('without a reason from the server it says so plainly, never a waitlist', async () => {
+  api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ available: false, canSubscribe: false, blockedReason: null })));
+  await mount();
+  expect(text(tree)).toContain('Todavía no puedes abrir tu Cuenta inteligente.');
+  expect(text(tree)).toContain('US$149.99');
+  expect(text(tree)).not.toContain('Próximamente');
 });
 
 it('offers a retry when the offer cannot be loaded', async () => {
@@ -84,6 +113,12 @@ it('offers a retry when the offer cannot be loaded', async () => {
 
 it('sends someone who already has the account to it', async () => {
   api.fetchSmartAccountEntry.mockResolvedValue(ok({ status: account().status, contractAddress: '0xaa', totalUsd: '1' }));
+  await mount();
+  expect(nav.replace).toHaveBeenCalledWith('SmartAccountHome');
+});
+
+it('an account still opening is never offered a second subscribe', async () => {
+  api.fetchSmartAccountEntry.mockResolvedValue(ok({ status: 'opening', contractAddress: null, totalUsd: null }));
   await mount();
   expect(nav.replace).toHaveBeenCalledWith('SmartAccountHome');
 });

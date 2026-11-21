@@ -487,6 +487,20 @@ export const SMART_ACCOUNT_ENTRY = gql`
   }
 `;
 
+// Its own query: an older server without this field fails only this read,
+// never the offer itself.
+export const SMART_ACCOUNT_PAYOUT_RAIL_OPTIONS = gql`
+  query SmartAccountPayoutRailOptions {
+    smartAccountOffer { payoutRailOptions { key label hint } }
+  }
+`;
+
+export interface SmartAccountPayoutRailOption {
+  key: string;
+  label: string;
+  hint: string | null;
+}
+
 export const SMART_ACCOUNT_OFFER_GATE = gql`
   query SmartAccountOfferGate {
     smartAccountOffer { available canSubscribe }
@@ -627,6 +641,9 @@ export interface SmartAccountEntry {
 export const fetchSmartAccountEntry = (): Promise<SmartRead<SmartAccountEntry | null>> =>
   read(SMART_ACCOUNT_ENTRY, (d) => (d?.smartAccount ?? null) as SmartAccountEntry | null);
 
+export const fetchSmartAccountPayoutRailOptions = (): Promise<SmartRead<SmartAccountPayoutRailOption[]>> =>
+  read(SMART_ACCOUNT_PAYOUT_RAIL_OPTIONS, (d) => (d?.smartAccountOffer?.payoutRailOptions ?? []) as SmartAccountPayoutRailOption[]);
+
 export const fetchSmartAccountOfferGate = (): Promise<SmartRead<{ available: boolean; canSubscribe: boolean } | null>> =>
   read(SMART_ACCOUNT_OFFER_GATE, (d) => d?.smartAccountOffer ?? null);
 
@@ -739,35 +756,136 @@ const P_SEND_RULE = gql`
     prepareSmartAccountSendRule(ruleId: $ruleId, payeeHandle: $payeeHandle, amountUsd: $amountUsd, frequency: $frequency) { ${PREPARED_FIELDS} }
   }
 `;
-export const prepareSmartAccountSendRule = (params: {
-  ruleId?: string | null; payeeHandle: string; amountUsd: string; frequency: SmartFrequency | string;
-}) => prepare(P_SEND_RULE, 'prepareSmartAccountSendRule', { ...params, ruleId: params.ruleId ?? null });
+// With a first run the owner chose (a weekday, a day of the month: Confío
+// IA+ proposals). Separate documents: a server without the argument rejects
+// only these, and rules without a start date never send it.
+const P_SEND_RULE_AT = gql`
+  mutation PrepareSmartAccountSendRuleAt($ruleId: ID, $payeeHandle: String!, $amountUsd: String!, $frequency: String!, $firstRunAt: String) {
+    prepareSmartAccountSendRule(ruleId: $ruleId, payeeHandle: $payeeHandle, amountUsd: $amountUsd, frequency: $frequency, firstRunAt: $firstRunAt) { ${PREPARED_FIELDS} }
+  }
+`;
+const P_PAYOUT_RULE_AT = gql`
+  mutation PrepareSmartAccountPayoutRuleAt($ruleId: ID, $payoutMethodId: String!, $amountUsd: String!, $frequency: String!, $firstRunAt: String) {
+    prepareSmartAccountPayoutRule(ruleId: $ruleId, payoutMethodId: $payoutMethodId, amountUsd: $amountUsd, frequency: $frequency, firstRunAt: $firstRunAt) { ${PREPARED_FIELDS} }
+  }
+`;
+const P_BUY_RULE_AT = gql`
+  mutation PrepareSmartAccountBuyRuleAt($ruleId: ID, $assetKey: String!, $amountUsd: String!, $frequency: String!, $firstRunAt: String) {
+    prepareSmartAccountBuyRule(ruleId: $ruleId, assetKey: $assetKey, amountUsd: $amountUsd, frequency: $frequency, firstRunAt: $firstRunAt) { ${PREPARED_FIELDS} }
+  }
+`;
 
 const P_PAYOUT_RULE = gql`
   mutation PrepareSmartAccountPayoutRule($ruleId: ID, $payoutMethodId: String!, $amountUsd: String!, $frequency: String!) {
     prepareSmartAccountPayoutRule(ruleId: $ruleId, payoutMethodId: $payoutMethodId, amountUsd: $amountUsd, frequency: $frequency) { ${PREPARED_FIELDS} }
   }
 `;
-export const prepareSmartAccountPayoutRule = (params: {
-  ruleId?: string | null; payoutMethodId: string; amountUsd: string; frequency: SmartFrequency | string;
-}) => prepare(P_PAYOUT_RULE, 'prepareSmartAccountPayoutRule', { ...params, ruleId: params.ruleId ?? null });
-
 const P_BUY_RULE = gql`
   mutation PrepareSmartAccountBuyRule($ruleId: ID, $assetKey: String!, $amountUsd: String!, $frequency: String!) {
     prepareSmartAccountBuyRule(ruleId: $ruleId, assetKey: $assetKey, amountUsd: $amountUsd, frequency: $frequency) { ${PREPARED_FIELDS} }
   }
 `;
-export const prepareSmartAccountBuyRule = (params: {
-  ruleId?: string | null; assetKey: string; amountUsd: string; frequency: SmartFrequency | string;
-}) => prepare(P_BUY_RULE, 'prepareSmartAccountBuyRule', { ...params, ruleId: params.ruleId ?? null });
+
+/** The Confío IA+ proposal step a rule screen came from: a label only (the
+ *  server re-validates the rule itself). Sent only when both are set. */
+export interface SmartRuleProposalTag {
+  proposalMessageId?: string | null;
+  proposalStep?: number | null;
+}
+
+const proposalTagOf = (p?: SmartRuleProposalTag | null) => (
+  p && typeof p.proposalMessageId === 'string' && p.proposalMessageId
+    && typeof p.proposalStep === 'number' && Number.isInteger(p.proposalStep) && p.proposalStep >= 0
+    ? { proposalMessageId: p.proposalMessageId, proposalStep: p.proposalStep }
+    : null);
+
+type RuleMutation = { op: string; field: string; target: 'payeeHandle' | 'payoutMethodId' | 'assetKey' };
+const RULE_MUTATIONS: Record<SmartRuleKind, RuleMutation> = {
+  send: { op: 'PrepareSmartAccountSendRule', field: 'prepareSmartAccountSendRule', target: 'payeeHandle' },
+  payout: { op: 'PrepareSmartAccountPayoutRule', field: 'prepareSmartAccountPayoutRule', target: 'payoutMethodId' },
+  buy: { op: 'PrepareSmartAccountBuyRule', field: 'prepareSmartAccountBuyRule', target: 'assetKey' },
+};
+// [without a first run, with one]
+const UNTAGGED_RULE: Record<SmartRuleKind, [DocumentNode, DocumentNode]> = {
+  send: [P_SEND_RULE, P_SEND_RULE_AT],
+  payout: [P_PAYOUT_RULE, P_PAYOUT_RULE_AT],
+  buy: [P_BUY_RULE, P_BUY_RULE_AT],
+};
+
+// With a proposal tag: separate documents again, so a server without the
+// arguments rejects only these (and the prepare is retried untagged).
+const taggedRuleDocs = new Map<string, DocumentNode>();
+function taggedRuleDoc(kind: SmartRuleKind, withFirstRun: boolean): DocumentNode {
+  const key = `${kind}:${withFirstRun}`;
+  const cached = taggedRuleDocs.get(key);
+  if (cached) {
+    return cached;
+  }
+  const { op, field, target } = RULE_MUTATIONS[kind];
+  const at = withFirstRun ? ', $firstRunAt: String' : '';
+  const atArg = withFirstRun ? ', firstRunAt: $firstRunAt' : '';
+  const doc = gql(`
+    mutation ${op}${withFirstRun ? 'At' : ''}Proposal($ruleId: ID, $${target}: String!, $amountUsd: String!, $frequency: String!${at}, $proposalMessageId: ID, $proposalStep: Int) {
+      ${field}(ruleId: $ruleId, ${target}: $${target}, amountUsd: $amountUsd, frequency: $frequency${atArg}, proposalMessageId: $proposalMessageId, proposalStep: $proposalStep) { ${PREPARED_FIELDS} }
+    }
+  `);
+  taggedRuleDocs.set(key, doc);
+  return doc;
+}
+
+type RuleParams = SmartRuleProposalTag & {
+  ruleId?: string | null; amountUsd: string; frequency: SmartFrequency | string; firstRunAt?: string | null;
+};
+
+async function prepareRule(kind: SmartRuleKind, target: string, params: RuleParams): Promise<SmartAccountPreparedBatch> {
+  const { field, target: name } = RULE_MUTATIONS[kind];
+  const variables: Record<string, unknown> = {
+    ruleId: params.ruleId ?? null, [name]: target, amountUsd: params.amountUsd, frequency: params.frequency,
+    ...(params.firstRunAt ? { firstRunAt: params.firstRunAt } : {}),
+  };
+  const untagged = () => prepare(UNTAGGED_RULE[kind][params.firstRunAt ? 1 : 0], field, variables);
+  const tag = proposalTagOf(params);
+  if (!tag) {
+    return untagged();
+  }
+  const out = await prepare(taggedRuleDoc(kind, !!params.firstRunAt), field, { ...variables, ...tag });
+  // An older server without the proposal arguments: the same rule, untagged.
+  return out.errorCode === 'unsupported' ? untagged() : out;
+}
+
+export const prepareSmartAccountSendRule = (params: RuleParams & { payeeHandle: string }) =>
+  prepareRule('send', params.payeeHandle, params);
+
+export const prepareSmartAccountPayoutRule = (params: RuleParams & { payoutMethodId: string }) =>
+  prepareRule('payout', params.payoutMethodId, params);
+
+export const prepareSmartAccountBuyRule = (params: RuleParams & { assetKey: string }) =>
+  prepareRule('buy', params.assetKey, params);
 
 const P_CANCEL_RULE = gql`
   mutation PrepareSmartAccountCancelRule($ruleId: ID!) {
     prepareSmartAccountCancelRule(ruleId: $ruleId) { ${PREPARED_FIELDS} }
   }
 `;
-export const prepareSmartAccountCancelRule = (ruleId: string) =>
-  prepare(P_CANCEL_RULE, 'prepareSmartAccountCancelRule', { ruleId });
+const P_CANCEL_RULE_PROPOSAL = gql`
+  mutation PrepareSmartAccountCancelRuleProposal($ruleId: ID!, $proposalMessageId: ID, $proposalStep: Int) {
+    prepareSmartAccountCancelRule(ruleId: $ruleId, proposalMessageId: $proposalMessageId, proposalStep: $proposalStep) { ${PREPARED_FIELDS} }
+  }
+`;
+export const prepareSmartAccountCancelRule = async (
+  ruleId: string,
+  proposal?: SmartRuleProposalTag | null,
+): Promise<SmartAccountPreparedBatch> => {
+  const tag = proposalTagOf(proposal);
+  if (tag) {
+    const out = await prepare(P_CANCEL_RULE_PROPOSAL, 'prepareSmartAccountCancelRule', { ruleId, ...tag });
+    // An older server without the proposal arguments: the same stop, untagged.
+    if (out.errorCode !== 'unsupported') {
+      return out;
+    }
+  }
+  return prepare(P_CANCEL_RULE, 'prepareSmartAccountCancelRule', { ruleId });
+};
 
 const P_BENEFICIARY_DESIGNATION = gql`
   mutation PrepareBeneficiaryDesignation($beneficiaryHandle: String!, $windowDays: Int!, $disclosureAccepted: Boolean!) {
@@ -1024,6 +1142,50 @@ export const SMART_FREQUENCIES: SmartFrequency[] = ['daily', 'weekly', 'biweekly
 export const isSmartAccountOpen = (status: string | null | undefined): boolean =>
   status === 'active' || status === 'cancel_pending';
 
+/**
+ * 'opening': the server saw this person's subscribe go out (signed batch on
+ * the wire or mined) but has not reconciled the account yet. Never a reason
+ * to show the sign-up again.
+ */
+export const isSmartAccountOpening = (status: string | null | undefined): boolean => status === 'opening';
+
 /** The viewer has an own account record to show, including an expired one. */
 export const hasOwnSmartAccount = (status: string | null | undefined): boolean =>
   isSmartAccountOpen(status) || status === 'expired';
+
+// ------------------------------------------------------------ alerts (Confío IA+)
+// Set by talking to the assistant; listed and deleted here. Own documents.
+
+export interface SmartAccountWatch {
+  watchId: string;
+  text: string;
+  hasAction: boolean;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+}
+
+export const SMART_ACCOUNT_WATCHES = gql`
+  query SmartAccountWatches {
+    smartAccountWatches { watchId text hasAction lastTriggeredAt createdAt }
+  }
+`;
+
+export const fetchSmartAccountWatches = (): Promise<SmartRead<SmartAccountWatch[]>> =>
+  read(SMART_ACCOUNT_WATCHES, (d) => (d?.smartAccountWatches ?? []) as SmartAccountWatch[]);
+
+const DELETE_SMART_ACCOUNT_WATCH = gql`
+  mutation DeleteSmartAccountWatch($watchId: String!) {
+    deleteSmartAccountWatch(watchId: $watchId) { success errorCode errorMessage }
+  }
+`;
+
+export const deleteSmartAccountWatch = async (watchId: string): Promise<SmartAccountSimpleResult> => {
+  try {
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.mutate({ mutation: DELETE_SMART_ACCOUNT_WATCH, variables: { watchId } });
+    const out = data?.deleteSmartAccountWatch as SmartAccountSimpleResult | null | undefined;
+    return out ?? { success: false, errorCode: 'no_response', errorMessage: 'No pudimos borrar la alerta.' };
+  } catch {
+    return { success: false, errorCode: 'network', errorMessage: 'No pudimos borrar la alerta. Revisa tu conexión.' };
+  }
+};
