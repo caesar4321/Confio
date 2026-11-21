@@ -1,6 +1,29 @@
 # cUSD+ deployment record — BSC mainnet
 
-## Cuenta inteligente — PREPARED 2026-11-21, NOT DEPLOYED
+## Cuenta inteligente — DEPLOYED 2026-11-21 (cUSD Safe upgrade PENDING)
+
+Deployed by the KMS sponsor `0xf9f9…dfc9D` via `deploy_smart_account
+--broadcast --yes-mainnet` (all post-deploy checks passed), all five
+verified on BscScan, factory proxy linked to its logic:
+
+| Contract | Address | Block / tx |
+| --- | --- | --- |
+| Fee collector | `0x1AE0ACB82bAb9F506188c49305953CB655A539CD` | 134967771 · `0x3ae6af6a…c78d` |
+| Account implementation | `0x8a20a0B3d2C0c6BED8BeB00bB6Bc7AE3c7ace44A` | 134967777 · `0xda966048…1376` |
+| Factory logic | `0x1FE1701915F6A85B218f5B7521A01fd3642f6C50` | 134967777 · `0x9a87cfdd…cfc5` |
+| **Factory proxy** | `0x339094A17605B842e0b2fc01441204E67020f953` | 134967777 · `0xed0ef571…f037` |
+| CusdVault implementation (not yet live) | `0xcB75f9Ea2cF662754f0Cdd8671A4d9CA65EcE707` | tx `0x2e002f44…5997` |
+
+Server: `SMART_ACCOUNT_FACTORY_ADDRESS`, `SMART_ACCOUNT_FEE_COLLECTOR_ADDRESS`,
+`SMART_ACCOUNT_START_BLOCK=134967777` in `.env.mainnet`; `SMART_ACCOUNT_ENABLED`
+off. PENDING: Safe nonce 30, built and fork-replayed (pass):
+`cUSD.upgradeToAndCall(0xcB75…E707, setSmartAccountFactory(0x3390…f953, true))`,
+SafeTxHash `0x17f90062…b0b4`, file
+`.kms-local/kms_evm_multisig/safe_tx_bsc_nonce30_smart_account_cusd_upgrade.json`.
+Signing failed on 2026-11-21 because aws-vault cannot read the signer keys
+from the keychain ("item could not be found in the keyring"). After it
+executes: steps 9 and 10 (post-checks, cUSD proxy re-link on BscScan).
+Until then accounts work, but their conversions pay no referral commission.
 
 Factory, account implementation and fee collector (`../smart_account`), plus
 the cUSD upgrade that lets the factory's accounts arm the fee referral (spec
