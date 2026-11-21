@@ -868,6 +868,7 @@ Still open:
 |---|---|---|---|
 | C2 | Match the two feed addresses against Chainlink's published list before they are hard-coded | Design resolved (9.2); tolerance and feed age are in the numbers table | Engineering, in the contract audit |
 | C6 | A claim pending when a signed cancellation expires | Default kept: the return wins (9.2). Not answered by the founder | Founder, if he wants it otherwise |
+| R1 | A previous owner who lost the account through an executed claim (for example a living owner who missed every notice) can never open a new Cuenta inteligente from the same wallet: the factory maps one account per owner address and never resets it (invariant 17), and the account's inherited-withdraw destination is computed from that same salt. The backend refuses with `wallet_account_inherited`. Allowing a new account needs a factory change before deployment (a generation in the salt, with the destination computation changed to match) | Decide before the factory is deployed | Founder |
 | P1 | Which rails are live for payment rules at launch. All three run on the same provider path, so the question is the provider's terms and limits (X9), not three separate integrations | Not started | Founder |
 
 Numbers (O6), all confirmed by the founder on 2026-11-20:
