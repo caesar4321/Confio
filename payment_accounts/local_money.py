@@ -49,7 +49,7 @@ class Method:
 METHODS = {m.id: m for m in (
     Method('br_pix', 'send', 'BRA', 'BR', 'BRL', 'Pix', 'Chave Pix: CPF, celular, e-mail o aleatoria',
            kind='bank_account', destination_type='CHAVE PIX', field='chavePix'),
-    Method('br_qr', 'send', 'BRA', 'BR', 'BRL', 'QR Pix', 'Escanea o importa un QR Pix sin monto fijo',
+    Method('br_qr', 'send', 'BRA', 'BR', 'BRL', 'QR Pix', 'Paga QR Pix de tiendas, apps y personas',
            kind='qr', destination_type='BR_CODE', field='brCode'),
     Method('co_breb', 'send', 'COL', 'CO', 'COP', 'Llave Bre-B', 'Nequi, Bancolombia, Daviplata y más',
            kind='breb_key', destination_type='BREB_KEY', field='brebKey'),
@@ -219,22 +219,67 @@ def normalize_value(method, raw):
                 or value[-4:].upper() != emv_crc(value[:-4])):
             raise PaymentAccountError('Este código no es un QR de pago válido para este país.')
         if method.id == 'br_qr':
-            templates = [emv_fields(v) or {} for k, v in fields.items() if k.isdigit() and 26 <= int(k) <= 51]
-            pix = [t for t in templates if t.get('00', '').lower() == 'br.gov.bcb.pix']
-            if fields.get('53') != '986' or len(pix) != 1:
-                raise PaymentAccountError('Este código no es un QR Pix en reales.')
-            if fields.get('01') == '12' or '25' in pix[0]:
-                raise PaymentAccountError('Por ahora solo puedes pagar QR Pix estáticos y sin monto.')
-            key = pix[0].get('01', '')
-            # Validate the very key sent inside the untouched QR. Do not
-            # verify a cleaned CPF/CNPJ while paying a different raw value.
-            if _pix_key(key) != key and not _EVP.fullmatch(key):
-                raise PaymentAccountError('Este QR contiene una chave Pix con formato inválido.')
+            pix_code(value)
+            return value
         # The journey is dollar-driven, so an exact peso amount cannot be
         # guaranteed; a fixed-amount QR would be underpaid or rejected.
         if '54' in fields:
             raise PaymentAccountError('Este QR tiene un monto fijo. Por ahora solo puedes pagar QR sin monto.')
     return value
+
+
+PIX_GUI = 'br.gov.bcb.pix'
+
+
+def pix_code(value):
+    """What a well-formed Pix BR Code asks for, read from the code itself.
+
+    Static codes carry the Pix key; dynamic codes carry the location of a
+    charge (field 25) whose amount, receiver and expiry only the Pix network
+    knows. Nothing here is trusted as the receiver's identity: the merchant
+    shown to the person comes from the provider's DICT lookup (validation).
+    BCB Manual de Padrões para Iniciação do Pix, BR Code fields 26/54/62.
+    """
+    fields = emv_fields(value) if len(value) <= 4096 else None
+    if (not fields or fields.get('00') != '01' or fields.get('58') != 'BR'
+            or not value[-8:].startswith('6304') or value[-4:].upper() != emv_crc(value[:-4])):
+        raise PaymentAccountError('Este código no es un QR de pago válido para este país.')
+    templates = {k: emv_fields(v) or {} for k, v in fields.items() if k.isdigit() and 26 <= int(k) <= 51}
+    pix = [t for t in templates.values() if t.get('00', '').lower() == PIX_GUI]
+    if fields.get('53') != '986' or len(pix) != 1:
+        raise PaymentAccountError('Este código no es un QR Pix en reales.')
+    # Pix Automático (recurring authorization) rides in field 80; it is a
+    # mandate, not a payment, and the provider does not pay it.
+    if any((emv_fields(v) or {}).get('00', '').lower() == PIX_GUI
+           for k, v in fields.items() if k.isdigit() and 52 <= int(k) <= 99 and k not in {'62', '63'}):
+        raise PaymentAccountError('Los QR de Pix Automático (pagos recurrentes) no están disponibles.')
+    template = pix[0]
+    key, location = template.get('01', ''), template.get('25', '')
+    if bool(key) == bool(location):
+        raise PaymentAccountError('Este QR Pix no indica a quién pagar.')
+    if location and (any(ord(ch) <= 32 or ord(ch) == 127 for ch in location) or '/' not in location):
+        raise PaymentAccountError('Este QR Pix tiene un cobro con formato inválido.')
+    if key and _pix_key(key) != key and not _EVP.fullmatch(key):
+        # Validate the very key sent inside the untouched QR. Do not
+        # verify a cleaned CPF/CNPJ while paying a different raw value.
+        raise PaymentAccountError('Este QR contiene una chave Pix con formato inválido.')
+    amount = fields.get('54', '')
+    if '54' in fields and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount) or Decimal(amount) <= 0):
+        raise PaymentAccountError('El monto del QR no es válido.')
+    if fields.get('01') == '12' and not (amount or location):
+        raise PaymentAccountError('Este QR Pix de un solo uso no indica un monto.')
+    additional = emv_fields(fields.get('62', '')) or {}
+    txid = additional.get('05', '')
+    return {'dynamic': bool(location), 'key': key, 'location': location, 'amount': amount,
+            # Point of initiation 12: the code itself says it is paid once.
+            'single_use': fields.get('01') == '12',
+            'txid': '' if txid == '***' else txid, 'fixed': bool(location or amount),
+            'merchant_name': fields.get('59', ''), 'merchant_city': fields.get('60', '')}
+
+
+def fixed_pix_charge(method, value):
+    """A Pix code that names its own amount: paid at that exact amount in reais."""
+    return method.id == 'br_qr' and pix_code(value)['fixed']
 
 
 # --------------------------------------------------------------- availability
@@ -586,9 +631,14 @@ _VALIDATION_TYPES = {
 def _validation_request(method, value):
     if method.id == 'co_qr':
         return {'country': 'CO', 'account': {'dataType': 'BREB_KEY', 'brebKey': decode_breb_qr(value)['key']}}
+    if method.id == 'br_qr' and fixed_pix_charge(method, value):
+        # A charge (dynamic code, or a static code with an amount) is read
+        # by the provider from the Pix network: receiver as registered in
+        # DICT, amount and expiry. Validation docs, BrazilQRCode, 2026-10-16.
+        return {'country': 'BR', 'account': {'dataType': 'QR_CODE', 'qrCode': value}}
     if method.id == 'br_qr':
-        # Static Pix QR embeds the registered key; the live validation API
-        # accepts PIX_KEY, not a BR_CODE/QR_CODE validation request.
+        # A static Pix QR without an amount embeds the registered key: check
+        # that key, as before charges were payable.
         fields = emv_fields(value) or {}
         for tag, raw in fields.items():
             if tag.isdigit() and 26 <= int(tag) <= 51:
@@ -612,7 +662,7 @@ def _find_name(node, depth=0):
         for item in owners:
             if isinstance(item, dict) and str(item.get('name') or '').strip():
                 return str(item['name']).strip()
-    for key in ('accountHolderName', 'ownerName', 'merchantName', 'name'):
+    for key in ('accountHolderName', 'ownerName', 'merchantName', 'name', 'holder'):
         if isinstance(node.get(key), str) and node[key].strip():
             return node[key].strip()
     for value in node.values():
@@ -633,14 +683,20 @@ def summarize_validation(response):
     account = data.get('account') if isinstance(data.get('account'), dict) else {}
     owners = data.get('owners') if isinstance(data.get('owners'), list) else []
     first = owners[0] if owners and isinstance(owners[0], dict) else {}
-    return {
+    summary = {
         'id': str(response.get('id') or ''),
         'status': str(response.get('status') or '').upper(),
         'holder_name': _find_name(data)[:255],
-        'holder_document': _mask(first.get('documentNumber')),
-        'institution': str(account.get('bankName') or '')[:120],
+        'holder_document': _mask(first.get('documentNumber') or data.get('holderDocument')),
+        'institution': str(account.get('bankName') or data.get('bankName') or '')[:120],
         'checked_at': timezone.now().isoformat(),
     }
+    if data.get('type') in ('static', 'dynamic'):
+        # A Pix code's charge as the Pix network answers it (QRValidationResponseBrazil).
+        summary['charge'] = {'type': data['type'], 'amount': str(data.get('amount') or ''),
+                             'expiration': str(data.get('expiration') or ''),
+                             'txid': str(data.get('txid') or '')[:35]}
+    return summary
 
 
 def verification_state(validation):
@@ -721,9 +777,34 @@ def checked_recently(validation):
     return timezone.now() - checked < timedelta(hours=hours)
 
 
+def charge_checked_recently(validation):
+    """A Pix charge can be paid, cancelled or expire within minutes: its check
+    is trusted for LOCAL_MONEY_PIX_CHARGE_CHECK_SECONDS only."""
+    seconds = int(getattr(settings, 'LOCAL_MONEY_PIX_CHARGE_CHECK_SECONDS', 600))
+    try:
+        checked = datetime.fromisoformat(str((validation or {}).get('checked_at') or ''))
+    except ValueError:
+        return False
+    if timezone.is_naive(checked):
+        return False
+    return timedelta(0) <= timezone.now() - checked < timedelta(seconds=seconds)
+
+
+def _is_charge(destination):
+    data = getattr(destination, 'provider_data', None) or {}
+    if data.get('method_id') != 'br_qr':
+        return False
+    try:
+        return fixed_pix_charge(METHODS['br_qr'], (destination.details or {}).get('brCode', ''))
+    except PaymentAccountError:
+        return False
+
+
 def _current_verified(destination):
     validation = (destination.provider_data or {}).get('validation')
-    return verification_state(validation) == VERIFIED and checked_recently(validation)
+    if verification_state(validation) != VERIFIED:
+        return False
+    return charge_checked_recently(validation) if _is_charge(destination) else checked_recently(validation)
 
 
 def _validate(method, value, client):
@@ -772,6 +853,9 @@ def resolve_destination(owner, method_id, raw_value, *, client=None):
                 destination.provider_data = {**(destination.provider_data or {}),
                                              'method_id': method.id, 'breb_qr': qr_data}
                 destination.save(update_fields=['provider_data'])
+            elif fixed_pix_charge(method, value):
+                destination.provider_data = {**(destination.provider_data or {}), 'fixed_charge': True}
+                destination.save(update_fields=['provider_data'])
         check = _start_check(destination)
     validation = _validate(method, value, client)
     return _apply_validation(destination, method, value, validation, check=check)
@@ -818,7 +902,7 @@ def recheck_destination(destination, *, client=None):
 def require_current_destination(destination):
     """Server-side guard for a new send: a holder verified long ago is checked again first."""
     validation = (destination.provider_data or {}).get('validation')
-    if verification_state(validation) == VERIFIED and not checked_recently(validation):
+    if verification_state(validation) == VERIFIED and not _current_verified(destination):
         raise PaymentAccountError('Revisa de nuevo a quien recibe antes de enviar.')
 
 
@@ -847,10 +931,195 @@ def destination_view(destination):
 
 
 def saved_destinations(owner, method_id):
+    # A Pix charge is paid once: it is never offered again as a saved recipient
+    # (excluded before the slice, so charges never crowd out real recipients).
     rows = PayoutDestination.objects.filter(
         confio_account=owner, provider='infinia', provider_data__method_id=get_method(method_id, 'send').id,
-    ).order_by('-created_at')[:10]
-    return [row for row in rows if verification_state((row.provider_data or {}).get('validation')) != NOT_FOUND]
+    # Containment, not a key lookup: rows without the key must stay (a key
+    # lookup is NULL there and NOT NULL would drop every normal recipient).
+    ).exclude(provider_data__contains={'fixed_charge': True}).order_by('-created_at')[:10]
+    return [row for row in rows if verification_state((row.provider_data or {}).get('validation')) != NOT_FOUND
+            and not _is_charge(row)]
+
+
+# ---------------------------------------------------------------- Pix charges
+
+def _charge_amount(value):
+    amount = _decimal(value)
+    if amount is None or amount <= 0 or amount != amount.quantize(FIAT_CENT) or amount >= Decimal('1e9'):
+        return None
+    return amount.quantize(FIAT_CENT)
+
+
+def _aware(value):
+    from django.utils.dateparse import parse_datetime
+    try:
+        stamp = parse_datetime(str(value or ''))
+    except ValueError:
+        return None
+    if stamp is None:
+        return None
+    if timezone.is_naive(stamp):
+        from datetime import timezone as dt_timezone
+        stamp = stamp.replace(tzinfo=dt_timezone.utc)
+    return stamp
+
+
+def _sha(value):
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+def pix_charge(destination):
+    """The charge behind a fixed-amount Pix code, as the Pix network answered
+    it (provider validation), or None for any other recipient.
+
+    `verified` holds only when the network answered for this very code: a
+    receiver name, a positive amount in cents and the code's own kind. A
+    static code's printed amount must match the answer; a dynamic code's
+    amount is the network's (BCB: the charge payload prevails).
+    """
+    if not _is_charge(destination):
+        return None
+    value = destination.details.get('brCode', '')
+    code = pix_code(value)
+    validation = (destination.provider_data or {}).get('validation') or {}
+    answer = validation.get('charge') or {}
+    amount = _charge_amount(answer.get('amount'))
+    expires_at = _aware(answer.get('expiration'))
+    # A dynamic charge always expires; one whose expiry we cannot read is
+    # refused rather than treated as never expiring (fail closed).
+    verified = (verification_state(validation) == VERIFIED and amount is not None
+                and answer.get('type') == ('dynamic' if code['dynamic'] else 'static')
+                and (code['dynamic'] or Decimal(code['amount']) == amount)
+                and (expires_at is not None or not code['dynamic']))
+    txid = code['txid'] or ('' if code['dynamic'] else str(answer.get('txid') or '').strip('*'))
+    if code['dynamic']:
+        key, single_use = 'pix:loc:' + _sha(code['location'].lower()), True
+    elif txid:
+        # A static code is reusable by design (a shop's printed QR); its txid
+        # is a reconciliation reference. Only a payment in flight blocks it.
+        key, single_use = 'pix:txid:' + _sha(f"{code['key']}|{txid}"), code['single_use']
+    else:
+        key, single_use = 'pix:qr:' + _sha(value), code['single_use']
+    return {'verified': verified, 'amount': amount, 'expires_at': expires_at,
+            'expiration_raw': str(answer.get('expiration') or ''), 'key': key, 'single_use': single_use,
+            'dynamic': code['dynamic'], 'validation': validation}
+
+
+def charge_snapshot(destination):
+    """The terms a journey pays a Pix charge on; None for any other recipient."""
+    charge = pix_charge(destination)
+    if charge is None:
+        return None
+    return {'key': charge['key'], 'single_use': charge['single_use'],
+            'amount': str(charge['amount'] or ''), 'expires_at': charge['expiration_raw'],
+            'holder': str(charge['validation'].get('holder_name') or '')}
+
+
+def _seconds_left(expires_at):
+    return None if expires_at is None else (expires_at - timezone.now()).total_seconds()
+
+
+def require_payable_charge(owner, destination, *, exclude_request_id=None):
+    """Refuse a Pix charge that cannot be paid now: unverified, checked too
+    long ago, too close to its expiry to settle, or already paid."""
+    charge = pix_charge(destination)
+    if charge is None:
+        raise PaymentAccountError('Este QR no tiene un cobro para pagar.')
+    if not charge['verified']:
+        raise PaymentAccountError('No pudimos confirmar este cobro con el banco. Escanea el QR de nuevo.')
+    if not charge_checked_recently(charge['validation']):
+        raise PaymentAccountError('Revisa de nuevo el cobro antes de pagar.')
+    left = _seconds_left(charge['expires_at'])
+    if left is not None and left < int(getattr(settings, 'LOCAL_MONEY_PIX_MIN_SECONDS_LEFT', 600)):
+        raise PaymentAccountError('Este cobro vence muy pronto para pagarlo con seguridad. Pide un QR nuevo.')
+    from .infinia_bridge import live_journeys
+    # A dynamic charge is one payment on the Pix network, whichever account
+    # (personal, business, anyone's) pays it: never a second funding for it.
+    journeys = InfiniaJourney.objects.filter(direction='to_bank',
+                                             destination_snapshot__pix_charge__key=charge['key'])
+    if not charge['single_use']:
+        journeys = journeys.filter(confio_account=owner)
+    if exclude_request_id:
+        journeys = journeys.exclude(request_id=exclude_request_id)
+    if live_journeys(journeys).exists():
+        raise PaymentAccountError('Ya hay un pago en curso para este QR.')
+    # A charge is paid once. Only a payment that ended without paying it
+    # (refunded, or never funded) lets the person try again.
+    if charge['single_use']:
+        blocking = journeys.exclude(stage='failed')
+        if blocking.filter(confio_account=owner, stage='completed').exists():
+            raise PaymentAccountError('Ya pagaste este cobro.')
+        if blocking.exists():
+            # Another account's payment, or one under review: say no more than
+            # that it cannot be paid again from Confío now.
+            raise PaymentAccountError('Este cobro ya tiene un pago en Confío y no se puede pagar otra vez.')
+    return charge
+
+
+def _fx_buffer():
+    return _tolerance('LOCAL_MONEY_PIX_FX_BUFFER_BPS', 100)
+
+
+def usdc_for_target(client, crypto, local, target, *, external_id=None):
+    """The dollars a provider FX quote asks for to land exactly `target` in the
+    local account. Returns (source_amount, quote)."""
+    from .infinia_journeys import provider_number, positive
+    response = client.create_transfer_quote({
+        'external_id': external_id or f'confio-estimate-{uuid.uuid4()}',
+        'source_account_id': crypto.provider_account_id, 'target_account_id': local.provider_account_id,
+        'target_amount': provider_number(target),
+    })
+    try:
+        source = positive(response.get('source_amount'))
+        if (response.get('status') != 'ACTIVE' or positive(response.get('target_amount')) != target
+                or str(response.get('source_account_id') or crypto.provider_account_id) != crypto.provider_account_id
+                or str(response.get('target_account_id') or local.provider_account_id) != local.provider_account_id):
+            raise ValueError('quote does not match')
+    except (AttributeError, TypeError, ValueError, ArithmeticError, PaymentAccountError) as exc:
+        raise PaymentAccountError('No pudimos cotizar este pago. Intenta de nuevo.') from exc
+    return source, response
+
+
+def pix_charge_quote(owner, destination, *, client=None):
+    """What paying a Pix charge costs the person, all in.
+
+    The merchant receives exactly the charge amount. The dollars that leave
+    the wallet cover the processor fee, the conversion and a buffer
+    (LOCAL_MONEY_PIX_FX_BUFFER_BPS) against the rate moving before it runs;
+    whatever the buffer does not use goes back to the person's own wallet.
+    """
+    charge = require_payable_charge(owner, destination)
+    local, crypto = _active_pair(owner, destination.country, destination.asset)
+    client = client or InfiniaClient()
+    exact_source, _ = usdc_for_target(client, crypto, local, charge['amount'])
+    needed = (exact_source * (1 + _fx_buffer())).quantize(FIAT_CENT, rounding=ROUND_UP)
+    from .infinia_fee_policy import price as fee_price
+    from .bridge import exceeds_bridge_cap
+    fee = fee_price(local, 'to_bank', destination=destination)
+    fee_usd = Decimal(fee['total_usd']) if fee else Decimal(0)
+    total = (needed + fee_usd).quantize(FIAT_CENT, rounding=ROUND_UP)
+    for _ in range(5):
+        if exceeds_bridge_cap(total):
+            raise PaymentAccountError('Este cobro supera el máximo por pago.')
+        minimum, expected, instruction = _bridge_estimate(owner, crypto, total, fee)
+        if minimum >= needed:
+            break
+        if minimum <= 0:
+            raise PaymentAccountError('No pudimos cotizar este pago. Intenta de nuevo.')
+        total = (total * needed / minimum).quantize(FIAT_CENT, rounding=ROUND_UP) + FIAT_CENT
+    else:
+        raise PaymentAccountError('No pudimos cotizar este pago. Intenta de nuevo.')
+    if fee or getattr(settings, 'INFINIA_LEGACY_PAYOUT_FEES_ENABLED', False):
+        from .infinia_legacy_fees import remember
+        remember(owner, instruction, total, destination)
+    validation = charge['validation']
+    return {'amount': charge['amount'], 'asset': local.asset, 'total_usd': total, 'fee_usd': fee_usd,
+            'estimated_return_usd': max(expected - exact_source, Decimal(0)).quantize(FIAT_CENT, rounding=ROUND_DOWN),
+            'merchant_name': validation.get('holder_name', ''), 'merchant_document': validation.get('holder_document', ''),
+            'institution': validation.get('institution', ''),
+            'expires_at': charge['expires_at'].isoformat() if charge['expires_at'] else '',
+            'dynamic': charge['dynamic'], 'rate': (charge['amount'] / total).quantize(Decimal('0.0001'))}
 
 
 # --------------------------------------------------------------------- quotes
@@ -924,6 +1193,60 @@ def payout_fee(owner, destination, *, bridge=None):
     return disclosure(fee_price(local, 'to_bank', destination=destination))
 
 
+def _bridge_estimate(owner, crypto, total, fee):
+    """(minimum, expected) USDC a bridge funded from a total USD spend lands
+    in the provider dollar account, and that account's deposit instruction."""
+    from .bridge import net_funding_units, executable_bridge_routes, bridge_route_minimum, verified_destination
+    from .allbridge_next import to_units
+    from .bridge_routing import quote_routes
+    from .models import FundingInstruction
+    if fee:
+        from .infinia_fee_funding import quote_funding
+        from .infinia_fees import FeePricingError
+        budget = int(to_units(total, 'BSC:USDT'))
+        if budget <= int(fee['units']):
+            raise PaymentAccountError(fee_exceeds_amount_message(fee))
+        try:
+            units = quote_funding(owner, budget, int(fee['units']))['bridge_units']
+        except FeePricingError as exc:
+            if 'too small' in str(exc):
+                raise PaymentAccountError(fee_exceeds_amount_message(fee)) from exc
+            raise
+    else:
+        units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))
+    instruction = FundingInstruction.objects.filter(financial_account=crypto,
+        kind='crypto_address', status='active').first()
+    if instruction is None:
+        raise PaymentAccountError('An active crypto funding instruction is required')
+    recipient = verified_destination(instruction, owner)
+    route = executable_bridge_routes(quote_routes('BSC:USDT', 'POL:USDC', units,
+                                                  owner.bsc_address, recipient))[0]
+    return (Decimal(bridge_route_minimum(route)) / Decimal(10 ** 6),
+            Decimal(int(route['amountOut'])) / Decimal(10 ** 6), instruction)
+
+
+def _charge_review_quote(owner, destination, local, crypto, source, *, client=None):
+    """A send to a Pix charge lands exactly the charge amount, never 'at least'.
+
+    The bridge's guaranteed minimum must cover a fresh quote for that amount
+    plus the buffer; otherwise the person reviews a new price instead of
+    signing one that could fall short when it runs. Returns (exact dollars
+    the conversion takes, charge amount, quote expiry).
+    """
+    charge = require_payable_charge(owner, destination)
+    target = charge['amount']
+    exact_source, response = usdc_for_target(client or InfiniaClient(), crypto, local, target)
+    # The price shown carries the full buffer; the review gate asks for half
+    # of it, so a small move between the two does not send the person back.
+    if source < (exact_source * (1 + _fx_buffer() / 2)).quantize(FIAT_CENT, rounding=ROUND_UP):
+        raise PaymentAccountError('El precio del cobro cambió. Revisa el pago de nuevo.')
+    # Never far more than the charge needs: an app that predates charges lets
+    # people type any amount, and the excess would only cost bridge fees.
+    if source > (exact_source * (1 + 2 * _fx_buffer())).quantize(FIAT_CENT, rounding=ROUND_UP) + Decimal('0.50'):
+        raise PaymentAccountError('Este QR cobra un monto exacto. Actualiza la app para pagarlo.')
+    return exact_source, target, str(response.get('expire_at') or '')
+
+
 def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
     """Estimate for a send. With a prepared bridge, price exactly what will land.
 
@@ -946,48 +1269,27 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
     else:
         # The typed amount is the user's total budget, not the USDC principal.
         # Price the post-redemption USDT through the same bridge used at review.
-        from .bridge import net_funding_units, executable_bridge_routes, bridge_route_minimum, exceeds_bridge_cap
-        from .allbridge_next import to_units
-        from .bridge_routing import quote_routes
-        from .bridge import verified_destination
-        from .models import FundingInstruction
+        from .bridge import exceeds_bridge_cap
         total = _positive(amount, USDC_UNIT)
         if exceeds_bridge_cap(total):
             raise PaymentAccountError('Amount exceeds the configured bridge limit')
         from .infinia_fee_policy import price as fee_price
         fee = fee_price(local, 'to_bank', destination=destination)
-        if fee:
-            from .infinia_fee_funding import quote_funding
-            from .infinia_fees import FeePricingError
-            budget = int(to_units(total, 'BSC:USDT'))
-            if budget <= int(fee['units']):
-                raise PaymentAccountError(fee_exceeds_amount_message(fee))
-            try:
-                units = quote_funding(owner, budget, int(fee['units']))['bridge_units']
-            except FeePricingError as exc:
-                if 'too small' in str(exc):
-                    raise PaymentAccountError(fee_exceeds_amount_message(fee)) from exc
-                raise
-        else:
-            units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))
-        instruction = FundingInstruction.objects.filter(financial_account=crypto,
-            kind='crypto_address', status='active').first()
-        if instruction is None:
-            raise PaymentAccountError('An active crypto funding instruction is required')
-        recipient = verified_destination(instruction, owner)
-        routes = executable_bridge_routes(quote_routes('BSC:USDT', 'POL:USDC', units,
-                                                       owner.bsc_address, recipient))
-        route = routes[0]
-        source = Decimal(bridge_route_minimum(route)) / Decimal(10 ** 6)
-        expected_source = Decimal(int(route['amountOut'])) / Decimal(10 ** 6)
+        source, expected_source, instruction = _bridge_estimate(owner, crypto, total, fee)
         spend = total
-    source = fx_source_amount(source)
-    target, expires = _quote(client or InfiniaClient(), crypto, local, source)
-    minimum = (target * (1 - _tolerance('LOCAL_MONEY_FX_TOLERANCE_BPS', 100))).quantize(FIAT_CENT, rounding=ROUND_DOWN)
-    # Relay's tolerance is amount-aware, so the gap between what should land and
-    # the minimum we authorize widens on small sends. Show both rather than
-    # blocking the send: target_amount is already priced off the minimum.
-    expected_target = (target * expected_source / source).quantize(FIAT_CENT, rounding=ROUND_DOWN)
+    if charge_snapshot(destination) is not None:
+        # Exact: the merchant receives the charge amount, and any dollars the
+        # conversion does not use go back to the person (journey return leg).
+        source, target, expires = _charge_review_quote(owner, destination, local, crypto, source, client=client)
+        minimum = expected_target = target
+    else:
+        source = fx_source_amount(source)
+        target, expires = _quote(client or InfiniaClient(), crypto, local, source)
+        minimum = (target * (1 - _tolerance('LOCAL_MONEY_FX_TOLERANCE_BPS', 100))).quantize(FIAT_CENT, rounding=ROUND_DOWN)
+        # Relay's tolerance is amount-aware, so the gap between what should land and
+        # the minimum we authorize widens on small sends. Show both rather than
+        # blocking the send: target_amount is already priced off the minimum.
+        expected_target = (target * expected_source / source).quantize(FIAT_CENT, rounding=ROUND_DOWN)
     cost = ((spend - expected_source) / spend * 100).quantize(FIAT_CENT, rounding=ROUND_UP)
     if bridge is not None and bridge.quote.money_flow.metadata.get('legacy_fee_review_required'):
         from .infinia_legacy_fees import record_review

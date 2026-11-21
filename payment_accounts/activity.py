@@ -60,6 +60,13 @@ def _link_mint(j):
 def display_stage(j):
     if j.direction == 'to_bank' and j.bridge_id and j.bridge.status == 'refunded':
         return 'refunded'
+    if j.direction == 'to_bank' and (j.destination_snapshot or {}).get('pix_charge'):
+        # A Pix charge: the merchant is paid once the payout succeeds; the
+        # unused dollars travelling back are the person's, not the payment.
+        if j.stage == 'returning_remainder':
+            return 'completed'
+        if j.stage == 'failed' and (j.money_flow.metadata or {}).get('pix_charge_return'):
+            return 'refunded'
     if j.direction == 'to_wallet' and j.stage == 'completed':
         if not j.wallet_conversion_id or j.wallet_conversion.status != 'COMPLETED':
             return 'awaiting_wallet_conversion'
@@ -91,6 +98,7 @@ def progress_message(j, stage):
         'awaiting_wallet_conversion': 'Tus dólares llegaron. Abre la app para completar la conversión a Confío Dollar.',
         'completed': 'Tu ingreso se completó.' if incoming else 'Tu envío se completó.',
         'refunded': 'Se devolvieron fondos a tu billetera. Consulta el importe y la moneda recibidos.',
+        'refunding': 'El cobro ya no se podía pagar. Estamos devolviendo tus dólares a tu billetera.',
         'failed': 'La transferencia no se completó. Consulta el estado antes de intentarlo de nuevo.',
         'needs_review': 'Tu transferencia necesita revisión. Consulta el estado antes de intentarlo de nuevo.',
     }.get(stage, 'Estamos consultando el estado de tu transferencia.')

@@ -98,6 +98,22 @@ export interface LocalPayoutQuote {
   expiresAt: string;
 }
 
+/** A merchant's Pix charge: paid at exactly `amount` reais. The merchant name
+ *  is the receiver the Pix network registers, never the QR's own text. */
+export interface LocalPixCharge {
+  amount: string;
+  asset: string;
+  totalUsd: string;
+  feeUsd: string;
+  estimatedReturnUsd: string;
+  merchantName: string;
+  merchantDocument: string;
+  institution: string;
+  expiresAt: string;
+  dynamic: boolean;
+  rate: string;
+}
+
 export interface LocalDepositQuote {
   minimumNetWalletReceipt: string | null;
   sourceAmount: string;
@@ -271,6 +287,16 @@ const LOCAL_PAYOUT_QUOTE = gql`
       rate
       asset
       expiresAt
+    }
+  }
+`;
+
+// Its own operation: against an older server only the charge view fails.
+const LOCAL_PIX_CHARGE = gql`
+  query LocalPixCharge($destinationId: UUID!) {
+    localPixCharge(destinationId: $destinationId) {
+      amount asset totalUsd feeUsd estimatedReturnUsd merchantName merchantDocument
+      institution expiresAt dynamic rate
     }
   }
 `;
@@ -719,6 +745,12 @@ export async function fetchPayoutFee(destinationId: string, options: {bridgeId?:
   } catch {
     return undefined;
   }
+}
+
+/** The charge behind a fixed-amount Pix code, or null for any other recipient.
+ *  Throws the server's reason (already paid, expiring, price changed). */
+export function fetchPixCharge(destinationId: string): Promise<LocalPixCharge | null> {
+  return runQuery(LOCAL_PIX_CHARGE, {destinationId}, 'localPixCharge', 'No pudimos revisar este cobro.');
 }
 
 export function fetchDepositQuote(creditId: string): Promise<LocalDepositQuote> {

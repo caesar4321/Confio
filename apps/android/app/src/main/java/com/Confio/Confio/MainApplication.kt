@@ -32,6 +32,7 @@ class MainApplication : Application(), ReactApplication {
           return PackageList(this).packages.apply {
             // Manual: local in-app package (not an npm module)
             add(MediaPickerPackage())
+            add(ConfioShareIntentPackage())
             add(BrebLocationPackage())
             add(ConfioLocationPackage())
             add(FaceLivenessPackage())

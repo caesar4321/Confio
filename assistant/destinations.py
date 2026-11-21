@@ -6,7 +6,10 @@ add new ones freely, never rename. Old clients ignore keys they don't know.
 
 DESTINATIONS = {
     'home': 'Inicio: saldos de tus billeteras y botones Enviar / Recibir.',
-    'pay_qr': 'Pagar: escáner para pagar con un código QR.',
+    'pay_qr': ('Pagar: escáner para pagar un código QR con la cámara o con una imagen de la galería (por ejemplo '
+               'una captura del QR). Úsalo cuando piden pagar un QR ("págame este QR", "paga este Pix"). En Brasil '
+               'paga QR Pix de tiendas, apps y personas; si el QR trae monto, se paga exactamente ese monto en '
+               'reales. La persona revisa y confirma el pago en esa pantalla: tú nunca pagas.'),
     'send': 'Enviar dinero (a un contacto, a tu propia cuenta bancaria o a otra billetera).',
     'receive': 'Recibir dinero (tu número Confío, cuentas locales y "Recargar ahora").',
     'top_up': 'Recargar: cargar dólares desde tu banco (dentro de Recibir).',

@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .allbridge_next import address
-from .clients import InfiniaClient
+from .clients import InfiniaClient, ProviderAPIError
 from .eligibility import context_from_identity, enforce_and_record
 from .models import InfiniaJourney, MoneyFlow, MoneyOperation, LedgerEntry
 from .services import (PaymentAccountError, _require_provider_enabled,
@@ -93,6 +93,10 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         snapshot = {'destination_account': destination.details, 'country': destination.country,
                     'destination_internal_id': str(destination.internal_id),
                     'display_label': f'{destination.label} · {destination.holder_name}'}
+        from .local_money import charge_snapshot
+        charge = charge_snapshot(destination)
+        if charge is not None:
+            snapshot['pix_charge'] = charge
         if (not bridge or bridge.quote.confio_account_id != owner.pk
                 or bridge.quote.source_token_id != 'BSC:USDT'
                 or bridge.quote.funding_instruction.financial_account_id != crypto_account.pk):
@@ -127,6 +131,17 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
                 direction == 'to_wallet' and existing.funding_credit_id != credit.pk):
             raise PaymentAccountError('Request id already used for different journey details')
         return existing
+    if direction == 'to_bank' and snapshot.get('pix_charge'):
+        # Serialize every account paying this charge (personal, business,
+        # someone else's) for the rest of this transaction: two confirmations
+        # at once must not both pass the paid-once check.
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [snapshot['pix_charge']['key']])
+        from .local_money import require_payable_charge
+        payable = require_payable_charge(owner, destination, exclude_request_id=request_id)
+        if minimum != payable['amount'] or Decimal(snapshot['pix_charge']['amount']) != payable['amount']:
+            raise PaymentAccountError('El monto autorizado no coincide con el cobro. Revisa el pago de nuevo.')
     from .infinia_fee_policy import enabled as fee_enabled, freeze as freeze_fee
     fee = None
     if direction == 'to_bank':
@@ -429,6 +444,165 @@ def _new_operation(j, leg, source, target, amount):
         provider_data={'quote_id': j.fx_quote['id']} if leg == 'fx' else {})
 
 
+# ------------------------------------------------------------- Pix charges
+# A to-bank journey whose destination snapshot carries `pix_charge` pays a
+# merchant's Pix code at its exact amount: the conversion names the reais to
+# land (target_amount), the payout is that amount, and any dollars the
+# conversion does not use go back to the person's own wallet (return leg).
+RETURN_LEG = 'return'
+USDC_QUANTUM = Decimal('0.000001')
+
+
+def _charge(j):
+    return (j.destination_snapshot or {}).get('pix_charge') if j.direction == 'to_bank' else None
+
+
+def _return_operation(j):
+    return MoneyOperation.objects.filter(money_flow=j.money_flow, provider='infinia', operation_type='payout',
+        idempotency_key=str(uuid.uuid5(j.internal_id, RETURN_LEG))).first()
+
+
+def _start_return(j, amount, stage, reason):
+    """Pay dollars of this journey back to the wallet pinned at authorization:
+    the whole funding when the charge can no longer be paid, or what the
+    conversion did not use. Never anywhere else, never more than arrived."""
+    amount = Decimal(amount).quantize(USDC_QUANTUM, rounding=ROUND_DOWN)
+    arrived = positive(j.funding_credit.amount)
+    if amount <= 0 or amount > arrived:
+        _state(j, 'needs_review', failure='pix_charge_return_amount_invalid')
+        return None
+    operation = MoneyOperation.objects.create(money_flow=j.money_flow, provider='infinia',
+        operation_type='payout', source_account=j.crypto_account, destination_account=None,
+        source_asset=j.crypto_account.asset, source_amount=amount, target_asset=j.crypto_account.asset,
+        idempotency_key=str(uuid.uuid5(j.internal_id, RETURN_LEG)),
+        external_destination={'destination_account': {'type': 'POLYGON', 'address': j.wallet_address},
+                              'country': 'XXX'})
+    j.money_flow.metadata = dict(j.money_flow.metadata, pix_charge_return={
+        'amount': str(amount), 'asset': j.crypto_account.asset, 'reason': reason,
+        'operation_id': str(operation.internal_id)})
+    j.money_flow.save(update_fields=['metadata', 'updated_at'])
+    _state(j, stage, failure=reason if stage == 'refunding' else '')
+    return operation
+
+
+def _finish_return(j):
+    reason = ((j.money_flow.metadata or {}).get('pix_charge_return') or {}).get('reason', '')
+    if j.stage == 'refunding':
+        _state(j, 'failed', failure=reason or 'pix_charge_refunded')
+    else:
+        _state(j, 'completed')
+
+
+def _charge_still_payable(j, charge, client=None):
+    """True; None while the network's answer is not known yet; or why the
+    charge can no longer be paid (then the funding goes back to the person).
+
+    Asked again after the dollars arrive and before any conversion: the
+    charge may have been paid elsewhere, cancelled, changed or be about to
+    expire while the bridge ran.
+    """
+    from . import local_money
+    left = local_money._seconds_left(local_money._aware(charge.get('expires_at')))
+    if left is not None and left < int(getattr(settings, 'LOCAL_MONEY_PIX_SETTLE_SECONDS', 180)):
+        return 'pix_charge_expiring'
+    from .models import PayoutDestination
+    destination = PayoutDestination.objects.filter(
+        confio_account=j.confio_account, internal_id=j.destination_snapshot.get('destination_internal_id')).first()
+    value = (destination.details or {}).get('brCode', '') if destination else ''
+    if not value or value != (j.destination_snapshot.get('destination_account') or {}).get('brCode'):
+        return 'pix_charge_destination_changed'
+    answer = _charge_recheck(j, value, client)
+    status = answer.get('status')
+    if status == 'ERROR':
+        return 'pix_charge_unpayable'
+    if status != 'SUCCESSFUL':
+        # Temporary failure or still running: ask again on the next pass,
+        # but not forever for a charge with no expiry of its own.
+        waited = (timezone.now() - j.funding_credit.created_at).total_seconds()
+        if waited > int(getattr(settings, 'LOCAL_MONEY_PIX_RECHECK_MAX_SECONDS', 1800)):
+            return 'pix_charge_unconfirmed'
+        return None
+    fresh = answer.get('charge') or {}
+    try:
+        same_amount = Decimal(str(fresh.get('amount'))) == Decimal(charge['amount'])
+    except (ArithmeticError, ValueError, TypeError):
+        same_amount = False
+    if not same_amount or (charge.get('holder') and answer.get('holder_name') != charge['holder']):
+        return 'pix_charge_changed'
+    return True
+
+
+def _charge_recheck(j, value, client=None):
+    """The network's current answer for this charge. A check still running
+    is polled by its id; a new one is asked only when none is running (or the
+    last could not answer), so each pass does not pay for another lookup."""
+    from . import local_money
+    meta = j.money_flow.metadata or {}
+    running = meta.get('pix_charge_recheck') or {}
+    if running.get('id') and running.get('status') == 'IN_PROGRESS':
+        try:
+            answer = local_money.summarize_validation(
+                (client or InfiniaClient()).get_bank_account_validation(running['id']))
+        except ProviderAPIError:
+            answer = {'id': running['id'], 'status': 'IN_PROGRESS'}
+    else:
+        answer = local_money._validate(local_money.METHODS['br_qr'], value, client)
+    j.money_flow.metadata = dict(meta, pix_charge_recheck={'id': answer.get('id', ''),
+                                                           'status': answer.get('status', '')})
+    j.money_flow.save(update_fields=['metadata', 'updated_at'])
+    return answer
+
+
+def _authorized_exact_quote(j, source, target, available, client=None):
+    """(quote, '') for exactly the charge amount within the dollars that
+    arrived; (None, 'short') when they no longer cover it; (None, 'invalid')."""
+    from .local_money import usdc_for_target
+    try:
+        exact = positive(_charge(j)['amount'])
+        amount, quote = usdc_for_target(client or InfiniaClient(), source, target, exact,
+                                        external_id=str(j.internal_id))
+        expires = parse_datetime(str(quote.get('expire_at', '')))
+        if expires and timezone.is_naive(expires):
+            expires = expires.replace(tzinfo=dt_timezone.utc)
+        valid = (quote.get('id') and expires and expires > timezone.now()
+                 and str(quote.get('source_account_id')) == source.provider_account_id
+                 and str(quote.get('target_account_id')) == target.provider_account_id)
+    except (AttributeError, TypeError, ValueError, ArithmeticError, PaymentAccountError):
+        return None, 'invalid'
+    if not valid:
+        return None, 'invalid'
+    if amount > available:
+        return None, 'short'
+    return quote, ''
+
+
+def _start_exact_conversion(j, source, target, credit_amount, client=None):
+    """The operation to submit for a Pix charge's conversion, a full refund
+    when it cannot be paid, or None (waiting, or parked for review)."""
+    charge = _charge(j)
+    payable = _charge_still_payable(j, charge, client)
+    if payable is None:
+        return None
+    if payable is not True:
+        return _start_return(j, credit_amount, 'refunding', payable)
+    quote, problem = _authorized_exact_quote(j, source, target, credit_amount, client)
+    if problem == 'short':
+        return _start_return(j, credit_amount, 'refunding', 'pix_charge_fx_short')
+    if quote is None:
+        _state(j, 'needs_review', failure='fx_quote_outside_authorization')
+        return None
+    amount = positive(quote['source_amount'])
+    j.fx_quote = quote
+    j.fx_operation = _new_operation(j, 'fx', source, target, amount)
+    j.money_flow.metadata = dict(j.money_flow.metadata, fx_source_remainder={
+        'amount': str(credit_amount - amount), 'asset': source.asset,
+        'financial_account_id': str(source.internal_id), 'funding_credit_id': str(j.funding_credit_id),
+    })
+    j.save(update_fields=['fx_quote', 'fx_operation', 'updated_at'])
+    _state(j, 'converting')
+    return j.fx_operation
+
+
 def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None):
     """Persist each leg under a row lock, submit only after COMMIT.
 
@@ -489,7 +663,22 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 _state(j, 'needs_review', failure='funding_credit_mismatch'); return j
             j.funding_credit = credit
             j.save(update_fields=['funding_credit', 'updated_at'])
-        if not j.fx_operation_id:
+        returning = _return_operation(j) if _charge(j) else None
+        if returning is not None:
+            if has_refund(returning) or returning.status in {'failed', 'reversed', 'needs_review'}:
+                _state(j, 'needs_review', failure='pix_charge_return_' + (
+                    'refunded' if has_refund(returning) else returning.status))
+            elif returning.status == 'succeeded':
+                _finish_return(j)
+            elif returning.status == 'created':
+                operation = returning
+        elif not j.fx_operation_id and _charge(j):
+            # Waiting is not a failure. Do not start a quote's expiry clock
+            # while another operation still reserves this source account.
+            require_unreserved_source('infinia', source, j.money_flow_id)
+            _require_capability(source, 'convert')
+            operation = _start_exact_conversion(j, source, target, positive(j.funding_credit.amount), client)
+        elif not j.fx_operation_id:
             # Waiting is not a failure. Do not start a quote's expiry clock
             # while another operation still reserves this source account.
             require_unreserved_source('infinia', source, j.money_flow_id)
@@ -539,7 +728,23 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             if LedgerEntry.objects.filter(operation=j.fx_operation, direction='debit').exists():
                 _state(j, 'needs_review', failure='fx_requote_debit_exists'); return j
             amount = positive(j.fx_operation.source_amount)
-            quote = _authorized_fx_quote(j, source, target, amount, client)
+            if _charge(j):
+                # Same reais again; the dollars it takes may differ, within
+                # what arrived. A charge no longer payable or no longer
+                # covered parks the journey: the rejected conversion cannot
+                # be retired cleanly here, so a human returns the dollars.
+                payable = _charge_still_payable(j, _charge(j), client)
+                if payable is None:
+                    return j
+                if payable is not True:
+                    _state(j, 'needs_review', failure=payable); return j
+                quote, problem = _authorized_exact_quote(j, source, target, positive(j.funding_credit.amount), client)
+                if problem == 'short':
+                    _state(j, 'needs_review', failure='pix_charge_fx_short'); return j
+                if quote is not None:
+                    amount = positive(quote['source_amount'])
+            else:
+                quote = _authorized_fx_quote(j, source, target, amount, client)
             if quote is None:
                 _state(j, 'needs_review', failure='fx_quote_outside_authorization'); return j
             if j.direction == 'to_wallet' and j.minimum_wallet_output is not None:
@@ -554,7 +759,7 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 submitted_at=operation.submitted_at,
                 provider_operation_id=operation.provider_operation_id,
                 updated_at=operation.updated_at, provider_data=previous).update(
-                    status='created', failure_code='', failure_detail='',
+                    status='created', failure_code='', failure_detail='', source_amount=amount,
                     provider_data={'quote_id': quote['id']}, updated_at=timezone.now())
             if not changed:
                 return j
@@ -580,10 +785,15 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 operation = j.fx_operation if j.fx_operation.status == 'created' else None
             elif proceeds < j.minimum_fx_output or proceeds != positive(j.fx_quote['target_amount']):
                 _state(j, 'needs_review', failure='conversion_credit_mismatch')
+            elif _charge(j) and proceeds != positive(_charge(j)['amount']):
+                _state(j, 'needs_review', failure='conversion_credit_mismatch')
+            elif _charge(j) and _charge_expired(j):
+                # The reais are in the person's own local account; paying an
+                # expired charge would only bounce. A human returns them.
+                _state(j, 'needs_review', failure='pix_charge_expired_after_conversion')
             else:
                 _require_capability(target, 'send_third_party')
                 quantum = Decimal('0.01') if j.direction == 'to_bank' else Decimal('0.000001')
-                from decimal import ROUND_DOWN
                 payout_amount = proceeds.quantize(quantum, rounding=ROUND_DOWN)
                 positive(payout_amount)
                 direct = j.direction == 'to_wallet' and j.minimum_wallet_output is not None
@@ -629,7 +839,15 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 j.money_flow.metadata = dict(j.money_flow.metadata,
                     payout_face_amount=str(j.payout_operation.source_amount), payout_asset=j.local_account.asset)
                 j.money_flow.save(update_fields=['target_amount', 'updated_at'])
-                _state(j, 'completed')
+                remainder = Decimal(0)
+                if _charge(j):
+                    remainder = (positive(j.funding_credit.amount) - j.fx_operation.source_amount).quantize(
+                        USDC_QUANTUM, rounding=ROUND_DOWN)
+                minimum_return = Decimal(str(getattr(settings, 'LOCAL_MONEY_PIX_MIN_RETURN_USD', '0.01')))
+                if remainder > 0 and remainder >= minimum_return:
+                    operation = _start_return(j, remainder, 'returning_remainder', 'pix_charge_remainder')
+                else:
+                    _state(j, 'completed')
             elif j.bridge_id and j.bridge.status == 'delivered':
                 j.money_flow.target_amount = Decimal(j.bridge.actual_out_units) / Decimal(10**18)
                 j.money_flow.save(update_fields=['target_amount', 'updated_at'])
@@ -646,6 +864,13 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
         # Never hold the journey transaction over a money-moving HTTP request.
         submit_money_operation(operation)
     return j
+
+
+def _charge_expired(j):
+    """Too late to pay: the payout must have time to settle before the charge expires."""
+    from . import local_money
+    left = local_money._seconds_left(local_money._aware((_charge(j) or {}).get('expires_at')))
+    return left is not None and left < int(getattr(settings, 'LOCAL_MONEY_PIX_PAYOUT_SECONDS', 60))
 
 
 def _complete_wallet(j):

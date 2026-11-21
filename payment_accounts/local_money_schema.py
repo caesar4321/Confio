@@ -82,6 +82,26 @@ class LocalPayoutQuoteType(graphene.ObjectType):
     expires_at = graphene.String(required=True)
 
 
+class LocalPixChargeType(graphene.ObjectType):
+    """A merchant's Pix charge and what paying it costs, all in.
+
+    Its own query: an app asking an older server loses only this screen part.
+    The merchant name is the receiver the Pix network registers (DICT), never
+    the text printed in the QR.
+    """
+    amount = graphene.String(required=True)
+    asset = graphene.String(required=True)
+    total_usd = graphene.String(required=True)
+    fee_usd = graphene.String(required=True)
+    estimated_return_usd = graphene.String(required=True)
+    merchant_name = graphene.String(required=True)
+    merchant_document = graphene.String(required=True)
+    institution = graphene.String(required=True)
+    expires_at = graphene.String(required=True)
+    dynamic = graphene.Boolean(required=True)
+    rate = graphene.String(required=True)
+
+
 class LocalTransferFeeType(graphene.ObjectType):
     """The payment processor's fee for one local transfer, in US dollars.
 
@@ -181,6 +201,7 @@ class LocalMoneyQuery(graphene.ObjectType):
     local_payout_fee = graphene.Field(LocalTransferFeeType, destination_id=graphene.UUID(required=True),
                                       bridge_id=graphene.UUID())
     local_transfer_fee = graphene.Field(LocalTransferFeeType, journey_id=graphene.UUID(required=True))
+    local_pix_charge = graphene.Field(LocalPixChargeType, destination_id=graphene.UUID(required=True))
     limit_increase_request = graphene.Field(LimitIncreaseRequestType)
     limit_increase_requirements = graphene.List(graphene.NonNull(EddRequirementType), required=True,
                                                 income_type=graphene.String(required=True))
@@ -355,6 +376,23 @@ class LocalMoneyQuery(graphene.ObjectType):
         except Exception as exc:
             raise _query_error(exc)
         return LocalTransferFeeType(**fee) if fee else None
+
+    def resolve_local_pix_charge(self, info, destination_id):
+        """Null for a recipient that is not a fixed-amount Pix code."""
+        owner = _owner(info, 'send_funds', owner_only=True)
+        row = PayoutDestination.objects.filter(internal_id=destination_id, confio_account=owner,
+                                               provider='infinia').first()
+        if row is None:
+            raise GraphQLError('Destino no encontrado')
+        if local_money.charge_snapshot(row) is None:
+            return None
+        try:
+            local_money.require_rail(owner, _identity(owner, required=False), local_money.METHODS['br_qr'])
+            quote = local_money.pix_charge_quote(owner, row)
+        except Exception as exc:
+            raise _query_error(exc)
+        return LocalPixChargeType(**{key: value if isinstance(value, bool) else str(value)
+                                     for key, value in quote.items()})
 
     def resolve_local_transfer_fee(self, info, journey_id):
         from .infinia_fee_collection import collection_evidence

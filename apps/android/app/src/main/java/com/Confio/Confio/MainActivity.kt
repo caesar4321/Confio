@@ -3,6 +3,7 @@ package com.Confio.Confio
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.MotionEvent
@@ -18,6 +19,19 @@ class MainActivity : ReactActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(null)
+    // A share is handled when it arrives, never again when Android restores
+    // the task (process death) or relaunches it from Recents.
+    val fromHistory = ((intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+    if (savedInstanceState == null && !fromHistory) {
+      ConfioShareIntentModule.handleIntent(intent)
+    }
+  }
+
+  // singleTask: a share while the app is open arrives here.
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    ConfioShareIntentModule.handleIntent(intent)
   }
 
   /**

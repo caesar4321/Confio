@@ -144,6 +144,7 @@ export function infiniaStage(stage: string): string {
         completed: 'Completado',
         failed: 'No completado',
         refunded: 'Fondos devueltos',
+        refunding: 'Devolviendo tus dólares',
         needs_review: 'Estamos revisando el pago. No lo repitas.',
       } as Record<string, string>
     )[stage] || 'Consultando estado'

@@ -213,6 +213,13 @@ class InfiniaProvider(PaymentAccountProvider):
         }
         # Journey quote binding survives response/error payload replacement.
         journey = getattr(operation.money_flow, 'infinia_journey', None) if getattr(operation, 'money_flow_id', None) else None
+        if (journey is not None and journey.fx_operation_id == operation.pk
+                and (journey.destination_snapshot or {}).get('pix_charge')):
+            # A Pix charge is paid at its exact amount: the conversion names
+            # the amount to land, as its quote did, not the dollars it takes.
+            from payment_accounts.infinia_journeys import provider_number
+            del payload['source_amount']
+            payload['target_amount'] = provider_number(journey.fx_quote['target_amount'])
         quote_id = journey.fx_quote.get('id') if journey else (operation.provider_data or {}).get('quote_id')
         if quote_id:
             payload['quote_id'] = quote_id

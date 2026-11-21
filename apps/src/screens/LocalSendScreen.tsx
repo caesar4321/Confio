@@ -47,6 +47,7 @@ import {
   currencyName,
   fetchLocalDestination,
   fetchPayoutFee,
+  fetchPixCharge,
   fetchPayoutQuote,
   LOCAL_MONEY_ACCOUNTS,
   LOCAL_MONEY_LIMITS,
@@ -56,10 +57,12 @@ import {
   LocalLimits,
   LocalMethod,
   LocalPayoutQuote,
+  LocalPixCharge,
   recheckLocalDestination,
   resolveLocalDestination,
 } from '../services/localMoney';
 import { sanitizeAmountInput } from '../utils/numberLocale';
+import { pixChargeHint } from '../utils/localPaymentQr';
 import {
   heavyFeeNote,
   LocalTransferFee,
@@ -105,11 +108,23 @@ const COPY: Record<string, {
   },
   br_qr: {
     hero: 'Paga con QR Pix', field: 'Código QR Pix', placeholder: 'Escanea o importa el QR Pix',
-    helper: 'Por ahora solo QR Pix estáticos y sin monto fijo: tú eliges cuánto pagar.',
+    helper: 'De tiendas, apps o personas. Si el QR trae monto, pagamos exactamente ese monto en reales.',
   },
 };
 
 const AMOUNT_PATTERN = /^\d+([.,]\d{1,2})?$/;
+
+// The server refuses to start a charge with less time left (LOCAL_MONEY_PIX_MIN_SECONDS_LEFT).
+const PIX_CHARGE_MIN_LEFT_MS = 10 * 60 * 1000;
+
+// "hoy 14:32" for a charge's expiry, in the person's own time zone.
+const chargeExpiry = (iso: string): string => {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return '';
+  const time = when.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  return when.toDateString() === new Date().toDateString() ? `hoy ${time}`
+    : `${when.toLocaleDateString('es', { day: 'numeric', month: 'short' })} ${time}`;
+};
 
 // Same check digits as the server, checked locally before Continue.
 const clabeValid = (v: string) => /^\d{18}$/.test(v)
@@ -244,6 +259,12 @@ function InfiniaLocalSendScreen() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [amountFocused, setAmountFocused] = useState(false);
+  // A Pix code with its own amount (a store's or app's charge) is paid at
+  // exactly that amount in reais; the dollars are computed, never typed.
+  const [pixCharge, setPixCharge] = useState<LocalPixCharge | null>(null);
+  const [pixChargeLoading, setPixChargeLoading] = useState(false);
+  const [pixChargeError, setPixChargeError] = useState('');
+  const chargeExpected = scannedQr?.methodId === 'br_qr' && pixChargeHint(scannedQr.payload);
   const [quote, setQuote] = useState<LocalPayoutQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState('');
@@ -316,6 +337,10 @@ function InfiniaLocalSendScreen() {
   // confirmation, the prepared review and any lookup in flight no longer apply.
   const startNewRecipient = () => {
     setScannedQr(null);
+    // A charge's dollars were computed, not typed: never carry them over.
+    if (pixCharge || chargeExpected) setAmount('');
+    setPixCharge(null);
+    setPixChargeError('');
     setRetryRecipient(null);
     setLocationBlocked(false);
     lookup.current += 1;
@@ -448,6 +473,44 @@ function InfiniaLocalSendScreen() {
     void resolve(input);
   }, [methodId, locked, resetReview, resolve]);
 
+  // A charge: what it costs all in, once the Pix network named its receiver.
+  // The amount field then holds the computed dollars and is not editable.
+  const chargeRun = useRef(0);
+  const loadPixCharge = useCallback(async (row: LocalDestination) => {
+    const run = ++chargeRun.current;
+    setPixCharge(null);
+    setPixChargeError('');
+    setPixChargeLoading(true);
+    try {
+      const next = await fetchPixCharge(row.id);
+      if (run !== chargeRun.current || !mounted.current) return;
+      if (!next) {
+        setPixChargeError('No pudimos revisar este cobro.');
+        return;
+      }
+      resetReview();
+      setPixCharge(next);
+      setAmount(next.totalUsd);
+    } catch (error: any) {
+      if (run === chargeRun.current && mounted.current) setPixChargeError(error?.message || 'No pudimos revisar este cobro.');
+    } finally {
+      if (run === chargeRun.current && mounted.current) setPixChargeLoading(false);
+    }
+  }, [resetReview]);
+  useEffect(() => {
+    chargeRun.current += 1;
+    setPixCharge(null);
+    setPixChargeError('');
+    setPixChargeLoading(false);
+    if (!chargeExpected || !destination || !pairReady) return;
+    if (destination.verification === 'pending') return;
+    if (destination.verification !== 'verified') {
+      setPixChargeError('No pudimos confirmar este cobro con el banco. Escanea el QR de nuevo.');
+      return;
+    }
+    void loadPixCharge(destination);
+  }, [chargeExpected, destination, pairReady, loadPixCharge]);
+
   // Live estimate while typing; the authoritative quote is priced again on
   // the prepared bridge at review.
   useEffect(() => {
@@ -488,7 +551,8 @@ function InfiniaLocalSendScreen() {
   const inputCheck = AUTO_LOOKUP[methodId];
   const draftReady = !destination && Boolean(scannedQr || (value.trim()
     && (!inputCheck || inputCheck.valid(value.replace(/[\s.\-/]/g, '')))));
-  const canContinue = (recipientReady || draftReady) && !resolving && pairReady && amountNumber > 0 && !amountError;
+  const canContinue = (recipientReady || draftReady) && !resolving && pairReady && amountNumber > 0 && !amountError
+    && (!chargeExpected || (Boolean(pixCharge) && amount === pixCharge!.totalUsd));
   // Typing has no button of its own: leaving the field (or Done) prepares the
   // recipient, so its card and the estimate appear without waiting for Continue.
   // Never per keystroke: each preparation saves a recipient on the server.
@@ -536,6 +600,11 @@ function InfiniaLocalSendScreen() {
       if (!bridgePrepared && error?.quoteRefreshRequired === true) requestId.current = null;
       setFlowError(error?.message || 'No pudimos preparar el envío. Intenta de nuevo.');
       setStep('form');
+      // A charge whose price moved is priced again; Continue then uses the new total.
+      if (pixCharge && recipient) {
+        requestId.current = null;
+        void loadPixCharge(recipient);
+      }
     }
   };
 
@@ -547,6 +616,11 @@ function InfiniaLocalSendScreen() {
     if (BigInt(bridge.deadline) <= BigInt(Math.floor(Date.now() / 1000) + 45)) {
       resetReview();
       setFlowError('La cotización venció. Revisa el envío de nuevo.');
+      return;
+    }
+    if (pixCharge?.expiresAt && Date.parse(pixCharge.expiresAt) - Date.now() < PIX_CHARGE_MIN_LEFT_MS) {
+      resetReview();
+      setFlowError('Este cobro está por vencer. Pide un QR nuevo para pagarlo.');
       return;
     }
     // Sign only what was reviewed: same amount, same recipient.
@@ -995,6 +1069,35 @@ function InfiniaLocalSendScreen() {
                   accentBackground={colors.primaryLight}
                   titleColor={colors.dark}
                 />
+                {chargeExpected ? (
+                  <View style={styles.inputCard}>
+                    <Text style={styles.inputLabel}>Pagas desde tu Confío Dollar</Text>
+                    {pixChargeLoading ? <ActivityIndicator color={colors.primary} /> : pixCharge ? (
+                      <>
+                        <Text style={styles.quoteFinalValue}>{formatRampMoney(pixCharge.totalUsd, USD_UNIT)}</Text>
+                        <Text style={styles.helperText}>
+                          {`El comercio recibe exactamente ${formatRampMoney(pixCharge.amount, pixCharge.asset)}. `}
+                          Incluye las comisiones y un margen por si el tipo de cambio se mueve: lo que sobre vuelve a tu billetera.
+                        </Text>
+                      </>
+                    ) : pixChargeError ? (
+                      <>
+                        <Text style={styles.errorText}>{pixChargeError}</Text>
+                        {destination && !locked ? (
+                          <TouchableOpacity accessibilityRole="button" onPress={() => {
+                            if (scannedQr) void resolve(scannedQr.payload, scannedQr.methodId);
+                          }}>
+                            <Text style={styles.addButtonText}>Revisar el cobro de nuevo</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </>
+                    ) : (
+                      <Text style={styles.helperText}>Te mostramos el monto del cobro en cuanto el banco lo confirme.</Text>
+                    )}
+                    <Text style={styles.limitText}>Saldo disponible: {formatRampMoney(spendable, USD_UNIT)}</Text>
+                    {amountError ? <Text style={styles.errorText}>{amountError}</Text> : null}
+                  </View>
+                ) : (
                 <View style={styles.inputCard}>
                   <Text style={styles.inputLabel}>Envías desde tu Confío Dollar</Text>
                   <View style={[styles.amountInputRow, amountFocused && styles.amountInputRowFocused]}>
@@ -1028,6 +1131,7 @@ function InfiniaLocalSendScreen() {
                     </TouchableOpacity>
                   ) : null}
                 </View>
+                )}
               </View>
             </RampReveal>
 
@@ -1069,7 +1173,7 @@ function InfiniaLocalSendScreen() {
                     </View>
                   ) : quote ? (
                     <>
-                      <Text style={styles.quoteEyebrow}>Estimado que recibe</Text>
+                      <Text style={styles.quoteEyebrow}>{pixCharge ? 'El comercio recibe exactamente' : 'Estimado que recibe'}</Text>
                       <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
                       <Text style={styles.quoteRate}>{`1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · estimado neto de conversión`}</Text>
                       <View style={styles.quoteDivider} />
@@ -1092,9 +1196,29 @@ function InfiniaLocalSendScreen() {
                           ) : null}
                         </>
                       ) : null}
+                      {pixCharge ? (
+                        <>
+                          <View style={styles.quoteRow}>
+                            <Text style={styles.quoteLabel}>Comercio</Text>
+                            <Text style={styles.quoteValue}>{pixCharge.merchantName}</Text>
+                          </View>
+                          {pixCharge.expiresAt ? (
+                            <View style={styles.quoteRow}>
+                              <Text style={styles.quoteLabel}>El cobro vence</Text>
+                              <Text style={styles.quoteValue}>{chargeExpiry(pixCharge.expiresAt)}</Text>
+                            </View>
+                          ) : null}
+                          {Number(pixCharge.estimatedReturnUsd) > 0 ? (
+                            <View style={styles.quoteRow}>
+                              <Text style={styles.quoteLabel}>Vuelve a tu billetera (aprox.)</Text>
+                              <Text style={styles.quoteValue}>{usd(pixCharge.estimatedReturnUsd)}</Text>
+                            </View>
+                          ) : null}
+                        </>
+                      ) : null}
                       <View style={styles.quoteFinalDivider} />
                       <View style={styles.quoteFinalRow}>
-                        <Text style={styles.quoteFinalLabel}>Recibe al menos</Text>
+                        <Text style={styles.quoteFinalLabel}>{pixCharge ? 'Recibe exactamente' : 'Recibe al menos'}</Text>
                         <Text style={styles.quoteFinalValue}>{formatRampMoney(quote.minimumTarget, quote.asset)}</Text>
                       </View>
                       {feeView && heavyFeeNote(feeView) ? (
@@ -1105,7 +1229,9 @@ function InfiniaLocalSendScreen() {
                       ) : null}
                       <View style={styles.disclaimerPill}>
                         <Icon name="info" size={12} color={colors.primaryDark} />
-                        <Text style={styles.quoteNote}>Si la conversión diera menos, no enviamos el pago y te avisamos.</Text>
+                        <Text style={styles.quoteNote}>{pixCharge
+                          ? 'Si el cobro ya no se puede pagar o vence antes, no pagamos y te devolvemos los dólares.'
+                          : 'Si la conversión diera menos, no enviamos el pago y te avisamos.'}</Text>
                       </View>
                     </>
                   ) : (
@@ -1173,7 +1299,7 @@ function InfiniaLocalSendScreen() {
                   ) : null}
                   <View style={styles.reviewRow}>
                     <Icon name="check-circle" size={16} color={colors.textSecondary} />
-                    <Text style={styles.reviewLabel}>Recibe al menos</Text>
+                    <Text style={styles.reviewLabel}>{pixCharge ? 'Recibe exactamente' : 'Recibe al menos'}</Text>
                     <Text style={styles.reviewValueHighlight}>{formatRampMoney(finalQuote.minimumTarget, finalQuote.asset)}</Text>
                   </View>
                   <View style={styles.settlementNotice}>

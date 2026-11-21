@@ -361,6 +361,23 @@ export const ScanScreen = () => {
     }
   }, [isProcessing, client, navigation, scanMode, activeAccount?.id]);
 
+  // A QR shared from another app (useSharedQr) goes through the very same
+  // handler as a scan, once per share, then the params are cleared.
+  const sharedQr = (route.params as any)?.sharedQr as string | undefined;
+  const sharedAt = (route.params as any)?.sharedAt as number | undefined;
+  const handledShare = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!sharedQr || !sharedAt || handledShare.current === sharedAt) return;
+    // Busy (a scan in flight, an alert or the rails sheet open): keep the share
+    // and take it when the screen is free again, never drop it silently.
+    if (isProcessing || localScanInFlight.current || railsSheetOpenRef.current) return;
+    handledShare.current = sharedAt;
+    (navigation as any).setParams({ sharedQr: undefined, sharedAt: undefined });
+    void handleQRCodeScanned(sharedQr);
+    // handleQRCodeScanned is re-created each render; the share is keyed by sharedAt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedQr, sharedAt, isProcessing, showRailsSheet]);
+
   // Removed prewarm HEAD /health pings
 
   const handleClose = () => {
