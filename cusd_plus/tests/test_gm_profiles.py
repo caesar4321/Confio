@@ -72,7 +72,7 @@ class GenerateTests(TestCase):
         self.assertEqual(result['written'], ['AAAA'])                     # retry succeeded
         row = GmAssetProfile.objects.get(ticker='BBBB')
         self.assertEqual((row.failed_attempts, row.description), (1, ''))  # bounded by MAX_ATTEMPTS
-        self.assertNotIn('gm_profiles_outage', str(alert.call_args_list))  # not an outage
+        alert.assert_not_called()
 
     def test_search_sources_count_when_the_answer_carries_no_citation(self):
         data = _response(_answer(), cited=())
@@ -140,7 +140,7 @@ class DescribeTests(TestCase):
                     mock.patch('config.ops_alerts.send_ops_alert') as alert:
                 gm_profiles.describe_new_assets()
         self.assertEqual(gm_profiles.description_for('AAAA'), GOOD)
-        self.assertIn('ZZZZ', alert.call_args.args[0])
+        alert.assert_not_called()                                # never reported on Telegram
 
     def test_website_is_reduced_to_a_domain_and_hidden_rows_feed_no_logo(self):
         GmAssetProfile.objects.create(ticker='TTWO', description=GOOD, website='https://WWW.Take2Games.com/x?y=1')
@@ -180,16 +180,7 @@ class LogoFallbackTests(TestCase):
             self.assertEqual(_fetch_logo('ANT', 'anthropic.com'), (_png(128), True))
 
 
-class AnnounceAndOutageTests(TestCase):
-    def test_announce_splits_under_telegram_limit(self):
-        written = [(f'T{i}', 'x' * 600) for i in range(20)]
-        with mock.patch('config.ops_alerts.send_ops_alert', return_value=True) as alert:
-            gm_profiles._announce(written)
-        sent = [call.args[0] for call in alert.call_args_list]
-        self.assertGreater(len(sent), 1)
-        self.assertTrue(all(len(text) <= 4096 for text in sent))
-        self.assertEqual(sum(text.count('\n• ') for text in sent), 20)
-
+class OutageTests(TestCase):
     def test_provider_outage_stops_the_sweep_without_burning_attempts(self):
         from assistant.engine import AssistantUnavailable
         market = _market(*[(f'T{i:03}', 'X') for i in range(6)])
@@ -199,7 +190,7 @@ class AnnounceAndOutageTests(TestCase):
             gm_profiles.describe_new_assets()
         self.assertEqual(gen.call_count, gm_profiles.OUTAGE_STREAK)
         self.assertEqual(set(GmAssetProfile.objects.values_list('failed_attempts', flat=True)), {0})
-        self.assertEqual(alert.call_args.kwargs['dedupe_key'], 'gm_profiles_outage')
+        alert.assert_not_called()                                # logged, not posted to Telegram
 
     def test_one_erroring_asset_backs_off_and_the_sweep_continues(self):
         from assistant.engine import AssistantUnavailable
@@ -218,7 +209,7 @@ class AnnounceAndOutageTests(TestCase):
             from datetime import timedelta
             GmAssetProfile.objects.filter(ticker='AAAA').update(last_attempt_at=row.last_attempt_at - timedelta(days=1))
             self.assertEqual(gm_profiles.missing_listed(), [('AAAA', 'Slow')])  # a day, not a week
-        self.assertNotIn('gm_profiles_outage', str(alert.call_args_list))
+        alert.assert_not_called()
 
 
 class AdminWebsiteTests(TestCase):

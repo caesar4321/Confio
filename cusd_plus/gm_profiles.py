@@ -10,10 +10,11 @@ asset's website, which the logo mirror uses when its usual source has none.
 Generated text is checked before it is stored: Spanish prose of a sane
 length, sources the search actually consulted, and none of the phrases that
 turn a description into advice ("te recomendamos", "garantiza", "sin
-riesgo"...). It is published without a manual gate, and every written batch
-is posted to the ops group so staff can read it and hide or edit a row in
-the admin. An answer that fails is recorded on the row (blank description)
-and retried later with backoff, up to MAX_ATTEMPTS; never shown.
+riesgo"...). It is published without a manual gate; staff review it in the
+admin (Stock descriptions) and hide or edit any row. Nothing is posted to
+Telegram (product decision, 2026-11-21): written and failed tickers are logged.
+An answer that fails is recorded on the row (blank description) and
+retried later with backoff, up to MAX_ATTEMPTS; never shown.
 """
 import json
 import logging
@@ -266,32 +267,6 @@ def _store(ticker: str, name: str, profile: dict) -> bool:
         **profile, name=name[:200], last_error='', last_attempt_at=timezone.now(), updated_at=timezone.now()))
 
 
-TELEGRAM_CHUNK = 3800  # Telegram caps a message at 4096 characters
-
-
-def _announce(written: list[tuple[str, str]]) -> None:
-    """Post every written description to ops, split under Telegram's limit."""
-    if not written:
-        return
-    from config.ops_alerts import send_ops_alert
-    header = 'Nuevas descripciones de acciones (revisar/ocultar en admin → Stock descriptions):'
-    chunks, current = [], header
-    for ticker, text in written:
-        line = f'\n• {ticker}: {text}'
-        if len(current) + len(line) > TELEGRAM_CHUNK:
-            chunks.append(current)
-            current = header + ' (cont.)'
-        current += line
-    chunks.append(current)
-    for chunk in chunks:
-        try:
-            delivered = send_ops_alert(chunk)
-        except Exception:  # noqa: BLE001 — the notice is best-effort
-            delivered = False
-        if not delivered:
-            logger.error('gm profiles: ops notice not delivered (%d chars)', len(chunk))
-
-
 def describe_new_assets(limit: int = 40, dry_run: bool = False) -> dict:
     """Write profiles for up to `limit` listed assets that are owed one."""
     written, failed = [], {}
@@ -312,7 +287,7 @@ def describe_new_assets(limit: int = 40, dry_run: bool = False) -> dict:
         except Exception as exc:  # noqa: BLE001 — request-level error, not the content
             # Not the asset's fault: never burn an attempt, but back the ticker
             # off so one slow or rejected asset can't pin the queue's head.
-            # A run of them is the provider being down: stop and tell ops.
+            # A run of them is the provider being down: stop (logged only).
             error = f'{type(exc).__name__}: {str(exc)[:100]}'
             failed[ticker] = error[:80]
             streak += 1
@@ -321,13 +296,6 @@ def describe_new_assets(limit: int = 40, dry_run: bool = False) -> dict:
             if streak < OUTAGE_STREAK:
                 continue
             logger.warning('gm profiles: generation unavailable, stopping: %s', error)
-            if not dry_run:
-                try:
-                    from config.ops_alerts import send_ops_alert
-                    send_ops_alert(f'Descripciones de acciones: generación no disponible ({error}).',
-                                   dedupe_key='gm_profiles_outage', dedupe_seconds=86400)
-                except Exception:  # noqa: BLE001
-                    pass
             break
         streak = 0
         if dry_run:
@@ -335,8 +303,6 @@ def describe_new_assets(limit: int = 40, dry_run: bool = False) -> dict:
             written.append((ticker, profile['description']))
         elif _store(ticker, name, profile):
             written.append((ticker, profile['description']))
-    if not dry_run:
-        _announce(written)
     result = {'missing': len(todo), 'written': [ticker for ticker, _ in written], 'failed': failed,
               'at': timezone.now().isoformat(timespec='minutes')}
     logger.info('gm profiles: %s', result)
