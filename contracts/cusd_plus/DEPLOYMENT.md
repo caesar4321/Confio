@@ -1,6 +1,15 @@
 # cUSD+ deployment record — BSC mainnet
 
-## Cuenta inteligente — DEPLOYED 2026-11-21 (cUSD Safe upgrade PENDING)
+## Cuenta inteligente — DEPLOYED 2026-11-21 (cUSD upgrade EXECUTED, Safe nonce 30)
+
+**cUSD upgrade EXECUTED 2026-11-21** at Safe nonce 30 (signers 1/3/5, tx
+`0x7f29e5a9650fc146c3e270cef8d48cf17c460e50b47ba5d8c490962af1f05816`, block
+134969843; the founder ran the signer in his terminal). Verified live: impl
+slot = `0xcB75…E707`, `isSmartAccountFactory(0x3390…f953)` true, Safe nonce
+31, owner Safe, `feeBps` 90, unpaused, fully backed, `referralShareCapBps`
+5000, `batchDelegate` `0xC06B…bc00` unchanged. cUSD proxy re-linked on
+BscScan to the new implementation. The notes below about the pending
+signature are history.
 
 Deployed by the KMS sponsor `0xf9f9…dfc9D` via `deploy_smart_account
 --broadcast --yes-mainnet` (all post-deploy checks passed), all five
