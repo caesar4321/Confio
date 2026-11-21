@@ -61,6 +61,11 @@ def live_journeys(queryset, *, recoverable=RECOVERABLE_DELAYS):
                    _fx_rejection_text=F('_expired_quote_message'))
                  & (Q(fx_operation__provider_operation_id__isnull=True)
                     | Q(fx_operation__provider_operation_id='')))
+        # A Pix charge being unwound: its reais are going back to the person
+        # and its legs are in flight (infinia_journeys._advance_unwind).
+        # Parked ones not yet checked are visited by the worker
+        # (infinia_journeys.unwind_candidates) without being live.
+        live |= Q(stage='needs_review', money_flow__metadata__pix_charge_unwind__state='active')
     return queryset.filter(live)
 
 

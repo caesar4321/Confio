@@ -631,11 +631,6 @@ _VALIDATION_TYPES = {
 def _validation_request(method, value):
     if method.id == 'co_qr':
         return {'country': 'CO', 'account': {'dataType': 'BREB_KEY', 'brebKey': decode_breb_qr(value)['key']}}
-    if method.id == 'br_qr' and fixed_pix_charge(method, value):
-        # A charge (dynamic code, or a static code with an amount) is read
-        # by the provider from the Pix network: receiver as registered in
-        # DICT, amount and expiry. Validation docs, BrazilQRCode, 2026-10-16.
-        return {'country': 'BR', 'account': {'dataType': 'QR_CODE', 'qrCode': value}}
     if method.id == 'br_qr':
         # A static Pix QR without an amount embeds the registered key: check
         # that key, as before charges were payable.
@@ -721,7 +716,8 @@ def _label(method, value, validation):
         # Merchant text comes from the QR itself, not an owner lookup. Include
         # a stable reference so two saved codes with the same name differ.
         fields = emv_fields(value) or {}
-        name = validation.get('holder_name') if verification_state(validation) == VERIFIED else fields.get('59')
+        name = (validation.get('holder_name') if verification_state(validation) == VERIFIED
+                and validation.get('holder_source') not in ('qr', 'charge') else fields.get('59'))
         name = ' '.join(str(name or 'Código de pago').split())[:60]
         reference = hashlib.sha256(value.encode('utf-8')).hexdigest()[:10].upper()
         return f'QR · {name} · {reference}'
@@ -756,7 +752,9 @@ def _apply_validation(destination, method, value, validation, *, answers=None, c
             return destination
         if check is not None and data.get('check') != check:
             return destination
-        destination.holder_name = validation['holder_name'] if verification_state(validation) == VERIFIED else ''
+        # A name a Pix charge or its QR carries is not a registered holder.
+        destination.holder_name = (validation['holder_name'] if verification_state(validation) == VERIFIED
+                                   and validation.get('holder_source') not in ('qr', 'charge') else '')
         destination.label = _label(method, value, validation)[:100]
         destination.provider_data = {**(destination.provider_data or {}), 'method_id': method.id,
                                      'validation': validation}
@@ -808,6 +806,14 @@ def _current_verified(destination):
 
 
 def _validate(method, value, client):
+    if method.id == 'br_qr' and fixed_pix_charge(method, value):
+        # A Pix charge is read from the code and, for a dynamic one, from the
+        # Pix network itself (signed payload, pix_payload): no paid lookup.
+        if not getattr(settings, 'LOCAL_MONEY_PIX_CHARGES_ENABLED', True):
+            return {'id': '', 'status': 'DISABLED', 'holder_name': '', 'holder_document': '',
+                    'institution': '', 'checked_at': timezone.now().isoformat()}
+        from . import pix_payload
+        return pix_payload.validation(pix_code(value))
     if not getattr(settings, 'INFINIA_ACCOUNT_VALIDATION_ENABLED', False):
         return {'id': '', 'status': 'DISABLED', 'holder_name': '', 'holder_document': '',
                 'institution': '', 'checked_at': timezone.now().isoformat()}
@@ -916,6 +922,11 @@ def destination_view(destination):
     data = destination.provider_data or {}
     validation = data.get('validation') or {}
     state = verification_state(validation)
+    if state == VERIFIED and validation.get('holder_source') in ('qr', 'charge'):
+        # A Pix charge's name comes from the code or its payload, not from a
+        # registered-holder lookup: never shown as a verified holder; the
+        # person confirms it explicitly, as for any unchecked recipient.
+        state = UNVERIFIED
     method = METHODS.get(data.get('method_id'))
     label = _label(method, _destination_value(destination, method), validation) if method else destination.label
     qr_data = data.get('breb_qr') or {}
@@ -1013,7 +1024,8 @@ def charge_snapshot(destination):
         return None
     return {'key': charge['key'], 'single_use': charge['single_use'],
             'amount': str(charge['amount'] or ''), 'expires_at': charge['expiration_raw'],
-            'holder': str(charge['validation'].get('holder_name') or '')}
+            'holder': str(charge['validation'].get('holder_name') or ''),
+            'holder_source': str(charge['validation'].get('holder_source') or 'dict')}
 
 
 def _seconds_left(expires_at):
@@ -1117,6 +1129,9 @@ def pix_charge_quote(owner, destination, *, client=None):
     return {'amount': charge['amount'], 'asset': local.asset, 'total_usd': total, 'fee_usd': fee_usd,
             'estimated_return_usd': max(expected - exact_source, Decimal(0)).quantize(FIAT_CENT, rounding=ROUND_DOWN),
             'merchant_name': validation.get('holder_name', ''), 'merchant_document': validation.get('holder_document', ''),
+            # Where the name comes from: 'dict' (provider lookup), 'charge'
+            # (the signed payload) or 'qr' (the code's own, unsigned text).
+            'merchant_source': str(validation.get('holder_source') or 'dict'),
             'institution': validation.get('institution', ''),
             'expires_at': charge['expires_at'].isoformat() if charge['expires_at'] else '',
             'dynamic': charge['dynamic'], 'rate': (charge['amount'] / total).quantize(Decimal('0.0001'))}

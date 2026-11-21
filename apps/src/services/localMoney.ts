@@ -98,8 +98,10 @@ export interface LocalPayoutQuote {
   expiresAt: string;
 }
 
-/** A merchant's Pix charge: paid at exactly `amount` reais. The merchant name
- *  is the receiver the Pix network registers, never the QR's own text. */
+/** A merchant's Pix charge: paid at exactly `amount` reais. merchantSource
+ *  says where the name comes from: 'charge' (the bank-signed charge), 'qr'
+ *  (the code's own, unverified text) or 'dict' (registered holder);
+ *  institution is the bank site that signed a dynamic charge. */
 export interface LocalPixCharge {
   amount: string;
   asset: string;
@@ -108,6 +110,7 @@ export interface LocalPixCharge {
   estimatedReturnUsd: string;
   merchantName: string;
   merchantDocument: string;
+  merchantSource: string;
   institution: string;
   expiresAt: string;
   dynamic: boolean;
@@ -296,7 +299,7 @@ const LOCAL_PIX_CHARGE = gql`
   query LocalPixCharge($destinationId: UUID!) {
     localPixCharge(destinationId: $destinationId) {
       amount asset totalUsd feeUsd estimatedReturnUsd merchantName merchantDocument
-      institution expiresAt dynamic rate
+      merchantSource institution expiresAt dynamic rate
     }
   }
 `;

@@ -504,8 +504,10 @@ function InfiniaLocalSendScreen() {
     setPixChargeLoading(false);
     if (!chargeExpected || !destination || !pairReady) return;
     if (destination.verification === 'pending') return;
-    if (destination.verification !== 'verified') {
-      setPixChargeError('No pudimos confirmar este cobro con el banco. Escanea el QR de nuevo.');
+    // A charge read from the code or its signed payload is 'unverified' (the
+    // name is not a registered-holder lookup); only a refused code stops here.
+    if (destination.verification === 'not_found') {
+      setPixChargeError('Este cobro ya no se puede pagar o no pudimos leerlo. Pide un QR nuevo.');
       return;
     }
     void loadPixCharge(destination);
@@ -1199,9 +1201,23 @@ function InfiniaLocalSendScreen() {
                       {pixCharge ? (
                         <>
                           <View style={styles.quoteRow}>
-                            <Text style={styles.quoteLabel}>Comercio</Text>
+                            <Text style={styles.quoteLabel}>
+                              {pixCharge.merchantSource === 'dict' ? 'Comercio'
+                                : pixCharge.merchantSource === 'charge' ? 'Nombre en el cobro' : 'Nombre en el QR'}
+                            </Text>
                             <Text style={styles.quoteValue}>{pixCharge.merchantName}</Text>
                           </View>
+                          {pixCharge.institution ? (
+                            <View style={styles.quoteRow}>
+                              <Text style={styles.quoteLabel}>Cobro emitido por</Text>
+                              <Text style={styles.quoteValue}>{pixCharge.institution}</Text>
+                            </View>
+                          ) : null}
+                          {pixCharge.merchantSource !== 'dict' ? (
+                            <Text style={styles.helperText}>
+                              El nombre lo escribe quien creó el cobro; no lo verificamos. Paga solo si lo reconoces.
+                            </Text>
+                          ) : null}
                           {pixCharge.expiresAt ? (
                             <View style={styles.quoteRow}>
                               <Text style={styles.quoteLabel}>El cobro vence</Text>

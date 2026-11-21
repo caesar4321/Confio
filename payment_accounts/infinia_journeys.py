@@ -1,6 +1,6 @@
 """Durable Infinia conversion/payout orchestration using authenticated ledger facts."""
 import uuid
-from datetime import timezone as dt_timezone
+from datetime import timedelta, timezone as dt_timezone
 from decimal import Decimal, ROUND_DOWN
 
 from django.conf import settings
@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .allbridge_next import address
-from .clients import InfiniaClient, ProviderAPIError
+from .clients import InfiniaClient
 from .eligibility import context_from_identity, enforce_and_record
 from .models import InfiniaJourney, MoneyFlow, MoneyOperation, LedgerEntry
 from .services import (PaymentAccountError, _require_provider_enabled,
@@ -231,6 +231,14 @@ def _state(j, stage, *, failure=''):
     flow = j.money_flow
     flow.status = {'completed': 'succeeded', 'failed': 'failed', 'needs_review': 'needs_review'}.get(stage, 'processing')
     flow.metadata = dict(flow.metadata, stage=stage)
+    unwind = (flow.metadata or {}).get('pix_charge_unwind') or {}
+    if stage == 'needs_review' and unwind.get('state') == 'active':
+        # A parked unwind is a human's now: never live (and blocking) forever,
+        # and no leg it never sent keeps reserving the person's accounts.
+        flow.metadata = dict(flow.metadata, pix_charge_unwind=dict(unwind, state='stopped', stopped_for=failure))
+        for leg in (_unwind_operation(j), _return_operation(j)):
+            if leg is not None:
+                _close_never_submitted(leg)
     if stage in {'completed', 'failed'}:
         flow.completed_at = timezone.now()
     flow.save(update_fields=['status', 'metadata', 'completed_at', 'updated_at'])
@@ -462,12 +470,14 @@ def _return_operation(j):
         idempotency_key=str(uuid.uuid5(j.internal_id, RETURN_LEG))).first()
 
 
-def _start_return(j, amount, stage, reason):
+def _start_return(j, amount, stage, reason, *, cap=None):
     """Pay dollars of this journey back to the wallet pinned at authorization:
-    the whole funding when the charge can no longer be paid, or what the
-    conversion did not use. Never anywhere else, never more than arrived."""
+    the whole funding when the charge can no longer be paid, what the
+    conversion did not use, or everything an unwind brought back. Never
+    anywhere else, never more than this journey holds (`cap`: what arrived,
+    or for an unwind what arrived less the conversion plus its reversal)."""
     amount = Decimal(amount).quantize(USDC_QUANTUM, rounding=ROUND_DOWN)
-    arrived = positive(j.funding_credit.amount)
+    arrived = positive(j.funding_credit.amount) if cap is None else Decimal(cap)
     if amount <= 0 or amount > arrived:
         _state(j, 'needs_review', failure='pix_charge_return_amount_invalid')
         return None
@@ -486,11 +496,205 @@ def _start_return(j, amount, stage, reason):
 
 
 def _finish_return(j):
+    # By reason, not by stage: a failed leg elsewhere in the flow can have
+    # flipped the stage to needs_review (services._sync_flow_status) meanwhile.
     reason = ((j.money_flow.metadata or {}).get('pix_charge_return') or {}).get('reason', '')
-    if j.stage == 'refunding':
-        _state(j, 'failed', failure=reason or 'pix_charge_refunded')
-    else:
+    if (j.money_flow.metadata or {}).get('pix_charge_unwind'):
+        _unwind_mark(j, 'done')
+    if reason == 'pix_charge_remainder':
         _state(j, 'completed')
+    else:
+        _state(j, 'failed', failure=reason or 'pix_charge_refunded')
+
+
+# --------------------------------------------------------------- unwind
+# A charge whose payout failed cleanly (or that expired after conversion) is
+# not left for a human: the reais converted for it go back to dollars at the
+# current rate and everything this journey holds returns to the person's
+# pinned wallet. State lives in money_flow.metadata.pix_charge_unwind, because
+# a failed leg flips the stage to needs_review (services._sync_flow_status):
+#   active          the worker keeps advancing it (live_journeys)
+#   done/stopped    finished, or parked for a human
+#   not_applicable  checked once and not unwindable: never live again
+UNWIND_LEG = 'unwind'
+UNWIND_TRIGGERS = frozenset({'payout_failed', 'provider_leg_requires_review', 'pix_charge_expired_after_conversion'})
+
+
+def _unwind_operation(j):
+    return MoneyOperation.objects.filter(money_flow=j.money_flow, provider='infinia',
+        operation_type='conversion', idempotency_key=str(uuid.uuid5(j.internal_id, UNWIND_LEG))).first()
+
+
+def _unwind_mark(j, state, **extra):
+    meta = j.money_flow.metadata or {}
+    j.money_flow.metadata = dict(meta, pix_charge_unwind=dict(meta.get('pix_charge_unwind') or {},
+                                                              state=state, **extra))
+    j.money_flow.save(update_fields=['metadata', 'updated_at'])
+    if state == 'stopped':
+        # Whatever stops it, no leg it never sent keeps reserving accounts.
+        for leg in (_unwind_operation(j), _return_operation(j)):
+            if leg is not None:
+                _close_never_submitted(leg)
+
+
+# Refusals that are final: the provider's own FAILED status (no HTTP code), or
+# a request it rejected as invalid. Anything else (auth, rate limits, not
+# found, an unknown code) may still be payable: a human decides.
+DEFINITIVE_REJECTIONS = frozenset({'', '400', '422'})
+
+
+def _payout_cleanly_failed(j):
+    """The payout was refused for good, with no money leaving the account. A
+    rate limit or timeout is not a refusal: that charge may still be payable."""
+    op = j.payout_operation
+    if op is None or op.status != 'failed' or has_refund(op):
+        return False
+    if str(op.failure_code or '') not in DEFINITIVE_REJECTIONS:
+        return False
+    if op.provider_operation_id and LedgerEntry.objects.filter(
+            financial_account=j.local_account, provider='infinia', direction='debit',
+            provider_data__operation__operation_id=op.provider_operation_id).exists():
+        return False
+    return True
+
+
+BAD_LEG = frozenset({'failed', 'reversed', 'needs_review'})
+
+
+def _unwind_legs_clear(j):
+    """The conversion and the unwind (if any) are not failed, reversed,
+    disputed or refunded: only then may an unwind move money again."""
+    for op in (j.fx_operation, _unwind_operation(j)):
+        if op is not None and (op.status in BAD_LEG or has_refund(op)):
+            return False
+    # The payout that started it must still be a clean refusal.
+    return not j.payout_operation_id or _payout_cleanly_failed(j)
+
+
+def _close_never_submitted(operation):
+    """A leg parked without ever reaching the provider stops reserving its
+    account (create_journey, require_unreserved_source): it never existed there."""
+    from django.db.models import Q
+    MoneyOperation.objects.filter(pk=operation.pk, status='created', submitted_at__isnull=True).filter(
+        Q(provider_operation_id__isnull=True) | Q(provider_operation_id='')).update(
+        status='failed', failure_code='never_submitted', updated_at=timezone.now())
+
+
+def _leg_stuck(operation):
+    hours = int(getattr(settings, 'LOCAL_MONEY_PIX_UNWIND_MAX_HOURS', 6))
+    return operation.created_at < timezone.now() - timedelta(hours=hours)
+
+
+def unwind_candidates(queryset):
+    """Parked charge journeys not yet checked for an unwind. The worker visits
+    them; they are NOT live: they hold no operation in flight, so they never
+    reserve an account or block the owner's next payment (live_journeys)."""
+    from django.db.models import Q
+    return queryset.filter(
+        stage='needs_review', direction='to_bank', destination_snapshot__has_key='pix_charge',
+        failure_code__in=sorted(UNWIND_TRIGGERS), fx_operation__isnull=False,
+    ).exclude(money_flow__metadata__has_key='pix_charge_unwind')
+
+
+def _unwind_started(j):
+    return ((j.money_flow.metadata or {}).get('pix_charge_unwind') or {}).get('state') == 'active'
+
+
+def prefetch_payout_lookup(journey_id, client=None):
+    """Ask the provider about a failed charge payout before deciding to
+    unwind, with no lock held: 'clean' (never created, or the provider's own
+    failed record), 'live' (it exists and did not fail: never unwind) or None
+    (no answer: wait). A local 'failed' without an id is not proof."""
+    row = InfiniaJourney.objects.filter(pk=journey_id).values(
+        'stage', 'failure_code', 'destination_snapshot', 'payout_operation__status',
+        'payout_operation__idempotency_key', 'money_flow__metadata').first()
+    if (not row or row['stage'] != 'needs_review' or row['failure_code'] not in UNWIND_TRIGGERS
+            or not (row['destination_snapshot'] or {}).get('pix_charge')
+            or row['payout_operation__status'] != 'failed'
+            or (row['money_flow__metadata'] or {}).get('pix_charge_unwind')):
+        return None
+    try:
+        rows = (client or InfiniaClient()).find_operation('payout', row['payout_operation__idempotency_key'])
+    except Exception:
+        return None
+    if _explicitly_empty_lookup(rows):
+        return 'clean'
+    statuses = {str((r or {}).get('status') or '').upper() for r in rows} if isinstance(rows, list) else {'?'}
+    return 'clean' if statuses and statuses <= {'FAILED', 'ERROR', 'REJECTED'} else 'live'
+
+
+def _unwindable(j):
+    """True: a parked charge journey whose reais can go back (conversion
+    proceeds credited and exactly the charge, payout never made, nothing
+    refunded, and the provider confirms it). False: never. None: not known
+    yet (the provider did not answer): ask again next pass."""
+    if not _charge(j) or not j.fx_operation_id or j.stage != 'needs_review':
+        return False
+    if (j.money_flow.metadata or {}).get('pix_charge_unwind') or j.failure_code not in UNWIND_TRIGGERS:
+        return False
+    if _return_operation(j) is not None or has_refund(j.fx_operation) or j.fx_operation.status in BAD_LEG:
+        return False
+    if j.fx_operation.status not in {'succeeded', 'settling'}:
+        return None  # the conversion's own status has not landed yet: wait (bounded)
+    if j.payout_operation_id:
+        if not _payout_cleanly_failed(j):
+            return False
+        lookup = getattr(j, '_payout_lookup', None)
+        if lookup is None:
+            return None
+        if lookup != 'clean':
+            return False
+    elif j.failure_code != 'pix_charge_expired_after_conversion':
+        return False
+    return _credit_for_operation(j.fx_operation, j.local_account) == positive(_charge(j)['amount'])
+
+
+def _advance_unwind(j):
+    """The next operation of an unwind, or None (waiting, or parked)."""
+    unwind = _unwind_operation(j)
+    if unwind is None:
+        reais = positive(_charge(j)['amount'])
+        reason = 'pix_charge_payout_failed' if j.payout_operation_id else 'pix_charge_expired'
+        unwind = MoneyOperation.objects.create(money_flow=j.money_flow, provider='infinia',
+            operation_type='conversion', source_account=j.local_account, destination_account=j.crypto_account,
+            source_asset=j.local_account.asset, source_amount=reais, target_asset=j.crypto_account.asset,
+            idempotency_key=str(uuid.uuid5(j.internal_id, UNWIND_LEG)), external_destination={},
+            provider_data={})
+        _unwind_mark(j, 'active', reason=reason, operation_id=str(unwind.internal_id), reais=str(reais),
+                     payout_pk=j.payout_operation_id)
+        _state(j, 'unwinding', failure=reason)
+        return unwind
+    if has_refund(unwind) or unwind.status in {'failed', 'reversed', 'needs_review'}:
+        _unwind_mark(j, 'stopped')
+        _state(j, 'needs_review', failure='pix_charge_unwind_' + ('refunded' if has_refund(unwind) else unwind.status))
+        return None
+    if unwind.status == 'created':
+        if _leg_stuck(unwind):
+            _close_never_submitted(unwind)
+            _state(j, 'needs_review', failure='pix_charge_unwind_stuck')
+            return None
+        if j.stage != 'unwinding':
+            _state(j, 'unwinding', failure=j.failure_code)
+        return unwind
+    why = {}
+    proceeds = _credit_for_operation(unwind, j.crypto_account, why=why)
+    if not proceeds:
+        if why.get('reason'):
+            _unwind_mark(j, 'stopped')
+            _state(j, 'needs_review', failure=why['reason'])
+        elif j.stage != 'unwinding':
+            _state(j, 'unwinding', failure=j.failure_code)
+        return None
+    if j.payout_operation_id and not _payout_cleanly_failed(j):
+        # The payout's record changed after the unwind began (a debit, a
+        # refund, a status): never send the reais' dollars on top of it.
+        _state(j, 'needs_review', failure='pix_charge_unwind_payout_changed')
+        return None
+    # Everything this journey holds in dollars: the buffer the conversion did
+    # not use plus what the reversal brought back.
+    holds = positive(j.funding_credit.amount) - j.fx_operation.source_amount + proceeds
+    reason = ((j.money_flow.metadata or {}).get('pix_charge_unwind') or {}).get('reason') or 'pix_charge_payout_failed'
+    return _start_return(j, holds, 'refunding', reason, cap=holds)
 
 
 def _charge_still_payable(j, charge, client=None):
@@ -513,12 +717,15 @@ def _charge_still_payable(j, charge, client=None):
         return 'pix_charge_destination_changed'
     answer = _charge_recheck(j, value, client)
     status = answer.get('status')
-    if status == 'ERROR':
+    if status == 'ERROR' and answer.get('gone'):
+        # The Pix network says it is gone (paid, removed, 404/410).
         return 'pix_charge_unpayable'
     if status != 'SUCCESSFUL':
         # Temporary failure or still running: ask again on the next pass,
         # but not forever for a charge with no expiry of its own.
-        waited = (timezone.now() - j.funding_credit.created_at).total_seconds()
+        since = parse_datetime(str(((j.money_flow.metadata or {}).get('pix_charge_recheck') or {})
+                                   .get('first_unanswered_at') or '')) or timezone.now()
+        waited = (timezone.now() - since).total_seconds()
         if waited > int(getattr(settings, 'LOCAL_MONEY_PIX_RECHECK_MAX_SECONDS', 1800)):
             return 'pix_charge_unconfirmed'
         return None
@@ -527,30 +734,61 @@ def _charge_still_payable(j, charge, client=None):
         same_amount = Decimal(str(fresh.get('amount'))) == Decimal(charge['amount'])
     except (ArithmeticError, ValueError, TypeError):
         same_amount = False
-    if not same_amount or (charge.get('holder') and answer.get('holder_name') != charge['holder']):
+    # Names compare only when they come from the same place: a journey
+    # authorized on a provider (DICT) name is not "changed" by a QR name.
+    same_source = (charge.get('holder_source') or 'dict') == (answer.get('holder_source') or 'dict')
+    if not same_amount or (same_source and charge.get('holder') and answer.get('holder_name') != charge['holder']):
         return 'pix_charge_changed'
     return True
 
 
 def _charge_recheck(j, value, client=None):
-    """The network's current answer for this charge. A check still running
-    is polled by its id; a new one is asked only when none is running (or the
-    last could not answer), so each pass does not pay for another lookup."""
-    from . import local_money
+    """The Pix network's answer for this charge, read by advance_journey
+    BEFORE it locks the journey (prefetch_charge_answer): a slow or hostile
+    QR site must never hold the row lock or a worker. Without a prefetched
+    answer the check is simply not done this pass (temporary)."""
+    answer = getattr(j, '_charge_answer', None)
+    if answer is None or answer.get('_value') != value:
+        answer = {'id': '', 'status': 'TEMPORARY_FAILURE'}
     meta = j.money_flow.metadata or {}
-    running = meta.get('pix_charge_recheck') or {}
-    if running.get('id') and running.get('status') == 'IN_PROGRESS':
-        try:
-            answer = local_money.summarize_validation(
-                (client or InfiniaClient()).get_bank_account_validation(running['id']))
-        except ProviderAPIError:
-            answer = {'id': running['id'], 'status': 'IN_PROGRESS'}
-    else:
-        answer = local_money._validate(local_money.METHODS['br_qr'], value, client)
-    j.money_flow.metadata = dict(meta, pix_charge_recheck={'id': answer.get('id', ''),
-                                                           'status': answer.get('status', '')})
+    previous = meta.get('pix_charge_recheck') or {}
+    now = timezone.now().isoformat()
+    unanswered = answer.get('status') != 'SUCCESSFUL' and not answer.get('gone')
+    j.money_flow.metadata = dict(meta, pix_charge_recheck={
+        'status': answer.get('status', ''), 'checked_at': now,
+        # The wait for an answer counts from the first unanswered check.
+        'first_unanswered_at': (previous.get('first_unanswered_at') or now) if unanswered else ''})
     j.money_flow.save(update_fields=['metadata', 'updated_at'])
     return answer
+
+
+def prefetch_charge_answer(journey_id):
+    """Read a Pix charge from the network for a journey about to convert, with
+    no lock held. None when the journey will not need it this pass."""
+    row = InfiniaJourney.objects.filter(pk=journey_id).values(
+        'internal_id', 'direction', 'stage', 'destination_snapshot', 'funding_credit_id', 'fx_operation_id',
+        'fx_operation__status', 'payout_operation_id', 'bridge__provider_credit_id', 'money_flow_id').first()
+    if (not row or row['direction'] != 'to_bank' or row['stage'] in {'completed', 'failed', 'refunding'}
+            or not (row['destination_snapshot'] or {}).get('pix_charge') or row['payout_operation_id']
+            or not (row['funding_credit_id'] or row['bridge__provider_credit_id'])):
+        return None
+    # Only the passes that read the answer: before the conversion, or when a
+    # conversion that never ran is about to be quoted again.
+    if row['fx_operation_id'] and row['fx_operation__status'] not in {'created', 'failed'}:
+        return None
+    if MoneyOperation.objects.filter(money_flow_id=row['money_flow_id'], provider='infinia',
+                                     idempotency_key=str(uuid.uuid5(row['internal_id'], RETURN_LEG))).exists():
+        return None
+    value = ((row['destination_snapshot'] or {}).get('destination_account') or {}).get('brCode', '')
+    if not value:
+        return None
+    from . import local_money
+    charge = row['destination_snapshot']['pix_charge']
+    left = local_money._seconds_left(local_money._aware(charge.get('expires_at')))
+    if left is not None and left < int(getattr(settings, 'LOCAL_MONEY_PIX_SETTLE_SECONDS', 180)):
+        return None  # it is refunded without asking
+    answer = local_money._validate(local_money.METHODS['br_qr'], value, None)
+    return dict(answer, _value=value)
 
 
 def _authorized_exact_quote(j, source, target, available, client=None):
@@ -610,14 +848,44 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
     idempotency key. A worker never creates a replacement economic leg.
     """
     operation = None
+    # Network reads for a Pix charge happen here, before any lock is taken.
+    charge_answer = prefetch_charge_answer(journey_id)
+    payout_lookup = prefetch_payout_lookup(journey_id, client)
     with transaction.atomic():
         j = InfiniaJourney.objects.select_for_update(of=('self',)).select_related(
             'money_flow', 'confio_account', 'local_account__provider_profile',
             'crypto_account__provider_profile', 'funding_credit', 'bridge__quote',
             'fx_operation', 'payout_operation').get(pk=journey_id)
+        # The flow row may have changed since the join was read (another pass
+        # just committed): its metadata carries the unwind state.
+        j.money_flow.refresh_from_db()
+        j._charge_answer = charge_answer
+        j._payout_lookup = payout_lookup
         if j.stage in {'completed', 'failed'}:
             return j
-        if j.stage == 'needs_review' and not _requotable(j):
+        unwinding = _unwind_started(j)
+        if (not unwinding and j.stage == 'needs_review' and _charge(j) and not _requotable(j)
+                and not (j.money_flow.metadata or {}).get('pix_charge_unwind')
+                and j.failure_code in UNWIND_TRIGGERS):
+            verdict = _unwindable(j)
+            if verdict is None:
+                # The provider did not answer: ask again next pass, for a while.
+                meta = j.money_flow.metadata or {}
+                since = parse_datetime(str(meta.get('pix_charge_unwind_wait') or ''))
+                if since is None:
+                    j.money_flow.metadata = dict(meta, pix_charge_unwind_wait=timezone.now().isoformat())
+                    j.money_flow.save(update_fields=['metadata', 'updated_at'])
+                    return j
+                hours = int(getattr(settings, 'LOCAL_MONEY_PIX_UNWIND_MAX_HOURS', 6))
+                if timezone.now() - since < timedelta(hours=hours):
+                    return j
+                verdict = False  # no answer for hours: a human decides
+            if not verdict:
+                # Checked once: never live again, so it cannot block the owner.
+                _unwind_mark(j, 'not_applicable')
+                return j
+            unwinding = True
+        if j.stage == 'needs_review' and not _requotable(j) and not unwinding:
             # Only a delayed deposit can recover automatically, using receipts
             # alone. Never resume money-moving legs or override another review.
             from .infinia_bridge import RECOVERABLE_DELAYS
@@ -637,6 +905,8 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             return j
         for op in (j.fx_operation, j.payout_operation):
             if op and has_refund(op):
+                if unwinding:
+                    _unwind_mark(j, 'stopped')
                 _state(j, 'needs_review', failure='provider_refund_posted'); return j
         enabled()
         if j.direction == 'to_wallet':
@@ -666,12 +936,56 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
         returning = _return_operation(j) if _charge(j) else None
         if returning is not None:
             if has_refund(returning) or returning.status in {'failed', 'reversed', 'needs_review'}:
+                if unwinding:
+                    _unwind_mark(j, 'stopped')
                 _state(j, 'needs_review', failure='pix_charge_return_' + (
                     'refunded' if has_refund(returning) else returning.status))
+            elif unwinding and not _unwind_legs_clear(j):
+                _state(j, 'needs_review', failure='pix_charge_unwind_leg_problem')
+            elif unwinding and j.stage == 'needs_review' and returning.status in {
+                    'created', 'submitted', 'processing', 'settling', 'unknown'} and not _leg_stuck(returning):
+                # Parked while its refund is still in flight: submissions are
+                # refused in needs_review, and this one is the person's money.
+                _state(j, 'refunding', failure=j.failure_code)
+                if returning.status == 'created':
+                    operation = returning
             elif returning.status == 'succeeded':
                 _finish_return(j)
+            elif returning.status == 'created' and unwinding and _leg_stuck(returning):
+                _close_never_submitted(returning)
+                _state(j, 'needs_review', failure='pix_charge_return_stuck')
             elif returning.status == 'created':
                 operation = returning
+        elif unwinding and not _unwind_legs_clear(j):
+            # Parked by a problem on the conversion or the unwind itself: no
+            # more money moves; a human looks.
+            _state(j, 'needs_review', failure='pix_charge_unwind_leg_problem')
+        elif unwinding:
+            # Serialized with create_journey on the owner row, so starting an
+            # unwind and a new payment can never both pass the gate.
+            type(j.confio_account).objects.select_for_update().filter(pk=j.confio_account_id).first()
+            pending = _unwind_operation(j)
+            if pending is not None and pending.status == 'created' and _leg_stuck(pending):
+                # Checked before any wait: a leg that cannot go out for hours
+                # always ends (closed, parked), whatever keeps it waiting.
+                _close_never_submitted(pending)
+                _state(j, 'needs_review', failure='pix_charge_unwind_stuck')
+                return j
+            if pending is None:
+                # Only before the first leg exists: the same gate create_journey
+                # uses, plus both accounts the unwind debits. Once it has
+                # started it only moves forward; each submission is still
+                # checked by submit_money_operation, and refused legs end at
+                # the 6 h stuck exits.
+                if live_journeys(InfiniaJourney.objects.filter(confio_account=j.confio_account)).exclude(
+                        money_flow_id=j.money_flow_id).exists():
+                    return j
+                try:
+                    require_unreserved_source('infinia', j.local_account, j.money_flow_id)
+                    require_unreserved_source('infinia', j.crypto_account, j.money_flow_id)
+                except PaymentAccountError:
+                    return j  # reserved by something else for now: a candidate, not live
+            operation = _advance_unwind(j)
         elif not j.fx_operation_id and _charge(j):
             # Waiting is not a failure. Do not start a quote's expiry clock
             # while another operation still reserves this source account.

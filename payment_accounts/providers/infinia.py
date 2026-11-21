@@ -220,7 +220,14 @@ class InfiniaProvider(PaymentAccountProvider):
             from payment_accounts.infinia_journeys import provider_number
             del payload['source_amount']
             payload['target_amount'] = provider_number(journey.fx_quote['target_amount'])
-        quote_id = journey.fx_quote.get('id') if journey else (operation.provider_data or {}).get('quote_id')
+        # The journey's quote binds its own conversion only. Another conversion
+        # in the flow (a charge's unwind) runs at the current rate.
+        if journey is not None and journey.fx_operation_id == operation.pk:
+            quote_id = journey.fx_quote.get('id')
+        elif journey is not None:
+            quote_id = None
+        else:
+            quote_id = (operation.provider_data or {}).get('quote_id')
         if quote_id:
             payload['quote_id'] = quote_id
         callback_base = getattr(settings, 'PAYMENT_ACCOUNTS_CALLBACK_BASE_URL', '').rstrip('/')

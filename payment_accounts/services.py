@@ -1109,9 +1109,19 @@ def _sync_flow_status(flow):
         # Late failures/reversals must still reopen a completed customer flow.
         from .infinia_journeys import has_refund
         from .cobre_journeys import has_source_credit
+        operations = flow.operations.all()
+        # A Pix charge being unwound (or unwound) already carries the payout
+        # that failed and started it: that one operation is the unwind's to
+        # handle. Every other leg, the unwind and its refund included, still
+        # reopens the flow when it fails, reverses or is refunded later.
+        unwind = (flow.metadata or {}).get('pix_charge_unwind') or {}
+        if unwind.get('state') in ('active', 'done') and unwind.get('payout_pk'):
+            # Only while it is still the failure that started the unwind: a
+            # late flip (a conflict, a completion) reopens the flow.
+            operations = operations.exclude(pk=unwind['payout_pk'], status='failed')
         refunded = any((has_refund(op) if flow.metadata['orchestrator'] == 'infinia' else has_source_credit(op))
-                       for op in flow.operations.select_related('source_account'))
-        if refunded or flow.operations.filter(status__in=['failed', 'reversed', 'needs_review']).exists():
+                       for op in operations.select_related('source_account'))
+        if refunded or operations.filter(status__in=['failed', 'reversed', 'needs_review']).exists():
             from .models import InfiniaJourney, CobreJourney
             journey_model = InfiniaJourney if flow.metadata['orchestrator'] == 'infinia' else CobreJourney
             journey_model.objects.filter(money_flow=flow).update(stage='needs_review',

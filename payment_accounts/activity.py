@@ -65,6 +65,9 @@ def display_stage(j):
         # unused dollars travelling back are the person's, not the payment.
         if j.stage == 'returning_remainder':
             return 'completed'
+        unwind = ((j.money_flow.metadata or {}).get('pix_charge_unwind') or {}).get('state')
+        if j.stage == 'unwinding' or (j.stage == 'needs_review' and unwind == 'active'):
+            return 'refunding'
         if j.stage == 'failed' and (j.money_flow.metadata or {}).get('pix_charge_return'):
             return 'refunded'
     if j.direction == 'to_wallet' and j.stage == 'completed':

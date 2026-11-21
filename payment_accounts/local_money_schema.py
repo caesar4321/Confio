@@ -86,8 +86,9 @@ class LocalPixChargeType(graphene.ObjectType):
     """A merchant's Pix charge and what paying it costs, all in.
 
     Its own query: an app asking an older server loses only this screen part.
-    The merchant name is the receiver the Pix network registers (DICT), never
-    the text printed in the QR.
+    Amount, expiry and charge come from the code or its signed payload; the
+    merchant name is what the charge (or the QR) carries, not a DICT lookup,
+    and merchant_source says which.
     """
     amount = graphene.String(required=True)
     asset = graphene.String(required=True)
@@ -96,6 +97,9 @@ class LocalPixChargeType(graphene.ObjectType):
     estimated_return_usd = graphene.String(required=True)
     merchant_name = graphene.String(required=True)
     merchant_document = graphene.String(required=True)
+    # 'dict' (registered holder), 'charge' (the signed payload) or 'qr' (the
+    # code's own unsigned text). institution: the bank site that signed it.
+    merchant_source = graphene.String(required=True)
     institution = graphene.String(required=True)
     expires_at = graphene.String(required=True)
     dynamic = graphene.Boolean(required=True)

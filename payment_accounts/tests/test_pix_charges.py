@@ -13,6 +13,7 @@ from payment_accounts.activity import display_stage
 from payment_accounts.bridge_execution import reconcile_provider_credit
 from payment_accounts.infinia_journeys import advance_journey, create_journey
 from payment_accounts.models import InfiniaJourney, LedgerEntry, MoneyOperation, PayoutDestination
+from payment_accounts.pix_payload import PixPayloadError
 from payment_accounts.services import PaymentAccountError
 from .test_bridge_execution import DEST_HASH
 from . import test_infinia_journeys as journey_tests
@@ -39,13 +40,29 @@ class PixCodeTests(SimpleTestCase):
         self.assertEqual(local_money.normalize_value(self.method, DYNAMIC), DYNAMIC)
         self.assertEqual(local_money.normalize_value(self.method, STATIC_AMOUNT), STATIC_AMOUNT)
 
-    def test_fixed_codes_are_checked_on_the_pix_network_and_open_ones_by_key(self):
-        for payload in (DYNAMIC, STATIC_AMOUNT):
-            self.assertEqual(local_money._validation_request(self.method, payload),
-                             {'country': 'BR', 'account': {'dataType': 'QR_CODE', 'qrCode': payload}})
+    @override_settings(INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+    def test_charges_are_read_without_the_paid_lookup(self):
+        client = mock.Mock()
+        static = local_money._validate(self.method, STATIC_AMOUNT, client)
+        self.assertEqual((static['status'], static['holder_name'], static['holder_source']),
+                         ('SUCCESSFUL', 'ANA SILVA', 'qr'))
+        self.assertEqual(static['charge'], {'type': 'static', 'amount': '150.00', 'expiration': '',
+                                            'txid': 'INFINIASANDBOX01'})
+        with mock.patch('payment_accounts.pix_payload.resolve_dynamic', return_value={
+                'amount': Decimal('250.75'), 'expires_at': timezone.now() + timedelta(hours=1), 'txid': 't' * 26,
+                'key': 'k', 'receiver_name': '', 'revision': 0, 'domain': 'pix.example.com'}) as network:
+            dynamic = local_money._validate(self.method, DYNAMIC, client)
+        network.assert_called_once_with('pix.example.com/qr/v2/cob/4d8f085b2d9149deb10c3d0be5c59783')
+        self.assertEqual((dynamic['status'], dynamic['holder_name'], dynamic['holder_source'], dynamic['institution']),
+                         ('SUCCESSFUL', 'INFINIA SANDBOX', 'qr', 'pix.example.com'))
+        client.create_bank_account_validation.assert_not_called()
         open_code = qr(('26', PIX + tlv('01', 'ana@example.com')), ('53', '986'), ('58', 'BR'))
         self.assertFalse(local_money.fixed_pix_charge(self.method, open_code))
         self.assertEqual(local_money._validation_request(self.method, open_code)['account']['dataType'], 'PIX_KEY')
+
+    @override_settings(LOCAL_MONEY_PIX_CHARGES_ENABLED=False)
+    def test_charges_have_their_own_switch(self):
+        self.assertEqual(local_money._validate(self.method, STATIC_AMOUNT, mock.Mock())['status'], 'DISABLED')
 
     def test_refuses_codes_that_are_not_one_payable_charge(self):
         location = tlv('25', 'bank.example/cob/1')
@@ -105,10 +122,11 @@ class PixChargeBase(TestCase):
         self.local.country, self.local.asset = 'BRA', 'BRL'
         self.local.save(update_fields=['country', 'asset'])
         self.charge = self.charge_destination(DYNAMIC, charge_validation())
-        self.api.create_bank_account_validation.return_value = {
-            'id': 'v2', 'status': 'SUCCESSFUL', 'countryData': {
-                'type': 'dynamic', 'amount': 250.75, 'holder': 'INFINIA SANDBOX LTDA',
-                'expiration': (timezone.now() + timedelta(hours=1)).isoformat()}}
+        # The Pix network's answer when a journey reads the charge again.
+        self.network = mock.patch('payment_accounts.pix_payload.resolve_dynamic', return_value={
+            'amount': Decimal('250.75'), 'expires_at': timezone.now() + timedelta(hours=1), 'txid': 't' * 26,
+            'key': 'k', 'receiver_name': 'INFINIA SANDBOX LTDA', 'revision': 0,
+            'domain': 'pix.example.com'}).start()
 
     def tearDown(self):
         mock.patch.stopall()
@@ -218,6 +236,21 @@ class PixChargeJourneyTests(PixChargeBase):
         from users.models import Account
         return Account.objects.create(user=self.owner.user, account_type='business', account_index=7)
 
+    def test_a_qr_name_is_never_shown_as_a_verified_holder(self):
+        validation = dict(charge_validation(), holder_source='qr')
+        view = local_money.destination_view(self.charge_destination(DYNAMIC, validation))
+        self.assertEqual((view['verification'], view['holder_name']), ('unverified', ''))
+        # A provider (DICT) answer still shows as verified.
+        view = local_money.destination_view(self.charge)
+        self.assertEqual(view['verification'], 'verified')
+
+    def test_a_journey_authorized_on_a_dict_name_is_not_refunded_for_a_qr_name(self):
+        j, _ = self.funded()
+        self.network.return_value = dict(self.network.return_value, receiver_name='')  # QR name 'INFINIA SANDBOX'
+        self.target_quote()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'converting')
+
     def test_charges_are_not_offered_as_saved_recipients(self):
         flagged = self.charge_destination(DYNAMIC, charge_validation())
         flagged.provider_data = dict(flagged.provider_data, fixed_charge=True); flagged.save()
@@ -286,12 +319,12 @@ class PixChargeJourneyTests(PixChargeBase):
 
     def test_a_charge_paid_elsewhere_returns_all_the_dollars(self):
         j, _ = self.funded()
-        self.api.create_bank_account_validation.return_value = {'id': 'v3', 'status': 'ERROR', 'countryData': {}}
+        self.network.side_effect = PixPayloadError('charge is CONCLUIDA', gone=True)
         self.refunds(j, 'pix_charge_unpayable')
 
     def test_a_changed_charge_returns_all_the_dollars(self):
         j, _ = self.funded()
-        self.api.create_bank_account_validation.return_value['countryData']['amount'] = 260
+        self.network.return_value = dict(self.network.return_value, amount=Decimal('260.00'))
         self.refunds(j, 'pix_charge_changed')
 
     def test_a_rate_that_no_longer_fits_returns_all_the_dollars(self):
@@ -306,36 +339,31 @@ class PixChargeJourneyTests(PixChargeBase):
                                       expires_at=(timezone.now() + timedelta(seconds=60)).isoformat())
         InfiniaJourney.objects.filter(pk=j.pk).update(destination_snapshot=snapshot)
         self.refunds(j, 'pix_charge_expiring')
-        self.api.create_bank_account_validation.assert_not_called()
+        self.network.assert_not_called()
 
     def test_an_unanswered_check_waits_then_gives_the_dollars_back(self):
         j, entry = self.funded()
-        self.api.create_bank_account_validation.return_value = {'id': 'v4', 'status': 'TEMPORARY_FAILURE'}
+        self.network.side_effect = PixPayloadError('fetch failed', temporary=True)
         advance_journey(j.pk, client=self.api); j.refresh_from_db()
         self.assertEqual(j.stage, 'awaiting_credit')
         self.assertIsNone(j.fx_operation_id)
-        LedgerEntry.objects.filter(pk=entry.pk).update(created_at=timezone.now() - timedelta(minutes=31))
+        flow = j.money_flow
+        flow.metadata = dict(flow.metadata, pix_charge_recheck=dict(
+            flow.metadata['pix_charge_recheck'], first_unanswered_at=(timezone.now() - timedelta(minutes=31)).isoformat()))
+        flow.save(update_fields=['metadata'])
         self.refunds(j, 'pix_charge_unconfirmed')
 
-    def test_a_running_check_is_polled_not_asked_again(self):
+    def test_a_journey_never_uses_the_paid_lookup(self):
         j, _ = self.funded()
-        self.api.create_bank_account_validation.return_value = {'id': 'v9', 'status': 'IN_PROGRESS'}
-        advance_journey(j.pk, client=self.api)
-        self.api.get_bank_account_validation.return_value = {'id': 'v9', 'status': 'IN_PROGRESS'}
-        advance_journey(j.pk, client=self.api); j.refresh_from_db()
-        self.assertEqual(self.api.create_bank_account_validation.call_count, 1)
-        self.api.get_bank_account_validation.assert_called_with('v9')
-        self.assertIsNone(j.fx_operation_id)
-        self.api.get_bank_account_validation.return_value = {'id': 'v9', 'status': 'SUCCESSFUL', 'countryData': {
-            'type': 'dynamic', 'amount': 250.75, 'holder': 'INFINIA SANDBOX LTDA'}}
         self.target_quote()
         advance_journey(j.pk, client=self.api); j.refresh_from_db()
         self.assertEqual(j.stage, 'converting')
-        self.assertEqual(self.api.create_bank_account_validation.call_count, 1)
+        self.network.assert_called_once()
+        self.api.create_bank_account_validation.assert_not_called()
 
     def test_a_failed_return_is_reviewed(self):
         j, _ = self.funded()
-        self.api.create_bank_account_validation.return_value = {'id': 'v3', 'status': 'ERROR', 'countryData': {}}
+        self.network.side_effect = PixPayloadError('charge returned 410', gone=True)
         advance_journey(j.pk, client=self.api); j.refresh_from_db()
         back = self.returned(j); back.status = 'failed'; back.save()
         advance_journey(j.pk, client=self.api); j.refresh_from_db()
@@ -394,3 +422,339 @@ class PixChargeQuoteTests(PixChargeBase):
     def test_gives_up_rather_than_underfund(self):
         with self.assertRaisesRegex(PaymentAccountError, 'No pudimos cotizar'):
             self.run_quote([(Decimal('1'), Decimal('1'))] * 5)
+
+
+class PixChargeUnwindTests(PixChargeBase):
+    """A charge whose payout fails cleanly goes back to dollars, automatically."""
+
+    def paid_out(self, credit='50'):
+        j, _ = self.funded(credit=credit)
+        self.target_quote()
+        advance_journey(j.pk, client=self.api)
+        self.settle_fx(j, self.local, '250.75')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertIsNotNone(j.payout_operation_id)
+        return j
+
+    def fail_payout(self, j):
+        # The provider refuses the payout; the sync flips the journey to review.
+        MoneyOperation.objects.filter(pk=j.payout_operation_id).update(status='failed', failure_code='')
+        InfiniaJourney.objects.filter(pk=j.pk).update(stage='needs_review', failure_code='provider_leg_requires_review')
+
+    def live(self, j):
+        from payment_accounts.infinia_bridge import live_journeys
+        return live_journeys(InfiniaJourney.objects.filter(pk=j.pk)).exists()
+
+    def candidate(self, j):
+        from payment_accounts.infinia_journeys import unwind_candidates
+        return unwind_candidates(InfiniaJourney.objects.filter(pk=j.pk)).exists()
+
+    def unwind(self, j):
+        return MoneyOperation.objects.get(money_flow=j.money_flow,
+                                          idempotency_key=str(uuid.uuid5(j.internal_id, 'unwind')))
+
+    def settle_unwind(self, j, usdc='45.80'):
+        op = self.unwind(j)
+        op.provider_operation_id = 'unwind-id'; op.status = 'settling'; op.save()
+        self.credit(self.crypto, amount=usdc, provider_data={
+            'operation': {'type': 'INTERNAL_TRANSFER', 'operation_id': 'unwind-id'}})
+
+    def test_a_failed_payout_returns_every_dollar_the_journey_holds(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        # Visited by the worker, but not live: it reserves nothing.
+        self.assertFalse(self.live(j))
+        self.assertTrue(self.candidate(j))
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'unwinding')
+        self.assertTrue(self.live(j))
+        self.assertEqual(display_stage(j), 'refunding')
+        op = self.unwind(j)
+        self.assertEqual((op.source_account, op.destination_account, op.source_amount),
+                         (self.local, self.crypto, Decimal('250.75')))
+        # A failed leg elsewhere in the flow flips it to review again: it keeps going.
+        InfiniaJourney.objects.filter(pk=j.pk).update(stage='needs_review', failure_code='provider_leg_requires_review')
+        self.assertTrue(self.live(j))
+        self.settle_unwind(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'refunding')
+        back = self.returned(j)
+        # 50 arrived, 46.10 converted, 45.80 came back from the reais.
+        self.assertEqual(back.source_amount, Decimal('49.700000'))
+        self.assertEqual(back.external_destination['destination_account'],
+                         {'type': 'POLYGON', 'address': j.wallet_address})
+        InfiniaJourney.objects.filter(pk=j.pk).update(stage='needs_review', failure_code='provider_leg_requires_review')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'refunding')  # unparked so its submission is allowed
+        back.status = 'succeeded'; back.save()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('failed', 'pix_charge_payout_failed'))
+        self.assertEqual(display_stage(j), 'refunded')
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'done')
+        self.assertFalse(self.live(j))
+
+    def test_an_expired_charge_after_conversion_is_unwound_too(self):
+        j, _ = self.funded()
+        self.target_quote()
+        advance_journey(j.pk, client=self.api)
+        self.settle_fx(j, self.local, '250.75')
+        j.refresh_from_db()
+        snapshot = dict(j.destination_snapshot)
+        snapshot['pix_charge'] = dict(snapshot['pix_charge'], expires_at=(timezone.now() - timedelta(seconds=1)).isoformat())
+        InfiniaJourney.objects.filter(pk=j.pk).update(destination_snapshot=snapshot)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'pix_charge_expired_after_conversion'))
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('unwinding', 'pix_charge_expired'))
+        self.assertEqual(self.unwind(j).source_amount, Decimal('250.75'))
+
+    def test_a_payout_that_moved_money_is_never_unwound(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        MoneyOperation.objects.filter(pk=j.payout_operation_id).update(provider_operation_id='payout-id')
+        self.credit(self.local, amount='250.75', provider_data={})  # unrelated credit
+        LedgerEntry.objects.create(provider='infinia', financial_account=self.local, provider_entry_id='debit-1',
+                                   direction='debit', asset='BRL', amount='250.75', occurred_at=timezone.now(),
+                                   provider_data={'operation': {'type': 'PAYOUT', 'operation_id': 'payout-id'}})
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'needs_review')
+        self.assertFalse(MoneyOperation.objects.filter(idempotency_key=str(uuid.uuid5(j.internal_id, 'unwind'))).exists())
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'not_applicable')
+        # Checked once, never live again: it cannot block the owner's next payment.
+        self.assertFalse(self.live(j))
+
+    def test_a_failed_unwind_parks_for_a_human_and_stops_being_live(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        MoneyOperation.objects.filter(pk=self.unwind(j).pk).update(status='failed')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'pix_charge_unwind_leg_problem'))
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'stopped')
+        self.assertFalse(self.live(j))
+
+    def test_the_unwind_runs_at_the_current_rate_not_the_payment_quote(self):
+        from payment_accounts.providers.infinia import InfiniaProvider
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        client = mock.Mock()
+        client.create_internal_transfer.return_value = {'id': 't2', 'status': 'PENDING'}
+        adapter = InfiniaProvider.__new__(InfiniaProvider); adapter.client = client
+        adapter.create_transfer(self.unwind(j))
+        payload = client.create_internal_transfer.call_args[0][0]
+        self.assertNotIn('quote_id', payload)
+        self.assertEqual(payload['source_amount'], 250.75)
+        self.assertNotIn('target_amount', payload)
+
+    def test_a_payout_the_provider_still_has_is_never_unwound(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        self.api.find_operation.return_value = [{'originId': 'x', 'status': 'IN_PROGRESS'}]
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'not_applicable')
+        self.assertFalse(MoneyOperation.objects.filter(idempotency_key=str(uuid.uuid5(j.internal_id, 'unwind'))).exists())
+
+    def test_no_answer_from_the_provider_waits_without_deciding(self):
+        from payment_accounts.clients import ProviderAPIError
+        j = self.paid_out()
+        self.fail_payout(j)
+        self.api.find_operation.side_effect = ProviderAPIError('unavailable')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertNotIn('pix_charge_unwind', j.money_flow.metadata)
+        self.assertTrue(self.candidate(j))
+        self.assertFalse(self.live(j))
+        self.api.find_operation.side_effect = None
+        self.api.find_operation.return_value = []
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'unwinding')
+
+    def test_the_flow_sync_leaves_an_active_unwind_alone(self):
+        from payment_accounts.services import _sync_flow_status
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        _sync_flow_status(j.money_flow); j.refresh_from_db()
+        self.assertEqual(j.stage, 'unwinding')
+
+    def test_a_parked_unwind_stops_being_live(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.owner.bsc_address = '0x' + '9' * 40; self.owner.save(update_fields=['bsc_address'])
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'wallet_changed'))
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'stopped')
+        self.assertFalse(self.live(j))
+
+    def test_an_unwind_that_cannot_be_submitted_for_hours_is_parked(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        MoneyOperation.objects.filter(pk=self.unwind(j).pk).update(created_at=timezone.now() - timedelta(hours=7))
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'pix_charge_unwind_stuck'))
+        self.assertFalse(self.live(j))
+        # The never-submitted leg no longer reserves the account or the owner.
+        self.assertEqual((self.unwind(j).status, self.unwind(j).failure_code), ('failed', 'never_submitted'))
+
+    def test_a_rate_limited_payout_is_not_unwound(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        MoneyOperation.objects.filter(pk=j.payout_operation_id).update(failure_code='429')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'not_applicable')
+        self.assertFalse(self.live(j))
+
+    def test_a_provider_that_never_answers_stops_holding_the_owner(self):
+        from payment_accounts.clients import ProviderAPIError
+        j = self.paid_out()
+        self.fail_payout(j)
+        self.api.find_operation.side_effect = ProviderAPIError('unavailable')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertTrue(self.candidate(j))
+        flow = j.money_flow
+        flow.metadata = dict(flow.metadata, pix_charge_unwind_wait=(timezone.now() - timedelta(hours=7)).isoformat())
+        flow.save(update_fields=['metadata'])
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'not_applicable')
+        self.assertFalse(self.live(j))
+
+    def test_a_late_webhook_never_reopens_a_finished_unwind(self):
+        from payment_accounts.services import _sync_flow_status
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api)
+        self.settle_unwind(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        back = self.returned(j); back.status = 'succeeded'; back.save()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'failed')
+        _sync_flow_status(j.money_flow); j.refresh_from_db()
+        self.assertEqual(j.stage, 'failed')
+        self.assertEqual(display_stage(j), 'refunded')
+
+    def test_a_refund_reversed_after_the_unwind_is_reopened_for_review(self):
+        from payment_accounts.services import _sync_flow_status
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api)
+        self.settle_unwind(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        back = self.returned(j); back.status = 'succeeded'; back.save()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'failed')
+        back.status = 'reversed'; back.save()
+        _sync_flow_status(j.money_flow); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'provider_leg_requires_review'))
+
+    def test_two_parked_charges_unwind_one_after_the_other(self):
+        first = self.paid_out()
+        self.fail_payout(first)
+        # A second parked charge journey of the same person on the same accounts.
+        second = InfiniaJourney.objects.get(pk=first.pk)
+        second.pk = None; second.internal_id = uuid.uuid4(); second.request_id = uuid.uuid4()
+        flow = first.money_flow; flow.pk = None; flow.internal_id = uuid.uuid4(); flow.metadata = {}; flow.save()
+        second.money_flow = flow; second.fx_operation = None; second.payout_operation = None
+        second.funding_credit = None; second.bridge = None
+        second.save()
+        self.assertFalse(self.live(second))
+        advance_journey(first.pk, client=self.api); first.refresh_from_db()
+        self.assertEqual(first.stage, 'unwinding')
+        # The parked one never blocked it, and it cannot block the owner either.
+        self.assertFalse(self.live(second))
+
+    def test_a_reversed_conversion_stops_the_unwind_before_more_money_moves(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'unwinding')
+        MoneyOperation.objects.filter(pk=j.fx_operation_id).update(status='reversed')
+        self.submit.reset_mock()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'pix_charge_unwind_leg_problem'))
+        self.submit.assert_not_called()
+        self.assertFalse(self.live(j))
+
+    def test_a_late_flip_of_the_triggering_payout_reopens_the_flow(self):
+        from payment_accounts.services import _sync_flow_status
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        MoneyOperation.objects.filter(pk=j.payout_operation_id).update(status='needs_review')
+        _sync_flow_status(j.money_flow); j.refresh_from_db()
+        self.assertEqual(j.stage, 'needs_review')
+        self.submit.reset_mock()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual((j.stage, j.failure_code), ('needs_review', 'pix_charge_unwind_leg_problem'))
+        self.submit.assert_not_called()
+
+    def test_an_auth_error_is_not_a_refusal(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        MoneyOperation.objects.filter(pk=j.payout_operation_id).update(failure_code='401')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.money_flow.metadata['pix_charge_unwind']['state'], 'not_applicable')
+
+    def test_an_invalid_request_is_a_refusal(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        MoneyOperation.objects.filter(pk=j.payout_operation_id).update(failure_code='422')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'unwinding')
+
+    def test_a_parked_unwind_leaves_nothing_reserving_the_owner(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()  # unwind created, not submitted (mock)
+        MoneyOperation.objects.filter(pk=j.fx_operation_id).update(status='reversed')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(self.unwind(j).status, 'failed')
+        self.assertFalse(MoneyOperation.objects.filter(
+            source_account__in=[self.local, self.crypto], status__in=['created', 'submitted', 'processing',
+                                                                      'settling', 'unknown']).exists())
+
+    def test_an_unwind_once_started_is_not_held_by_other_activity(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'unwinding')
+        self.settle_unwind(j)
+        # Another live journey of the person exists now: the started unwind still finishes.
+        with mock.patch('payment_accounts.infinia_journeys.live_journeys') as live:
+            live.return_value.exclude.return_value.exists.return_value = True
+            advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'refunding')
+
+    def test_a_conversion_whose_status_has_not_landed_waits(self):
+        j = self.paid_out()
+        self.fail_payout(j)
+        MoneyOperation.objects.filter(pk=j.fx_operation_id).update(status='processing')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertNotIn('pix_charge_unwind', j.money_flow.metadata)
+        MoneyOperation.objects.filter(pk=j.fx_operation_id).update(status='succeeded')
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'unwinding')
+
+class PixChargeRecheckTests(PixChargeBase):
+    def test_an_unreadable_answer_waits_instead_of_refunding(self):
+        j, entry = self.funded()
+        self.network.side_effect = PixPayloadError('response is not a compact JWS')  # e.g. a WAF page
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'awaiting_credit')
+        self.assertFalse(MoneyOperation.objects.filter(
+            idempotency_key=str(uuid.uuid5(j.internal_id, 'return'))).exists())
+        self.network.side_effect = None
+        self.target_quote()
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        self.assertEqual(j.stage, 'converting')
+
+    def test_a_late_first_check_still_gets_its_full_wait(self):
+        j, entry = self.funded()
+        LedgerEntry.objects.filter(pk=entry.pk).update(created_at=timezone.now() - timedelta(hours=2))
+        self.network.side_effect = PixPayloadError('503', temporary=True)
+        advance_journey(j.pk, client=self.api); j.refresh_from_db()
+        # Not refunded on the first unanswered check, however old the credit.
+        self.assertEqual(j.stage, 'awaiting_credit')
+        self.assertFalse(MoneyOperation.objects.filter(
+            idempotency_key=str(uuid.uuid5(j.internal_id, 'return'))).exists())
