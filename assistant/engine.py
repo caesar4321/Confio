@@ -198,6 +198,23 @@ def _openai_post(payload, timeout=None):
     return response.json()
 
 
+CUT_NOTE = '(La respuesta quedó cortada por su largo: escribe «sigue» y continúo.)'
+CUT_EMPTY = 'Eso es muy largo para una sola respuesta. ¿Lo hacemos por partes? Pídeme la primera.'
+
+
+def _hit_output_limit(data):
+    """Only a length stop: a content-filter stop is not 'escribe «sigue»'."""
+    return (data.get('status') == 'incomplete'
+            and (data.get('incomplete_details') or {}).get('reason') == 'max_output_tokens')
+
+
+def _with_cut_note(reply, cut):
+    """A reply that hit the output limit never looks finished."""
+    if not cut:
+        return reply
+    return f'{reply}\n\n{CUT_NOTE}' if reply else CUT_EMPTY
+
+
 def _output_text(data):
     text = data.get('output_text')
     if isinstance(text, str) and text.strip():
@@ -914,7 +931,7 @@ class Toolbelt:
     """The model's tools for one turn, bound to one viewer."""
 
     def __init__(self, viewer: Viewer, result: TurnResult, *, analyses_left: int, can_navigate: bool = True,
-                 reserve_analysis=None, reserve_news=None, paid_offers_allowed: bool = True):
+                 reserve_analysis=None, reserve_news=None, reserve_web=None, paid_offers_allowed: bool = True):
         self.viewer = viewer
         self.result = result
         self.analyses_left = analyses_left
@@ -923,6 +940,8 @@ class Toolbelt:
         # Market tools only where the caller meters news searches (text turns;
         # realtime voice has its own server-tool list).
         self.reserve_news = reserve_news
+        # General web search, metered like the news search (text turns only).
+        self.reserve_web = reserve_web
         self.saw_web = False
         self.docs_read = set()
         # The message being answered and the person's few before it (set by
@@ -1198,6 +1217,28 @@ class Toolbelt:
                     'strict': True,
                 },
             ]
+        # Hosted web search runs on the OpenAI endpoint only.
+        if self.reserve_web is not None and not str(conf.get('CONFIO_ASSISTANT_MODEL')).startswith('claude-'):
+            specs.append({
+                'type': 'function',
+                'name': 'search_web',
+                'description': (
+                    'Busca en la web, con fuentes, información actual para una pregunta general que no es de Confío '
+                    '(noticias, horarios, eventos, clima, precios o datos fuera de Confío). query = solo la '
+                    'pregunta pública, corta; nunca nombres, montos, saldos ni datos de la cuenta de la persona. '
+                    'Una por mensaje. Después de usarla respondes sin más herramientas. language = idioma del usuario.'
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'query': {'type': 'string'},
+                        'language': {'type': 'string', 'enum': list(market.LANGUAGES)},
+                    },
+                    'required': ['query', 'language'],
+                    'additionalProperties': False,
+                },
+                'strict': True,
+            })
         if self.smart_ops():
             nullable_str = {'type': ['string', 'null']}
             nullable_int = {'type': ['integer', 'null']}
@@ -1332,6 +1373,7 @@ class Toolbelt:
             'get_exchange_rate': self.get_exchange_rate,
             'get_topup_status': self.get_topup_status,
             'search_market_news': self.search_market_news,
+            'search_web': self.search_web,
             'smart_account_rules': self.smart_account_rules,
             'propose_smart_account_rule': self.propose_smart_account_rule,
             'propose_target_allocation': self.propose_target_allocation,
@@ -1341,6 +1383,8 @@ class Toolbelt:
         if name in SMART_OPS_TOOLS and not self.smart_ops():
             handler = None
         if name in {'get_stock_quote', 'search_market_news'} and self.reserve_news is None:
+            handler = None
+        if name == 'search_web' and self.reserve_web is None:
             handler = None
         if self.waiting_for_team and name not in WAITING_TOOLS:
             handler = None
@@ -1556,6 +1600,43 @@ class Toolbelt:
             self.saw_web = True
         return found
 
+
+    # Tools that read the person's own money: after one of them, this turn's
+    # model has account data in context, so no free-text web query leaves.
+    PERSONAL_DATA_TOOLS = frozenset({
+        'get_month_summary', 'get_transactions', 'get_portfolio', 'analyze_finances', 'get_topup_status',
+        'categorize_transactions', 'smart_account_rules', 'smart_account_review', 'propose_smart_account_rule',
+        'propose_target_allocation', 'smart_account_alerts',
+    })
+
+    def search_web(self, query, language='español'):
+        if any(str(t.get('name', '')).split(':')[0] in self.PERSONAL_DATA_TOOLS for t in self.result.tools):
+            return {'disponible': False, '_denied': True,
+                    'motivo': 'No busco en internet en el mismo mensaje en que revisé tu cuenta. Pregúntamelo aparte.'}
+        if market.clean_web_query(query) is None or language not in market.LANGUAGES:
+            # Refused before a slot is claimed: a bad query never costs a search.
+            return {'disponible': False, '_denied': True,
+                    'motivo': 'Busca solo la pregunta general, sin direcciones web, correos ni números largos.'}
+        if 'search_web' in self.paid_used:
+            return {'disponible': False, '_denied': True, 'motivo': 'Una búsqueda en internet por mensaje.'}
+        if not self.reserve_web():
+            # No upsell here: more searches are never sold (App Review 3.1.1;
+            # Cuenta inteligente decision 34). Answer from what is known.
+            return {'disponible': False, '_denied': True, 'limite_de_hoy': True,
+                    'motivo': 'Ya usaste las búsquedas en internet de hoy. Responde con lo que sabes y aclara '
+                              'que puede no estar actualizado.'}
+        self.paid_used.add('search_web')
+        try:
+            found = market.web_search(query, language=language)
+        except AssistantUnavailable:
+            logger.warning('Confio Assistant: web search failed', exc_info=True)
+            return {'error': 'No pude buscar en internet ahora.'}
+        self.result.add_usage(conf.get('CONFIO_ASSISTANT_MODEL'), found.get('_usage'))
+        self.result.cost_usd += market.search_cost(found.get('_search_calls') or 0)
+        if found.get('encontrado'):
+            # Web text is untrusted: the answer that follows gets no tools.
+            self.saw_web = True
+        return found
 
     # ── Confío IA+: the assistant operates the Cuenta inteligente ──────────
 
@@ -1850,12 +1931,12 @@ def _open_claimed_screen(belt, result):
 
 
 def run_turn(viewer: Viewer, history, *, first_name, account_label, country, analyses_left, can_navigate=True,
-             reserve_analysis=None, reserve_news=None, waiting_for_team=False, guide_note=''):
+             reserve_analysis=None, reserve_news=None, reserve_web=None, waiting_for_team=False, guide_note=''):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
     except after the model already escalated: the handoff is kept."""
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
-                    reserve_analysis=reserve_analysis, reserve_news=reserve_news)
+                    reserve_analysis=reserve_analysis, reserve_news=reserve_news, reserve_web=reserve_web)
     belt.waiting_for_team = waiting_for_team
     belt.guide_note = guide_note
     said = [item['content'] for item in history_items(history) if item['role'] == 'user']
@@ -1929,6 +2010,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         'instructions': system,
         'input': history_items(history),
         'tools': specs,
+        # Kept at 2000: a longer reply can outrun the request timeout. A cut
+        # reply says so (_with_cut_note) and the person asks to continue.
         'max_output_tokens': 2000,
         # No server-side retention of customer turns; reasoning is carried
         # forward encrypted between tool steps instead.
@@ -1947,7 +2030,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         output = data.get('output') or []
         calls = [item for item in output if item.get('type') == 'function_call']
         if not calls:
-            result.reply = _output_text(data)
+            result.reply = _with_cut_note(_output_text(data), _hit_output_limit(data))
             break
         # store=False: carry the whole transcript forward instead of previous_response_id.
         input_items.extend(item for item in output if item.get('type') in {'function_call', 'reasoning'})
@@ -1970,7 +2053,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         payload = {**payload, 'input': input_items, 'tool_choice': 'none'}
         data = _openai_post(payload)
         result.add_usage(model, data.get('usage'))
-        result.reply = _output_text(data)
+        result.reply = _with_cut_note(_output_text(data), _hit_output_limit(data))
 
     return _finish(result)
 
@@ -2086,7 +2169,7 @@ def _run_turn_claude(belt, result, history, system, model, effort, specs):
         response = send(**({'tool_choice': {'type': 'none'}} if belt.saw_web else {}))
         calls = [b for b in response.content if b.type == 'tool_use']
         if not calls:
-            result.reply = text_of(response)
+            result.reply = _with_cut_note(text_of(response), response.stop_reason == 'max_tokens')
             break
         messages.append({'role': 'assistant', 'content': response.content})
         messages.append({'role': 'user', 'content': [
@@ -2094,7 +2177,8 @@ def _run_turn_claude(belt, result, history, system, model, effort, specs):
              'content': _run_tool(belt, result, call.name, dict(call.input or {}))}
             for call in calls]})
     else:
-        result.reply = text_of(send(tool_choice={'type': 'none'}))
+        final = send(tool_choice={'type': 'none'})
+        result.reply = _with_cut_note(text_of(final), final.stop_reason == 'max_tokens')
     return _finish(result)
 
 def human_mode_active(state, last_staff_reply_at, now=None):

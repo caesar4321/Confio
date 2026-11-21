@@ -30,6 +30,8 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_DAILY_ANALYSES': 3,
     # Cited news lookups ("¿por qué bajó Apple?"): one hosted web search each.
     'CONFIO_ASSISTANT_DAILY_NEWS_SEARCHES': 5,
+    # General web lookups (search_web): current facts outside Confío.
+    'CONFIO_ASSISTANT_DAILY_WEB_SEARCHES': 5,
     # USD per hosted web_search call (billed by the provider outside tokens).
     'CONFIO_ASSISTANT_WEB_SEARCH_PRICE': Decimal('0.01'),
     'CONFIO_ASSISTANT_HUMAN_MODE_HOURS': 24,
@@ -53,6 +55,7 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_PLUS_DAILY_TURNS': 300,
     'CONFIO_ASSISTANT_PLUS_DAILY_ANALYSES': 30,
     'CONFIO_ASSISTANT_PLUS_DAILY_NEWS_SEARCHES': 30,
+    'CONFIO_ASSISTANT_PLUS_DAILY_WEB_SEARCHES': 30,
     'CONFIO_ASSISTANT_PLUS_VOICE_MINUTES': 100,  # realtime minutes per calendar month
 
     # ---- Realtime voice (Assistant+) ----

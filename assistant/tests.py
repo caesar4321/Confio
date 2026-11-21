@@ -72,6 +72,26 @@ class AskTests(TestCase):
         self.assertEqual(second_input[-1]['type'], 'function_call_output')
 
     @patch('assistant.engine._openai_post')
+    def test_a_reply_cut_by_length_says_so_and_a_filtered_one_does_not(self, post):
+        from .engine import CUT_NOTE
+        cut = {**text_response('Primera parte del ensayo'), 'status': 'incomplete',
+               'incomplete_details': {'reason': 'max_output_tokens'}}
+        post.side_effect = [cut]
+        self.assertTrue(self.ask('Escribe un ensayo largo sobre el café').reply_message.body.endswith(CUT_NOTE))
+        filtered = {**text_response('Texto'), 'status': 'incomplete', 'incomplete_details': {'reason': 'content_filter'}}
+        post.side_effect = [filtered]
+        self.assertNotIn(CUT_NOTE, self.ask('Otra cosa').reply_message.body)
+
+    @patch('assistant.engine._openai_post')
+    def test_long_pasted_text_is_marked_cut_and_never_hands_off(self, post):
+        post.side_effect = [text_response('Listo, traduje la primera parte.')]
+        pasted = 'Traduce: el cliente quiere hablar con una persona real sobre la factura. ' * 60
+        outcome = self.ask(pasted)
+        self.assertTrue(outcome.user_message.body.endswith(service.TRUNCATED_INPUT_NOTE))
+        self.assertEqual(outcome.reply_message.sender_type, 'AGENT')  # answered by the assistant, no handoff
+        self.staff_push.assert_not_called()
+
+    @patch('assistant.engine._openai_post')
     def test_unknown_destination_is_refused(self, post):
         post.side_effect = [
             call_response('navigate', '{"destination": "admin_panel"}'),
@@ -1235,6 +1255,20 @@ class HoldingsGainTests(TestCase):
             self.assertNotIn('ganancia_usd', _holdings('0xabc')[0])
 
 
+class GeneralAssistantGuardTests(TestCase):
+    def test_a_cut_reply_never_looks_finished(self):
+        from .engine import CUT_EMPTY, CUT_NOTE, _with_cut_note
+        self.assertEqual(_with_cut_note('Hola', False), 'Hola')
+        self.assertTrue(_with_cut_note('Parte uno', True).endswith(CUT_NOTE))
+        self.assertEqual(_with_cut_note('', True), CUT_EMPTY)
+
+    def test_only_a_short_message_asks_for_a_person(self):
+        self.assertTrue(service.asks_for_person('Quiero hablar con una persona, por favor'))
+        pasted = 'Traduce esto: ' + 'la carta dice que quiere hablar con una persona real sobre el contrato. ' * 4
+        self.assertFalse(service.asks_for_person(pasted))
+        self.assertFalse(service.asks_for_person('¿Cómo recargo?'))
+
+
 class MarketToolTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='mkt', password='x', phone_country='BO')
@@ -1354,6 +1388,58 @@ class MarketToolTests(TestCase):
         self.assertIn('search_market_news', names(belt))
         denied = belt.call('search_market_news', {'topic': 'Apple', 'timeframe': 'hoy', 'language': 'español'})
         self.assertEqual((denied['disponible'], denied['_denied']), (False, True))
+
+    def test_general_web_search_is_metered_and_never_upsells(self):
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0)
+        viewer = Viewer(user=self.user, account=account, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        names = lambda belt: {s['name'] for s in belt.specs()}  # noqa: E731
+        self.assertNotIn('search_web', names(Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)))
+        self.assertEqual(Toolbelt(viewer, TurnResult(reply=''), analyses_left=0).call(
+            'search_web', {'query': 'vuelos Lima Cusco', 'language': 'español'}),
+            {'error': 'herramienta desconocida: search_web'})
+        spent = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0, reserve_web=lambda: False)
+        self.assertIn('search_web', names(spent))
+        denied = spent.call('search_web', {'query': 'clima en La Paz', 'language': 'español'})
+        self.assertEqual((denied['disponible'], denied['limite_de_hoy']), (False, True))
+        self.assertNotRegex(denied['motivo'].lower(), r'suscri|pag|plus|ia\+')
+        found = {'encontrado': True, 'resumen_no_verificado': 'x', 'fuentes': [{'titulo': 't', 'url': 'https://a.b'}],
+                 '_usage': None, '_search_calls': 1}
+        belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0, reserve_web=lambda: True)
+        with patch('assistant.market.web_search', return_value=found) as search:
+            self.assertTrue(belt.call('search_web', {'query': 'feriados en Bolivia', 'language': 'español'})['encontrado'])
+            again = belt.call('search_web', {'query': 'otra cosa', 'language': 'español'})
+        self.assertTrue(belt.saw_web)                      # web text ends tool use for the turn
+        self.assertEqual(search.call_count, 1)             # one search per message
+        self.assertEqual(again['_denied'], True)
+
+    def test_web_search_never_follows_account_data_or_carries_private_strings(self):
+        account = Account.objects.create(user=self.user, account_type='personal', account_index=0)
+        viewer = Viewer(user=self.user, account=account, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        claimed = []
+        belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0, reserve_web=lambda: claimed.append(1) or True)
+        for query in ('saldo de https://x.co', 'manda a ana@example.com', '0xabcdef1234 balance',
+                      'cuenta 1234567890', '   '):
+            self.assertTrue(belt.call('search_web', {'query': query, 'language': 'español'})['_denied'], query)
+        self.assertEqual(claimed, [])                      # a refused query never costs a search
+        belt.result.tools.append({'name': 'get_portfolio', 'ok': True})
+        denied = belt.call('search_web', {'query': 'clima en La Paz', 'language': 'español'})
+        self.assertTrue(denied['_denied'])
+        self.assertEqual(claimed, [])
+        self.assertIsNotNone(market.clean_web_query('vuelos La Paz Lima en marzo 2027'))  # years are fine
+
+    def test_web_search_query_is_one_short_public_line(self):
+        captured = {}
+
+        def fake_post(payload, **_):
+            captured.update(payload)
+            return {'status': 'completed', 'output': []}
+        with patch('assistant.engine._openai_post', side_effect=fake_post):
+            market.web_search('  horarios\n del  bus ' + 'x' * 500, language='español')
+        self.assertLessEqual(len(captured['input']), market.WEB_QUERY_MAX_CHARS)
+        self.assertNotIn('\n', captured['input'])
+        self.assertEqual(captured['max_tool_calls'], 1)
 
     def test_web_results_end_tool_use_and_refusals_keep_quota(self):
         account = Account.objects.create(user=self.user, account_type='personal', account_index=0)

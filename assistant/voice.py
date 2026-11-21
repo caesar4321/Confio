@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 VOICE_NOTE = """
 # Estás en una llamada de voz
-- Habla natural y breve: 1-3 oraciones. Nada de listas, viñetas ni formato.
+- Habla natural y breve: 1-3 oraciones, también en tareas generales. Nada de listas, viñetas ni formato. Si piden un texto largo, código o una traducción extensa, sugiere pedirlo por escrito en el chat.
 - Di los montos como se dicen ("doce dólares con cincuenta"), no como se escriben.
 - Si abres una pantalla, dilo en pocas palabras mientras se abre.
 - En llamada no puedes clasificar movimientos: si te lo piden, di que lo hagan por escrito en el chat.

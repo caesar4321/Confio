@@ -31,6 +31,7 @@ from .destinations import PAID_OFFERS
 from security.geo import country_of
 
 LABELS = {'ia_plus': 'Conoce Confío IA+', 'cuenta_inteligente': 'Conoce Cuenta inteligente'}
+ASKED_MAX_CHARS = 200
 ASKED = {
     # Not "Assistant+": that is the existing (unsold) plan, not this offer.
     'ia_plus': re.compile(r'(\bia\s*\+|\bia\s+plus\b)', re.I),
@@ -73,7 +74,9 @@ def choose(viewer, user_text, result, allowed):
     chosen = None
     for key in PAID_OFFERS:
         target = ia_key if key == 'ia_plus' else key
-        if target in allowed and ASKED[key].search(text):
+        # Asked = a short request; a long pasted text that names an offer is
+        # material for a general task, never a request for the offer.
+        if target in allowed and len(text) <= ASKED_MAX_CHARS and ASKED[key].search(text):
             chosen = (target, 'asked' if target == key else 'asked_ia_plus')
             break
     if chosen is None:

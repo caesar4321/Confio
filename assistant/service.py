@@ -40,6 +40,15 @@ LIMIT_REPLY = (
 )
 HANDOFF_NOTICE = 'Te pasé con el equipo de Confío. Te responderán aquí mismo, normalmente en unas horas.'
 HUMAN_KEYWORDS = ('hablar con una persona', 'hablar con un humano', 'agente humano', 'persona real')
+HUMAN_REQUEST_MAX_CHARS = 200
+# Stored with the message, so the person sees it in their own bubble too.
+TRUNCATED_INPUT_NOTE = '… [mensaje recortado]'
+
+
+def asks_for_person(text):
+    """A request for a person is a short message, not a phrase inside text
+    pasted to translate or summarize."""
+    return len(text) <= HUMAN_REQUEST_MAX_CHARS and any(k in text.lower() for k in HUMAN_KEYWORDS)
 
 
 @dataclass
@@ -174,6 +183,12 @@ def news_searches_left(user):
     cap = conf.get('CONFIO_ASSISTANT_PLUS_DAILY_NEWS_SEARCHES' if _plus(user)
                    else 'CONFIO_ASSISTANT_DAILY_NEWS_SEARCHES')
     return max(cap - _tool_uses_today(user, 'search_market_news'), 0)
+
+
+def web_searches_left(user):
+    cap = conf.get('CONFIO_ASSISTANT_PLUS_DAILY_WEB_SEARCHES' if _plus(user)
+                   else 'CONFIO_ASSISTANT_DAILY_WEB_SEARCHES')
+    return max(cap - _tool_uses_today(user, 'search_web'), 0)
 
 
 def _account_label(viewer, business):
@@ -339,10 +354,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             raise ValueError('No escuché nada en el audio.')
         body, modality = transcript, TurnModality.VOICE_NOTE
 
-    clean = (body or '').strip()[:conf.get('CONFIO_ASSISTANT_MAX_INPUT_CHARS')]
+    limit = conf.get('CONFIO_ASSISTANT_MAX_INPUT_CHARS')
+    clean = (body or '').strip()
     if not clean:
         raise ValueError('Message body is required')
-    wants_human = any(k in clean.lower() for k in HUMAN_KEYWORDS)
+    if len(clean) > limit:
+        # Pasted text: the person and the assistant both see it was cut.
+        clean = clean[:limit] + TRUNCATED_INPUT_NOTE
+    wants_human = asks_for_person(clean)
 
     # 3. Record the message and route it (short lock). Human mode is checked
     # again here: staff may have replied while the note was transcribing.
@@ -431,6 +450,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             analyses_left=0,
             reserve_analysis=_analysis_reserver(user, turn),
             reserve_news=_tool_reserver(user, turn, 'search_market_news', news_searches_left),
+            reserve_web=_tool_reserver(user, turn, 'search_web', web_searches_left),
             can_navigate=can_navigate,
             waiting_for_team=bool(waiting),
             guide_note='' if waiting else guide.steering_note(
