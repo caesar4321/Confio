@@ -36,7 +36,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IConfioSmartAccount} from "./interfaces/IConfioSmartAccount.sol";
 import {IConfioSmartAccountFactory} from "./interfaces/IConfioSmartAccountFactory.sol";
 
@@ -186,9 +185,10 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
 
     // ═════════════════════════ Immutable configuration (4.2) ════════════
     address public immutable FACTORY;
-    /// The implementation's own address, as every clone sees it: the
-    /// inherited-withdraw destination is derived from it, not read (6.6).
-    address private immutable SELF;
+    /// keccak256 of the EIP-1167 runtime code of a clone of this
+    /// implementation (OZ Clones). The inherited-withdraw destination is
+    /// recognised by it, never read from the factory (6.6).
+    bytes32 private immutable CLONE_CODEHASH;
     // The rest are private: eleven more getters would push the
     // implementation over the 24 KB code limit. They are the constructor
     // arguments of the verified implementation, and the tests pin each one
@@ -306,7 +306,8 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
             "dollar decimals"
         );
         FACTORY = factory;
-        SELF = address(this);
+        CLONE_CODEHASH =
+            keccak256(abi.encodePacked(hex"363d3d373d3d3d363d73", address(this), hex"5af43d82803e903d91602b57fd5bf3"));
         CUSD = cusd;
         CUSD_PLUS = cusdPlus;
         USDT = usdt;
@@ -973,18 +974,21 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         }
     }
 
-    /// `to == owner` reads nothing. The own-account form computes, without
-    /// reading the factory, the clone address the factory deploys for the
-    /// new owner (salt = owner, as ConfioSmartAccountFactory._salt), then
-    /// asks that account who owns it now: an account the caller once opened
-    /// may since have passed on.
+    /// `to == owner` reads nothing. The own-account form reads no factory
+    /// and derives no address (an owner may have several generations, 3.1):
+    /// `to` must be a clone of this implementation, owned by the new owner
+    /// and not itself inherited. Only FACTORY can initialize a clone, so a
+    /// look-alike clone deployed by anyone else reports owner() == 0. A
+    /// clone is owned by someone other than its opener only after a claim,
+    /// which marks it inherited, so the one match is the new owner's
+    /// current account (factory.accountOf).
     function _requireInheritedDestination(address to) private view {
         if (!inherited) revert NotInherited();
         address newOwner = owner;
         if (to == newOwner) return;
         if (
-            to != Clones.predictDeterministicAddress(SELF, bytes32(uint256(uint160(newOwner))), FACTORY)
-                || to.code.length == 0 || IConfioSmartAccount(to).owner() != newOwner || IConfioSmartAccount(to).inherited()
+            to.codehash != CLONE_CODEHASH || IConfioSmartAccount(to).owner() != newOwner
+                || IConfioSmartAccount(to).inherited()
         ) revert BadDestination();
     }
 

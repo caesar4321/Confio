@@ -9,8 +9,11 @@ pragma solidity ^0.8.24;
  * - UUPS, Ownable2Step, owned by the Confío Safe, renounce disabled (as in
  *   CusdVault and CusdPlusVault).
  * - Accounts are EIP-1167 clones of one immutable implementation, at a
- *   CREATE2 address derived from the owner. `accountOf[owner]` is written
- *   once and never overwritten (invariant 17).
+ *   CREATE2 address derived from (owner, generation). `accountOf[owner]`
+ *   points at the owner's current account and changes only when that one
+ *   has been inherited by someone else (or is no longer owned by them);
+ *   every account the factory ever created stays in `isAccount`
+ *   (invariant 17).
  * - The Safe has no function here that moves an account's assets or changes
  *   its owner or beneficiary (invariant 16). What it can change is listed
  *   below, and every value an account reads from here is clamped by limits
@@ -51,6 +54,8 @@ interface ISmartAccountImplementation {
     function MAX_MONTHLY_FEE_USD() external view returns (uint256);
     function MAX_ANNUAL_FEE_USD() external view returns (uint256);
     function initialize(address owner_) external;
+    function owner() external view returns (address);
+    function inherited() external view returns (bool);
 }
 
 contract ConfioSmartAccountFactory is
@@ -109,6 +114,9 @@ contract ConfioSmartAccountFactory is
     // Appended (storage is append-only): relayer approvals, by account.
     mapping(address => mapping(bytes32 => uint64)) public designationApprovedUntil;
     mapping(address => mapping(address => uint64)) public acceptanceApprovedUntil;
+    /// Generation of accountOf[owner]: 0 for the first account, +1 for each
+    /// account opened after the previous one was inherited (salt 3.1).
+    mapping(address => uint64) public generationOf;
 
     event CreationPausedSet(bool paused);
 
@@ -154,22 +162,51 @@ contract ConfioSmartAccountFactory is
 
     // ═════════════════════════ Accounts ═════════════════════════════════
 
-    /// The caller becomes the owner. One account per owner, per factory.
+    /// The caller becomes the owner. One current account per owner, per
+    /// factory. A caller whose current account passed to a beneficiary
+    /// through an executed claim opens a new one, one generation on.
     function createAccount() external whenNotPaused returns (address account) {
-        require(accountOf[msg.sender] == address(0), "account exists");
-        account = Clones.cloneDeterministic(implementation, _salt(msg.sender));
+        address current = accountOf[msg.sender];
+        uint64 generation = generationOf[msg.sender];
+        if (current != address(0)) {
+            require(_replaceable(current, msg.sender), "account exists");
+            generationOf[msg.sender] = ++generation;
+        }
+        account = Clones.cloneDeterministic(implementation, _salt(msg.sender, generation));
         accountOf[msg.sender] = account;
+        // Never cleared: an inherited account keeps working for its heir.
         isAccount[account] = true;
         ISmartAccountImplementation(account).initialize(msg.sender);
         emit AccountCreated(msg.sender, account);
     }
 
+    /// Where the next createAccount by `owner_` deploys: generation 0 with
+    /// no account, the next generation once the current one is replaceable.
+    /// While the current account is still the owner's (active, cancelled or
+    /// expired alike) createAccount reverts and this returns that account.
     function predictAddress(address owner_) external view returns (address) {
-        return Clones.predictDeterministicAddress(implementation, _salt(owner_), address(this));
+        address current = accountOf[owner_];
+        uint64 generation = generationOf[owner_];
+        if (current != address(0)) {
+            if (!_replaceable(current, owner_)) return current;
+            ++generation;
+        }
+        return predictAddressAt(owner_, generation);
     }
 
-    function _salt(address owner_) private pure returns (bytes32) {
-        return bytes32(uint256(uint160(owner_)));
+    function predictAddressAt(address owner_, uint64 generation) public view returns (address) {
+        return Clones.predictDeterministicAddress(implementation, _salt(owner_, generation), address(this));
+    }
+
+    /// Inherited, or (equivalently, since only a claim changes the owner)
+    /// no longer owned by the one who opened it.
+    function _replaceable(address account, address owner_) private view returns (bool) {
+        return
+            ISmartAccountImplementation(account).inherited() || ISmartAccountImplementation(account).owner() != owner_;
+    }
+
+    function _salt(address owner_, uint64 generation) private pure returns (bytes32) {
+        return keccak256(abi.encode(owner_, generation));
     }
 
     // ═════════════════════════ Designation approvals (decision 26) ══════

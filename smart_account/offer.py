@@ -185,8 +185,6 @@ BLOCKED = {
     'identity': 'Verifica tu identidad para abrir tu Cuenta inteligente.',
     'identity_hold': 'Tu cuenta está en revisión. Escríbenos por soporte para continuar.',
     'minor': 'La Cuenta inteligente está disponible para mayores de 18 años.',
-    'wallet_account_inherited': ('La Cuenta inteligente de esta billetera pasó a tu beneficiario. '
-                                 'Con esta billetera no se puede abrir otra.'),
     'chain_unavailable': 'No pudimos consultar la red. Inténtalo de nuevo en unos minutos.',
 }
 
@@ -211,18 +209,17 @@ def subscribe_block(user, *, personal_context: bool, meta) -> str | None:
     from security.identity_reuse import outgoing_identity_restriction
     if outgoing_identity_restriction(user):
         return 'identity_hold'
-    return inherited_wallet_block(user)
+    return wallet_chain_block(user)
 
 
-def inherited_wallet_block(user) -> str | None:
-    """'wallet_account_inherited' when this person has no own row but the
-    factory already maps their signer to a clone that is inherited or owned
-    by someone else on chain: a claim moved it to the heir, and accountOf is
-    never reset (spec 6.5, invariant 17), so a subscribe batch from this
-    wallet only reverts (NotOwner). Decided by the clone's owner() and
-    inherited(), not the mirror (which may lag a ClaimExecuted). An
-    unreadable chain is 'chain_unavailable': fail closed. A clone the
-    signer still owns is created-but-not-reconciled and stays open."""
+def wallet_chain_block(user) -> str | None:
+    """'chain_unavailable' when the factory cannot tell whether this person's
+    wallet can subscribe; None otherwise. With no own row, the factory may
+    already map the signer to a clone: one still theirs (created, not
+    reconciled) is subscribed in place; one inherited or owned by someone
+    else is replaced by a new account at the next generation (decision 33,
+    spec 4.3). Either way the person may subscribe, but only on a readable
+    chain: unknown is never 'may subscribe'."""
     from . import context
     from .models import SmartAccount
     if context.own_account(user) is not None:
@@ -240,18 +237,19 @@ def inherited_wallet_block(user) -> str | None:
     if not mapped:
         return None
     # Fast path: inheritance is irreversible, so a mirror that already shows
-    # it can never disagree with the chain.
+    # it can never disagree with the chain: a re-open.
     if SmartAccount.objects.filter(contract_address__iexact=existing, status='inherited').exists():
-        return 'wallet_account_inherited'
-    return mapped_clone_block(user, existing, signer)
+        return None
+    return 'chain_unavailable' if mapped_clone_state(user, existing, signer) == 'chain_unavailable' else None
 
 
-def mapped_clone_block(user, clone: str, signer: str) -> str | None:
+def mapped_clone_state(user, clone: str, signer: str) -> str:
     """Chain truth for the clone factory.accountOf(signer) names (spec 6.5):
-    'wallet_account_inherited' when it is inherited() or its owner() is not
-    the signer, whatever the mirror says (a ClaimExecuted it has not
-    applied); None when the signer still owns it (created, not reconciled).
-    Unreadable is 'chain_unavailable': fail closed."""
+    'own' when the signer still owns it and it is not inherited (created,
+    not reconciled: subscribe in place); 'replaceable' when it is inherited()
+    or its owner() is not the signer, whatever the mirror says (a
+    ClaimExecuted it has not applied): the next createAccount opens a new
+    account (decision 33). 'chain_unavailable' when unreadable: fail closed."""
     from .models import SmartAccount
     try:
         state = chain.account_control(clone)
@@ -262,7 +260,7 @@ def mapped_clone_block(user, clone: str, signer: str) -> str | None:
         logger.warning('smart account: owner()/inherited() read failed for subscribe check', exc_info=True)
         return 'chain_unavailable'
     if state['inherited'] or owner != (signer or '').lower():
-        return 'wallet_account_inherited'
+        return 'replaceable'
     if SmartAccount.objects.filter(contract_address__iexact=clone).exclude(owner_user=user).exists():
         # The chain says this signer owns it, the mirror names someone else.
         logger.warning('smart account %s: mirror owner differs from chain owner %s', clone, owner)
@@ -273,7 +271,7 @@ def mapped_clone_block(user, clone: str, signer: str) -> str | None:
                            dedupe_seconds=86400)
         except Exception:  # noqa: BLE001
             logger.exception('smart account ops alert failed for %s', clone)
-    return None
+    return 'own'
 
 
 def viewer_dollar(user, meta=None) -> str:

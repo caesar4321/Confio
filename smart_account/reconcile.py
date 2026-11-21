@@ -442,16 +442,30 @@ def _own_account_row(user, address: str):
     A soft-deleted index-0 row that no SmartAccount points at any more is
     the user's previous own account, inherited away (its heir got a row of
     their own): it keeps its address and history and moves to the next free
-    index, so the new account takes index 0. Anything else at index 0 is a
-    second own account and is refused (the event stays unapplied, alerted)."""
+    index, so the new account takes index 0. That is the legitimate re-open
+    (decision 33): the factory deploys a new account for an owner only once
+    their current one is inherited, so it is not alerted.
+
+    A live index-0 row whose account the chain already shows inherited (or
+    owned by someone else) is the same re-open with a ClaimExecuted the
+    mirror has not applied yet: the event waits, unalerted, and applies once
+    that claim is mirrored. Anything else at index 0 is a second own account
+    and is refused (the event stays unapplied, alerted)."""
     from users.models import Account
     rows = Account.all_objects.select_for_update().filter(user=user, account_type='smart')
     current = rows.filter(account_index=0).first()
     if current is not None and (current.bsc_address or '').lower() == address and current.deleted_at is None:
         return current
     if current is not None:
+        linked = SmartAccount.all_objects.filter(account=current).select_related('owner_account').first()
         if (current.deleted_at is None or (current.bsc_address or '').lower() == address
-                or SmartAccount.all_objects.filter(account=current).exists()):
+                or linked is not None):
+            passed = _passed_on_chain(linked) if (current.bsc_address or '').lower() != address else False
+            if passed is not False:
+                # True: a re-open the mirror lags on. None: unreadable, so
+                # retried next run (the stuck-event sweep alerts if it lasts).
+                raise RuntimeError(f'user {user.pk}: previous account {linked.contract_address} '
+                                   f'{"inherited on chain, ClaimExecuted not mirrored yet" if passed else "unreadable"}')
             # Not convergeable without breaking "one own account per user"
             # (smart_account_one_own_per_user): it blocks only THIS new
             # account (factory events are keyed per created account) and
@@ -463,6 +477,25 @@ def _own_account_row(user, address: str):
         index = max(taken) + 1
         Account.all_objects.filter(pk=current.pk).update(account_index=index)
     return Account.objects.create(user=user, account_type='smart', account_index=0, bsc_address=address)
+
+
+def _passed_on_chain(account) -> bool | None:
+    """True when the chain shows `account` inherited, or owned by someone
+    other than the wallet the mirror names (a ClaimExecuted not applied
+    yet); False when the chain still names that wallet (or there is no
+    account); None when unreadable."""
+    if account is None or account.status == 'inherited':
+        return account is not None
+    signer = (getattr(account.owner_account, 'bsc_address', '') or '').lower()
+    try:
+        state = chain.account_control(account.contract_address)
+        owner = str(state['owner'] or '').lower()
+        if not int(owner or '0x0', 16):
+            return None
+    except Exception:  # noqa: BLE001
+        logger.warning('smart account %s: owner()/inherited() unreadable', account.contract_address, exc_info=True)
+        return None
+    return bool(state['inherited']) or owner != signer
 
 
 def _fee_scheduled(event) -> list:

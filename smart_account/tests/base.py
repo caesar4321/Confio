@@ -51,7 +51,8 @@ class FakeChain:
         self.rules = {}             # (address, id) -> dict
         self.fees = {'monthly': int(14.99 * 100) * 10 ** 16, 'annual': int(149.99 * 100) * 10 ** 16}
         self.scheduled = {'monthly': (0, 0), 'annual': (0, 0)}
-        self.accounts = {}          # owner -> account
+        self.accounts = {}          # owner -> account (factory.accountOf)
+        self.generations = {}       # owner -> factory.generationOf
         self.inheritance = True
         self.paused = False
         self.fail = set()           # names that raise
@@ -79,9 +80,41 @@ class FakeChain:
     def factory_scheduled_fee(self, plan):
         return self.scheduled[plan]
 
-    def predict_address(self, owner):
+    def predict_address_at(self, owner, generation):
         self._maybe_fail('predict_address')
-        return '0x' + 'bb' * 8 + owner.lower()[2:26]
+        return '0x' + ('bb' if not generation else format(int(generation), '02x')) * 8 + owner.lower()[2:26]
+
+    def _replaceable(self, account, owner):
+        return bool(self.views.get((account, 'inherited'))) or self.views.get((account, 'owner')) != owner
+
+    def predict_address(self, owner):
+        # The factory's predictAddress: the current account while it is
+        # still the owner's, else where the next createAccount deploys.
+        owner = owner.lower()
+        current = self.accounts.get(owner, abi.ZERO_ADDRESS)
+        generation = self.generations.get(owner, 0)
+        if int(current, 16):
+            if not self._replaceable(current, owner):
+                self._maybe_fail('predict_address')
+                return current
+            generation += 1
+        return self.predict_address_at(owner, generation)
+
+    def generation_of(self, owner):
+        self._maybe_fail('generation_of')
+        return self.generations.get(owner.lower(), 0)
+
+    def create_account(self, owner):
+        """What a mined createAccount does to the factory views."""
+        owner = owner.lower()
+        address = self.predict_address(owner)
+        if int(self.accounts.get(owner, abi.ZERO_ADDRESS), 16):
+            assert address != self.accounts[owner], 'account exists'
+            self.generations[owner] = self.generations.get(owner, 0) + 1
+        self.accounts[owner] = address
+        self.views[(address, 'owner')] = owner
+        self.views[(address, 'inherited')] = False
+        return address
 
     def account_of(self, owner):
         self._maybe_fail('account_of')
@@ -89,7 +122,7 @@ class FakeChain:
 
     def patches(self):
         names = ['balance_of', 'account_view', 'account_rule', 'factory_fee_usd_wei',
-                 'factory_scheduled_fee', 'predict_address', 'account_of']
+                 'factory_scheduled_fee', 'predict_address', 'predict_address_at', 'generation_of', 'account_of']
         out = [mock.patch(f'smart_account.chain.{n}', side_effect=getattr(self, n)) for n in names]
         out += [
             mock.patch('smart_account.chain.p_plus_wad', side_effect=lambda: WAD),
@@ -171,6 +204,9 @@ class SmartAccountTestCase(TestCase):
         # The chain agrees with the row unless a test says otherwise.
         self.chain.views[(contract.lower(), 'owner')] = personal.bsc_address.lower()
         self.chain.views[(contract.lower(), 'inherited')] = status == 'inherited'
+        if status != 'inherited' and index == 0:
+            # factory.accountOf names the owner's own account.
+            self.chain.accounts.setdefault(personal.bsc_address.lower(), contract.lower())
         return SmartAccount.objects.create(**values)
 
     def info(self, user, account_type='personal', index=0, business_id=None, meta=None):

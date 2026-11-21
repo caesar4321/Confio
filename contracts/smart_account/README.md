@@ -12,7 +12,7 @@ sections 4 to 6. The ABI the backend and the app build against is frozen in
 | Contract | What it is |
 |---|---|
 | `ConfioSmartAccount` | The per-user account. Deployed as an EIP-1167 clone. Immutable: no upgrade function, no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT` in the implementation |
-| `ConfioSmartAccountFactory` | Clones one account per owner at a CREATE2 address and holds the global settings. UUPS, `Ownable2Step`, owned by the Confío Safe, renounce disabled |
+| `ConfioSmartAccountFactory` | Clones one current account per owner at a CREATE2 address and holds the global settings. UUPS, `Ownable2Step`, owned by the Confío Safe, renounce disabled |
 | `ConfioSmartAccountFeeCollector` | Receives the fee (cUSD, and cUSD+ shares in kind). No owner, no upgrade; anyone sweeps, only the immutable treasury receives |
 
 One existing contract changes: `../cusd_plus/CusdVault.sol` gains an appended
@@ -33,9 +33,28 @@ factory can arm the fee referral (spec decision 32).
   reads are gas-capped static calls whose failure is a value, never a revert,
   so `withdraw`, `withdrawAll`, `returnAsset`, `cancelClaim` and the claim
   functions work even if every factory call fails. The inherited-withdraw
-  destination "the new owner's own account" is computed by the account from
-  the factory address, its own implementation address and the owner (the
-  CREATE2 clone address), not read from the factory.
+  destination "the new owner's own account" is recognised without the
+  factory: its code hash must be that of an EIP-1167 clone of this
+  implementation, its `owner()` the new owner and its `inherited()` false.
+  Only the factory can initialize a clone, so a look-alike clone deployed by
+  anyone else reports `owner() == 0`.
+- **One current account per owner, re-opened after inheritance** (spec R1,
+  invariant 17). The clone of an owner's account of generation `g` sits at
+  CREATE2 salt `keccak256(abi.encode(owner, g))`. `createAccount()` reverts
+  with `account exists` while `accountOf(owner)` is still the owner's
+  (unsubscribed, active, cancelled or expired: an Expired owner
+  re-subscribes on the same account). Once that account has been inherited
+  by someone else (or no longer reports the caller as `owner()`), the same
+  wallet can call `createAccount()` again: `generationOf(owner)` goes up by
+  one, the new clone is deployed and `accountOf(owner)` points at it. Every
+  account ever created stays `isAccount`, so an inherited account keeps
+  working for its heir (and for cUSD's referral check).
+  `predictAddress(owner)` is the address the next `createAccount()` by that
+  owner deploys (generation 0 with no account, `generationOf + 1` once the
+  current one is replaceable) and the current account itself while
+  `createAccount()` would revert; `predictAddressAt(owner, generation)` gives
+  any generation's address. `AccountCreated(owner, account)` is unchanged;
+  read `generationOf(owner)` for the generation.
 - **Designation and acceptance need a relayer approval** (decision 26,
   invariant 18). `setBeneficiary(addr, window)` requires a live
   `factory.designationApprovedUntil(account, keccak256(abi.encode(addr, window)))`

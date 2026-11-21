@@ -6,6 +6,7 @@ import {IConfioSmartAccount} from "../interfaces/IConfioSmartAccount.sol";
 import {IConfioSmartAccountFactory} from "../interfaces/IConfioSmartAccountFactory.sol";
 import {SmartAccountBase} from "./Base.t.sol";
 import {ConfioBatchDelegate} from "cusd-plus/ConfioBatchDelegate.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 /// Looks like a live, non-inherited account of `owner`, at an address the
 /// factory never deployed.
@@ -33,6 +34,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
     event ClaimInitiated(address indexed beneficiary, uint64 executableAt);
     event ClaimCancelled(address indexed beneficiary, uint64 cooldownUntil);
     event ClaimExecuted(address indexed previousOwner, address indexed newOwner);
+    event AccountCreated(address indexed owner, address indexed account);
 
     function setUp() public override {
         super.setUp();
@@ -1142,10 +1144,15 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         vm.expectRevert(NOT_BENEFICIARY);
         acct.executeClaim();
         vm.stopPrank();
-        // Alice's own factory entry still points here: she cannot open another.
-        vm.prank(alice);
-        vm.expectRevert(bytes("account exists"));
-        factory.createAccount();
+        // Alice's factory entry still points here until she opens a new
+        // account (R1, invariant 17); opening one changes nothing here.
+        assertEq(factory.accountOf(alice), address(acct));
+        ConfioSmartAccount fresh = _create(alice);
+        assertTrue(address(fresh) != address(acct));
+        assertEq(acct.owner(), bob);
+        vm.prank(alice, relayer);
+        vm.expectRevert(NOT_OWNER);
+        acct.withdraw(address(cusd), 1, alice);
     }
 
     function test_inheritedWithdraw_toTheNewOwnersWallet_andOwnAccount_nothingElse() public {
@@ -1227,9 +1234,10 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         acct.withdraw(address(cusd), 1e18, bob);
     }
 
-    /// Audit P3: the destination is computed from (FACTORY, implementation,
-    /// salt), never read. A factory that names another contract for the new
-    /// owner is ignored; the real account works even with the factory dead.
+    /// Audit P3: the destination is recognised by its code (a clone of this
+    /// implementation) and its own owner()/inherited(), never read from the
+    /// factory. A factory that names another contract for the new owner is
+    /// ignored; the real account works even with the factory dead.
     function test_inheritedWithdraw_factoryNamingAFakeAccount_isIgnored() public {
         _inherit();
         ConfioSmartAccount bobs = _create(bob);
@@ -1261,6 +1269,201 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.BadDestination.selector);
         acct.withdraw(address(cusd), 0, address(acct));
+    }
+
+    // ── re-opening after an executed claim (R1, invariant 17) ───────────
+
+    /// `heir` takes `a` from `owner_` through the full claim path, with the
+    /// subscription kept paid by the relayer. Inheritance must be enabled.
+    function _inheritAccount(ConfioSmartAccount a, address owner_, address heir) internal {
+        if (a.plan() == IConfioSmartAccount.Plan.None) {
+            _giveCusd(address(a), 500e18);
+            vm.prank(owner_, relayer);
+            a.subscribe(M, type(uint256).max);
+        }
+        _approveName(a, heir, 90 days);
+        vm.prank(owner_, relayer);
+        a.setBeneficiary(heir, 90 days);
+        _approveAccept(a, heir);
+        vm.prank(heir, relayer);
+        a.acceptBeneficiary();
+        vm.prank(heir, heir);
+        a.initiateClaim();
+        uint256 at = a.claimExecutableAt();
+        while (a.paidUntil() <= at) {
+            vm.warp(a.paidUntil());
+            vm.prank(relayer, relayer);
+            a.collectFee();
+        }
+        vm.warp(at);
+        vm.prank(heir, heir);
+        a.executeClaim();
+        assertEq(a.owner(), heir);
+    }
+
+    function _expectNoReopen() internal {
+        vm.prank(alice);
+        vm.expectRevert(bytes("account exists"));
+        factory.createAccount();
+        assertEq(factory.accountOf(alice), address(acct));
+        assertEq(factory.predictAddress(alice), address(acct));
+        assertEq(factory.generationOf(alice), 0);
+    }
+
+    /// Unsubscribed, active, cancelled, expired or with a claim pending, the
+    /// account is still the owner's: no second one. An Expired owner
+    /// re-subscribes on the same account.
+    function test_reopen_refusedWhileTheAccountIsStillTheOwners() public {
+        ConfioSmartAccount bobs = _create(bob);
+        vm.prank(bob);
+        vm.expectRevert(bytes("account exists"));
+        factory.createAccount();
+        assertEq(factory.predictAddress(bob), address(bobs), "unsubscribed");
+
+        assertEq(acct.status(), 1);
+        _expectNoReopen();
+        _asOwner();
+        acct.cancelSubscription();
+        assertEq(acct.status(), 2);
+        _expectNoReopen();
+        vm.warp(acct.paidUntil());
+        assertEq(acct.status(), 3);
+        _expectNoReopen();
+        _subscribe(M);
+        assertEq(acct.status(), 1);
+        _expectNoReopen();
+        _pendingClaim();
+        _expectNoReopen();
+        _warpPaid(acct.claimExecutableAt());
+        assertEq(acct.claimStatus(), 2);
+        _expectNoReopen();
+    }
+
+    function test_reopen_afterExecutedClaim_newAccount_oldOneStaysTheHeirs() public {
+        _inherit();
+        assertEq(factory.accountOf(alice), address(acct));
+        assertEq(factory.generationOf(alice), 0);
+        assertEq(factory.predictAddressAt(alice, 0), address(acct));
+        address predicted = factory.predictAddress(alice);
+        assertEq(predicted, factory.predictAddressAt(alice, 1));
+        assertTrue(predicted != address(acct));
+        assertEq(predicted.code.length, 0);
+
+        vm.expectEmit(true, true, false, false, address(factory));
+        emit AccountCreated(alice, predicted);
+        ConfioSmartAccount fresh = _create(alice);
+        assertEq(address(fresh), predicted);
+        assertEq(factory.accountOf(alice), address(fresh));
+        assertEq(factory.generationOf(alice), 1);
+        assertEq(factory.predictAddress(alice), address(fresh), "the new one is not replaceable");
+        assertTrue(factory.isAccount(address(acct)), "the inherited one stays recognised");
+        assertTrue(factory.isAccount(address(fresh)));
+        assertEq(factory.accountOf(bob), address(0), "the heir's entry is untouched");
+        assertEq(fresh.owner(), alice);
+        assertFalse(fresh.inherited());
+        assertEq(fresh.nextRuleId(), 1);
+        assertEq(fresh.status(), 0);
+        vm.prank(alice);
+        vm.expectRevert(bytes("account exists"));
+        factory.createAccount();
+
+        // The new account is a normal one.
+        _giveCusd(address(fresh), MONTHLY);
+        vm.prank(alice, relayer);
+        fresh.subscribe(M, type(uint256).max);
+        assertEq(fresh.status(), 1);
+
+        // The inherited one keeps working for the heir...
+        uint256 balance = cusd.balanceOf(address(acct));
+        vm.prank(bob, bob);
+        acct.withdraw(address(cusd), 1e18, bob);
+        assertEq(cusd.balanceOf(bob), 1e18);
+        // ...never into the previous owner's new account...
+        vm.prank(bob, bob);
+        vm.expectRevert(ConfioSmartAccount.BadDestination.selector);
+        acct.withdraw(address(cusd), 1e18, address(fresh));
+        // ...and into the heir's own current account.
+        ConfioSmartAccount bobs = _create(bob);
+        vm.prank(bob, bob);
+        acct.withdraw(address(cusd), balance - 1e18, address(bobs));
+        assertEq(cusd.balanceOf(address(bobs)), balance - 1e18);
+
+        // The previous owner cannot touch the inherited one.
+        vm.startPrank(alice, relayer);
+        vm.expectRevert(NOT_OWNER);
+        acct.withdraw(address(cusd), 0, alice);
+        vm.expectRevert(NOT_OWNER);
+        acct.withdraw(address(cusd), 0, address(fresh));
+        vm.expectRevert(NOT_OWNER);
+        acct.withdraw(address(cusd), 0);
+        vm.stopPrank();
+    }
+
+    function test_reopen_thirdGeneration_andTheHeirsInheritedGenerationIsNoDestination() public {
+        _inherit(); // generation 0 to bob
+        ConfioSmartAccount gen1 = _create(alice);
+        _inheritAccount(gen1, alice, carol);
+        assertEq(factory.accountOf(alice), address(gen1));
+        address predicted = factory.predictAddress(alice);
+        assertEq(predicted, factory.predictAddressAt(alice, 2));
+        ConfioSmartAccount gen2 = _create(alice);
+        assertEq(address(gen2), predicted);
+        assertEq(factory.generationOf(alice), 2);
+        assertEq(factory.accountOf(alice), address(gen2));
+        assertEq(factory.predictAddressAt(alice, 0), address(acct));
+        assertEq(factory.predictAddressAt(alice, 1), address(gen1));
+        assertTrue(address(acct) != address(gen1) && address(gen1) != address(gen2) && address(acct) != address(gen2));
+        assertTrue(
+            factory.isAccount(address(acct)) && factory.isAccount(address(gen1)) && factory.isAccount(address(gen2))
+        );
+        assertEq(acct.owner(), bob);
+        assertEq(gen1.owner(), carol);
+        assertEq(gen2.owner(), alice);
+        assertFalse(gen2.inherited());
+
+        // The heir's own generation 0 passes to carol; he opens generation 1.
+        ConfioSmartAccount bob0 = _create(bob);
+        _inheritAccount(bob0, bob, carol);
+        ConfioSmartAccount bob1 = _create(bob);
+        assertEq(address(bob1), factory.predictAddressAt(bob, 1));
+        vm.prank(bob, bob);
+        vm.expectRevert(ConfioSmartAccount.BadDestination.selector);
+        acct.withdraw(address(cusd), 1e18, address(bob0));
+        vm.prank(bob, bob);
+        acct.withdraw(address(cusd), 1e18, address(bob1));
+        assertEq(cusd.balanceOf(address(bob1)), 1e18);
+        // Carol owns two inherited accounts and no account of her own:
+        // neither inherited one is a destination for the other.
+        vm.prank(carol, carol);
+        vm.expectRevert(ConfioSmartAccount.BadDestination.selector);
+        gen1.withdraw(address(cusd), 0, address(bob0));
+    }
+
+    /// Anyone can deploy a byte-identical clone of the implementation, but
+    /// only the factory can initialize one: its owner() stays zero.
+    function test_inheritedWithdraw_toALookAlikeCloneDeployedBySomeoneElse_reverts() public {
+        _inherit();
+        vm.prank(eve);
+        address plain = Clones.clone(address(implementation));
+        // Even under the salt the factory would use for bob.
+        address salted = Clones.cloneDeterministic(address(implementation), keccak256(abi.encode(bob, uint64(0))));
+        assertTrue(salted != factory.predictAddressAt(bob, 0));
+        address[2] memory lookalikes = [plain, salted];
+        for (uint256 i = 0; i < 2; ++i) {
+            ConfioSmartAccount fake = ConfioSmartAccount(lookalikes[i]);
+            assertEq(address(fake).codehash, address(acct).codehash, "byte-identical");
+            assertEq(fake.owner(), address(0));
+            assertFalse(fake.inherited());
+            vm.prank(bob);
+            vm.expectRevert(ConfioSmartAccount.NotFactory.selector);
+            fake.initialize(bob);
+            vm.prank(eve);
+            vm.expectRevert(ConfioSmartAccount.NotFactory.selector);
+            fake.initialize(bob);
+            vm.prank(bob, bob);
+            vm.expectRevert(ConfioSmartAccount.BadDestination.selector);
+            acct.withdraw(address(cusd), 1e18, address(fake));
+        }
     }
 
     // ── the direct path (6.7) ───────────────────────────────────────────

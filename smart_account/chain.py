@@ -106,12 +106,31 @@ def factory_scheduled_fee(plan: str) -> tuple[int, int]:
     return int(fee), int(at)
 
 
+def _factory_view(name: str, *args):
+    signature, arg_types, out_types = abi.FACTORY_VIEWS[name]
+    return _view(factory_address(), signature, arg_types, list(args), out_types)[0]
+
+
 def predict_address(owner: str) -> str:
-    return _view(factory_address(), 'predictAddress(address)', ['address'], [owner], ['address'])[0].lower()
+    """factory.predictAddress(owner): accountOf(owner) while it is still the
+    owner's (createAccount then reverts), generation 0 with no account, the
+    next generation once the current one is inherited (spec 4.3)."""
+    return _factory_view('predictAddress', owner).lower()
+
+
+def predict_address_at(owner: str, generation: int) -> str:
+    return _factory_view('predictAddressAt', owner, int(generation)).lower()
+
+
+def generation_of(owner: str) -> int:
+    """Generation of accountOf(owner): 0 for the first account."""
+    return int(_factory_view('generationOf', owner))
 
 
 def account_of(owner: str) -> str:
-    return _view(factory_address(), 'accountOf(address)', ['address'], [owner], ['address'])[0].lower()
+    """The owner's current account (zero when none). It may be one their
+    beneficiary has since inherited, until they open a new one."""
+    return _factory_view('accountOf', owner).lower()
 
 
 def inheritance_enabled() -> bool:

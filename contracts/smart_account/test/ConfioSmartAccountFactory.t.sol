@@ -60,6 +60,8 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
     function test_oneAccountPerOwner_predictedAddressEqualsDeployed() public {
         assertEq(factory.accountOf(alice), address(acct));
         assertEq(factory.predictAddress(alice), address(acct));
+        assertEq(factory.predictAddressAt(alice, 0), address(acct));
+        assertEq(factory.generationOf(alice), 0);
         assertTrue(factory.isAccount(address(acct)));
         assertEq(acct.owner(), alice);
         assertEq(acct.nextRuleId(), 1);
@@ -70,15 +72,57 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
         emit AccountCreated(bob, predicted);
         ConfioSmartAccount bobs = _create(bob);
         assertEq(address(bobs), predicted);
+        assertEq(predicted, factory.predictAddressAt(bob, 0));
         assertTrue(address(bobs) != address(acct));
+        // Salt = keccak256(abi.encode(owner, generation)).
+        assertEq(
+            factory.predictAddressAt(bob, 7),
+            vm.computeCreate2Address(
+                keccak256(abi.encode(bob, uint64(7))),
+                keccak256(
+                    abi.encodePacked(
+                        hex"3d602d80600a3d3981f3363d3d373d3d3d363d73",
+                        address(implementation),
+                        hex"5af43d82803e903d91602b57fd5bf3"
+                    )
+                ),
+                address(factory)
+            )
+        );
 
-        // I-17: written once, never overwritten.
+        // I-17: not replaced while it is still the owner's.
         vm.prank(alice);
         vm.expectRevert(bytes("account exists"));
         factory.createAccount();
         assertEq(factory.accountOf(alice), address(acct));
         assertFalse(factory.isAccount(address(implementation)));
         assertFalse(factory.isAccount(eve));
+    }
+
+    /// The second replaceability condition: an account no longer owned by
+    /// its opener (only a claim does that, and it also sets inherited; the
+    /// owner is mocked here to reach the branch on its own).
+    function test_createAccount_replacesAnAccountNoLongerOwnedByTheCaller() public {
+        vm.mockCall(address(acct), abi.encodeWithSignature("owner()"), abi.encode(bob));
+        assertFalse(acct.inherited());
+        address predicted = factory.predictAddress(alice);
+        assertEq(predicted, factory.predictAddressAt(alice, 1));
+        vm.expectEmit(true, true, false, false, address(factory));
+        emit AccountCreated(alice, predicted);
+        ConfioSmartAccount fresh = _create(alice);
+        assertEq(address(fresh), predicted);
+        assertEq(factory.accountOf(alice), address(fresh));
+        assertEq(factory.generationOf(alice), 1);
+        assertTrue(factory.isAccount(address(acct)));
+        assertEq(fresh.owner(), alice);
+        // While paused, not even a replacement.
+        vm.clearMockedCalls();
+        vm.mockCall(address(fresh), abi.encodeWithSignature("inherited()"), abi.encode(true));
+        vm.prank(safe);
+        factory.pause();
+        vm.prank(alice);
+        vm.expectRevert();
+        factory.createAccount();
     }
 
     function test_createAccount_canBePaused_existingAccountsUnaffected() public {

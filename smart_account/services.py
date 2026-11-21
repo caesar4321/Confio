@@ -334,15 +334,23 @@ def prepare_subscribe(viewer, plan: str, deposits, disclosures_accepted: bool) -
         target = own.contract_address
     else:
         existing = _chain(chain.account_of, signer)
-        if int(existing, 16):
+        state = offer.mapped_clone_state(viewer.user, existing, signer) if int(existing, 16) else 'none'
+        if state == 'chain_unavailable':
+            raise PrepareError(state, offer.BLOCKED[state])
+        if state == 'own':
             # Created on chain, not reconciled yet, and still this signer's
             # by chain truth (owner(), inherited()), whatever the mirror says.
-            block = offer.mapped_clone_block(viewer.user, existing, signer)
-            if block:
-                raise PrepareError(block, offer.BLOCKED[block])
             target = existing
         else:
+            # No account yet, or the current one passed to a beneficiary:
+            # createAccount deploys at the factory's predicted address (the
+            # next generation for a re-open, decision 33). The relay policy
+            # accepts exactly factory.predictAddress(signer).
             target = _chain(chain.predict_address, signer)
+            if int(existing, 16) and target == existing:
+                # A factory that cannot re-open would only revert.
+                logger.error('smart account: predictAddress(%s) still names inherited %s', signer, existing)
+                raise PrepareError('chain_unavailable')
             calls.append(abi.call(chain.factory_address(), abi.encode_call('createAccount')))
     fee_wei = _chain(offer.signing_fee_wei, plan)
     if fee_wei <= 0:
@@ -1209,6 +1217,25 @@ def inherited_account_for(viewer, inherited_account_id) -> SmartAccount:
     return account
 
 
+def _heir_own_account(viewer) -> str:
+    """The heir's own account as an inherited-withdraw destination (spec
+    6.6): factory.accountOf(heir), which must be the heir's live own account
+    in the mirror AND, on chain, still owned by the heir and not inherited.
+    The account contract checks the same (a clone of the implementation,
+    owned by the heir, not inherited)."""
+    own = context.own_account(viewer.user)
+    if own is None or own.status not in ('active', 'cancel_pending'):
+        raise PrepareError('no_own_account')
+    signer = viewer.signer_address
+    current = _chain(chain.account_of, signer)
+    if not int(current, 16) or current != own.contract_address.lower():
+        raise PrepareError('no_own_account')
+    state = _chain(chain.account_control, current)
+    if state['inherited'] or str(state['owner'] or '').lower() != signer:
+        raise PrepareError('no_own_account')
+    return current
+
+
 def prepare_inherited_withdraw(viewer, inherited_account_id, asset_keys, destination: str) -> PreparedBatch:
     _require_configured()
     account = inherited_account_for(viewer, inherited_account_id)
@@ -1216,10 +1243,7 @@ def prepare_inherited_withdraw(viewer, inherited_account_id, asset_keys, destina
         to = viewer.signer_address
         where = 'tu cuenta personal'
     elif destination == 'smart_account':
-        own = context.own_account(viewer.user)
-        if own is None or own.status not in ('active', 'cancel_pending'):
-            raise PrepareError('no_own_account')
-        to = own.contract_address
+        to = _heir_own_account(viewer)
         where = 'tu Cuenta inteligente'
     else:
         raise PrepareError('bad_destination')

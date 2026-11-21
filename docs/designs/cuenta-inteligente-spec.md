@@ -77,6 +77,7 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | 30 | Presale CONFIO is not a fee source; it cannot be inside the account at all (decision 13), so the question does not arise for it. CONFIO that has been unlocked and moved into the account is an ordinary asset of the account: it passes with an ownership transfer and it is a fee source by forced sale like stocks, bitcoin and gold. CONFIO has no DEX market today, so v1 cannot sell it; the contract must be built so that CONFIO sales can be switched on later without replacing accounts (section 5.5). (Corrected by the founder: an earlier version of this row excluded all CONFIO from fees) | Unlocked CONFIO is the user's liquid asset like any other; only the locked allocation is outside | FINAL |
 | 31 | USDT that reaches the account is converted automatically into the owner's Confío dollar (cUSD+ if Ondo-eligible, cUSD otherwise), as in the personal wallet | A user never holds raw USDT in Confío; the same rule applies inside the account | FINAL |
 | 32 | `CusdVault` is changed so that a Cuenta inteligente can arm the fee referral for its owner. Automated activity (rules, forced sales, USDT conversion) then pays the referrer's share like owner-signed activity | The referral share should not depend on whether the owner or the relayer triggered the conversion (former C4) | FINAL |
+| 33 | An owner whose account passed to a beneficiary can open a new account from the same wallet; the factory keeps one current account per owner (generation in the CREATE2 salt) | A living owner who missed the window must be able to start again | FINAL |
 
 ---
 
@@ -93,9 +94,11 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | Beneficiary | No | Yes (one) | No |
 | Relayer authority | Executes only user-signed batches | Fee, notice, forced sale, USDT conversion, user-registered rules (section 4.6) | None |
 | Assets leave to | Anywhere the user signs | `owner` wallet; send-rule payees the owner registered; payout destinations for payment rules the owner registered; fee collector; by ownership transfer | New owner's wallet or the new owner's own Cuenta inteligente |
-| How many per user | One per account context (existing) | One | Any number (one per inheritance received) |
+| How many per user | One per account context (existing) | One current account | Any number (one per inheritance received) |
 
-One Cuenta inteligente per user means one account per owner address, enforced by the factory (`accountOf[owner]`). An inherited account does not count: it is not the new owner's Cuenta inteligente and never becomes one.
+One Cuenta inteligente per user means one current account per owner address, enforced by the factory (`accountOf[owner]`). An inherited account does not count: it is not the new owner's Cuenta inteligente and never becomes one.
+
+An owner whose account passed to their beneficiary through an executed claim can open a new one from the same wallet (decision 33). The factory deploys it one generation on (section 4.3) and `accountOf[owner]` then points at it. The inherited account stays the heir's. While the owner's current account is still theirs (never subscribed, active, cancelled, expired, or with a claim pending or executable) no second account can be opened.
 
 ### 3.2 Assets that can be inside
 
@@ -122,7 +125,7 @@ The account does not keep an on-chain list of tokens. Every asset function takes
 - **Out (owner).** `withdraw(token, amount)` sends to `owner` only. There is no destination parameter in `Active` state.
 - **Out (rules).** A send rule pays the payee the owner registered on-chain. A payment rule exits dollars to USDT and pays a payout destination (section 4.7, conflict C7).
 - **Out (expiry).** After a user-signed cancellation and the end of the paid period, anyone may call `returnAsset(token)`; the full balance of that token goes to `owner`.
-- **Out (inherited).** The new owner calls `withdraw(token, amount, to)` where `to` is the new owner's address or the new owner's own Cuenta inteligente (`factory.accountOf(owner)`).
+- **Out (inherited).** The new owner calls `withdraw(token, amount, to)` where `to` is the new owner's address or the new owner's own Cuenta inteligente (in practice `factory.accountOf(owner)`; the rule is in 6.6).
 
 ### 3.4 "Move everything"
 
@@ -137,8 +140,8 @@ The account does not keep an on-chain list of tokens. Every asset function takes
 
 Three new contracts (factory, account, and the fee collector of 4.2), in a new package `contracts/smart_account/` (Foundry, same layout as `contracts/crypto_swap/`):
 
-- `ConfioSmartAccountFactory`: deploys one account per owner and holds the global configuration. UUPS-upgradeable, `Ownable2StepUpgradeable`, owned by the Confío Safe, `renounceOwnership` disabled (as in `CusdVault` and `CusdPlusVault`).
-- `ConfioSmartAccount`: the per-user account, deployed by the factory as an EIP-1167 minimal clone at a CREATE2 address derived from the owner. Instances are immutable (decision 23): no owner-of-code, no upgrade function, no delegatecall to a changeable target. A new version is a new factory with its own implementation; v1 has no in-place migration. An owner moves by withdrawing to their wallet and depositing into an account of the new factory, both signed. "One account per owner", `accountOf`, `predictAddress` and the inherited-withdraw destination are all per factory; a later version must say how an inherited v1 account may pay into a newer account, since v1's check knows only its own factory. `CusdVault` keeps a set of recognised factories rather than one address (7.4). Because the factory itself is upgradeable, every limit an account relies on is hard-coded in the account implementation (maximum fee per plan, minimum notice, minimum rule gap) and the account clamps whatever the factory returns to those limits.
+- `ConfioSmartAccountFactory`: deploys one current account per owner and holds the global configuration. UUPS-upgradeable, `Ownable2StepUpgradeable`, owned by the Confío Safe, `renounceOwnership` disabled (as in `CusdVault` and `CusdPlusVault`).
+- `ConfioSmartAccount`: the per-user account, deployed by the factory as an EIP-1167 minimal clone at a CREATE2 address derived from the owner and a generation (salt `keccak256(abi.encode(owner, generation))`, section 4.3). Instances are immutable (decision 23): no owner-of-code, no upgrade function, no delegatecall to a changeable target. A new version is a new factory with its own implementation; v1 has no in-place migration. An owner moves by withdrawing to their wallet and depositing into an account of the new factory, both signed. "One current account per owner", `accountOf`, `generationOf`, `predictAddress` and the inherited-withdraw destination are all per factory; a later version must say how an inherited v1 account may pay into a newer account, since v1's check knows only its own factory. `CusdVault` keeps a set of recognised factories rather than one address (7.4). Because the factory itself is upgradeable, every limit an account relies on is hard-coded in the account implementation (maximum fee per plan, minimum notice, minimum rule gap) and the account clamps whatever the factory returns to those limits.
 
 One contract per user is required here, unlike `ConfioMarketEscrow`, which deliberately uses one shared contract (`ConfioMarketEscrow.sol:17-21`): both routers deliver bought assets and sale proceeds to `msg.sender`, ownership must be transferable as a unit, and each user's assets sit at that user's own address (decision 19).
 
@@ -164,18 +167,24 @@ A call arriving through the owner's 7702 batch has `tx.origin` equal to the spon
 
 | Variable | Type | Meaning |
 |---|---|---|
-| `accountOf` | `mapping(address => address)` | Owner wallet to account. One per owner |
+| `accountOf` | `mapping(address => address)` | Owner wallet to their current account. One per owner. Moves to a new account only when the current one has been inherited (or is no longer owned by that wallet), through `createAccount` |
+| `generationOf` | `mapping(address => uint64)` | Generation of `accountOf[owner]`: 0 for the first account, plus one for each account opened after the previous one was inherited. Part of the CREATE2 salt |
 | `monthlyFeeUsd`, `annualFeeUsd` | `uint256` (18 decimals) | Current list prices. Changed only by `scheduleFee(plan, newFee, effectiveAt)`, Safe-only, with `effectiveAt` at least `FEE_CHANGE_DELAY` ahead, so every subscriber can be told before a renewal at the new price. Accounts clamp to their own hard-coded maximum |
 | `allowedChallengeWindows` | `mapping(uint64 => bool)` | Selectable windows: 90, 180, 365 days |
 | `claimCooldown` | `uint64` | Wait after a cancelled claim before the same beneficiary may claim again: 30 days |
 | `forcedSaleNotice` | `uint64` | Minimum time between `startPaymentNotice` and `forcedSale`: 7 days, with hard-coded floor |
 | `confioSale` | struct (venue, price reference) | Empty at launch. The Safe can set it once; after that it cannot be changed or cleared. Read only by `forcedSale` when `tokenIn` is CONFIO (section 5.5) |
-| `isAccount` | `mapping(address => bool)` | True for accounts this factory created. Read by `CusdVault.armReferral` (decision 32) |
+| `isAccount` | `mapping(address => bool)` | True for every account this factory ever created, inherited ones included; never cleared. Read by `CusdVault.armReferral` (decision 32) |
 | `FEE_CHANGE_DELAY` | constant | 30 days |
 | `inheritanceEnabled` | `bool` | One-way switch, Safe-set. `setBeneficiary` reverts while false (rollout step 3) |
 | `relayerPaused` | `bool` | Safe-set. Blocks relayer functions on every account. Never blocks owner, beneficiary or permissionless functions |
 
-Factory functions: `createAccount()` (caller becomes owner; reverts if `accountOf[msg.sender] != 0`), `predictAddress(owner)` (view), the Safe-only setters for the variables above, `pause`/`unpause` of account creation.
+Factory functions:
+
+- `createAccount()`: the caller becomes the owner. With no account it deploys generation 0. It reverts with "account exists" while `accountOf[msg.sender]` is still the caller's (not `inherited` and `owner()` is the caller: never subscribed, active, cancel pending, expired, claim pending or executable). Once that account is inherited (or its `owner()` is someone else) it deploys a new clone at `generationOf[msg.sender] + 1`, increments `generationOf` and points `accountOf[msg.sender]` at the new account. Emits `AccountCreated(owner, account)` every time.
+- `predictAddress(owner)` (view): where the owner's account is or will be. `accountOf[owner]` while it is still theirs; `predictAddressAt(owner, 0)` with no account; `predictAddressAt(owner, generationOf[owner] + 1)` once the current one is inherited. The backend signs a subscribe against exactly this address.
+- `predictAddressAt(owner, generation)` (view): the CREATE2 address for salt `keccak256(abi.encode(owner, generation))`.
+- The Safe-only setters for the variables above, `pause`/`unpause` of account creation.
 
 An account snapshots its challenge window at the owner-signed designation; a later Safe change does not alter it. The fee is not snapshotted: each renewal charges the factory's price for the account's plan in force at that moment (decision 24), clamped to the account's hard-coded maximum.
 
@@ -251,7 +260,7 @@ After `executeClaim`, the owner functions that remain are the inherited forms on
 
 | Function | Preconditions | Effect |
 |---|---|---|
-| `withdraw(token, amount, to)` | `inherited`; `to == owner`, or `to == FACTORY.accountOf(owner)` where that account is non-zero, reports `owner() == owner` and is not itself `inherited` (an account the caller once opened may since have passed to someone else) | Transfers |
+| `withdraw(token, amount, to)` | `inherited`; `to == owner`, or `to` is a clone of the account implementation (its code hash), reports `owner() == owner` and is not itself `inherited` (an account the caller once opened may since have passed to someone else). In practice that is `FACTORY.accountOf(owner)` | Transfers |
 | `withdrawAll(tokens[], to)` | Same | Transfers each full balance |
 
 **Beneficiary.**
@@ -356,7 +365,7 @@ No transition out of `PaymentDue`, `Notice` or `SaleAllowed` returns assets to t
 
 Each is a testable statement. Section 10.2 maps them to tests.
 
-1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee`, `subscribe` or `forcedSale`; a transfer to a `Send` rule's stored `payee` inside `executeRule`, or a burn by `CUSD_PLUS.unwrapToCusd` / a pull by `CUSD_PLUS.wrapCusd` in that rule whose minted dollar goes to the same stored `payee`; a burn by `CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee` inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of CONFIO by the `confioSale` venue inside `forcedSale`, once that venue is set; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or `FACTORY.accountOf(owner)`.
+1. A token balance of the account decreases only through: a transfer to `owner`; a transfer to `FEE_COLLECTOR` inside `collectFee`, `subscribe` or `forcedSale`; a transfer to a `Send` rule's stored `payee` inside `executeRule`, or a burn by `CUSD_PLUS.unwrapToCusd` / a pull by `CUSD_PLUS.wrapCusd` in that rule whose minted dollar goes to the same stored `payee`; a burn by `CUSD_PLUS.redeemToUsdt` or `CUSD.redeemWithFee` inside a `Payout` rule, limited to the rule's stored amount and frequency, whose USDT goes to the address the relayer names for that run (the one exit whose destination the contract does not fix; C7); a pull by `STOCK_ROUTER` or `SWAP_ROUTER` inside `trade`, `executeRule` or `forcedSale`; a pull of CONFIO by the `confioSale` venue inside `forcedSale`, once that venue is set; a pull of USDT by `CUSD_PLUS` or `CUSD` inside `convertUsdt`, which mints the owner's dollar back to the account. In `Inherited` state only: a transfer to `owner` or to a clone of the account implementation (same code hash) that `owner` owns and that is not inherited (in practice `FACTORY.accountOf(owner)`).
 2. `owner` changes only in `executeClaim`, and only to the `beneficiary` stored at that moment.
 3. `collectFee` succeeds at most once for any value of `paidUntil`, and each success moves `paidUntil` forward by exactly the period length of the plan charged, from the block time. The total collected by one success never exceeds `feeUsd()` in value (cUSD at par, cUSD+ at `pPlus`, rounding up by at most one share unit), and `feeUsd()` never exceeds the implementation's hard-coded maximum for the plan whatever the factory returns.
 4. The relayer cannot change the fee, `plan` (it changes only to the `nextPlan` the owner signed, at renewal), `nextPlan`, `owner`, `pendingBeneficiary`, `beneficiary`, `challengeWindow` or any rule field other than `nextRunAt`, which `executeRule` advances. The price changes only through the factory's delayed `scheduleFee`, which is Safe-only. The 30-day delay lives in the factory, which the Safe can upgrade; what the account itself enforces is the hard-coded maximum per plan. An upgraded factory could raise a renewal to that maximum without notice.
@@ -372,7 +381,7 @@ Each is a testable statement. Section 10.2 maps them to tests.
 14. The account never holds a non-zero allowance to any address at the end of a transaction.
 15. `factory.relayerPaused` blocks only relayer functions. `withdraw`, `withdrawAll`, `cancelSubscription`, `returnAsset`, `cancelClaim`, `removeBeneficiary`, `initiateClaim` and `executeClaim` work while it is set.
 16. The Safe has no function that moves an account's assets, changes its `owner` or changes its `beneficiary`. The one indirect power is `confioSale`: until an account has latched it (5.5) the Safe decides which venue and price reference that account will use for CONFIO forced sales; after the latch it cannot.
-17. `factory.accountOf[owner]` is written once per owner and never overwritten. This holds per factory; a later version is a separate factory.
+17. `factory.accountOf[owner]` names at most one current account per owner. It is overwritten only by `createAccount` from that owner, and only when the account it names is `inherited` or no longer owned by that owner; the new account is at the next generation. `isAccount` stays true for every account ever created. This holds per factory; a later version is a separate factory.
 18. `setBeneficiary` and `acceptBeneficiary` revert unless the factory holds a live (under one hour old) relayer approval for exactly that designation or acceptance. A transaction the relay did not approve, self-sent or forwarded, cannot create or accept a designation.
 19. `initiateClaim` and `executeClaim` succeed only for the accepted `beneficiary`. A `pendingBeneficiary` who is not also the current accepted beneficiary cannot claim. When the owner re-names the current beneficiary, that person keeps their standing and their cooldown; only the window changes, on acceptance.
 20. The implementation has no function that changes code and contains no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; each account's runtime code is exactly the EIP-1167 pattern pointing at that implementation (the clone's one fixed `DELEGATECALL`). The account has and no dependency on the factory for moving assets to `owner`: `withdraw`, `withdrawAll`, `returnAsset` and the claim functions succeed even if every factory call reverts (factory reads used by them are wrapped and fall back to the hard-coded limits).
@@ -508,13 +517,13 @@ During the window the account behaves normally: fees are collected, rules run, f
 | `beneficiary`, `pendingBeneficiary`, `challengeWindow`, `pendingChallengeWindow`, `pendingBeneficiaryExpiresAt`, `claimStartedAt`, `claimCooldownUntil` | Cleared |
 | Every rule | Dead without iteration: `executeRule`, `createRule` and `updateRule` revert when `inherited`. `executeClaim` never loops over rules, so no number of rules can make it run out of gas |
 | Token balances | Unchanged. Nothing moves |
-| `factory.accountOf` | Unchanged for both parties. The previous owner address keeps pointing at this account, so that address cannot open another. The new owner's own entry is untouched |
+| `factory.accountOf` | Unchanged at execution for both parties. The previous owner's entry keeps pointing at this account until they open a new one: their next `createAccount` deploys a new account one generation on and moves `accountOf` to it (decision 33). The new owner's own entry is untouched |
 
 No fee is charged at execution (decision 8).
 
 ### 6.6 The withdraw-only box
 
-In `Inherited` state the only state-changing functions are `withdraw(token, amount, to)` and `withdrawAll(tokens[], to)`, callable by the new owner, with `to` restricted to the new owner's wallet or the new owner's own Cuenta inteligente. There is no deadline. The relayer has no function. The previous owner's key has no function. The new owner cannot trade, automate, subscribe or name a beneficiary on this account; to do any of those they move the assets into their own Cuenta inteligente.
+In `Inherited` state the only state-changing functions are `withdraw(token, amount, to)` and `withdrawAll(tokens[], to)`, callable by the new owner, with `to` restricted to the new owner's wallet or the new owner's own Cuenta inteligente: a clone of the account implementation (checked by code hash) whose `owner()` is the new owner and which is not itself inherited. In practice that is `factory.accountOf(newOwner)`, which the backend uses and re-checks. There is no deadline. The relayer has no function. The previous owner's key has no function. The new owner cannot trade, automate, subscribe or name a beneficiary on this account; to do any of those they move the assets into their own Cuenta inteligente.
 
 Selling an inherited stock position therefore happens after moving it out. A new owner who is not Ondo-eligible can only withdraw (decision 19).
 
@@ -524,7 +533,7 @@ A beneficiary can complete a claim with no Confío service running. They need:
 
 | Need | Where it comes from |
 |---|---|
-| The account address and chain (BNB Smart Chain) | The acceptance screen and its notification; also derivable from `factory.predictAddress(ownerWallet)` |
+| The account address and chain (BNB Smart Chain) | The acceptance screen and its notification; also `factory.accountOf(ownerWallet)` until the claim executes |
 | The contract ABI | This public repository and the BscScan-verified source |
 | Their own wallet key | It lives on their device in the Confío app. Confío does not export keys |
 | BNB for gas at their wallet address | Bought and sent by the beneficiary |
@@ -848,6 +857,7 @@ Closed by the founder on 2026-11-20:
 | O3 | Positioning | Closed | Decision 21 |
 | O4 | Residual risk for a living owner who misses every notice | It goes on the screen | Section 8.3, item 7 |
 | O5 | Annual plan cancellation | No refund; runs to expiry | Decision 22 |
+| R1 | A previous owner who lost the account through an executed claim could never open a new one from the same wallet | Resolved: re-open allowed. The factory keeps one current account per owner, with a generation in the CREATE2 salt; the inherited-withdraw destination is checked by code hash and owner, not by salt (founder, 2026-11-21) | Decision 33 |
 | O7 | Scope of "works even if Confío disappears" in copy | No copy rule | Decision 28 |
 | S1 | Immutable or upgradeable account instances | Immutable | Decision 23 |
 | S3 | How a price change reaches subscribers | From the next renewal | Decision 24 |
@@ -868,7 +878,6 @@ Still open:
 |---|---|---|---|
 | C2 | Match the two feed addresses against Chainlink's published list before they are hard-coded | Design resolved (9.2); tolerance and feed age are in the numbers table | Engineering, in the contract audit |
 | C6 | A claim pending when a signed cancellation expires | Default kept: the return wins (9.2). Not answered by the founder | Founder, if he wants it otherwise |
-| R1 | A previous owner who lost the account through an executed claim (for example a living owner who missed every notice) can never open a new Cuenta inteligente from the same wallet: the factory maps one account per owner address and never resets it (invariant 17), and the account's inherited-withdraw destination is computed from that same salt. The backend refuses with `wallet_account_inherited`. Allowing a new account needs a factory change before deployment (a generation in the salt, with the destination computation changed to match) | Decide before the factory is deployed | Founder |
 | P1 | Which rails are live for payment rules at launch. All three run on the same provider path, so the question is the provider's terms and limits (X9), not three separate integrations | Not started | Founder |
 
 Numbers (O6), all confirmed by the founder on 2026-11-20:
@@ -975,7 +984,7 @@ Inheritance:
 | `removeBeneficiary` during a pending claim; `setBeneficiary` naming someone new during a pending claim cancels that claim with cooldown; the old beneficiary keeps standing until the new one accepts and loses it at that moment | 6.4 |
 | Execution resets every field listed in 6.5 and moves no token | I-12 |
 | After execution: relayer functions, `subscribe`, `setBeneficiary`, `acceptBeneficiary`, `createRule`, `trade` revert; the previous owner's calls revert | I-12, I-13 |
-| Inherited withdraw to the new owner's wallet; to the new owner's own account; to any other address reverts; to `accountOf` when the new owner has none reverts | I-1 |
+| Inherited withdraw to the new owner's wallet; to the new owner's own account (any generation); to any other address reverts; to a contract that is not a clone of the implementation reverts; to a zero `accountOf` when the new owner has none reverts | I-1 |
 | Inherited withdraw to `accountOf(owner)` reverts when that account has itself been inherited by someone else | Decision 10 |
 | A pending designation lapses 30 days after naming; `acceptBeneficiary` then reverts | 4.4 |
 | `withdrawDesignation` clears only the pending entry and leaves the accepted beneficiary able to claim; `removeBeneficiary` clears both | 4.6 |
@@ -984,7 +993,7 @@ Inheritance:
 | A claim pending when a signed cancellation expires: the return works and the claim cannot execute | C6 |
 | Bytecode checks: the implementation contains no `DELEGATECALL`, `CALLCODE` or `SELFDESTRUCT`; a deployed account's runtime code equals the EIP-1167 pattern with the expected implementation address | Decision 23, I-20 |
 | The direct path: `initiateClaim`, `executeClaim` and inherited `withdraw` sent as plain self-paid transactions with no sponsor in the call chain | 6.7 |
-| Factory: one account per owner; predicted address equals deployed address; the Safe has no function over account assets | I-16, I-17 |
+| Factory: one current account per owner: `createAccount` reverts while the current account is still the caller's (never subscribed, active, cancel pending, expired, claim pending, claim executable); after it is inherited, `createAccount` deploys at generation + 1, moves `accountOf`, keeps `isAccount` true for the old one, and `predictAddress` equals the deployed address before each creation; the Safe has no function over account assets | I-16, I-17, decision 33 |
 
 Property tests (fuzzed sequences of calls by owner, beneficiary, relayer and strangers): invariants 1, 2, 3, 8 and 14 hold after every call.
 
@@ -997,6 +1006,7 @@ Property tests (fuzzed sequences of calls by owner, beneficiary, relayer and str
 - Payment rules: the standing authorization is created only with Face at rule creation and is bound to destination, amount and frequency; a run whose bridge cost or FX rate is outside the rule's limits is skipped and notified; a payout method that is not the viewer's is refused; an edited or deleted method deactivates its rule; a rail not confirmed for unattended payouts is not offered.
 - Offer: annual is the default plan; prices are 14.99 and 149.99, read from the factory with settings as fallback.
 - Entitlement: IA+ on at `FeeCollected`, off after `paid_until`, never on for an inherited account.
+- Re-open (decision 33): a previous owner whose account was inherited sees the plans again; the subscribe batch creates the account at `factory.predictAddress(signer)` and the policy accepts exactly that address and refuses the inherited one; reconcile gives the second `AccountCreated` index 0 without an ops alert (an `AccountCreated` while the owner's current account is still theirs on chain is still alerted); the new subscription grants IA+; an inherited withdraw can go to the heir's own new account.
 - App: subscribe, move everything, rule creation, cancel, claim and inherited withdrawal on a real device; the claim-pending banner appears in every account context; older builds never receive the new GraphQL fields in shared queries.
 - Local tests must patch the Telegram alert path (they otherwise reach the real channel).
 

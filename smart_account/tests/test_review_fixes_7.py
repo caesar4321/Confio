@@ -5,17 +5,19 @@
    refused for lacking it. An unreadable chain keeps the protective no-op
    but never requires it.
 2. Subscribe from a wallet whose clone the factory still maps: owner() and
-   inherited() decide, not the mirror."""
+   inherited() decide, not the mirror. Still the signer's: subscribed in
+   place. Inherited or owned by someone else: a new account one generation
+   on (decision 33)."""
 from datetime import timedelta
 from unittest import mock
 
 from django.test import override_settings
 from django.utils import timezone
 
-from smart_account import offer, relay_policy, services
+from smart_account import abi, offer, relay_policy, services
 from smart_account.models import SmartAccountPreparedAction
 
-from .base import BUILD, VAULT, WAD, SmartAccountTestCase
+from .base import BUILD, FACTORY, VAULT, WAD, SmartAccountTestCase
 from .test_review_fixes import _ClaimPending
 
 
@@ -113,6 +115,14 @@ class SubscribeChainTruthTests(SmartAccountTestCase):
         return services.prepare_subscribe(self.viewer(self.previous), 'annual',
                                           [{'asset_key': 'cusd_plus', 'units': str(200 * WAD)}], True)
 
+    def assert_reopens(self):
+        self.assertIsNone(self.block())
+        batch = self.prepare()
+        new = self.chain.predict_address_at(self.previous.wallet, 1)
+        self.assertEqual(batch.calls[0], abi.call(FACTORY, abi.encode_call('createAccount')))
+        self.assertEqual(batch.calls[-1]['to'], new)
+        self.assertNotIn(self.chain.account_of(self.previous.wallet), [c['to'] for c in batch.calls])
+
     def assert_refused(self, code):
         self.assertEqual(self.block(), code)
         with self.assertRaises(services.PrepareError) as raised:
@@ -120,14 +130,14 @@ class SubscribeChainTruthTests(SmartAccountTestCase):
         self.assertEqual(raised.exception.code, code)
         self.assertFalse(SmartAccountPreparedAction.objects.exists())
 
-    def test_inherited_on_chain_with_no_mirror_row_refuses(self):
+    def test_inherited_on_chain_with_no_mirror_row_reopens(self):
         self.chain.views[(self.clone, 'inherited')] = True
         self.chain.views[(self.clone, 'owner')] = self.heir.wallet
-        self.assert_refused('wallet_account_inherited')
+        self.assert_reopens()
 
-    def test_owner_changed_on_chain_refuses(self):
+    def test_owner_changed_on_chain_reopens(self):
         self.chain.views[(self.clone, 'owner')] = self.heir.wallet
-        self.assert_refused('wallet_account_inherited')
+        self.assert_reopens()
 
     def test_mirror_lags_a_claim_on_an_unknown_wallet_row(self):
         # Mirror row for the clone belongs to someone else and is not marked
@@ -136,7 +146,7 @@ class SubscribeChainTruthTests(SmartAccountTestCase):
         row = self.make_account(other, index=1)
         self.chain.accounts[self.previous.wallet] = row.contract_address
         self.chain.views[(row.contract_address, 'inherited')] = True
-        self.assert_refused('wallet_account_inherited')
+        self.assert_reopens()
 
     def test_unreadable_owner_fails_closed(self):
         self.chain.fail.add('account_view')

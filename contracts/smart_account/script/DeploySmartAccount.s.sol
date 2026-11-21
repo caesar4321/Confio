@@ -14,6 +14,12 @@ pragma solidity ^0.8.24;
  * the proxy, so a wrong prediction fails the deployment instead of
  * producing a mismatched pair.
  *
+ * Account addresses: the clone of an owner's account of generation g is at
+ * CREATE2 salt keccak256(abi.encode(owner, g)) from the proxy; g goes up by
+ * one each time an owner re-opens after their account was inherited.
+ * factory.predictAddress(owner) is the next createAccount's address;
+ * factory.predictAddressAt(owner, g) any generation's.
+ *
  * NEVER broadcast from a laptop. Like every Confío deployment this runs on
  * the production host through the documented deploy path, which takes the
  * shared sponsor nonce lock (see README.md, "Deploy"). A dry run:
@@ -118,6 +124,11 @@ contract DeploySmartAccount is Script {
         require(implementation.FACTORY() == address(factory), "implementation factory");
         require(!factory.inheritanceEnabled(), "inheritance must start off");
         require(factory.CUSD_PLUS() == CUSD_PLUS && factory.STOCK_ROUTER() == STOCK_ROUTER, "factory immutables");
+        require(
+            factory.generationOf(deployer) == 0
+                && factory.predictAddress(deployer) == factory.predictAddressAt(deployer, 0),
+            "account address semantics"
+        );
 
         console2.log("ConfioSmartAccountFeeCollector:", address(collector));
         console2.log("ConfioSmartAccount (implementation):", address(implementation));

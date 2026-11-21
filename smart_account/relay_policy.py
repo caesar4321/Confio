@@ -355,8 +355,12 @@ def _owner_target(user, signer: str, target: str, *, allow_predicted: bool) -> b
                 and (own.owner_account.bsc_address or '').lower() == signer)
     if not allow_predicted:
         return False
-    # No row yet: the account is created by this very batch (or was created
-    # and is not reconciled). Its address is a pure function of the signer.
+    # No own row: the account is created by this very batch (or was created
+    # and is not reconciled). factory.predictAddress(signer) names exactly
+    # one address: the signer's current account while it is still theirs,
+    # else where the next createAccount deploys (generation 0, or the next
+    # generation once the current one was inherited: decision 33). An
+    # inherited previous account is never it.
     return chain.predict_address(signer) == target
 
 

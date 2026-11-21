@@ -80,6 +80,17 @@ FUNCTIONS = {
 }
 FACTORY_FUNCTIONS = frozenset({'createAccount', 'approveDesignation', 'approveAcceptance'})
 
+# Factory views chain.py reads, as (signature, argument types, return types);
+# checked against the interface in test_abi. One current account per owner:
+# accountOf moves to a new clone, one generation on, only after the previous
+# one was inherited (spec 4.3, decision 33).
+FACTORY_VIEWS = {
+    'accountOf': ('accountOf(address)', ['address'], ['address']),
+    'generationOf': ('generationOf(address)', ['address'], ['uint64']),
+    'predictAddress': ('predictAddress(address)', ['address'], ['address']),
+    'predictAddressAt': ('predictAddressAt(address,uint64)', ['address', 'uint64'], ['address']),
+}
+
 
 def selector(signature: str) -> str:
     return keccak(text=signature)[:4].hex()

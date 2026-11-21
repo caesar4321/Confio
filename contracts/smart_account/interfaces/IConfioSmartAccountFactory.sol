@@ -22,10 +22,26 @@ interface IConfioSmartAccountFactory {
     event RelayerPausedSet(bool paused);
     event ConfioSaleSet(address venue, address priceRef);
 
-    /// The caller becomes the owner. Reverts if the caller already has one.
+    /// The caller becomes the owner. Reverts ("account exists") while
+    /// accountOf(caller) is still the caller's: active, cancelled or expired
+    /// alike. Once that account has been inherited (or is otherwise no longer
+    /// owned by the caller) it opens a new one at generationOf(caller) + 1
+    /// and points accountOf(caller) at it.
     function createAccount() external returns (address account);
+    /// Address of the next createAccount by `owner`: predictAddressAt(owner, 0)
+    /// with no account, predictAddressAt(owner, generationOf(owner) + 1) once
+    /// the current account is replaceable, and accountOf(owner) itself while
+    /// createAccount would revert.
     function predictAddress(address owner) external view returns (address);
+    /// CREATE2 address of `owner`'s account of `generation`
+    /// (salt = keccak256(abi.encode(owner, generation))).
+    function predictAddressAt(address owner, uint64 generation) external view returns (address);
+    /// Generation of accountOf(owner); 0 also when the owner has none.
+    function generationOf(address owner) external view returns (uint64);
+    /// The owner's current account. Changes only when the previous one was
+    /// inherited by someone else (invariant 17).
     function accountOf(address owner) external view returns (address);
+    /// True for every account this factory ever created, inherited ones too.
     function isAccount(address account) external view returns (bool);
     function implementation() external view returns (address);
 

@@ -50,6 +50,15 @@ class InterfaceParityTests(SimpleTestCase):
             self.assertIn(signature, declared[sol_name], f'{name}: {signature} not in {declared[sol_name]}')
             self.assertEqual(abi.SELECTORS[name], keccak(text=signature)[:4].hex())
 
+    def test_factory_views_match_the_interface(self):
+        declared = _signatures(self.factory, 'function')
+        for name, (signature, arg_types, _out) in abi.FACTORY_VIEWS.items():
+            self.assertIn(signature, declared.get(name, []), name)
+            self.assertEqual(signature, f"{name}({','.join(arg_types)})")
+            returns = re.search(r'function\s+%s\([^)]*\)\s+external\s+view\s+returns\s*\((\w+)' % name,
+                                self.factory).group(1)
+            self.assertEqual([returns], _out, name)
+
     def test_overloaded_withdraws_have_distinct_selectors(self):
         self.assertNotEqual(abi.SELECTORS['withdraw'], abi.SELECTORS['withdrawTo'])
         self.assertNotEqual(abi.SELECTORS['withdrawAll'], abi.SELECTORS['withdrawAllTo'])
