@@ -24,7 +24,6 @@ RATE_SOURCE_PRIORITY = {
     ],
     'official': [
         'exchangerate_api',
-        'currencylayer',
         'bluelytics',
         'dolarapi',
         'bcv',
@@ -58,9 +57,6 @@ class ExchangeRateService:
         # Try Binance P2P as a parallel-market proxy for supported fiat markets
         results['binance_p2p'] = self.fetch_binance_p2p_parallel_rates()
 
-        # Try CurrencyLayer for additional VES rates
-        results['currencylayer'] = self.fetch_currencylayer_rates()
-        
         # Try Argentine-specific sources for ARS rates
         results['bluelytics'] = self.fetch_bluelytics_rates()
         results['dolarapi'] = self.fetch_dolarapi_rates()
@@ -86,8 +82,10 @@ class ExchangeRateService:
         start_time = timezone.now()
         
         try:
-            # Yadio API endpoint for VES/USD
-            url = "https://api.yadio.io/convert/1/VES/USD"
+            # Ask in the USD -> VES direction: 1 VES -> USD comes back rounded
+            # to 2 decimals ("result": 0), which silently stored nothing.
+            # `rate` keeps full precision and is already VES per USD.
+            url = "https://api.yadio.io/convert/1/USD/VES"
             
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
@@ -97,12 +95,8 @@ class ExchangeRateService:
             
             rates_created = 0
             
-            # Yadio returns the rate as how many USD you get for 1 VES
-            # We need to invert it to get VES per USD
-            if 'result' in data and data['result']:
-                usd_per_ves = Decimal(str(data['result']))
-                ves_per_usd = 1 / usd_per_ves
-                
+            ves_per_usd = Decimal(str(data.get('rate') or 0))
+            if ves_per_usd > 0:
                 ExchangeRate.objects.create(
                     source_currency='VES',
                     target_currency='USD',
@@ -114,13 +108,17 @@ class ExchangeRateService:
                 )
                 rates_created += 1
             
-            # Log success
+            # A 200 without a usable rate is a failure, not a quiet success.
             RateFetchLog.objects.create(
                 source='yadio',
-                status='success',
+                status='success' if rates_created else 'failed',
                 rates_fetched=rates_created,
+                error_message='' if rates_created else f'no usable rate in response: {str(data)[:200]}',
                 response_time_ms=response_time
             )
+            if not rates_created:
+                logger.error(f"Yadio: no usable VES rate in response: {data}")
+                return False
             
             logger.info(f"Yadio: Successfully fetched {rates_created} rates")
             return True
@@ -444,77 +442,6 @@ class ExchangeRateService:
         Backward-compatible wrapper for the management command name previously added.
         """
         return self.fetch_binance_p2p_parallel_rates()
-    
-    def fetch_currencylayer_rates(self) -> bool:
-        """
-        Fetch VES/USD rates from CurrencyLayer (free tier)
-        CurrencyLayer sometimes has VES rates when others don't
-        """
-        start_time = timezone.now()
-        
-        try:
-            # CurrencyLayer free endpoint (no API key required for basic usage)
-            url = "http://api.currencylayer.com/live?currencies=VES&source=USD&format=1"
-            
-            response = self.session.get(url)
-            response.raise_for_status()
-            
-            data = response.json()
-            response_time = int((timezone.now() - start_time).total_seconds() * 1000)
-            
-            rates_created = 0
-            
-            # CurrencyLayer format: {"quotes": {"USDVES": 119.5}}
-            if data.get('success') and 'quotes' in data:
-                quotes = data['quotes']
-                
-                if 'USDVES' in quotes:
-                    # CurrencyLayer gives USD to VES, we want VES per USD
-                    usd_to_ves = Decimal(str(quotes['USDVES']))
-                    
-                    ExchangeRate.objects.create(
-                        source_currency='VES',
-                        target_currency='USD',
-                        rate=usd_to_ves,
-                        rate_type='official',  # CurrencyLayer typically provides official rates
-                        source='currencylayer',
-                        fetched_at=timezone.now(),
-                        raw_data=data
-                    )
-                    rates_created += 1
-            
-            # Log success
-            RateFetchLog.objects.create(
-                source='currencylayer',
-                status='success',
-                rates_fetched=rates_created,
-                response_time_ms=response_time
-            )
-            
-            logger.info(f"CurrencyLayer: Successfully fetched {rates_created} rates")
-            return True
-            
-        except requests.exceptions.RequestException as e:
-            response_time = int((timezone.now() - start_time).total_seconds() * 1000)
-            RateFetchLog.objects.create(
-                source='currencylayer',
-                status='failed',
-                rates_fetched=0,
-                error_message=str(e),
-                response_time_ms=response_time
-            )
-            logger.error(f"CurrencyLayer API error: {e}")
-            return False
-        
-        except Exception as e:
-            RateFetchLog.objects.create(
-                source='currencylayer',
-                status='failed',
-                rates_fetched=0,
-                error_message=str(e)
-            )
-            logger.error(f"CurrencyLayer unexpected error: {e}")
-            return False
     
     def fetch_bluelytics_rates(self) -> bool:
         """
