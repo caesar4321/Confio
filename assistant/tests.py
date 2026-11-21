@@ -382,12 +382,12 @@ class DestinationContractTests(TestCase):
 
         from django.conf import settings as django_settings
 
-        from .destinations import DESTINATIONS
+        from .destinations import CHIP_ONLY, DESTINATIONS
 
         source = (Path(django_settings.BASE_DIR) / 'apps/src/assistant/destinations.ts').read_text()
         block = source[source.index('DESTINATION_TARGETS'):source.index('};', source.index('DESTINATION_TARGETS'))]
         app_keys = set(re.findall(r'^\s+(\w+): \{', block, re.MULTILINE))
-        self.assertEqual(app_keys, set(DESTINATIONS))
+        self.assertEqual(app_keys, set(DESTINATIONS) | CHIP_ONLY)
 
 
 # --------------------------------------------------------------------------- #
@@ -2449,7 +2449,10 @@ class PaidChipAuditFixTests(TestCase):
             plain = build_system_prompt(destinations=['home', 'cuenta_inteligente'], **common)
             both = build_system_prompt(destinations=['home', 'ia_plus', 'cuenta_inteligente'], ia_plus_bundled=True,
                                        **common)
-        self.assertIn('Uno de sus beneficios es Confío IA+', bundled)
+        self.assertIn('Incluye Confío IA+: el asistente opera tu Cuenta inteligente', bundled)
+        # Never sold as more usage or a better model: those words appear only
+        # in the instruction that forbids them.
+        self.assertIn('nunca como más uso, un modelo mejor o funciones ilimitadas', bundled)
         self.assertNotIn('Confío IA+', plain)
         self.assertNotIn('no se ofrece por separado', both)  # standalone IA+ back on: no contradiction
 

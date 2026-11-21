@@ -67,8 +67,10 @@ export const BottomTabNavigator = () => {
   // A QR shared from another app opens Pagar as if it had been scanned; the
   // scan handler applies every check (employee, rail, account) from there.
   useSharedQr((payload) => {
-    if (!canSendFunds) {
-      Alert.alert('Pagar un QR', 'Tu rol en este negocio no permite hacer pagos.', [{ text: 'Entendido' }]);
+    if (isSmartAccount || !canSendFunds) {
+      Alert.alert('Pagar un QR', isSmartAccount
+        ? 'Cambia a tu cuenta personal o de negocio para pagar este QR.'
+        : 'Tu rol en este negocio no permite hacer pagos.', [{ text: 'Entendido' }]);
       return;
     }
     navigation.navigate('Scan' as any, { mode: 'pagar', sharedQr: payload, sharedAt: Date.now() } as any);
