@@ -37,9 +37,9 @@ export const explainLocateOutcome = (outcome: LocateOutcome, onPickCity: () => v
   }
   if (outcome === 'no_city') {
     Alert.alert(
-      'Aún no estamos en tu ciudad',
-      'Comprar todavía no tiene tu ciudad. Elige una ciudad cercana para ver sus tiendas.',
-      [{ text: 'Elegir ciudad', onPress: onPickCity }],
+      'No reconocimos tu ciudad',
+      'Escribe el nombre de tu ciudad para ver sus tiendas o abrir la tuya.',
+      [{ text: 'Escribir mi ciudad', onPress: onPickCity }],
     );
     return;
   }

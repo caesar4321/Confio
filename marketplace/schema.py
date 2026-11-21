@@ -354,12 +354,23 @@ def _visible_products():
 def _area_city_q(country_code: str, city: str, field: str = 'store__city') -> Q:
     """Matches any city of `city`'s delivery area (La Paz + El Alto), so
     listings, category counts and store counts follow where couriers go."""
-    from .checkout import area_cities
-    names = [c.city for c in area_cities(country_code, city)] or [(city or '').strip()]
+    from .checkout import _city_key, area_cities
+    names = [c.city for c in area_cities(country_code, city)] + [(city or '').strip()]
+    # Every stored spelling of those cities ("Bogota" for "Bogotá"):
+    # accents and spacing never hide a store from its own city.
+    names += _store_city_spellings(country_code, {_city_key(n) for n in names})
     q = Q()
-    for name in names:
+    for name in set(names):
         q |= Q(**{f'{field}__iexact': name})
     return q
+
+
+def _store_city_spellings(country_code: str, keys: set) -> list:
+    """The city names stores of a country were saved with that fold to `keys`."""
+    from .checkout import _city_key
+    stored = (Store.objects.filter(country_code=(country_code or '').strip().upper())
+              .values_list('city', flat=True).distinct())
+    return [c for c in stored if _city_key(c) in keys]
 
 
 def _selling_stores():
@@ -505,15 +516,42 @@ class Query(graphene.ObjectType):
     def resolve_marketplace_cities(self, info, country_code):
         if not _user(info):
             return []
-        return [Query._city_type(c) for c in
-                MarketplaceCity.objects.filter(country_code=country_code.upper().strip())]
+        cities = [Query._city_type(c) for c in
+                  MarketplaceCity.objects.filter(country_code=country_code.upper().strip())]
+        # Where people already sell first: an app with no GPS city opens the
+        # first live city of this list (stable sort keeps the rest A–Z).
+        radius = dict(MarketplaceCity.objects.filter(country_code=country_code.upper().strip())
+                      .values_list('city', 'radius_km'))
+        # Then the bigger city (its radius) before a small town.
+        return sorted(cities, key=lambda c: (-(c.store_count or 0), -(radius.get(c.city) or 0)))
+
+    @staticmethod
+    def _unlisted_city_type(country_code: str, city: str):
+        """A city Comprar has no row for: open like any other (no courier
+        estimate, no map center), so a typed or new city never meets the
+        fake door."""
+        from .checkout import area_is_live
+        from .pricing import currency_for_country
+        count = _selling_stores().filter(
+            _area_city_q(country_code, city, field='city'), country_code=country_code).distinct().count()
+        return MarketplaceCityType(
+            country_code=country_code, city=city, currency_code=currency_for_country(country_code),
+            is_live=area_is_live(country_code, city), delivery_estimate=None, delivery_partner='',
+            store_count=count, suggested_delivery_usd=str(suggested_delivery_usd(country_code, city)),
+            latitude=None, longitude=None)
 
     def resolve_marketplace_city(self, info, country_code, city):
         if not _user(info):
             return None
-        row = MarketplaceCity.objects.filter(
-            country_code=country_code.upper().strip(), city__iexact=city.strip()).first()
-        return Query._city_type(row) if row else None
+        country = country_code.upper().strip()
+        name = (city or '').strip()[:100]
+        if country not in VALID_COUNTRY_CODES or not name:
+            return None
+        from .checkout import _city_key
+        row = (MarketplaceCity.objects.filter(country_code=country, city__iexact=name).first()
+               or next((c for c in MarketplaceCity.objects.filter(country_code=country)
+                        if _city_key(c.city) == _city_key(name)), None))
+        return Query._city_type(row) if row else Query._unlisted_city_type(country, name)
 
     def resolve_marketplace_products(self, info, country_code, city=None, category=None,
                                      search=None, store_id=None, limit=20, offset=0):
@@ -522,14 +560,16 @@ class Query(graphene.ObjectType):
         country = country_code.upper().strip()
         if country not in VALID_COUNTRY_CODES:
             return []
+        # Every city sells except a known city an admin switched off (and not
+        # in a live delivery area) or a closed country: the rule checkout applies.
+        from .checkout import closed_city_names, country_is_closed
+        if country_is_closed(country):
+            return []
         qs = _visible_products().filter(store__country_code=country)
-        # Stores in a live city or in its delivery area (an El Alto store sells
-        # with La Paz), the same rule checkout applies.
-        from .checkout import live_city_names
-        live_q = Q()
-        for name in live_city_names(country):
-            live_q |= Q(store__city__iexact=name)
-        qs = qs.filter(live_q) if live_q else qs.none()
+        from .checkout import _city_key
+        closed = {_city_key(n) for n in closed_city_names(country)}
+        for name in _store_city_spellings(country, closed) if closed else []:
+            qs = qs.exclude(store__city__iexact=name)
         if city:
             # The whole delivery area: an El Alto buyer sees the La Paz stores.
             qs = qs.filter(_area_city_q(country, city))
@@ -861,7 +901,10 @@ class OpenMarketStore(graphene.Mutation):
             return OpenMarketStore(success=False, error='bad_location')
         if not (2 <= len(name) <= 80):
             return OpenMarketStore(success=False, error='bad_name')
-        known = MarketplaceCity.objects.filter(country_code=country, city__iexact=city.strip()).first()
+        # The known row under any accent or spacing ("Bogota" → "Bogotá").
+        from .checkout import _city_key
+        known = next((c for c in MarketplaceCity.objects.filter(country_code=country)
+                      if _city_key(c.city) == _city_key(city)), None)
         if delivery_price_usd in (None, ''):
             delivery = suggested_delivery_usd(country, city)
         else:

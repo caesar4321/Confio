@@ -176,7 +176,9 @@ def _city_key(name: str) -> str:
     city ("La  Paz", "la paz", "Córdoba"/"Cordoba"). Same-city delivery is
     charged, so a spelling must not turn it into "another city"."""
     import unicodedata
-    folded = unicodedata.normalize('NFKD', name or '').encode('ascii', 'ignore').decode()
+    # Drop only the accents: a non-Latin name ("Москва") keeps its letters
+    # instead of folding to '' and matching every other such city.
+    folded = ''.join(ch for ch in unicodedata.normalize('NFKD', name or '') if not unicodedata.combining(ch))
     return ' '.join(folded.casefold().split())
 
 
@@ -205,17 +207,37 @@ def area_cities(country_code: str, city: str) -> list:
                        .exclude(pk=me.pk))
 
 
+def country_is_closed(country_code: str) -> bool:
+    """A whole country switched off by the MARKETPLACE_CLOSED_COUNTRIES
+    setting or environment variable (ISO-2, comma-separated, empty by
+    default): Comprar is open in every country unless named there."""
+    import os
+
+    from django.conf import settings
+    raw = getattr(settings, 'MARKETPLACE_CLOSED_COUNTRIES', None)
+    if raw is None:
+        raw = os.environ.get('MARKETPLACE_CLOSED_COUNTRIES', '')
+    closed = {c.strip().upper() for c in str(raw or '').split(',') if c.strip()}
+    return (country_code or '').strip().upper() in closed
+
+
 def area_is_live(country_code: str, city: str) -> bool:
-    """Sells when this city, or any city of its delivery area, is live: an El
-    Alto store sells with La Paz."""
-    return any(c.is_live for c in area_cities(country_code, city))
+    """Comprar sells in every city (2026-11-21: open everywhere, self-serve).
+    A city closes only when Comprar knows it and an admin switched it off
+    (is_live=False), and then still sells when any city of its delivery area
+    is live (an El Alto store sells with La Paz). A city with no row is open."""
+    if country_is_closed(country_code):
+        return False
+    rows = area_cities(country_code, city)
+    return not rows or any(c.is_live for c in rows)
 
 
-def live_city_names(country_code: str) -> list:
-    """Cities whose stores sell: live ones and every city sharing an area with one."""
+def closed_city_names(country_code: str) -> list:
+    """Known cities whose stores do not sell: switched off and not in a live
+    delivery area. Every other city, known or not, sells."""
     rows = list(MarketplaceCity.objects.filter(country_code=(country_code or '').strip().upper()))
     live_areas = {c.delivery_area for c in rows if c.is_live and c.delivery_area}
-    return [c.city for c in rows if c.is_live or (c.delivery_area and c.delivery_area in live_areas)]
+    return [c.city for c in rows if not c.is_live and not (c.delivery_area and c.delivery_area in live_areas)]
 
 
 def clean_pin(latitude, longitude):
@@ -276,10 +298,21 @@ def pin_in_area(country_code: str, city: str, pin) -> bool:
     city's center + radius). Unknown geometry never refuses."""
     import math
 
+    lat, lng = float(pin[0]), float(pin[1])
+    if not area_cities(country_code, city):
+        # A city Comprar has no row for (typed by its store): no centre to
+        # check, but the pin must be in the country (near its known cities,
+        # as for another city) and not inside another known city.
+        known = list(MarketplaceCity.objects.filter(
+            country_code=(country_code or '').strip().upper(), latitude__isnull=False, longitude__isnull=False))
+        if not known:
+            return True
+        distances = [(_km(lat, lng, float(c.latitude), float(c.longitude)), c) for c in known]
+        return (any(d <= COUNTRY_REACH_KM for d, _c in distances)
+                and not any(d <= (c.radius_km or 40) for d, c in distances))
     cities = [c for c in area_cities(country_code, city) if c.latitude is not None and c.longitude is not None]
     if not cities:
         return True
-    lat, lng = float(pin[0]), float(pin[1])
     for c in cities:
         dlat, dlng = math.radians(lat - float(c.latitude)), math.radians(lng - float(c.longitude))
         a = (math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat)) * math.cos(math.radians(float(c.latitude)))
@@ -371,8 +404,9 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     if (store.owner_account_id == account.id or store.owner_account.user_id == user.id
             or store.owner_account.user_id == account.user_id):
         raise CheckoutError('own_store')
-    city = city_for(store.country_code, store.city)
-    if city is None or not area_is_live(store.country_code, store.city):
+    # Any city sells (a city with no row included); only a city an admin
+    # switched off, or a closed country, refuses.
+    if not area_is_live(store.country_code, store.city):
         raise CheckoutError('city_not_live')
     delivery_address = (delivery_address or '').strip()
     delivery_phone = ''.join(ch for ch in (delivery_phone or '') if ch.isdigit() or ch == '+')

@@ -104,8 +104,10 @@ class MarketplaceCity(models.Model):
     country_code = models.CharField(max_length=2, choices=COUNTRY_CHOICES, db_index=True)
     city = models.CharField(max_length=100)
     currency_code = models.CharField(max_length=3, help_text='Local currency, e.g. BOB')
+    # Comprar is open in every city (2026-11-21); a city with no row sells too.
+    # Switching a row off is how one city is closed (the fake door shows there).
     is_live = models.BooleanField(
-        default=False, help_text='Off = the fake door ("Próximamente en tu ciudad")')
+        default=True, help_text='Off = closed: the fake door ("Próximamente en tu ciudad")')
     delivery_estimate = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True,
         help_text='Same-city delivery estimate in local currency, paid to the courier '

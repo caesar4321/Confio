@@ -3065,7 +3065,7 @@ class GuideStepTests(TestCase):
         from . import guide
         self._answer('devaluation')
         with patch.object(guide, '_ladder_done', return_value=False), \
-                patch('marketplace.checkout.live_city_names', return_value=[]):
+                patch('marketplace.checkout.country_is_closed', return_value=True):
             with patch.object(guide, '_invest_options', return_value=['stocks']):
                 self.assertEqual(self._key(funded=True), 'invest')
             with patch.object(guide, '_invest_options', return_value=[]):
@@ -3074,7 +3074,7 @@ class GuideStepTests(TestCase):
     def test_no_answer_offers_investing_first(self):
         from . import guide
         with patch.object(guide, '_ladder_done', return_value=False), \
-                patch('marketplace.checkout.live_city_names', return_value=[]):
+                patch('marketplace.checkout.country_is_closed', return_value=True):
             with patch.object(guide, '_invest_options', return_value=['stocks']):
                 self.assertEqual(self._key(funded=True), 'invest')
             with patch.object(guide, '_invest_options', return_value=[]):
@@ -3087,7 +3087,7 @@ class GuideStepTests(TestCase):
             self._answer(answer)
             with patch.object(guide, '_ladder_done', return_value=False), \
                     patch.object(guide, '_invest_options', return_value=['stocks']), \
-                    patch('marketplace.checkout.live_city_names', return_value=[]):
+                    patch('marketplace.checkout.country_is_closed', return_value=True):
                 self.assertEqual(self._key(funded=True), 'send', answer)
 
     def test_unanswered_invest_refusal_moves_on_to_send(self):
@@ -3098,7 +3098,7 @@ class GuideStepTests(TestCase):
                                                 dismissed_at=timezone.now() - timedelta(hours=1))
         with patch.object(guide, '_ladder_done', return_value=False), \
                 patch.object(guide, '_invest_options', return_value=['stocks']), \
-                patch('marketplace.checkout.live_city_names', return_value=[]):
+                patch('marketplace.checkout.country_is_closed', return_value=True):
             # Saying no still rests the guide first.
             self.assertIsNone(self._key(funded=True))
             AssistantGuideStep.objects.filter(pk=row.pk).update(
@@ -3129,7 +3129,7 @@ class GuideStepTests(TestCase):
                 patch.object(guide, 'current_key', return_value='opening'), \
                 patch.object(guide, '_text', return_value='x'), \
                 patch.object(guide, '_invest_options', return_value=['crypto']), \
-                patch('marketplace.checkout.live_city_names', return_value=[]):
+                patch('marketplace.checkout.country_is_closed', return_value=True):
             found = guide.current(self._viewer(), {})
             self.assertEqual([c.answer for c in found.chips], ['savings', 'family', 'invest', 'usdt', ''])
             self.assertEqual(found.presentation, 'full')

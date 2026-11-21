@@ -760,7 +760,7 @@ class NearestCityTests(TestCase):
         self.assertEqual(nearest_city(10.49, -66.87).city, 'Caracas')
         self.assertEqual(nearest_city(-34.59, -58.42).city, 'Buenos Aires')  # Palermo
         self.assertEqual(nearest_city(-31.42, -64.19).city, 'Córdoba')
-        self.assertIsNone(nearest_city(-19.04, -65.26))  # Sucre: not a known city
+        self.assertIsNone(nearest_city(-30.0, -100.0))  # open Pacific: no known city
 
     def test_locating_stores_the_reading(self):
         from .models import MarketplaceLocationCheck
@@ -2303,3 +2303,136 @@ class AlcoholLicenseReviewTests(MarketTestBase):
             self.assertEqual(requeue_stuck_reviews()['licences'], 1)
             self.assertEqual(requeue_stuck_reviews()['licences'], 0)  # stamped: not again until the next window
         send.assert_called_once()
+
+
+@override_settings(**ENABLED)
+class OpenEverywhereTests(MarketTestBase):
+    """2026-11-21: Comprar sells in every country and city, self-serve."""
+
+    def _move_store(self, country, city):
+        Store.objects.filter(pk=self.store.pk).update(country_code=country, city=city)
+        self.product.refresh_from_db()
+
+    def _products(self, country, city=None):
+        from .schema import Query
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        return [int(p.id) for p in Query.resolve_marketplace_products(None, info, country_code=country, city=city)]
+
+    def test_a_city_with_no_row_lists_and_sells(self):
+        MarketplaceCity.objects.filter(country_code='PE', city__iexact='Huaraz').delete()
+        self._move_store('PE', 'Huaraz')
+        self.assertIn(self.product.pk, self._products('PE', 'Huaraz'))
+        self.assertIn(self.product.pk, self._products('PE'))
+        order, _, _ = self.prepare(delivery_country='PE', delivery_city='Huaraz',
+                                   delivery_phone='+51900000000')
+        self.assertEqual(order.status, 'draft')
+        self.assertFalse(order.delivery_outside_city)
+
+    def test_an_unlisted_city_reads_as_live_so_the_fake_door_never_shows(self):
+        from .schema import Query
+        MarketplaceCity.objects.filter(country_code='PE', city__iexact='Huaraz').delete()
+        self._move_store('PE', 'Huaraz')
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        city = Query.resolve_marketplace_city(None, info, country_code='pe', city=' Huaraz ')
+        self.assertTrue(city.is_live)
+        self.assertEqual((city.country_code, city.city, city.store_count), ('PE', 'Huaraz', 1))
+        self.assertEqual(city.currency_code, 'PEN')
+        self.assertIsNone(city.delivery_estimate)
+        self.assertIsNone(Query.resolve_marketplace_city(None, info, country_code='BO', city='  '))
+        self.assertIsNone(Query.resolve_marketplace_city(None, info, country_code='ZZ', city='Huaraz'))
+
+    def test_a_city_an_admin_switched_off_stays_closed(self):
+        MarketplaceCity.objects.filter(pk=self.city.pk).update(is_live=False)
+        self.assertNotIn(self.product.pk, self._products('BO', 'La Paz'))
+        self.assertNotIn(self.product.pk, self._products('BO'))
+        with self.assertRaisesMessage(checkout.CheckoutError, 'city_not_live'):
+            self.prepare()
+
+    def test_a_closed_country_sells_nowhere(self):
+        self._move_store('PE', 'Huaraz')
+        with override_settings(MARKETPLACE_CLOSED_COUNTRIES='pe, CU'):
+            self.assertEqual(self._products('PE'), [])
+            with self.assertRaisesMessage(checkout.CheckoutError, 'city_not_live'):
+                self.prepare(delivery_country='PE', delivery_city='Huaraz')
+        self.assertIn(self.product.pk, self._products('PE'))
+
+    def test_the_safety_rules_still_apply_in_a_new_city(self):
+        self._move_store('PE', 'Huaraz')
+        self.buyer = make_user(verified=False)
+        with self.assertRaisesMessage(checkout.CheckoutError, 'identity_required'):
+            self.prepare(delivery_country='PE', delivery_city='Huaraz')
+
+    def test_cities_with_stores_come_first(self):
+        from .schema import Query
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        cities = Query.resolve_marketplace_cities(None, info, country_code='BO')
+        self.assertEqual(cities[0].city, 'La Paz')
+
+    def test_the_seed_reaches_every_country_and_keeps_existing_rows(self):
+        import importlib
+
+        from django.apps import apps as django_apps
+
+        from users.country_codes import COUNTRY_CODES
+        mod = importlib.import_module('marketplace.migrations.0018_open_everywhere')
+        seeded = {cc for cc, *_ in mod.rows()} | {'AR', 'BO', 'VE'}  # 0002 seeds those
+        self.assertEqual({c[2] for c in COUNTRY_CODES} - seeded, set())
+        MarketplaceCity.objects.filter(country_code='BO', city='Sucre').delete()
+        MarketplaceCity.objects.filter(country_code='PE', city__iexact='Lima').delete()
+        MarketplaceCity.objects.update_or_create(country_code='PE', city='lima',
+                                                 defaults={'currency_code': 'PEN', 'is_live': False})
+        mod.seed(django_apps, None)
+        mod.seed(django_apps, None)  # idempotent
+        sucre = MarketplaceCity.objects.get(country_code='BO', city='Sucre')
+        self.assertTrue(sucre.is_live)
+        self.assertEqual(sucre.currency_code, 'BOB')
+        lima = MarketplaceCity.objects.filter(country_code='PE', city__iexact='Lima')
+        self.assertEqual([(c.city, c.is_live) for c in lima], [('lima', False)])  # left as the admin set it
+        self.assertTrue(MarketplaceCity.objects.get(pk=self.city.pk).is_live)
+
+
+@override_settings(**ENABLED)
+class OpenEverywhereSpellingTests(MarketTestBase):
+    def setUp(self):
+        super().setUp()
+        MarketplaceCity.objects.update_or_create(
+            country_code='CO', city='Bogotá',
+            defaults={'currency_code': 'COP', 'is_live': True, 'latitude': Decimal('4.711'),
+                      'longitude': Decimal('-74.0721'), 'radius_km': 35})
+
+    def test_an_unaccented_store_city_is_found_under_its_listed_name(self):
+        from .schema import Query
+        Store.objects.filter(pk=self.store.pk).update(country_code='CO', city='Bogota')
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        listed = [int(p.id) for p in Query.resolve_marketplace_products(None, info, country_code='CO', city='Bogotá')]
+        self.assertIn(self.product.pk, listed)
+        city = Query.resolve_marketplace_city(None, info, country_code='CO', city='bogota')
+        self.assertEqual((city.city, city.store_count), ('Bogotá', 1))
+
+    def test_a_closed_city_hides_every_spelling(self):
+        from .schema import Query
+        MarketplaceCity.objects.filter(country_code='CO', city='Bogotá').update(is_live=False)
+        Store.objects.filter(pk=self.store.pk).update(country_code='CO', city='bogota ')
+        info = SimpleNamespace(context=SimpleNamespace(user=self.buyer))
+        self.assertNotIn(self.product.pk,
+                         [int(p.id) for p in Query.resolve_marketplace_products(None, info, country_code='CO')])
+
+    def test_opening_a_store_with_an_unaccented_name_uses_the_known_city(self):
+        from .schema import OpenMarketStore
+        seller = make_user()
+        info = SimpleNamespace(context=SimpleNamespace(user=seller))
+        with mock.patch('marketplace.schema._jwt', return_value=PERSONAL):
+            result = OpenMarketStore.mutate.__wrapped__(None, info, name='Tienda Uno', country_code='CO',
+                                                       city='Bogota')
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(Store.objects.get(owner=seller).city, 'Bogotá')
+
+    def test_non_latin_city_names_stay_distinct(self):
+        self.assertNotEqual(checkout._city_key('Москва'), checkout._city_key('Казань'))
+        self.assertEqual(checkout._city_key('  Bogotá '), checkout._city_key('bogota'))
+
+    def test_a_same_city_pin_inside_another_known_city_is_refused_for_an_unlisted_store_city(self):
+        MarketplaceCity.objects.filter(country_code='CO', city__iexact='Zipaquirá').delete()
+        self.assertFalse(checkout.pin_in_area('CO', 'Zipaquirá', (Decimal('4.70'), Decimal('-74.07'))))  # Bogotá
+        self.assertTrue(checkout.pin_in_area('CO', 'Zipaquirá', (Decimal('5.02'), Decimal('-74.00'))))
+        self.assertFalse(checkout.pin_in_area('CO', 'Zipaquirá', (Decimal('-16.50'), Decimal('-68.15'))))  # La Paz, BO

@@ -61,19 +61,30 @@ export const ComprarLocationModal = ({
       return (storeCounts[String(b[2])] || 0) - (storeCounts[String(a[2])] || 0);
     });
   }, [q, storeCounts, homeCountryCode]);
+  // Comprar is open in every city: a city missing from the list is typed.
+  const [cityQ, setCityQ] = useState('');
+  const fold = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const cities = useMemo(() => {
     const isHome = (c: any) => c.countryCode === homeCountryCode && c.city === homeCity;
-    return [...(data?.marketplaceCities || [])].sort((a: any, b: any) => {
+    const wanted = fold(cityQ);
+    const listed = (data?.marketplaceCities || []).filter((c: any) => !wanted || fold(String(c.city)).includes(wanted));
+    return [...listed].sort((a: any, b: any) => {
       if (isHome(a) !== isHome(b)) return isHome(a) ? -1 : 1;
       if ((b.storeCount || 0) !== (a.storeCount || 0)) return (b.storeCount || 0) - (a.storeCount || 0);
       if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
       return String(a.city).localeCompare(String(b.city), 'es');
     });
-  }, [data, homeCountryCode, homeCity]);
+  }, [data, homeCountryCode, homeCity, cityQ]);
+  const typedCity = cityQ.trim().replace(/\s+/g, ' ').slice(0, 100);
+  const listedMatch = (data?.marketplaceCities || []).find((c: any) => fold(String(c.city)) === fold(typedCity));
+  const typedIsListed = Boolean(listedMatch);
+  // "Bogota" picks the listed "Bogotá": one city, one spelling.
+  const pickTyped = () => { onSelect(pickedCountry, listedMatch ? String(listedMatch.city) : typedCity); close(); };
 
   const close = () => {
     setStep('city');
     setQ('');
+    setCityQ('');
     onClose();
   };
 
@@ -119,6 +130,7 @@ export const ComprarLocationModal = ({
                     setPickedCountry(String(item[2]));
                     setStep('city');
                     setQ('');
+                    setCityQ('');
                   }}>
                     <FlagLabel iso={item[2]} textStyle={styles.rowText}>{item[0]}</FlagLabel>
                     {String(item[2]) === homeCountryCode ? (
@@ -136,16 +148,31 @@ export const ComprarLocationModal = ({
                 <Icon name="navigation" size={16} color={colors.primaryDark} />
                 <Text style={styles.gpsText}>Usar mi ubicación</Text>
               </TouchableOpacity>
+              <View style={styles.searchBox}>
+                <Icon name="search" size={18} color={colors.text.light} />
+                <TextInput style={styles.searchInput} placeholder="Busca o escribe tu ciudad"
+                  placeholderTextColor={colors.text.light} value={cityQ} onChangeText={setCityQ}
+                  autoCorrect={false} returnKeyType="done"
+                  onSubmitEditing={() => { if (pickedCountry && typedCity.length >= 2) pickTyped(); }} />
+              </View>
+              {pickedCountry && typedCity.length >= 2 && !typedIsListed ? (
+                <TouchableOpacity style={styles.row} onPress={pickTyped}
+                  accessibilityRole="button" accessibilityLabel={`Usar ${typedCity}`}>
+                  <Text style={[styles.rowText, styles.rowSelected]} numberOfLines={1}>Usar «{typedCity}»</Text>
+                  <Icon name="chevron-right" size={18} color={colors.primaryDark} />
+                </TouchableOpacity>
+              ) : null}
               <FlatList
                 data={cities}
                 keyExtractor={(item: any) => `${item.countryCode}-${item.city}`}
                 style={{ maxHeight: 420 }}
+                keyboardShouldPersistTaps="handled"
                 initialNumToRender={20}
                 maxToRenderPerBatch={15}
                 windowSize={21}
                 ListEmptyComponent={
                   <Text style={styles.empty}>
-                    {loading ? 'Cargando…' : 'Aún no hay ciudades en Comprar para este país.'}
+                    {loading ? 'Cargando…' : typedCity ? '' : 'Escribe el nombre de tu ciudad.'}
                   </Text>
                 }
                 renderItem={({ item }: any) => {
@@ -156,7 +183,7 @@ export const ComprarLocationModal = ({
                         {item.city}{item.city === homeCity && item.countryCode === homeCountryCode ? ' · Tu ciudad' : ''}
                       </Text>
                       <Text style={styles.rowMeta}>
-                        {item.isLive ? `${formatDecimal(item.storeCount ?? 0, { decimals: 0 })} tiendas` : 'Próximamente'}
+                        {!item.isLive ? 'Próximamente' : item.storeCount ? `${formatDecimal(item.storeCount, { decimals: 0 })} tiendas` : ''}
                       </Text>
                     </TouchableOpacity>
                   );

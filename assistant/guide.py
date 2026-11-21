@@ -300,8 +300,9 @@ def _ladder_usable(viewer, state, key):
     if key == 'invest':
         return bool(_invest_options(viewer, state))
     if key == 'comprar':
-        from marketplace.checkout import live_city_names
-        return bool(live_city_names(state.country))
+        # Comprar is open in every city unless the country is closed.
+        from marketplace.checkout import country_is_closed
+        return bool(state.country) and not country_is_closed(state.country)
     return True
 
 
