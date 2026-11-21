@@ -37,16 +37,43 @@ import { useSmartRead } from '../components/smartAccount/useSmartRead';
 import { HELP_RULES } from '../components/smartAccount/help';
 import { SA, HIT } from '../components/smartAccount/tokens';
 import {
-  centsToDecimal, centsToInput, cryptoBuyAllowed, frequencyEvery, frequencyLabel, railLabel, railsPhrase, shortDate, toCents, typedCents, usd,
+  cardPeriodDays, cardPeriodLabel, centsToDecimal, centsToInput, cryptoBuyAllowed, frequencyEvery, frequencyLabel, railLabel,
+  railsPhrase, ruleTitle, shortDate, toCents, typedCents, usd,
 } from '../components/smartAccount/format';
 import {
-  SMART_FREQUENCIES, fetchSmartAccount, fetchSmartAccountBuyableAssets, fetchSmartAccountOffer,
-  fetchSmartAccountPayoutMethods, prepareSmartAccountBuyRule, prepareSmartAccountCancelRule,
+  SMART_FREQUENCIES, fetchSmartAccount, fetchSmartAccountBuyableAssets, fetchSmartAccountCardRules, fetchSmartAccountOffer,
+  fetchSmartAccountPayoutMethods, isEditableRuleKind, prepareSmartAccountBuyRule, prepareSmartAccountCancelRule,
   prepareSmartAccountPayoutRule, prepareSmartAccountSendRule,
-  type SmartAccountBuyableAsset, type SmartAccountPayoutMethod, type SmartFrequency, type SmartRuleKind,
+  type SmartAccountBuyableAsset, type SmartAccountPayoutMethod, type SmartAccountRule, type SmartFrequency, type SmartRuleKind,
 } from '../services/smartAccount';
 import type { MainStackParamList } from '../types/navigation';
 import { DEX_TRADING_UI_ENABLED } from '../config/features';
+import { PagoMovilDestinationForm } from '../components/smartAccount/PagoMovilDestinationForm';
+
+/** The rail whose destination can be added right here (Venezuela). */
+export const PAGO_MOVIL_RAIL = 've_pagomovil';
+
+/**
+ * Why there is no bank account to pick, and where to get one: a Pago Móvil
+ * account is added here; the other rails' accounts are saved from Enviar.
+ */
+export function payoutEmptyCopy(rails: string[]): string {
+  if (rails.length === 0) {
+    return 'Los pagos automáticos a cuenta bancaria todavía no están disponibles para ti.';
+  }
+  if (!rails.includes(PAGO_MOVIL_RAIL)) {
+    return `Guarda primero una cuenta ${railsPhrase(rails)} desde Enviar. Después podrás pagarle de forma automática.`;
+  }
+  const others = rails.filter((r) => r !== PAGO_MOVIL_RAIL);
+  return others.length > 0
+    ? `Agrega aquí una cuenta Pago Móvil. Las cuentas ${railsPhrase(others)} se guardan desde Enviar.`
+    : 'Agrega una cuenta Pago Móvil y podrás pagarle de forma automática.';
+}
+
+/** The pending-step notice: the IA+ sentence only when there is a plan to go back to. */
+export const pendingStepBody = (fromProposal: boolean): string => (fromProposal
+  ? 'No lo repitas. Cuando aparezca en tus reglas, vuelve a abrir la propuesta de Confío IA+ para seguir con el resto del plan.'
+  : 'No lo repitas. Cuando aparezca en tus reglas, ya está lista.');
 
 const TITLES: Record<SmartRuleKind, string> = {
   send: 'Enviar a alguien',
@@ -247,8 +274,12 @@ function RuleEditForm() {
   const offer = useSmartRead(fetchSmartAccountOffer);
   useRailLabels();
   const existing = ruleId ? (account.data?.rules ?? []).find((r) => String(r.id) === ruleId) ?? null : null;
-  const kind = ((existing?.kind ?? route.params?.kind ?? 'send') as SmartRuleKind);
-  const methods = useSmartRead(fetchSmartAccountPayoutMethods, { skip: kind !== 'payout' });
+  // A card allowance (decision 35) or a kind this build does not know: shown
+  // read-only, with only "Detener esta regla". Never opened as another kind.
+  const readOnly = !!existing && !isEditableRuleKind(existing.kind);
+  const kind = (readOnly ? 'send' : (existing?.kind ?? route.params?.kind ?? 'send')) as SmartRuleKind;
+  const methods = useSmartRead(fetchSmartAccountPayoutMethods, { skip: readOnly || kind !== 'payout' });
+  const cardRules = useSmartRead(fetchSmartAccountCardRules, { skip: existing?.kind !== 'card' });
   const flow = useSignFlow();
   const [stopping, setStopping] = useState(false);
 
@@ -272,6 +303,8 @@ function RuleEditForm() {
   const [firstRunAt, setFirstRunAt] = useState<string | null>(prefill?.firstRunAt ?? null);
   const stopOpened = useRef(false);
   const [picker, setPicker] = useState(false);
+  // The payout picker shows the "Agregar cuenta Pago Móvil" form instead of the list.
+  const [addingPagoMovil, setAddingPagoMovil] = useState(false);
   const [touched, setTouched] = useState(false);
   // A step of a multi-step proposal whose outcome is still unknown: the rest
   // of the plan must not open on top of it (it may not have gone through).
@@ -367,7 +400,7 @@ function RuleEditForm() {
 
   const onReview = () => {
     setTouched(true);
-    if (pendingRef.current || stopProposal || amountError || destinationError || cents === null) {
+    if (readOnly || pendingRef.current || stopProposal || amountError || destinationError || cents === null) {
       return;
     }
     setStopping(false);
@@ -477,13 +510,30 @@ function RuleEditForm() {
   const missingRule = !!ruleId && !!account.data && !existing;
   // Only when CREATING: an existing payout rule always keeps its form and
   // "Detener esta regla", even if no bank method is usable today.
-  const noMethods = !ruleId && kind === 'payout' && !methods.loading && !methods.failed && usableMethods.length === 0;
+  const noMethods = !ruleId && kind === 'payout' && !methods.loading && !methods.failed && usableMethods.length === 0
+    && !method;
+  const canAddPagoMovil = rails.includes(PAGO_MOVIL_RAIL);
+  const openAddPagoMovil = () => {
+    setAddingPagoMovil(true);
+    setPicker(true);
+  };
+  const closePicker = () => {
+    setPicker(false);
+    setAddingPagoMovil(false);
+  };
+  const onPagoMovilSaved = (saved: SmartAccountPayoutMethod) => {
+    if (saved.available) {
+      setMethod(saved);
+    }
+    closePicker();
+    void methods.reload();
+  };
 
   return (
     <SmartScreen
       title={existing ? 'Tu regla' : TITLES[kind]}
       help={HELP_RULES}
-      footer={!loading && !failed && !missingRule && !noMethods && !pendingStep && !stopProposal && !cryptoBlocked ? (
+      footer={!loading && !failed && !missingRule && !noMethods && !pendingStep && !stopProposal && !cryptoBlocked && !readOnly ? (
         <ActionButton label="Revisar" onPress={onReview} testID="rule-review" />
       ) : undefined}
     >
@@ -491,13 +541,20 @@ function RuleEditForm() {
         <LoadError onRetry={() => { void account.reload(); void offer.reload(); }} />
       ) : missingRule ? (
         <Empty icon="repeat" title="Esta regla ya no existe" actionLabel="Volver" onAction={() => navigation.goBack()} />
+      ) : readOnly && existing ? (
+        <ReadOnlyRule
+          rule={existing}
+          card={(cardRules.data ?? []).find((c) => c.ruleId === String(existing.id)) ?? null}
+          pending={pendingStep}
+          onStop={onStop}
+        />
       ) : noMethods ? (
         <Empty
           icon="home"
           title="Aún no guardaste una cuenta bancaria"
-          body={rails.length > 0
-            ? `Guarda primero una cuenta ${railsPhrase(rails)} desde Enviar. Después podrás pagarle de forma automática.`
-            : 'Los pagos automáticos a cuenta bancaria todavía no están disponibles para ti.'}
+          body={payoutEmptyCopy(rails)}
+          actionLabel={canAddPagoMovil ? 'Agregar cuenta Pago Móvil' : undefined}
+          onAction={canAddPagoMovil ? openAddPagoMovil : undefined}
         />
       ) : (
         <View style={kitStyles.pad}>
@@ -506,7 +563,7 @@ function RuleEditForm() {
               icon="clock"
               tone="notice"
               title="Este paso todavía se está confirmando"
-              body="No lo repitas. Cuando aparezca en tus reglas, vuelve a abrir la propuesta de Confío IA+ para seguir con el resto del plan."
+              body={pendingStepBody(!!route.params?.proposal || nextSteps.length > 0)}
               actionLabel="Ir a tus reglas"
               onPress={() => navigation.popTo('SmartAccountRules')}
               style={styles.proposal}
@@ -593,7 +650,7 @@ function RuleEditForm() {
         </View>
       )}
 
-      {kind === 'send' ? (
+      {kind === 'send' && !readOnly ? (
         <ConfioContactPicker
           visible={picker}
           title="¿A quién le envías?"
@@ -601,16 +658,18 @@ function RuleEditForm() {
           onPick={(p) => { setPerson(p); setPicker(false); }}
         />
       ) : null}
-      {kind === 'payout' ? (
-        <Sheet visible={picker} onClose={() => setPicker(false)} title="Tus cuentas guardadas">
-          {methods.loading && !methods.data ? <RowsSkeleton rows={2} /> : methods.failed && !methods.data ? (
+      {kind === 'payout' && !readOnly ? (
+        <Sheet
+          visible={picker}
+          onClose={closePicker}
+          title={addingPagoMovil ? 'Agregar cuenta Pago Móvil' : 'Tus cuentas guardadas'}
+        >
+          {addingPagoMovil ? (
+            <PagoMovilDestinationForm onSaved={onPagoMovilSaved} onCancel={() => setAddingPagoMovil(false)} />
+          ) : methods.loading && !methods.data ? <RowsSkeleton rows={2} /> : methods.failed && !methods.data ? (
             <LoadError onRetry={methods.reload} />
           ) : usableMethods.length === 0 ? (
-            <Text style={kitStyles.small} testID="payout-no-methods">
-              {rails.length > 0
-                ? `Guarda primero una cuenta ${railsPhrase(rails)} desde Enviar. Después podrás elegirla aquí.`
-                : 'Los pagos automáticos a cuenta bancaria todavía no están disponibles para ti.'}
-            </Text>
+            <Text style={kitStyles.small} testID="payout-no-methods">{payoutEmptyCopy(rails)}</Text>
           ) : usableMethods.map((m, i) => (
             <Row
               key={m.payoutMethodId}
@@ -623,9 +682,20 @@ function RuleEditForm() {
               chevron
             />
           ))}
+          {!addingPagoMovil && canAddPagoMovil && !(methods.loading && !methods.data) ? (
+            <Row
+              divider={usableMethods.length > 0}
+              left={<IconDisc icon="plus" tone="mint" />}
+              title="Agregar cuenta Pago Móvil"
+              subtitle="Banco, teléfono y cédula de quien recibe."
+              onPress={() => setAddingPagoMovil(true)}
+              chevron
+              testID="payout-add-pagomovil"
+            />
+          ) : null}
         </Sheet>
       ) : null}
-      {kind === 'buy' ? (
+      {kind === 'buy' && !readOnly ? (
         <BuyAssetPicker
           visible={picker}
           allowCrypto={allowCrypto}
@@ -656,6 +726,65 @@ function RuleEditForm() {
         failedAction={duplicateAction}
       />
     </SmartScreen>
+  );
+}
+
+/**
+ * A rule the form does not edit. A card allowance (decision 35): the card
+ * uses the account when you pay with it, up to the limit per period; the
+ * period's room comes from its own read and is simply left out if that read
+ * fails. Any other unknown kind: its title and the stop button only.
+ */
+export function ReadOnlyRule({ rule, card, pending, onStop }: {
+  rule: SmartAccountRule;
+  card: { spenderLabel: string; capUsd: string; spentUsd: string; remainingUsd: string; periodDays: number;
+    periodEnd: string | null; recentPulls: Array<{ pulledAt: string; usdSpent: string }> } | null;
+  pending: boolean;
+  onStop: () => void;
+}) {
+  const isCard = rule.kind === 'card';
+  const period = cardPeriodLabel(card?.periodDays ?? cardPeriodDays(rule.frequency));
+  return (
+    <View style={kitStyles.pad}>
+      <Card>
+        <Row
+          left={<IconDisc icon={isCard ? 'credit-card' : 'repeat'} tone={rule.active ? 'mint' : 'neutral'} />}
+          title={ruleTitle(rule)}
+          subtitle={isCard ? `Límite ${period}` : (rule.active ? 'Activa' : 'Detenida')}
+          testID="rule-readonly"
+        />
+      </Card>
+      {isCard ? (
+        <Notice
+          icon="credit-card"
+          body={`Cuando pagas con ${card?.spenderLabel || rule.payeeName || 'tu tarjeta'}, se usa el saldo de tu Cuenta inteligente, hasta ${usd(rule.amountUsd)} ${period}. Cada pago incluye la comisión de salida de 0,9% dentro de ese límite.`}
+          style={styles.gap}
+          testID="card-rule-note"
+        />
+      ) : (
+        <Notice
+          icon="info"
+          body="Esta regla no se puede cambiar desde esta versión de la app. Puedes detenerla cuando quieras."
+          style={styles.gap}
+          testID="rule-unknown-note"
+        />
+      )}
+      {isCard && card ? (
+        <Card style={styles.gap}>
+          <Row title="Usado en este período" value={usd(card.spentUsd)} testID="card-spent" />
+          <Row divider title="Disponible" value={usd(card.remainingUsd)} testID="card-remaining" />
+          {card.periodEnd ? (
+            <Row divider title="Se renueva" value={shortDate(card.periodEnd)} testID="card-period-end" />
+          ) : null}
+          {card.recentPulls.slice(0, 5).map((p, i) => (
+            <Row key={`${p.pulledAt}-${i}`} divider title={`Pago con tarjeta · ${shortDate(p.pulledAt)}`} value={usd(p.usdSpent)} />
+          ))}
+        </Card>
+      ) : null}
+      {rule.active && !pending ? (
+        <ActionButton label="Detener esta regla" variant="danger" onPress={onStop} style={styles.stop} testID="rule-stop" />
+      ) : null}
+    </View>
   );
 }
 

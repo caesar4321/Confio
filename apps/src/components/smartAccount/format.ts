@@ -231,19 +231,54 @@ export function ruleDestination(rule: {
   if (rule.kind === 'payout') {
     return rule.payoutLabel || railLabel(rule.payoutRail) || GENERIC_RAIL;
   }
-  return rule.assetName || rule.assetSymbol || 'Inversión';
+  if (rule.kind === 'card') {
+    // The server puts the card's name in payeeName (decision 35).
+    return rule.payeeName || 'Tu tarjeta';
+  }
+  if (rule.kind === 'buy') {
+    return rule.assetName || rule.assetSymbol || 'Inversión';
+  }
+  return 'Regla automática';
 }
 
 export function ruleVerb(kind: string): string {
-  return kind === 'send' ? 'Enviar' : kind === 'payout' ? 'Pagar' : 'Invertir';
+  return kind === 'send' ? 'Enviar' : kind === 'payout' ? 'Pagar' : kind === 'buy' ? 'Invertir' : kind === 'card' ? 'Tarjeta' : 'Regla';
 }
 
-/** "Enviar US$50.00 a Ana" */
+/** "Enviar US$50.00 a Ana"; a card: "Tarjeta Confío: hasta US$100.00". */
 export function ruleTitle(rule: Parameters<typeof ruleDestination>[0] & { amountUsd: string }): string {
   const to = ruleDestination(rule);
   const amount = usd(rule.amountUsd);
-  return rule.kind === 'buy' ? `Invertir ${amount} en ${to}` : `${ruleVerb(rule.kind)} ${amount} a ${to}`;
+  if (rule.kind === 'buy') {
+    return `Invertir ${amount} en ${to}`;
+  }
+  if (rule.kind === 'card') {
+    return `${to}: hasta ${amount}`;
+  }
+  if (rule.kind !== 'send' && rule.kind !== 'payout') {
+    return `Regla automática de ${amount}`;
+  }
+  return `${ruleVerb(rule.kind)} ${amount} a ${to}`;
 }
+
+/**
+ * A card rule's period: "cada 28 días", "cada día". An unknown period (no
+ * frequency, or one this build does not know) is never guessed as a day:
+ * "por período", so a limit reads "hasta US$X por período".
+ */
+export function cardPeriodLabel(days: number | null | undefined): string {
+  if (typeof days !== 'number' || !Number.isFinite(days) || days < 1) {
+    return 'por período';
+  }
+  if (days === 1) {
+    return 'cada día';
+  }
+  return `cada ${Math.round(days)} días`;
+}
+
+const CARD_PERIOD_DAYS: Record<string, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 28 };
+export const cardPeriodDays = (frequency: string | null | undefined): number | null =>
+  (frequency && Object.prototype.hasOwnProperty.call(CARD_PERIOD_DAYS, frequency) ? CARD_PERIOD_DAYS[frequency] : null);
 
 /** What the user typed in a US$ field, as integer cents (null if not an amount). */
 export function typedCents(text: string): bigint | null {

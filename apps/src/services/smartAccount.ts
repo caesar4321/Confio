@@ -26,7 +26,14 @@ import { FACE_STEP_UP_MESSAGE } from './faceStepUp';
 
 export type SmartPlanKey = 'annual' | 'monthly';
 export type SmartFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
+/** The kinds an owner creates or edits from the rule form. */
 export type SmartRuleKind = 'send' | 'payout' | 'buy';
+/** Kinds the form can edit. Anything else the server lists (a card
+ *  allowance, decision 35, or a kind this build does not know) is shown
+ *  read-only with only "Detener esta regla". */
+export const EDITABLE_RULE_KINDS: ReadonlySet<string> = new Set<SmartRuleKind>(['send', 'payout', 'buy']);
+export const isEditableRuleKind = (kind: string | null | undefined): kind is SmartRuleKind =>
+  !!kind && EDITABLE_RULE_KINDS.has(kind);
 export type SmartMoveDirection = 'in' | 'out';
 export type InheritedDestination = 'wallet' | 'smart_account';
 
@@ -501,6 +508,46 @@ export interface SmartAccountPayoutRailOption {
   hint: string | null;
 }
 
+// ADDITION (decision 35): Card rules with this period's room. Its own
+// document: a server without the field fails only this read, and the rule
+// still shows from the shared account read.
+export const SMART_ACCOUNT_CARD_RULES = gql`
+  query SmartAccountCardRules {
+    smartAccountCardRules {
+      ruleId
+      spenderLabel
+      active
+      capUsd
+      spentUsd
+      remainingUsd
+      periodDays
+      periodStart
+      periodEnd
+      recentPulls { pulledAt usdSpent usdtOut txHash }
+    }
+  }
+`;
+
+export interface SmartAccountCardPull {
+  pulledAt: string;
+  usdSpent: string;
+  usdtOut: string;
+  txHash: string;
+}
+
+export interface SmartAccountCardRule {
+  ruleId: string;
+  spenderLabel: string;
+  active: boolean;
+  capUsd: string;
+  spentUsd: string;
+  remainingUsd: string;
+  periodDays: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  recentPulls: SmartAccountCardPull[];
+}
+
 export const SMART_ACCOUNT_OFFER_GATE = gql`
   query SmartAccountOfferGate {
     smartAccountOffer { available canSubscribe }
@@ -643,6 +690,11 @@ export const fetchSmartAccountEntry = (): Promise<SmartRead<SmartAccountEntry | 
 
 export const fetchSmartAccountPayoutRailOptions = (): Promise<SmartRead<SmartAccountPayoutRailOption[]>> =>
   read(SMART_ACCOUNT_PAYOUT_RAIL_OPTIONS, (d) => (d?.smartAccountOffer?.payoutRailOptions ?? []) as SmartAccountPayoutRailOption[]);
+
+export const fetchSmartAccountCardRules = (): Promise<SmartRead<SmartAccountCardRule[]>> =>
+  read(SMART_ACCOUNT_CARD_RULES, (d) => (Array.isArray(d?.smartAccountCardRules)
+    ? d.smartAccountCardRules.filter((r: unknown) => !!r && typeof (r as SmartAccountCardRule).ruleId === 'string')
+    : []) as SmartAccountCardRule[]);
 
 export const fetchSmartAccountOfferGate = (): Promise<SmartRead<{ available: boolean; canSubscribe: boolean } | null>> =>
   read(SMART_ACCOUNT_OFFER_GATE, (d) => d?.smartAccountOffer ?? null);
@@ -1179,13 +1231,98 @@ const DELETE_SMART_ACCOUNT_WATCH = gql`
   }
 `;
 
+export const SMART_CONTEXT_REFUSAL_CODE = 'smart_context_not_supported';
+export const SMART_CONTEXT_REFUSAL_MESSAGE = 'Esto no está disponible desde tu Cuenta inteligente. Cambia a tu cuenta personal e inténtalo ahí.';
+
+/**
+ * The server's smart-context gate refused this mutation (a GraphQL error with
+ * extensions.code smart_context_not_supported): not a connection problem.
+ */
+export const isSmartContextRefusal = (error: unknown): boolean => {
+  const gqlErrors = (error as { graphQLErrors?: Array<{ extensions?: { code?: unknown } }> } | null)?.graphQLErrors;
+  return Array.isArray(gqlErrors) && gqlErrors.some((e) => e?.extensions?.code === SMART_CONTEXT_REFUSAL_CODE);
+};
+
 export const deleteSmartAccountWatch = async (watchId: string): Promise<SmartAccountSimpleResult> => {
   try {
     const { apolloClient } = await import('../apollo/client');
     const { data } = await apolloClient.mutate({ mutation: DELETE_SMART_ACCOUNT_WATCH, variables: { watchId } });
     const out = data?.deleteSmartAccountWatch as SmartAccountSimpleResult | null | undefined;
     return out ?? { success: false, errorCode: 'no_response', errorMessage: 'No pudimos borrar la alerta.' };
-  } catch {
+  } catch (e) {
+    if (isSmartContextRefusal(e)) {
+      return { success: false, errorCode: SMART_CONTEXT_REFUSAL_CODE, errorMessage: SMART_CONTEXT_REFUSAL_MESSAGE };
+    }
     return { success: false, errorCode: 'network', errorMessage: 'No pudimos borrar la alerta. Revisa tu conexión.' };
+  }
+};
+
+// ------------------------------------------------- Pago Móvil destinations
+// Saved here for bank payment rules (Venezuela). Own documents: a server
+// without these fields fails only this sheet, never a shared read.
+
+export interface SmartAccountPagoMovilBank {
+  code: string;
+  name: string;
+}
+
+const SMART_ACCOUNT_PAGO_MOVIL_BANKS = gql`
+  query SmartAccountPagoMovilBanks {
+    vePagomovilBanks { code name }
+  }
+`;
+
+export const fetchSmartAccountPagoMovilBanks = (): Promise<SmartRead<SmartAccountPagoMovilBank[]>> =>
+  read(SMART_ACCOUNT_PAGO_MOVIL_BANKS, (d) => (d?.vePagomovilBanks ?? []) as SmartAccountPagoMovilBank[]);
+
+const SAVE_SMART_ACCOUNT_PAGO_MOVIL_DESTINATION = gql`
+  mutation SaveSmartAccountPagoMovilDestination($phone: String!, $bankCode: String!, $idNumber: String!, $holderName: String!) {
+    saveSmartAccountPagoMovilDestination(phone: $phone, bankCode: $bankCode, idNumber: $idNumber, holderName: $holderName) {
+      success errorCode errorMessage
+      payoutMethod { payoutMethodId rail label holderName available }
+    }
+  }
+`;
+
+export interface SmartAccountPagoMovilSaveResult {
+  success: boolean;
+  errorCode: string | null;
+  errorMessage: string | null;
+  payoutMethod: SmartAccountPayoutMethod | null;
+}
+
+export interface SmartAccountPagoMovilInput {
+  phone: string;
+  bankCode: string;
+  idNumber: string;
+  holderName: string;
+}
+
+const PAGO_MOVIL_SAVE_ERROR = 'No pudimos guardar la cuenta. Inténtalo de nuevo.';
+
+export const saveSmartAccountPagoMovilDestination = async (
+  input: SmartAccountPagoMovilInput,
+): Promise<SmartAccountPagoMovilSaveResult> => {
+  const failed = (errorCode: string, errorMessage: string): SmartAccountPagoMovilSaveResult => (
+    { success: false, errorCode, errorMessage, payoutMethod: null });
+  try {
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.mutate({ mutation: SAVE_SMART_ACCOUNT_PAGO_MOVIL_DESTINATION, variables: input });
+    const out = data?.saveSmartAccountPagoMovilDestination as SmartAccountPagoMovilSaveResult | null | undefined;
+    if (!out) {
+      return failed('no_response', PAGO_MOVIL_SAVE_ERROR);
+    }
+    if (!out.success || !out.payoutMethod) {
+      return failed(out.errorCode || 'refused', out.errorMessage || PAGO_MOVIL_SAVE_ERROR);
+    }
+    return out;
+  } catch (e) {
+    if (isSmartContextRefusal(e)) {
+      return failed(SMART_CONTEXT_REFUSAL_CODE, SMART_CONTEXT_REFUSAL_MESSAGE);
+    }
+    if (isSchemaMismatch(e as any)) {
+      return failed('unsupported', 'Esta opción todavía no está disponible. No se guardó nada.');
+    }
+    return failed('network', 'No pudimos guardar la cuenta. Revisa tu conexión e inténtalo de nuevo.');
   }
 };

@@ -39,15 +39,24 @@ function tagOf(step: AssistantRuleStep, messageId?: string | null): Pick<RuleEdi
 
 /** One server step as rule-screen params; null when it is not usable. */
 export function stepToParams(step: AssistantRuleStep, messageId?: string | null): RuleEditParams | null {
-  if (!step || !KINDS.has(step.kind)) {
+  if (!step) {
     return null;
   }
-  const kind = step.kind as 'send' | 'payout' | 'buy';
+  // Only the three actions this screen knows; anything else (an unknown or
+  // missing action from a newer server) opens the rules list instead.
+  if (step.action !== 'create' && step.action !== 'update' && step.action !== 'cancel') {
+    return null;
+  }
   const ruleId = str(step.ruleId, 64);
   const tag = tagOf(step, messageId);
   if (step.action === 'cancel') {
+    // Stopping needs only the rule: any kind, a card rule (decision 35) too.
     return ruleId ? { ruleId, stop: true, proposal: str(step.sentence, 400), ...tag } : null;
   }
+  if (!KINDS.has(step.kind)) {
+    return null;
+  }
+  const kind = step.kind as 'send' | 'payout' | 'buy';
   if (step.action === 'update' && !ruleId) {
     return null;
   }

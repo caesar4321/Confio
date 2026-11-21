@@ -47,7 +47,7 @@ SCREENS = {
     'cancelled': 'SmartAccountHome', 'assets_returned': 'SmartAccountHome', 'price_change': 'SmartAccountBilling',
     'rule_ok': 'SmartAccountRules', 'rule_skipped': 'SmartAccountRules', 'rule_failed': 'SmartAccountRules',
     'payout_delivered': 'SmartAccountRules', 'rule_deactivated': 'SmartAccountRules',
-    'payout_resumed': 'SmartAccountRules',
+    'payout_resumed': 'SmartAccountRules', 'card_pulled': 'SmartAccountRules',
     'beneficiary_named': 'BeneficiaryInvite', 'beneficiary_removed': 'BeneficiaryInvite',
     'beneficiary_accepted': 'BeneficiaryStatus', 'beneficiary_declined': 'BeneficiaryStatus',
     'beneficiary_stale_address': 'BeneficiaryStatus',
@@ -148,7 +148,8 @@ def price_change_scheduled(user, plan_label: str, new_price: str, effective_at, 
 def rule_run(run):
     rule = run.rule
     account = rule.smart_account
-    label = {'send': 'envío automático', 'payout': 'pago automático', 'buy': 'compra automática'}[rule.kind]
+    label = {'send': 'envío automático', 'payout': 'pago automático',
+             'buy': 'compra automática'}.get(rule.kind, 'regla automática')
     if run.status == 'ok':
         title, body = f'Tu {label} se realizó', f'{_usd(rule.amount)} · {run.message or "Listo."}'
     elif run.status == 'skipped':
@@ -190,6 +191,24 @@ def rule_deactivated(rule, reason: str):
     return _send(rule.smart_account.owner_user, 'Pausamos un pago automático',
                  'El destino guardado cambió o ya no existe. Firma la regla de nuevo para reactivarla.',
                  kind='rule_deactivated', account=rule.smart_account, data={'reason': reason})
+
+
+def card_pulled(pull):
+    """Each card pull (decision 35): what left the account (the gross, the
+    0.9% exit fee included) and the room left this period."""
+    from . import cards
+    account = pull.smart_account
+    usdt = Decimal(int(pull.usdt_out_wei)) / Decimal(10 ** 18)  # BSC USDT: 18 decimals
+    fee = max(Decimal(0), Decimal(pull.usd_spent) - usdt)
+    label = cards.spender_label(pull.spender)
+    body = (f'{label} usó {_usd(pull.usd_spent)} de tu Cuenta inteligente '
+            f'({_usd(usdt)} del pago y {_usd(fee)} de comisión de salida).')
+    rule = pull.rule
+    if rule is not None and pull.period_start is not None and pull.spent_in_period is not None:
+        left = cards.remaining_usd(rule.amount, pull.spent_in_period)
+        body += f' Te quedan {_usd(left)} hasta el {_date(pull.period_start + cards.gap(rule.frequency))}.'
+    return _send(account.owner_user, f'Tu tarjeta usó {_usd(pull.usd_spent)}', body, kind='card_pulled',
+                 account=account, data={'rule_id': str(rule.internal_id)} if rule is not None else None)
 
 
 # ── beneficiary ─────────────────────────────────────────────────────────

@@ -606,6 +606,30 @@ class SmartAccountSectionTests(TestCase):
         self.assertIn('never scanned', html)
         self.assertIn('Cuenta inteligente funnel (30d)', html)
 
+    def test_card_pulls_and_spenders_are_counted(self):
+        from config.admin_dashboard_smart_account import smart_account
+        from smart_account.models import SmartAccountCardPause, SmartAccountCardPull, SmartAccountCardSpender
+
+        user = self.member('card-owner')
+        account = self.smart(user)
+        now = timezone.now()
+        SmartAccountCardSpender.objects.create(address=self.address(), allowed=True, label='Tarjeta')
+        SmartAccountCardSpender.objects.create(address=self.address(), allowed=False)
+        SmartAccountCardPause.objects.create(pk=1, paused=True)
+        event = self.event(account, 'CardPulled')
+        SmartAccountCardPull.objects.create(
+            smart_account=account, event=event, onchain_rule_id=0, spender=self.address(),
+            usdt_out_wei=str(991 * 10 ** 16), usd_spent=Decimal('10'), tx_hash=event.tx_hash,
+            block_number=event.block_number, pulled_at=now)
+        data = smart_account(sections.Window.current())['smart_account']
+        html = self.page()
+        cards = data['automation']['cards']
+        self.assertEqual((cards['pulls'], cards['pulls_usd'], cards['spenders_allowed'], cards['paused']),
+                         (1, Decimal('10'), 1, True))
+        self.assertIn('Card allowance', [r['label'] for r in data['automation']['rules']])
+        self.assertIn('Card pulls, window', html)
+        self.assertIn('cards paused', html)
+
     def test_a_failed_build_renders_as_unavailable(self):
         with mock.patch('config.admin_dashboard_smart_account._build', side_effect=RuntimeError('db')):
             html = self.page()

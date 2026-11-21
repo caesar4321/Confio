@@ -38,7 +38,7 @@ import { HIDDEN_AMOUNT, useBalanceHidden } from '../components/smartAccount/useB
 import { useHeader } from '../contexts/HeaderContext';
 import {
   fetchBeneficiaryDesignations, fetchSmartAccount, fetchSmartAccountBeneficiaryEnabled, fetchSmartAccountOffer,
-  hasOwnSmartAccount, isSmartAccountOpen, isSmartAccountOpening,
+  hasOwnSmartAccount, isEditableRuleKind, isSmartAccountOpen, isSmartAccountOpening,
   type SmartAccount, type SmartAccountAsset, type SmartAccountBilling,
 } from '../services/smartAccount';
 
@@ -220,7 +220,8 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
   const banner = data && open ? billingBanner(data) : null;
   const activeRules = (data?.rules ?? []).filter((r) => r.active);
   const nextRule = [...activeRules]
-    .filter((r) => r.nextRunAt)
+    // Only rules Confío runs on a date: a card rule (decision 35) has none.
+    .filter((r) => r.nextRunAt && isEditableRuleKind(r.kind))
     .sort((a, b) => Date.parse(a.nextRunAt as string) - Date.parse(b.nextRunAt as string))[0];
   const beneficiaryEnabled = flagKnown ? beneficiaryFlag.data === true : !!offer.data?.beneficiaryEnabled;
   const beneficiaryVisible = beneficiaryEnabled || !!data?.beneficiary || !!data?.pendingBeneficiary;

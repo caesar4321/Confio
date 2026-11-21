@@ -8,7 +8,9 @@ import {SmartAccountBase} from "./Base.t.sol";
 
 /// Spec 10.2, property tests: fuzzed sequences of calls by the owner, the
 /// beneficiary, the relayer and a stranger. Invariants 1, 2, 3, 8, 9 and 14
-/// (section 4.10) are checked after EVERY call of every sequence.
+/// (section 4.10) are checked after EVERY call of every sequence, and the
+/// card cap (decision 35): no Card rule moves more than its amount in any
+/// of its periods, whatever else happens around it.
 ///
 /// Each step picks one action from the seed, snapshots the account and the
 /// wallets around it, performs the call (it may revert), and then checks
@@ -32,7 +34,8 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         Convert,
         Return,
         Latch,
-        Stranger
+        Stranger,
+        CardPull
     }
 
     struct Snap {
@@ -44,6 +47,9 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         uint64 forcedSaleForPeriod;
         uint8 plan;
         uint8 nextPlan;
+        uint8 status;
+        uint64 epoch;
+        address pendingBeneficiary;
         bool inherited;
         uint256 fee;
         uint256[TOKENS] account;
@@ -60,6 +66,22 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
     uint256 successfulClaims;
     uint256 successfulSales;
     uint256 ownerCallsEndingAClaim;
+
+    address cardSpender = makeAddr("cardSpender");
+    // Card rules as the owner created them, tracked independently.
+    mapping(uint256 => uint256) cardCap;
+    mapping(uint256 => uint256) cardStart;
+    mapping(uint256 => uint256) cardGap;
+    mapping(uint256 => mapping(uint256 => uint256)) cardTakenInPeriod;
+    uint256 successfulPulls;
+
+    // The subscription epoch each rule was last stored in, tracked
+    // independently of the account (P3-1: a rule of an ended subscription
+    // never runs again).
+    mapping(uint256 => uint64) storedInEpoch;
+    uint256 lastRuleRun;
+    uint256 epochBumps;
+    uint256 deadRuleRefusals;
 
     function _token(uint256 i) internal view returns (IERC20) {
         if (i == 0) return IERC20(address(cusd));
@@ -84,6 +106,9 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         s.forcedSaleForPeriod = acct.forcedSaleForPeriod();
         s.plan = uint8(acct.plan());
         s.nextPlan = uint8(acct.nextPlan());
+        s.status = acct.status();
+        s.epoch = acct.subscriptionEpoch();
+        s.pendingBeneficiary = acct.pendingBeneficiary();
         s.inherited = acct.inherited();
         s.fee = acct.feeUsd();
         s.account = _balances(address(acct));
@@ -100,6 +125,8 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         _givePlus(address(acct), 60e18);
         btcb.mint(address(acct), 0.01e18);
         tsla.mint(address(acct), 1e18);
+        vm.prank(safe);
+        factory.setCardSpender(cardSpender, true);
     }
 
     function testFuzz_invariants_1_2_3_8_9_14_holdAfterEveryCall(uint256 seed) public {
@@ -179,10 +206,89 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         assertEq(acct.pendingBeneficiary(), address(0), "the unapproved naming did not happen");
     }
 
+    /// The card cap along a script, so the card checks are known to run on
+    /// successful pulls: a daily 5 USD card from cUSD, pulled 2 USD at a time.
+    function test_cardCap_alongAScript() public {
+        uint256 pull = 2e18 << 8;
+        pull -= pull % 6; // rule id 1
+        uint256[2][10] memory script = [
+            [uint256(2), 0], // subscribe
+            [uint256(32), 0], // card rule 1: cUSD, 5 USD, daily
+            [uint256(33), pull], // 2 USD
+            [uint256(33), pull], // 2 USD
+            [uint256(33), pull], // refused: over the cap
+            [uint256(7), 6 << 8], // the owner withdraws all cUSD+ meanwhile
+            [uint256(0), 1 days], // next period
+            [uint256(33), pull],
+            [uint256(33), pull],
+            [uint256(33), pull] // refused
+        ];
+        for (uint256 i = 0; i < script.length; ++i) {
+            uint256 action = script[i][0];
+            _stepWith(action, action == 0 ? script[i][1] - 1 : script[i][1]);
+        }
+        assertEq(successfulPulls, 4);
+        assertEq(acct.rule(1).payee, cardSpender);
+    }
+
+    /// P3-1 along a script: rules, a card and a beneficiary of one
+    /// subscription; a renewal keeps them; cancel, expiry and re-subscribe
+    /// kill them; new rules work.
+    function test_epoch_alongAScript() public {
+        uint256 pull = 1e18 << 8;
+        pull -= pull % 6; // card rule id 1 (id = 1 + arg % 6)
+        uint256 runRule2 = 1; // executeRule id = 1 + arg % 4 -> rule 2, cUSD+ payee form
+        uint256[2][27] memory script = [
+            [uint256(2), 0], // subscribe monthly: epoch 1
+            [uint256(32), 0], // card rule 1
+            [uint256(10), 0], // send rule 2
+            [uint256(14), 1], // name bob
+            [uint256(18), 1], // bob accepts
+            [uint256(33), pull], // card pull works
+            [uint256(25), runRule2], // rule 2 runs
+            [uint256(0), 30 days],
+            [uint256(22), 0], // renewal: same epoch
+            [uint256(33), pull], // still works
+            [uint256(25), runRule2], // still runs
+            [uint256(21), 0], // bob initiates
+            [uint256(5), 0], // cancel (ends the claim)
+            [uint256(21), 0], // bob initiates again? cooldown: refused
+            [uint256(0), 31 days], // Expired
+            [uint256(12), 2], // cancelRule(3)? no such rule: refused
+            [uint256(2), 0], // re-subscribe: epoch 2, bob dropped
+            [uint256(33), pull], // old card: refused
+            [uint256(25), runRule2], // old send rule: refused
+            [uint256(0), 1 days], // a fresh daily card period, still paid
+            [uint256(33), pull], // still refused
+            [uint256(25), runRule2],
+            [uint256(10), 0], // new send rule 3
+            [uint256(25), 2], // rule 3 runs
+            [uint256(32), 0], // card rule 4
+            [uint256(21), 0], // bob is no beneficiary
+            [uint256(30), 0] // a stranger tries
+        ];
+        for (uint256 i = 0; i < script.length; ++i) {
+            uint256 action = script[i][0];
+            _stepWith(action, action == 0 ? script[i][1] - 1 : script[i][1]);
+        }
+        assertEq(acct.subscriptionEpoch(), 2);
+        assertEq(epochBumps, 2, "first subscribe and the re-subscribe");
+        assertEq(successfulCollects, 1, "the renewal");
+        assertEq(successfulPulls, 2, "only the first epoch's pulls");
+        assertEq(deadRuleRefusals, 4, "two dead card pulls, two dead rule runs");
+        assertEq(acct.beneficiary(), address(0));
+        assertFalse(acct.rule(1).active);
+        assertFalse(acct.rule(2).active);
+        assertTrue(acct.rule(3).active);
+        assertTrue(acct.rule(4).active);
+        assertEq(acct.rule(3).epoch, 2);
+        assertGt(acct.rule(3).nextRunAt, vm.getBlockTimestamp(), "the new rule ran");
+    }
+
     // ── one step ────────────────────────────────────────────────────────
 
     function _step(uint256 r) internal {
-        _stepWith(r % 32, r >> 16);
+        _stepWith(r % 34, r >> 16);
     }
 
     function _stepWith(uint256 action, uint256 arg) internal {
@@ -194,7 +300,7 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
     function _perform(uint256 action, uint256 arg) internal returns (Class class, bool ok) {
         if (action <= 1) {
             // Time passes: up to 40 days. Feeds keep updating.
-            vm.warp(block.timestamp + 1 + (arg % 40 days));
+            vm.warp(vm.getBlockTimestamp() + 1 + (arg % 40 days));
             _freshFeeds();
             return (Class.Neutral, true);
         }
@@ -243,10 +349,12 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         if (action == 28 || action == 29) return (Class.ForcedSale, _relayerForcedSale(arg));
         if (action == 25) {
             bytes memory data = abi.encode(arg % 2 == 0 ? CUSD_ : PLUS, uint256(1));
-            return (
-                Class.ExecuteRule,
-                _tryFrom(relayer, relayer, abi.encodeCall(acct.executeRule, (1 + (arg % 4), data, address(0), 0)))
-            );
+            lastRuleRun = 1 + (arg % 4);
+            ok = _tryFrom(relayer, relayer, abi.encodeCall(acct.executeRule, (lastRuleRun, data, address(0), 0)));
+            if (!ok && storedInEpoch[lastRuleRun] != 0 && storedInEpoch[lastRuleRun] != acct.subscriptionEpoch()) {
+                ++deadRuleRefusals;
+            }
+            return (Class.ExecuteRule, ok);
         }
         if (action == 26) {
             uint256 held = usdt.balanceOf(address(acct));
@@ -260,6 +368,8 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
             );
         }
         if (action == 30) return (Class.Stranger, _strangerAttempt(arg));
+        if (action == 32) return (Class.Owner, _ownerCreateCardRule(arg));
+        if (action == 33) return (Class.CardPull, _cardPull(arg));
         // 31: permissionless functions, called by the stranger.
         if (arg % 2 == 0) {
             return (
@@ -291,15 +401,65 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         r = _rule(IConfioSmartAccount.RuleKind.Send, arg % 2 == 0 ? address(cusd) : address(plus), 1e18 + (arg % 3e18));
         r.payee = carol;
         r.frequency = IConfioSmartAccount.Frequency(arg % 4);
-        r.firstRunAt = uint64(block.timestamp + ((arg >> 8) % 3) * 1 days);
+        r.firstRunAt = uint64(vm.getBlockTimestamp() + ((arg >> 8) % 3) * 1 days);
     }
 
-    function _ownerCreateRule(uint256 arg) internal returns (bool) {
-        return _try(alice, abi.encodeCall(acct.createRule, (_sendRuleInput(arg))));
+    function _ownerCreateRule(uint256 arg) internal returns (bool ok) {
+        ok = _try(alice, abi.encodeCall(acct.createRule, (_sendRuleInput(arg))));
+        if (ok) storedInEpoch[acct.nextRuleId() - 1] = acct.subscriptionEpoch();
     }
 
-    function _ownerUpdateRule(uint256 arg) internal returns (bool) {
-        return _try(alice, abi.encodeCall(acct.updateRule, (1 + ((arg >> 4) % 4), _sendRuleInput(arg))));
+    function _ownerUpdateRule(uint256 arg) internal returns (bool ok) {
+        uint256 id = 1 + ((arg >> 4) % 4);
+        bool wasCard = cardCap[id] != 0;
+        ok = _try(alice, abi.encodeCall(acct.updateRule, (id, _sendRuleInput(arg))));
+        if (ok) {
+            storedInEpoch[id] = acct.subscriptionEpoch();
+            // Now a Send rule: the spender can no longer pull from it.
+            if (wasCard) cardCap[id] = 0;
+        }
+    }
+
+    function _ownerCreateCardRule(uint256 arg) internal returns (bool ok) {
+        IConfioSmartAccount.RuleInput memory r =
+            _rule(IConfioSmartAccount.RuleKind.Card, arg % 2 == 0 ? address(cusd) : address(plus), 5e18 + (arg % 20e18));
+        r.payee = cardSpender;
+        r.frequency = IConfioSmartAccount.Frequency((arg >> 4) % 4);
+        ok = _try(alice, abi.encodeCall(acct.createRule, (r)));
+        if (ok) {
+            uint256 id = acct.nextRuleId() - 1;
+            storedInEpoch[id] = acct.subscriptionEpoch();
+            uint256 f = uint256(r.frequency);
+            cardCap[id] = r.amountUsd;
+            cardStart[id] = vm.getBlockTimestamp();
+            cardGap[id] = f == 0 ? 1 days : f == 1 ? 7 days : f == 2 ? 14 days : 28 days;
+        }
+    }
+
+    /// The spender pulls from any rule id. A success must deliver exactly
+    /// the USDT asked, and the gross (computed here from the vault's own
+    /// feeFor) added up per period (computed here from the creation time)
+    /// must stay within the cap the owner signed.
+    function _cardPull(uint256 arg) internal returns (bool ok) {
+        uint256 id = 1 + (arg % 6);
+        uint256 net = 1 + ((arg >> 8) % 15e18);
+        uint256 before = usdt.balanceOf(cardSpender);
+        ok = _tryFrom(cardSpender, cardSpender, abi.encodeCall(acct.cardPull, (id, net)));
+        if (!ok) {
+            if (cardCap[id] != 0 && storedInEpoch[id] != acct.subscriptionEpoch()) ++deadRuleRefusals;
+            return ok;
+        }
+        ++successfulPulls;
+        assertEq(storedInEpoch[id], acct.subscriptionEpoch(), "P3-1: a card rule of an ended subscription paid out");
+        assertGt(cardCap[id], 0, "pulled from a rule the owner never made a card");
+        assertEq(acct.rule(id).payee, cardSpender);
+        assertEq(usdt.balanceOf(cardSpender) - before, net, "card: not exact");
+        uint256 g = (net * 10_000) / (10_000 - cusd.feeBps());
+        g = g > net + 2 ? g - 2 : net;
+        while (g - cusd.feeFor(g) < net) ++g;
+        uint256 period = (vm.getBlockTimestamp() - cardStart[id]) / cardGap[id];
+        cardTakenInPeriod[id][period] += g;
+        assertLe(cardTakenInPeriod[id][period], cardCap[id], "card: more than the cap in a period");
     }
 
     /// A relayer approval in the factory. It may fail (the account is not
@@ -390,9 +550,34 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
                 if (n.claimCooldownUntil == 0) {
                     assertEq(n.beneficiary, address(0), "I-9: claim ended without a cooldown");
                 } else {
-                    assertEq(n.claimCooldownUntil, block.timestamp + 30 days, "I-9: cooldown length");
+                    assertEq(n.claimCooldownUntil, vm.getBlockTimestamp() + 30 days, "I-9: cooldown length");
                 }
             }
+        }
+
+        // P3-1: the subscription epoch moves only by one, only in a
+        // successful owner subscribe from Unsubscribed or Expired (never on
+        // a renewal), and the new subscription starts with no beneficiary,
+        // no designation and no claim.
+        if (n.epoch != s.epoch) {
+            assertEq(n.epoch, s.epoch + 1, "epoch: not one step");
+            assertTrue(class == Class.Owner && ok, "epoch moved outside an owner call");
+            assertTrue(s.status == 0 || s.status == 3, "epoch moved during a live subscription");
+            assertEq(n.status, 1, "epoch moved without a new subscription");
+            assertEq(n.beneficiary, address(0), "old beneficiary survived a new subscription");
+            assertEq(n.pendingBeneficiary, address(0), "old designation survived a new subscription");
+            assertEq(n.claimStartedAt, 0);
+            ++epochBumps;
+        } else if (class == Class.Owner && ok && (s.status == 0 || s.status == 3) && n.status == 1) {
+            assertTrue(false, "a new subscription did not start a new epoch");
+        }
+        if (class == Class.ExecuteRule && ok) {
+            assertEq(storedInEpoch[lastRuleRun], n.epoch, "P3-1: a rule of an ended subscription ran");
+        }
+        // The view agrees: a rule reads active only in the current epoch.
+        for (uint256 id = 1; id < acct.nextRuleId() && id <= 6; ++id) {
+            IConfioSmartAccount.Rule memory r = acct.rule(id);
+            if (r.active) assertEq(r.epoch, n.epoch, "rule(id) shows an old-epoch rule active");
         }
 
         // I-8: no relayer function and no permissionless function changes
@@ -400,7 +585,7 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         if (
             class == Class.Collect || class == Class.Notice || class == Class.ForcedSale || class == Class.ExecuteRule
                 || class == Class.Convert || class == Class.Return || class == Class.Latch || class == Class.Stranger
-                || class == Class.Neutral
+                || class == Class.Neutral || class == Class.CardPull
         ) {
             assertEq(n.claimStartedAt, s.claimStartedAt, "claimStartedAt changed");
             assertEq(n.claimCooldownUntil, s.claimCooldownUntil, "claimCooldownUntil changed");
@@ -416,11 +601,11 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
         // more than feeUsd, and feeUsd never above the hard maximum.
         assertLe(n.fee, n.plan == 2 || n.nextPlan == 2 ? 299.99e18 : 29.99e18, "fee above the hard maximum");
         if (class == Class.Collect && ok) {
-            assertGe(block.timestamp, s.paidUntil, "collected before the period ended");
+            assertGe(vm.getBlockTimestamp(), s.paidUntil, "collected before the period ended");
             assertFalse(collectedForPaidUntil[s.paidUntil], "two fees for one paidUntil");
             collectedForPaidUntil[s.paidUntil] = true;
             ++successfulCollects;
-            assertEq(n.paidUntil, block.timestamp + (n.plan == 2 ? 365 days : 30 days), "period length");
+            assertEq(n.paidUntil, vm.getBlockTimestamp() + (n.plan == 2 ? 365 days : 30 days), "period length");
             uint256 p = plus.pPlus();
             uint256 cusdTaken = n.collectorWallet[0] - s.collectorWallet[0];
             uint256 sharesTaken = n.collectorWallet[1] - s.collectorWallet[1];
@@ -433,6 +618,12 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
             assertFalse(_tryFrom(relayer, relayer, abi.encodeCall(acct.collectFee, ())), "second collect in a period");
         } else if (class == Class.Collect) {
             assertEq(n.paidUntil, s.paidUntil);
+        }
+        // P3-2: no notice and no sale while the dollars plus the USDT the
+        // relayer could convert first (net of the entry fee) cover the fee.
+        if ((class == Class.Notice || class == Class.ForcedSale) && ok) {
+            uint256 dollarsBefore = s.account[0] + (s.account[1] * plus.pPlus()) / 1e18;
+            assertLt(dollarsBefore + (s.account[2] * (10_000 - FEE_BPS)) / 10_000, s.fee, "P3-2: USDT covered the fee");
         }
         if (class == Class.ForcedSale && ok) {
             // I-5, in passing: once per unpaid period.
@@ -485,6 +676,14 @@ contract ConfioSmartAccountPropertyTest is SmartAccountBase {
             } else if (class == Class.Convert) {
                 assertEq(i, 2, "convertUsdt: only USDT falls");
                 assertGt(n.account[0] + n.account[1], s.account[0] + s.account[1], "convertUsdt: no dollars back");
+            } else if (class == Class.CardPull) {
+                // A dollar falls; the USDT went to the spender (checked
+                // exactly in _cardPull). Nothing else moves.
+                assertLe(i, 1, "card: only a dollar falls");
+                // One pull is at most a cap (under 25 USD) plus the cUSD+
+                // redemption margin.
+                uint256 valueFell = i == 0 ? fell : (fell * plus.pPlus()) / 1e18;
+                assertLe(valueFell, 25e18 + (25e18 * 6) / 10_000 + 20, "card: more than a cap in one pull");
             } else if (class == Class.Return) {
                 assertEq(fell, n.aliceWallet[i] - s.aliceWallet[i], "return: not to the owner");
                 assertEq(s.owner, alice);

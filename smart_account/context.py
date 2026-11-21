@@ -167,7 +167,17 @@ ALLOWED_MUTATIONS = frozenset({
     'prepareBeneficiaryDesignation', 'prepareBeneficiaryDesignationWithdrawal', 'prepareBeneficiaryRemoval',
     'prepareClaimCancel', 'prepareBeneficiaryAcceptance', 'declineBeneficiaryDesignation',
     'prepareBeneficiaryClaim', 'prepareBeneficiaryClaimExecute', 'prepareInheritedWithdraw',
-    'prepareBeneficiaryWindowChange',
+    'prepareBeneficiaryWindowChange', 'prepareSmartAccountCardRule',
+    # Server-only, no money moves. Both resolve the viewer with
+    # resolve_viewer (identity = the JWT user, never an id from the client)
+    # and act on that user's own rows only:
+    # - an alert is deleted only where watch.user is the JWT user, so an
+    #   inherited smart_N viewer never reaches the previous owner's alerts
+    #   (those keep the deceased as their user);
+    # - a Pago Móvil destination is saved under the JWT user, the same scope
+    #   as prepareSmartAccountPayoutRule above, which names it and is signed
+    #   with Face on the viewer's own account.
+    'deleteSmartAccountWatch', 'saveSmartAccountPagoMovilDestination',
 })
 
 

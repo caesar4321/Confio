@@ -52,6 +52,7 @@ import { requestGuideWalk } from './guidePointer';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
+import { SmartContextAssistantNotice, isSmartContext } from './SmartContextNotice';
 import { clearCallError, startCall, useCall } from './callStore';
 import {
   MAX_VOICE_NOTE_MS,
@@ -234,6 +235,9 @@ export default function AssistantSheet() {
   const [showPlus, setShowPlus] = useState(false);
   const { activeAccount } = useAccount();
   const isBusiness = (activeAccount?.type || '').toLowerCase() === 'business';
+  // A Cuenta inteligente context: the assistant has no viewer there (see
+  // SmartContextNotice), so no thread read and nothing is ever sent.
+  const smartContext = isSmartContext(activeAccount);
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -260,7 +264,7 @@ export default function AssistantSheet() {
   const contextKey = activeAccount?.id || 'no-account';
   const { data, loading, refetch } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: PAGE_SIZE, contextKey },
-    skip: !isOpen,
+    skip: !isOpen || smartContext,
     fetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
     // Team replies arrive by polling while the sheet is open.
@@ -492,7 +496,7 @@ export default function AssistantSheet() {
   const send = useCallback(
     async (input: { body?: string; voice?: { base64: string; mimeType: string; durationMs: number } }) => {
       const body = input.body?.trim();
-      if ((!body && !input.voice) || thinking) {
+      if ((!body && !input.voice) || thinking || smartContext) {
         return;
       }
       setError(null);
@@ -577,7 +581,7 @@ export default function AssistantSheet() {
         setThinking(false);
       }
     },
-    [ask, route, runAction, thinking, showNavNote],
+    [ask, route, runAction, thinking, showNavNote, smartContext],
   );
 
   useEffect(() => {
@@ -932,7 +936,7 @@ export default function AssistantSheet() {
               <Pressable
                 key={id}
                 onPress={() => setChannel(id)}
-                onLongPress={id === 'ia' && aiEnabled ? () => setPickerOpen(true) : undefined}
+                onLongPress={id === 'ia' && aiEnabled && !smartContext ? () => setPickerOpen(true) : undefined}
                 style={styles.head}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: channel === id }}
@@ -969,6 +973,10 @@ export default function AssistantSheet() {
         ) : channel !== 'ia' ? (
           <View style={styles.channelBody}>
             <MessageInboxContent embeddedChannelId={channel} onExit={() => setChannel('ia')} onOpenPost={openPost} />
+          </View>
+        ) : smartContext ? (
+          <View style={styles.channelBody}>
+            <SmartContextAssistantNotice />
           </View>
         ) : !available ? (
           // No Confio Assistant chat (older server, or it failed to load): the classic

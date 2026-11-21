@@ -31,9 +31,9 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from . import assets as assets_mod, chain, context, services
+from . import abi, assets as assets_mod, chain, context, services
 from .models import (
-    SmartAccount, SmartAccountCharge, SmartAccountEvent, SmartAccountPreparedAction, SmartAccountRule,
+    SmartAccount, SmartAccountCardPull, SmartAccountCharge, SmartAccountEvent, SmartAccountPreparedAction, SmartAccountRule,
     SmartAccountRuleRun, SmartAccountTargetAllocation,
 )
 
@@ -343,6 +343,20 @@ def _rule_target(rule) -> dict:
         dest = rule.payout_method or rule.pagomovil_destination
         return {'cuenta': _clean(getattr(dest, 'label', '') or rule.payout_rail, 60),
                 'cuenta_id': str(dest.internal_id) if dest is not None else None}
+    if rule.kind == 'card':
+        # Decision 35: a card issuer pulls up to the cap per fixed period;
+        # Confío never runs it. Described, never proposed.
+        from . import cards
+        _start, end, spent = cards.current_period(rule)
+        return {'tarjeta': _clean(cards.spender_label(rule.payee_address), 60),
+                'limite_por_periodo_usd': cards.money(rule.amount),
+                'periodo_dias': cards.period_days(rule.frequency),
+                'usado_este_periodo_usd': cards.money(spent),
+                'disponible_este_periodo_usd': cards.money(cards.remaining_usd(rule.amount, spent)),
+                'periodo_termina': end.isoformat() if end else None,
+                'nota': 'La tarjeta usa este saldo cuando pagas con ella; Confío no la ejecuta en fechas.'}
+    if rule.kind != 'buy':
+        return {'detalle': 'regla automática'}
     resolved = assets_mod.resolve_asset_key(rule.asset_key) if rule.asset_key else None
     symbol = (resolved[1].removesuffix('on') if resolved and resolved[0] == 'stock'
               else resolved[1] if resolved else rule.asset_key)
@@ -365,7 +379,8 @@ def rules_snapshot(user, *, meta=None, tz=None) -> dict:
         rules.append({
             'regla_id': str(rule.internal_id), 'tipo': rule.kind, 'monto_usd': format(rule.amount, 'f'),
             'frecuencia': rule.frequency, 'activa': rule.active,
-            'proxima_ejecucion': _local(rule.scheduled_for or rule.next_run_at, tz) if rule.active else None,
+            'proxima_ejecucion': (_local(rule.scheduled_for or rule.next_run_at, tz)
+                                  if rule.active and rule.kind in abi.EXECUTABLE_RULE_KINDS else None),
             **_rule_target(rule),
             'ultima_ejecucion': ({'fecha': _local(last.scheduled_for, tz), 'estado': last.status,
                                   'motivo': _clean(last.message, 160) or None} if last else None),
@@ -560,7 +575,8 @@ def propose_rule(user, *, said: str, action: str, kind: str | None = None, rule_
         rule = _find_rule(own, rule_id)
         what = _rule_target(rule)
         label = (services.payee_label(rule.payee_user, _clean) if rule.kind == 'send' and rule.payee_user
-                 else what.get('persona') or what.get('cuenta') or what.get('inversion') or '')
+                 else what.get('persona') or what.get('cuenta') or what.get('inversion') or what.get('tarjeta')
+                 or '')
         sentence = (f'Detener la regla de {_usd(rule.amount)} {FREQUENCY_ES[rule.frequency]} ({label}). '
                     'Se borra de tu cuenta; si después quieres retomarla, se crea de nuevo.')
         return {'steps': [_step('cancel', rule.kind, rule_id=str(rule.internal_id), amount=rule.amount,
@@ -955,6 +971,16 @@ def review(user, *, months_back: int = 0, tz=None, now=None) -> dict:
             'en_curso': sum(1 for r in runs if r.status in ('pending', 'sent')),
         })
     out['reglas'] = rules
+    pulls = list(SmartAccountCardPull.objects.filter(
+        smart_account=own, pulled_at__gte=start, pulled_at__lt=end).order_by('pulled_at'))
+    if pulls:
+        from . import cards
+        out['pagos_con_tarjeta'] = {
+            'cantidad': len(pulls),
+            'total_usd': cards.money(sum((p.usd_spent for p in pulls), Decimal(0))),
+            'detalle': [{'fecha': _local(p.pulled_at, tz), 'monto_usd': cards.money(p.usd_spent),
+                         'tarjeta': _clean(cards.spender_label(p.spender), 60)} for p in pulls[-20:]],
+        }
     try:
         held = assets_mod.assets_of(own.contract_address)
         out['saldos_actuales'] = [{'activo': a.name if a.kind == 'dollar' else a.symbol,
@@ -987,6 +1013,10 @@ def monthly_note_text(user, *, tz=None, now=None) -> str | None:
     if data['reglas']:
         lines.append(f'• Reglas: {done} ejecutadas' + (f', {skipped} no se ejecutaron (pregúntame por qué).'
                                                         if skipped else '.'))
+    card = data.get('pagos_con_tarjeta')
+    if card:
+        lines.append(f'• Tarjeta: {card["cantidad"]} pago{"s" if card["cantidad"] != 1 else ""} por '
+                     f'{_usd(card["total_usd"])} desde la cuenta.')
     if isinstance(data.get('total_actual_usd'), str):
         lines.append(f'• Hoy hay {_usd(data["total_actual_usd"])} en la cuenta.')
     target = data.get('objetivo_de_inversion')

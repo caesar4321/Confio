@@ -1,5 +1,108 @@
 # cUSD+ deployment record — BSC mainnet
 
+## Cuenta inteligente — PREPARED 2026-11-21, NOT DEPLOYED
+
+Factory, account implementation and fee collector (`../smart_account`), plus
+the cUSD upgrade that lets the factory's accounts arm the fee referral (spec
+decision 32). Nothing below has run. Order matters; do not reorder.
+
+Tools:
+
+- `manage.py deploy_smart_account`: the KMS-sponsor twin of
+  `../smart_account/script/DeploySmartAccount.s.sol` (same four creations,
+  order, constructor args and constants). Implementation, factory logic and
+  proxy go out at three consecutive sponsor nonces inside one lease of the
+  shared nonce lock, so the predicted factory address holds while the relay
+  runs. Resume-safe: each creation is recorded as `signed` before broadcast
+  and `landed` after, in `.kms-local/kms_evm_multisig/smart_account_deploy_bsc.json`
+  (gitignored). `--rehearse-fork` runs the real thing on a local anvil fork.
+- `manage.py deploy_cusd_impl`: now refuses an artifact without
+  `setSmartAccountFactory` or built from another `CusdVault.sol`, takes the
+  shared nonce lock, writes `.kms-local/kms_evm_multisig/cusd_impl_deploy_bsc.json`.
+- `.kms-local/kms_evm_multisig/build_smart_account_cusd_upgrade.py`: the one
+  Safe transaction, a plain CALL (operation 0, no MultiSend):
+  `cUSD.upgradeToAndCall(newImpl, setSmartAccountFactory(factory, true))`.
+  It checks the new implementation's bytecode against the local artifact,
+  simulates the bytes from the Safe and cross-checks the SafeTxHash.
+- `test/SafeTxSmartAccountFactory.fork.t.sol`: replays those literal bytes as
+  the Safe on a fork. Asserts they are exactly that call, the impl slot moves,
+  the factory is recognised (slot 8), slots 0-7 and every getter are
+  unchanged, a member's mint and redeem work, and a real account of the
+  deployed factory arms a referral and pays the referrer.
+
+Storage: `forge inspect CusdVault storageLayout` at HEAD equals the live
+implementation's (`0xBE85…b249`, commit `96bdebb86`, bytecode matched) in
+slots 0-7, with `isSmartAccountFactory` appended at slot 8.
+
+Rehearsed end to end on an anvil fork 2026-11-21 (deploy, post-checks, cUSD
+impl, builder, fork replay: all pass). Gas used: collector 273,279,
+implementation 4,478,428, factory logic 2,344,688, proxy 332,193, cUSD impl
+about 3.58M. About 0.0006 BNB at 0.06 gwei.
+
+**Preconditions.** `../smart_account` sources committed, audited (Codex loop
+clean, spec 10.1 step 0) and on prod. CONFIO v2 final. Chainlink BTC/USD
+`0x2649…5Ebf` and XAU/USD `0x8689…1CD0` matched against Chainlink's BNB Chain
+list.
+
+1. **Build on a laptop** (prod has no forge): `forge build` in
+   `contracts/smart_account` and in `contracts/cusd_plus`. Copy to prod,
+   same paths: `contracts/smart_account/out/{ConfioSmartAccountFeeCollector.sol,ConfioSmartAccount.sol,ConfioSmartAccountFactory.sol,ERC1967Proxy.sol}/`
+   and `contracts/cusd_plus/out/CusdVault.sol/`. Both commands refuse an
+   artifact whose source hashes differ from the checkout they run in.
+2. **Dry run** on prod:
+   `myvenv/bin/python manage.py deploy_smart_account --expected-confio-token 0xF5765933764562A51e179F6AF2b19b7a3d506101`
+   (preflight, gas estimates, predicted addresses) and
+   `myvenv/bin/python manage.py deploy_cusd_impl`.
+3. **Broadcast** on prod: the same with `--broadcast --yes-mainnet`. It runs
+   the post-deploy checks (bytecode and immutables of all four contracts,
+   factory owner Safe, implementation, `feeUsd(1/2)` 14.99 / 149.99, windows,
+   cooldown, notice, inheritance off) and prints the env lines and the
+   verify commands. A rerun skips what landed; after a failed triple it asks
+   for `--redeploy-triple`. `--check-only` re-runs the checks.
+4. **Deploy the cUSD implementation**:
+   `manage.py deploy_cusd_impl --broadcast --yes-mainnet`.
+5. **Copy both records back** to the laptop's `.kms-local/kms_evm_multisig/`
+   (`smart_account_deploy_bsc.json`, `cusd_impl_deploy_bsc.json`).
+6. **Build the Safe transaction**, in `.kms-local/kms_evm_multisig`:
+   `venv/bin/python build_smart_account_cusd_upgrade.py`. Writes
+   `safe_tx_bsc_nonce<N>_smart_account_cusd_upgrade.json` (unsigned) and
+   prints the next two commands.
+7. **Fork replay**, in `contracts/cusd_plus`:
+   `SA_FACTORY=<factory> CUSD_IMPL=<impl> SAFE_TX_DATA=<data> forge test --match-contract SafeTxSmartAccountFactoryForkTest --fork-url https://bsc-dataseed.bnbchain.org -vv`.
+   Also run `UpgradeCusdReferral` and `UpgradeCusdFreeze` with `CUSD_IMPL`.
+8. **Sign and execute**: `venv/bin/python sign_safe_transaction.py --network bsc --to 0x6101cC370635cF2c7f2725EaB010aC407A8d543F --data <data> --operation 0 --nonce <N> --kms-signers 1 3 5 --output safe_tx_bsc_nonce<N>_smart_account_cusd_upgrade_signed.json --execute`.
+   It asks `Type 'execute bsc' to submit:`.
+9. **Post-checks** on mainnet: cUSD impl slot = new impl;
+   `isSmartAccountFactory(factory)` true; owner Safe, `feeBps` 90, unpaused,
+   `isFullyBacked`, `referralShareCapBps` 5000, `batchDelegate` unchanged.
+10. **Verify on BscScan.** Run the four `forge verify-contract` lines that
+    `deploy_smart_account` printed, in `contracts/smart_account` (via_ir,
+    100 runs, solc `v0.8.26+commit.8a97fa7a`; constructor args are also in
+    the record under `verify_args`) and the `CusdVault` line that
+    `deploy_cusd_impl` printed, in `contracts/cusd_plus` (200 runs, no
+    via_ir). `ETHERSCAN_API_KEY` is in the git-crypted `.env`. Then link both
+    proxies to their implementation (cUSD: this is the re-link after an
+    upgrade):
+
+    ```sh
+    curl -s https://api.etherscan.io/v2/api?chainid=56 \
+      --data-urlencode module=contract --data-urlencode action=verifyproxycontract \
+      --data-urlencode address=<proxy> --data-urlencode expectedimplementation=<impl> \
+      --data-urlencode apikey="$ETHERSCAN_API_KEY"
+    # then action=checkproxyverification&guid=<guid from the answer>
+    ```
+
+    Factory proxy → factory logic; cUSD `0x6101…543F` → the new CusdVault
+    implementation.
+11. **Server settings** (`.env.mainnet`): `SMART_ACCOUNT_FACTORY_ADDRESS`,
+    `SMART_ACCOUNT_FEE_COLLECTOR_ADDRESS`, `SMART_ACCOUNT_START_BLOCK` (the
+    proxy's creation block), as printed. `SMART_ACCOUNT_ENABLED` stays False
+    until the canary (spec 10.1, step 1).
+12. Record addresses, tx hashes and blocks in this section.
+
+Not in this Safe transaction, later and separately: `enableInheritance`
+(rollout step 2), `setConfioSale`, card spenders.
+
 ## CusdVault — fee referral (LIVE 2026-11-09, Safe nonce 27)
 
 Referrers receive a share of the cUSD perimeter fee their invited friends pay,

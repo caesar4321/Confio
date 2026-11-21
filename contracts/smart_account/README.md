@@ -81,6 +81,19 @@ immutables: public getters for them would push the implementation over the
 24 KB code limit. They are the constructor arguments of the verified
 implementation.
 
+- **Card rules** (spec decision 35). A `Card` rule names a card issuer's
+  spender, allowlisted by the Safe in the factory (`setCardSpender`, global
+  `setCardPaused`). The spender calls `cardPull(ruleId, usdtOut)` and gets
+  exactly `usdtOut` USDT pushed in the same call through the normal 0.9%
+  exit (cUSD: `redeemWithFee`; cUSD+: `redeemToUsdt`, since `unwrapToCusd`
+  needs a sponsor as origin). The gross counts against the rule's amount per
+  fixed period; no allowance is ever given.
+
+Compiled with `via_ir = true`, 100 optimizer runs: the smallest setting
+measured (spec 10.2 has the size table). Verify on BscScan with the same
+settings. Calls to the two vaults and plain reads go through two small
+helpers (`_call`, `_read`) instead of typed calls, which saved about 2 KB.
+
 ## Test
 
 ```sh

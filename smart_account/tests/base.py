@@ -81,7 +81,13 @@ class FakeChain:
 
     def account_rule(self, address, rule_id):
         self._maybe_fail('account_rule')
-        return self.rules[(address.lower(), int(rule_id))]
+        rule = dict(self.rules[(address.lower(), int(rule_id))])
+        if 'epoch' not in rule:
+            # Unless a test says otherwise, the rule was stored in the
+            # account's current subscription epoch (the mirror's).
+            account = SmartAccount.all_objects.filter(contract_address__iexact=address).first()
+            rule['epoch'] = int(account.subscription_epoch) if account is not None else 0
+        return rule
 
     def factory_fee_usd_wei(self, plan):
         self._maybe_fail('factory_fee_usd_wei')

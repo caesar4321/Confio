@@ -13,14 +13,21 @@ import {
 } from '../components/smartAccount/kit';
 import { HELP_RULES } from '../components/smartAccount/help';
 import { SA } from '../components/smartAccount/tokens';
-import { frequencyLabel, railsPhrase, ruleTitle, shortDate } from '../components/smartAccount/format';
+import { cardPeriodDays, cardPeriodLabel, frequencyLabel, railsPhrase, ruleTitle, shortDate } from '../components/smartAccount/format';
 import { useRailLabels } from '../components/smartAccount/useRailLabels';
 import { useSmartRead } from '../components/smartAccount/useSmartRead';
-import { fetchSmartAccount, fetchSmartAccountOffer, type SmartAccountRule } from '../services/smartAccount';
+import { fetchSmartAccount, fetchSmartAccountOffer, isEditableRuleKind, type SmartAccountRule } from '../services/smartAccount';
 
-export const RULE_ICONS: Record<string, string> = { send: 'send', payout: 'home', buy: 'trending-up' };
+export const RULE_ICONS: Record<string, string> = { send: 'send', payout: 'home', buy: 'trending-up', card: 'credit-card' };
 
 export function ruleSubtitle(rule: SmartAccountRule): string {
+  if (rule.kind === 'card') {
+    // Pulled by the card when you pay with it: a limit per period, no runs.
+    return rule.active ? `Límite ${cardPeriodLabel(cardPeriodDays(rule.frequency))}` : 'detenida';
+  }
+  if (!isEditableRuleKind(rule.kind)) {
+    return rule.active ? 'activa' : 'detenida';
+  }
   const parts = [frequencyLabel(rule.frequency)];
   if (!rule.active) {
     parts.push('detenida');
@@ -53,6 +60,14 @@ export function ruleNote(rule: SmartAccountRule & { lastRunReason?: string | nul
       || (rule.lastRunStatus === 'skipped' ? 'La última vez no se ejecutó.' : 'La última vez no se pudo completar.');
   }
   return undefined;
+}
+
+/** The bank-rule choice: a Pago Móvil account can be added on the next screen. */
+export function payoutKindSubtitle(rails: string[]): string {
+  const names = railsPhrase(rails, ',');
+  return rails.includes('ve_pagomovil')
+    ? `A una cuenta guardada o a una Pago Móvil que agregues: ${names}.`
+    : `A una cuenta que ya guardaste: ${names}.`;
 }
 
 export function SmartAccountRulesScreen() {
@@ -154,7 +169,7 @@ export function SmartAccountRulesScreen() {
             divider
             left={<IconDisc icon={RULE_ICONS.payout} />}
             title="Pagar a una cuenta bancaria"
-            subtitle={`A una cuenta que ya guardaste: ${railsPhrase(rails, ',')}.`}
+            subtitle={payoutKindSubtitle(rails)}
             onPress={() => create('payout')}
             chevron
             testID="new-payout"

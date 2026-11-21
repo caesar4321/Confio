@@ -117,6 +117,10 @@ contract ConfioSmartAccountFactory is
     /// Generation of accountOf[owner]: 0 for the first account, +1 for each
     /// account opened after the previous one was inherited (salt 3.1).
     mapping(address => uint64) public generationOf;
+    // Appended for decision 35: card spenders.
+    mapping(address => bool) public isCardSpender;
+    /// Stops every card pull on every account, and nothing else.
+    bool public cardPaused;
 
     event CreationPausedSet(bool paused);
 
@@ -350,6 +354,25 @@ contract ConfioSmartAccountFactory is
         } catch {
             revert("price ref: round");
         }
+    }
+
+    // ═════════════════════════ Card spenders (decision 35) ═════════════
+
+    /// A spender may be added or removed at any time; a removal stops its
+    /// pulls on every account at once, mid-period included.
+    function setCardSpender(address spender, bool allowed) external onlyOwner {
+        require(spender != address(0), "zero spender");
+        isCardSpender[spender] = allowed;
+        emit CardSpenderSet(spender, allowed);
+    }
+
+    function setCardPaused(bool paused_) external onlyOwner {
+        cardPaused = paused_;
+        emit CardPausedSet(paused_);
+    }
+
+    function cardSpenderAllowed(address spender) external view returns (bool) {
+        return isCardSpender[spender] && !cardPaused;
     }
 
     // ═════════════════════════ Ops ══════════════════════════════════════

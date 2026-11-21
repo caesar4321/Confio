@@ -138,6 +138,33 @@ class SmartAccountRuleType(graphene.ObjectType):
     asset_name = graphene.String()
 
 
+class SmartAccountCardPullType(graphene.ObjectType):
+    class Meta:
+        name = 'SmartAccountCardPull'
+    pulled_at = graphene.DateTime(required=True)
+    usd_spent = graphene.String(required=True, description='Gross US$ taken, the 0.9% exit fee included')
+    usdt_out = graphene.String(required=True, description='US$ the card issuer received')
+    tx_hash = graphene.String(required=True)
+
+
+class SmartAccountCardRuleType(graphene.ObjectType):
+    """ADDITION (decision 35): a Card rule's current period, read from the
+    mirror. Its own query (smartAccountCardRules), so the shared account
+    read never carries a field an older server lacks."""
+    class Meta:
+        name = 'SmartAccountCardRule'
+    rule_id = graphene.ID(required=True)
+    spender_label = graphene.String(required=True)
+    active = graphene.Boolean(required=True)
+    cap_usd = graphene.String(required=True, description='Most the card may take per period, gross')
+    spent_usd = graphene.String(required=True, description='Taken in the current period, gross')
+    remaining_usd = graphene.String(required=True)
+    period_days = graphene.Int(required=True)
+    period_start = graphene.DateTime()
+    period_end = graphene.DateTime()
+    recent_pulls = graphene.List(graphene.NonNull(SmartAccountCardPullType), required=True)
+
+
 class SmartAccountChargeType(graphene.ObjectType):
     class Meta:
         name = 'SmartAccountCharge'
@@ -409,6 +436,12 @@ def _rule_type(rule) -> SmartAccountRuleType:
             out.payout_method_id = str(rule.pagomovil_destination.internal_id)
             out.payout_label = ' · '.join(p for p in (rule.pagomovil_destination.label,
                                                       rule.pagomovil_destination.holder_name) if p)
+    if rule.kind == 'card':
+        # Pulled by the card issuer, never scheduled: no next run. The
+        # card's name rides in payeeName so every build has a label.
+        from . import cards
+        out.next_run_at = None
+        out.payee_name = cards.spender_label(rule.payee_address)
     if rule.kind == 'buy':
         out.asset_key = rule.asset_key or None
         resolved = assets_mod.resolve_asset_key(rule.asset_key) if rule.asset_key else None
@@ -489,6 +522,31 @@ class Query(graphene.ObjectType):
     smart_account_claim_alert = graphene.Field(SmartAccountClaimAlertType)
     # ADDITION (decision 34): the owner's alerts, set through Confío IA+.
     smart_account_watches = graphene.List(graphene.NonNull(SmartAccountWatchType))
+    # ADDITION (decision 35): the owner's Card rules with this period's room.
+    smart_account_card_rules = graphene.List(graphene.NonNull(SmartAccountCardRuleType))
+
+    def resolve_smart_account_card_rules(self, info):
+        viewer = _viewer(info, require_wallet=False)
+        if viewer is None:
+            return None
+        from . import cards
+        from .models import SmartAccountCardPull
+        own = context.own_account(viewer.user)
+        if own is None:
+            return []
+        out = []
+        for rule in RuleModel.objects.filter(smart_account=own, state='onchain', kind='card').order_by('id'):
+            start, end, spent = cards.current_period(rule)
+            pulls = SmartAccountCardPull.objects.filter(rule=rule).order_by('-block_number', '-id')[:10]
+            out.append(SmartAccountCardRuleType(
+                rule_id=str(rule.internal_id), spender_label=cards.spender_label(rule.payee_address),
+                active=rule.active, cap_usd=cards.money(rule.amount), spent_usd=cards.money(spent),
+                remaining_usd=cards.money(cards.remaining_usd(rule.amount, spent)),
+                period_days=cards.period_days(rule.frequency), period_start=start, period_end=end,
+                recent_pulls=[SmartAccountCardPullType(
+                    pulled_at=p.pulled_at, usd_spent=cards.money(p.usd_spent),
+                    usdt_out=cards.money(chain.usd(int(p.usdt_out_wei))), tx_hash=p.tx_hash) for p in pulls]))
+        return out
 
     def resolve_smart_account_watches(self, info):
         viewer = _viewer(info, require_wallet=False)
@@ -781,6 +839,10 @@ def _buy_rule(viewer, asset_key, amount_usd, frequency, rule_id=None, first_run_
                                      proposal=_proposal(proposal_message_id, proposal_step))
 
 
+def _card_rule(viewer, spender, amount_usd, frequency, rule_id=None, first_run_at=None):
+    return services.prepare_card_rule(viewer, rule_id, spender, amount_usd, frequency, first_run_at)
+
+
 def _cancel_rule(viewer, rule_id, proposal_message_id=None, proposal_step=None):
     return services.prepare_cancel_rule(viewer, rule_id, proposal=_proposal(proposal_message_id, proposal_step))
 
@@ -823,6 +885,13 @@ PrepareSmartAccountPayoutRule = _prepare_mutation('PrepareSmartAccountPayoutRule
 PrepareSmartAccountBuyRule = _prepare_mutation('PrepareSmartAccountBuyRule', _buy_rule, {
     'rule_id': _ID(), 'asset_key': _S(required=True), 'amount_usd': _S(required=True),
     'frequency': _S(required=True), 'first_run_at': _FIRST_RUN, **_PROPOSAL})
+# ADDITION (decision 35): its own mutation, off until
+# SMART_ACCOUNT_CARD_RULES_ENABLED. No proposal tag: Confío IA+ never
+# proposes a Card rule.
+PrepareSmartAccountCardRule = _prepare_mutation('PrepareSmartAccountCardRule', _card_rule, {
+    'rule_id': _ID(), 'spender': _S(required=True, description="The card issuer's allowlisted spender address"),
+    'amount_usd': _S(required=True, description='Most the card may take per period, gross of the exit fee'),
+    'frequency': _S(required=True), 'first_run_at': _FIRST_RUN})
 PrepareSmartAccountCancelRule = _prepare_mutation(
     'PrepareSmartAccountCancelRule', _cancel_rule, {'rule_id': _ID(required=True), **_PROPOSAL})
 # ADDITION (spec 7.3 lists it; the frozen SDL has no trade mutation): wraps a
@@ -943,6 +1012,7 @@ class Mutation(graphene.ObjectType):
     prepare_smart_account_payout_rule = PrepareSmartAccountPayoutRule.Field()
     prepare_smart_account_buy_rule = PrepareSmartAccountBuyRule.Field()
     prepare_smart_account_cancel_rule = PrepareSmartAccountCancelRule.Field()
+    prepare_smart_account_card_rule = PrepareSmartAccountCardRule.Field()
     prepare_smart_account_trade = PrepareSmartAccountTrade.Field()
     prepare_beneficiary_designation = PrepareBeneficiaryDesignation.Field()
     prepare_beneficiary_designation_withdrawal = PrepareBeneficiaryDesignationWithdrawal.Field()

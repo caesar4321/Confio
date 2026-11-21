@@ -291,7 +291,7 @@ abstract contract SmartAccountBase is Test {
             asset: asset,
             price: price,
             quantity: quantity,
-            expiration: block.timestamp + 300,
+            expiration: vm.getBlockTimestamp() + 300,
             side: side,
             additionalData: bytes32(0)
         });
@@ -392,13 +392,13 @@ abstract contract SmartAccountBase is Test {
         vm.warp(acct.paidUntil());
         _asRelayer();
         acct.startPaymentNotice();
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
         _freshFeeds();
     }
 
     function _freshFeeds() internal {
-        btcFeed.set(btcFeed.answer(), block.timestamp);
-        xauFeed.set(xauFeed.answer(), block.timestamp);
+        btcFeed.set(btcFeed.answer(), vm.getBlockTimestamp());
+        xauFeed.set(xauFeed.answer(), vm.getBlockTimestamp());
     }
 
     /// forcedSale as the relayer. The arguments are evaluated before the

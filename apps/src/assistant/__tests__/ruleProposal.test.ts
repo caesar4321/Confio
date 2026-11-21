@@ -131,3 +131,30 @@ describe('proposal progress (signed steps are skipped)', () => {
     expect(mockNavigate).toHaveBeenLastCalledWith('Main', { screen: 'SmartAccountRules' });
   });
 });
+
+describe('card rules (decision 35)', () => {
+  it('opens the stop of a card rule, never a card create or update', () => {
+    expect(stepToParams({ action: 'cancel', kind: 'card', ruleId: 'r9', sentence: 'Detener la tarjeta.' } as any))
+      .toEqual({ ruleId: 'r9', stop: true, proposal: 'Detener la tarjeta.' });
+    expect(stepToParams({ action: 'create', kind: 'card', amountUsd: '50.00', frequency: 'weekly' } as any)).toBeNull();
+    expect(stepToParams({ action: 'update', kind: 'card', ruleId: 'r9', amountUsd: '50.00' } as any)).toBeNull();
+    expect(stepToParams({ action: 'cancel', kind: 'card', ruleId: null } as any)).toBeNull();
+  });
+});
+
+describe('only create, update and cancel open the rule screen', () => {
+  it('any other action (unknown, missing, a newer server\'s) is unusable', () => {
+    for (const action of ['pause', 'delete', '', undefined, null, 'CREATE']) {
+      expect(stepToParams({ ...buy, action } as any)).toBeNull();
+    }
+    expect(stepToParams({ ...buy, action: 'update', ruleId: 'r1' } as any)).toMatchObject({ ruleId: 'r1' });
+    expect(proposalParams([{ ...buy, action: 'pause' }] as any)).toBeNull();
+  });
+
+  it('a proposal with only unknown actions opens the rules list', async () => {
+    mockQuery.mockResolvedValue({ data: { assistantRuleProposal: {
+      expired: false, done: false, message: '', steps: [{ ...buy, action: 'archive' }] } } });
+    await openRuleProposal('42');
+    expect(mockNavigate).toHaveBeenCalledWith('Main', { screen: 'SmartAccountRules' });
+  });
+});

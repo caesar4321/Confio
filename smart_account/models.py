@@ -53,6 +53,11 @@ class SmartAccount(SoftDeleteModel):
     sale_allowed_at = models.DateTimeField(null=True, blank=True)
     forced_sale_for_period = models.DateTimeField(null=True, blank=True)
     confio_sale_latched = models.BooleanField(default=False)
+    # The contract's subscriptionEpoch (spec 4.4, invariant 22): bumped by
+    # every subscribe, never by a renewal. A rule of an earlier epoch never
+    # runs; 0 before the first subscription. Set by reconcile from the
+    # Subscribed events.
+    subscription_epoch = models.PositiveIntegerField(default=0)
     inherited_from_user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
         related_name='smart_accounts_passed_on')
@@ -183,7 +188,8 @@ class SmartAccountStandingAuthorization(models.Model):
     payment rule bound to destination, amount and frequency (with the
     rule's own limits for a run with nobody present), or a send rule bound
     to payee wallet, amount and frequency."""
-    KIND_CHOICES = [('payout', 'Bank payout'), ('send', 'Send to a person')]
+    KIND_CHOICES = [('payout', 'Bank payout'), ('send', 'Send to a person'),
+                    ('card', 'Card spender allowance')]
 
     internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     kind = models.CharField(max_length=8, choices=KIND_CHOICES, default='payout')
@@ -235,7 +241,9 @@ class SmartAccountPagoMovilDestination(SoftDeleteModel):
 
 
 class SmartAccountRule(SoftDeleteModel):
-    KIND_CHOICES = [('send', 'Send'), ('payout', 'Bank payout'), ('buy', 'Buy')]
+    # 'card' (decision 35): pulled by an allowlisted card spender, never run
+    # by the relayer (automation.due_rules leaves it out).
+    KIND_CHOICES = [('send', 'Send'), ('payout', 'Bank payout'), ('buy', 'Buy'), ('card', 'Card allowance')]
     FREQUENCY_CHOICES = [('daily', 'Daily'), ('weekly', 'Weekly'), ('biweekly', 'Every two weeks'),
                          ('monthly', 'Monthly')]
     STATE_CHOICES = [('draft', 'Prepared, not on chain'), ('onchain', 'On chain'), ('cancelled', 'Cancelled')]
@@ -270,6 +278,14 @@ class SmartAccountRule(SoftDeleteModel):
     deactivated_reason = models.CharField(max_length=40, blank=True, default='')
     # A draft that edits an existing on-chain rule (updateRule).
     replaces = models.ForeignKey('self', on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    # Card rules (decision 35): the contract's cardSpentUsd, mirrored from
+    # CardPulled events: gross US dollars taken in the period that starts at
+    # next_run_at (stale, in effect zero, once that period ended).
+    card_spent_usd = models.DecimalField(max_digits=30, decimal_places=18, default=0)
+    # The subscription epoch the rule was stored in on chain (rule(id).epoch);
+    # for a draft, the account's epoch when it was prepared. A rule runs, is
+    # edited or is stopped only while this is the account's current epoch.
+    epoch = models.PositiveIntegerField(default=0)
 
     class Meta:
         constraints = [
@@ -510,3 +526,74 @@ class SmartAccountWatch(SoftDeleteModel):
 
     class Meta:
         indexes = [models.Index(fields=['active', 'deleted_at'], name='smart_watch_active_idx')]
+
+
+class SmartAccountCardSpender(models.Model):
+    """A card issuer's spender as the factory allowlists it (decision 35),
+    mirrored from CardSpenderSet by reconcile.py. `allowed` and the event
+    fields are chain state; `label` (what the owner sees, e.g. the card's
+    name) is the only field ops set. A Card rule may be prepared only for a
+    spender that is allowed here AND on chain."""
+    address = models.CharField(max_length=42, unique=True)
+    allowed = models.BooleanField(default=False)
+    label = models.CharField(max_length=80, blank=True, default='')
+    # The CardSpenderSet that last set `allowed` (block, log index, tx).
+    set_block = models.BigIntegerField(null=True, blank=True)
+    set_log_index = models.PositiveIntegerField(null=True, blank=True)
+    set_tx = models.CharField(max_length=66, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.label or "Card spender"} {self.address} ({"allowed" if self.allowed else "removed"})'
+
+    @property
+    def display_label(self) -> str:
+        return self.label or 'Tu tarjeta'
+
+
+class SmartAccountCardPause(models.Model):
+    """The factory's cardPaused flag (one row, pk=1), mirrored from
+    CardPausedSet by reconcile.py. Stops every card pull and Card rule
+    creation on every account; nothing else."""
+    paused = models.BooleanField(default=False)
+    set_block = models.BigIntegerField(null=True, blank=True)
+    set_log_index = models.PositiveIntegerField(null=True, blank=True)
+    set_tx = models.CharField(max_length=66, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def is_paused(cls) -> bool:
+        row = cls.objects.filter(pk=1).first()
+        return bool(row and row.paused)
+
+
+class SmartAccountCardPull(models.Model):
+    """One CardPulled (decision 35): the card issuer's spender took exactly
+    `usdt_out_wei` USDT from the account, `usd_spent` (gross, the 0.9% exit
+    fee included) counted against its Card rule's cap for the period that
+    starts at `period_start`. Append-only, one per event."""
+    smart_account = models.ForeignKey(SmartAccount, on_delete=models.PROTECT, related_name='card_pulls')
+    # Null only when the mirror has no rule with that on-chain id (alerted).
+    rule = models.ForeignKey(SmartAccountRule, on_delete=models.PROTECT, null=True, blank=True,
+                             related_name='card_pulls')
+    event = models.OneToOneField(SmartAccountEvent, on_delete=models.PROTECT, related_name='card_pull')
+    onchain_rule_id = models.BigIntegerField()
+    spender = models.CharField(max_length=42)
+    usdt_out_wei = models.CharField(max_length=80)
+    usd_spent = models.DecimalField(max_digits=30, decimal_places=18)
+    # The rule's period this pull counted in, and the period's total after it.
+    period_start = models.DateTimeField(null=True, blank=True)
+    spent_in_period = models.DecimalField(max_digits=30, decimal_places=18, null=True, blank=True)
+    tx_hash = models.CharField(max_length=66)
+    block_number = models.BigIntegerField()
+    pulled_at = models.DateTimeField()
+    notified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-block_number', '-id']
+        indexes = [models.Index(fields=['smart_account', 'pulled_at'], name='smart_card_pull_acct_idx')]
+
+    def __str__(self):
+        return f'CardPulled rule {self.onchain_rule_id} {self.tx_hash}'

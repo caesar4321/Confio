@@ -39,3 +39,20 @@ it('has an empty state that never suggests a level or an asset', async () => {
   expect(text(tree)).toContain('al nivel que tú elijas');
   expect(watchSubtitle({ ...watch, lastTriggeredAt: '2026-11-20T10:00:00Z' })).toMatch(/^Último aviso: /);
 });
+
+it('a delete refused in a Cuenta inteligente context says so, never "Revisa tu conexión"', async () => {
+  const alert = jest.spyOn(Alert, 'alert');
+  api.deleteSmartAccountWatch.mockResolvedValue({
+    success: false, errorCode: 'smart_context_not_supported',
+    errorMessage: 'Esto no está disponible desde tu Cuenta inteligente. Cambia a tu cuenta personal e inténtalo ahí.',
+  });
+  await act(async () => { tree = renderer.create(<SmartAccountWatchesScreen />); });
+  await flush();
+  await tap(tree, 'watch-w1');
+  const buttons = alert.mock.calls[alert.mock.calls.length - 1][2] as any[];
+  await act(async () => { await buttons.find((b) => b.text === 'Borrar').onPress(); });
+  const last = alert.mock.calls[alert.mock.calls.length - 1];
+  expect(last[0]).toBe('No se pudo borrar');
+  expect(last[1]).toMatch(/Cuenta inteligente/);
+  expect(last[1]).not.toMatch(/conexión/);
+});

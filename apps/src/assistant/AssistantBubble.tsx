@@ -27,6 +27,7 @@ import AssistantMascot from './AssistantMascot';
 import { useAssistant } from './AssistantContext';
 import { DOCK_ROUTES, HIDDEN_ROUTES, TAB_ROUTES, hintFor, type ScreenHint } from './suggestions';
 import { MAX_VOICE_NOTE_MS, cancelVoiceNote, isVoiceNoteAvailable, startVoiceNote, stopVoiceNote } from './voiceNote';
+import { isSmartContext } from './SmartContextNotice';
 
 // Hold still this long to start talking; moving earlier is a drag.
 const HOLD_TO_TALK_MS = 300;
@@ -69,6 +70,12 @@ export default function AssistantBubble() {
   const positionLoaded = useRef(false);
 
   const enabled = isAuthenticated && !authLoading;
+  // A Cuenta inteligente context: the assistant has no viewer there, so its
+  // reads and the position save are skipped (the gate refuses them anyway);
+  // a tap still opens the box, which says to switch to the personal account.
+  const smartContext = isSmartContext(activeAccount);
+  const smartContextRef = useRef(smartContext);
+  smartContextRef.current = smartContext;
   const contextKey = activeAccount?.id || 'no-account';
   const { data: unreadData, refetch: refetchUnread } = useQuery(GET_MESSAGE_INBOX_UNREAD_COUNT, {
     variables: { contextKey },
@@ -87,7 +94,7 @@ export default function AssistantBubble() {
   const { data: threadData, loading: threadLoading } = useQuery(GET_ASSISTANT_THREAD, {
     variables: { limit: 1, contextKey },
     fetchPolicy: 'cache-and-network',
-    skip: !enabled,
+    skip: !enabled || smartContext,
     errorPolicy: 'ignore',
   });
   // Hints ranked for this person on the server; the built-in list is the fallback.
@@ -323,9 +330,11 @@ export default function AssistantBubble() {
           setSide(nextSide);
           setHeightFraction(nextFraction);
           setDragging(false);
-          void saveProfile({
-            variables: { bubbleSide: nextSide, bubbleHeight: Math.round(nextFraction * 1000) / 1000 },
-          }).catch(() => {});
+          if (!smartContextRef.current) {
+            void saveProfile({
+              variables: { bubbleSide: nextSide, bubbleHeight: Math.round(nextFraction * 1000) / 1000 },
+            }).catch(() => {});
+          }
         },
         onPanResponderTerminate: () => setDragging(false),
       }),

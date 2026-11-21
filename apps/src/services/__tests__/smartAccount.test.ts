@@ -24,6 +24,7 @@ import {
   fetchSmartAccount, fetchSmartAccountCharges, fetchSmartAccountClaimAlert, hasOwnSmartAccount, isSmartAccountOpen,
   prepareSmartAccountSubscribe, prepareClaimCancel, prepareSmartAccountBuyRule, prepareSmartAccountCancelRule, signAndSubmitPrepared, toBatchCalls,
   IDENTITY_RESTRICTED_CODE, sponsorErrorCode,
+  deleteSmartAccountWatch, isSmartContextRefusal, saveSmartAccountPagoMovilDestination, fetchSmartAccountPagoMovilBanks,
   type SmartAccountPreparedBatch,
 } from '../smartAccount';
 
@@ -223,5 +224,83 @@ describe('rule prepares carry the Confío IA+ proposal step', () => {
     const failed = await prepareSmartAccountCancelRule('r1', { proposalMessageId: '42', proposalStep: 2 });
     expect(failed.errorCode).toBe('network');
     expect(mockMutate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('card rules (decision 35)', () => {
+  it('reads card rules in their own document, never in the shared account read', async () => {
+    const { print } = require('graphql');
+    const { SMART_ACCOUNT, SMART_ACCOUNT_CARD_RULES, fetchSmartAccountCardRules } = require('../smartAccount');
+    expect(print(SMART_ACCOUNT)).not.toContain('smartAccountCardRules');
+    expect(print(SMART_ACCOUNT)).not.toContain('remainingUsd');
+    const card = {
+      ruleId: 'r9', spenderLabel: 'Tarjeta', active: true, capUsd: '100.00', spentUsd: '25.00', remainingUsd: '75.00',
+      periodDays: 7, periodStart: null, periodEnd: null, recentPulls: [],
+    };
+    mockQuery.mockResolvedValueOnce({ data: { smartAccountCardRules: [card, null] } });
+    expect(await fetchSmartAccountCardRules()).toEqual({ ok: true, data: [card] });
+    expect(mockQuery.mock.calls[0][0].query).toBe(SMART_ACCOUNT_CARD_RULES);
+    // An older server without the field fails only this read.
+    mockQuery.mockRejectedValueOnce(new Error('Cannot query field "smartAccountCardRules"'));
+    expect(await fetchSmartAccountCardRules()).toEqual({ ok: false });
+  });
+
+  it('only send, payout and buy are editable kinds', () => {
+    const { isEditableRuleKind } = require('../smartAccount');
+    expect(['send', 'payout', 'buy'].every(isEditableRuleKind)).toBe(true);
+    expect(isEditableRuleKind('card')).toBe(false);
+    expect(isEditableRuleKind('something_new')).toBe(false);
+    expect(isEditableRuleKind(null)).toBe(false);
+  });
+});
+
+describe('smart-context refusals and Pago Móvil destinations', () => {
+  const refusal = Object.assign(new Error('Esta función no está disponible'), {
+    graphQLErrors: [{ message: 'x', extensions: { code: 'smart_context_not_supported' } }],
+  });
+
+  it('recognizes the gate refusal by its code only', () => {
+    expect(isSmartContextRefusal(refusal)).toBe(true);
+    expect(isSmartContextRefusal(new Error('offline'))).toBe(false);
+    expect(isSmartContextRefusal({ graphQLErrors: [{ extensions: { code: 'other' } }] })).toBe(false);
+    expect(isSmartContextRefusal(null)).toBe(false);
+  });
+
+  it('a refused alert delete says so precisely, never "Revisa tu conexión"', async () => {
+    mockMutate.mockRejectedValue(refusal);
+    const out = await deleteSmartAccountWatch('w1');
+    expect(out.success).toBe(false);
+    expect(out.errorCode).toBe('smart_context_not_supported');
+    expect(out.errorMessage).toMatch(/Cuenta inteligente/);
+    expect(out.errorMessage).not.toMatch(/conexión/);
+    mockMutate.mockRejectedValue(new Error('offline'));
+    expect((await deleteSmartAccountWatch('w1')).errorMessage).toMatch(/Revisa tu conexión/);
+  });
+
+  it('saves a Pago Móvil destination with its own document and returns it', async () => {
+    const method = { payoutMethodId: 'pm9', rail: 've_pagomovil', label: 'Pago Móvil · Banesco · 4567', holderName: 'Ana', available: true };
+    mockMutate.mockResolvedValue({ data: { saveSmartAccountPagoMovilDestination: { success: true, errorCode: null, errorMessage: null, payoutMethod: method } } });
+    const input = { phone: '0414 1234567', bankCode: '0134', idNumber: 'V12345678', holderName: 'Ana' };
+    const out = await saveSmartAccountPagoMovilDestination(input);
+    expect(out).toEqual({ success: true, errorCode: null, errorMessage: null, payoutMethod: method });
+    expect(mockMutate.mock.calls[0][0].mutation.definitions[0].name.value).toBe('SaveSmartAccountPagoMovilDestination');
+    expect(mockMutate.mock.calls[0][0].variables).toEqual(input);
+  });
+
+  it('passes the server validation message through and maps failures', async () => {
+    const input = { phone: '0212', bankCode: '0134', idNumber: 'V1', holderName: 'A' };
+    mockMutate.mockResolvedValue({ data: { saveSmartAccountPagoMovilDestination: {
+      success: false, errorCode: 'bad_pagomovil_destination', errorMessage: 'El teléfono debe ser un móvil venezolano.', payoutMethod: null } } });
+    expect(await saveSmartAccountPagoMovilDestination(input)).toMatchObject({
+      success: false, errorCode: 'bad_pagomovil_destination', errorMessage: 'El teléfono debe ser un móvil venezolano.' });
+    mockMutate.mockRejectedValue(refusal);
+    expect((await saveSmartAccountPagoMovilDestination(input)).errorCode).toBe('smart_context_not_supported');
+    mockMutate.mockRejectedValue(new Error('offline'));
+    expect((await saveSmartAccountPagoMovilDestination(input)).errorCode).toBe('network');
+  });
+
+  it('reads the bank list', async () => {
+    mockQuery.mockResolvedValue({ data: { vePagomovilBanks: [{ code: '0134', name: 'Banesco' }] } });
+    expect(await fetchSmartAccountPagoMovilBanks()).toEqual({ ok: true, data: [{ code: '0134', name: 'Banesco' }] });
   });
 });

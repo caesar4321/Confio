@@ -109,6 +109,77 @@ def _dollars_window(account, state) -> tuple[int, int]:
     return cusd + shares * low // WAD, cusd + shares * high // WAD
 
 
+# ── USDT first (spec 4.6) ───────────────────────────────────────────────
+# startPaymentNotice and forcedSale revert DollarsCover while the dollars,
+# or the dollars plus the USDT convertUsdt would turn into dollars (net of
+# the cUSD entry fee), cover the fee. The billing jobs convert the USDT
+# first and treat DollarsCover as "no sale needed", never as an error.
+
+def _usdt_net_wei(account) -> tuple[int, int]:
+    """(USDT balance, the dollars it converts to net of the entry fee),
+    read fresh. (0, 0) with no USDT configured."""
+    usdt = chain.usdt_address()
+    if not usdt:
+        return 0, 0
+    balance = chain.balance_of(usdt, account.contract_address)
+    if balance <= 0:
+        return 0, 0
+    return balance, balance * (BPS - chain.conversion_fee_bps()) // BPS
+
+
+def _usdt_may_cover(account, state, most_dollars: int) -> bool:
+    """The contract's _covers may hold through the USDT: its net value
+    reaches the gap at the most dollars the contract can see."""
+    _balance, net = _usdt_net_wei(account)
+    return net > 0 and net >= state['fee'] - most_dollars
+
+
+def convert_account_usdt(account, *, for_fee: bool = False) -> bool:
+    """Send one convertUsdt for this account. Returns whether a new
+    transaction was sent (False: none needed, or one is already on the
+    wire). Raises RelayError when it could not be sent.
+
+    The dollar minted is the owner's by eligibility, as convert_usdt. For a
+    fee (`for_fee`) a balance under the cUSD+ safe-mint floor is minted as
+    cUSD instead of waiting for more USDT: the fee must not wait on it."""
+    from cusd_plus import vault
+    from cusd_plus.crypto_policy import DOLLAR, DOLLAR_PLUS
+    from cusd_plus.eligibility import is_ondo_eligible
+    balance, _net = _usdt_net_wei(account)
+    if balance <= 0:
+        return False
+    dollar = DOLLAR_PLUS if is_ondo_eligible(account.owner_user) else DOLLAR
+    if not vault.is_safe_mint_amount(balance):
+        if not for_fee:
+            return False
+        dollar = DOLLAR
+    fee_bps = chain.conversion_fee_bps()
+    # The contract's floor is fee + 0.5%; ask for fee + 0.3%.
+    min_out = balance * (BPS - fee_bps - 30) // BPS
+    referrer, share = _referrer(account)
+    _row, created = relayer.send_relayer_call(
+        account, abi.encode_call('convertUsdt', dollar, min_out, referrer, share),
+        'smart_convert_usdt', _sequence(account, 'smart_convert_usdt', 'usdt'))
+    return created
+
+
+def _dollars_cover(exc: Exception) -> bool:
+    """A relayer simulation that reverted DollarsCover."""
+    return (isinstance(exc, relayer.RelayError) and exc.code == 'simulation_reverted'
+            and abi.revert_error(exc.detail) == 'DollarsCover')
+
+
+def _covered(account, out: dict) -> None:
+    """The fee is covered once the USDT is converted: convert it now
+    (collectFee follows on the next run). Counted, never an error."""
+    out['covered'] = out.get('covered', 0) + 1
+    try:
+        convert_account_usdt(account, for_fee=True)
+    except relayer.RelayError as exc:
+        # Retried on the next run (and by convert_usdt); not an alert storm.
+        logger.warning('USDT conversion before the fee not sent for %s: %s', account.contract_address, exc)
+
+
 # ── fees and notices ────────────────────────────────────────────────────
 
 def collect_due_fees() -> dict:
@@ -123,9 +194,12 @@ def collect_due_fees() -> dict:
             if state['status'] != 1 or state['billing'] == 0:
                 out['skipped'] += 1  # the mirror is behind the chain
                 continue
-            least, _most = _dollars_window(account, state)
+            least, most = _dollars_window(account, state)
             if least < state['fee']:
-                out['short'] += 1
+                if _usdt_may_cover(account, state, most):
+                    _covered(account, out)  # the USDT pays it once converted
+                else:
+                    out['short'] += 1
                 continue
             _row, created = relayer.send_relayer_call(
                 account, abi.encode_call('collectFee'), 'smart_collect_fee', f'period:{state["paid_until"]}')
@@ -168,11 +242,26 @@ def start_payment_notices() -> dict:
             if state['status'] != 1 or state['billing'] == 0 or state['dollars'] >= state['fee']:
                 out['skipped'] += 1
                 continue
-            if state['notice_started_at'] == 0 and not paused and _dollars_window(account, state)[1] < state['fee']:
+            most = _dollars_window(account, state)[1]
+            if most < state['fee'] and _usdt_may_cover(account, state, most):
+                # Covered once the USDT is converted: no notice (it would
+                # revert DollarsCover) and no "fee due" message.
+                if not paused:
+                    _covered(account, out)
+                else:
+                    out['covered'] = out.get('covered', 0) + 1
+                continue
+            if state['notice_started_at'] == 0 and not paused and most < state['fee']:
                 # (startPaymentNotice reverts when the accrued dollars cover the fee.)
-                _row, created = relayer.send_relayer_call(
-                    account, abi.encode_call('startPaymentNotice'), 'smart_payment_notice',
-                    f'period:{state["paid_until"]}')
+                try:
+                    _row, created = relayer.send_relayer_call(
+                        account, abi.encode_call('startPaymentNotice'), 'smart_payment_notice',
+                        f'period:{state["paid_until"]}')
+                except relayer.RelayError as exc:
+                    if not _dollars_cover(exc):
+                        raise
+                    _covered(account, out)
+                    continue
                 out['sent' if created else 'skipped'] += 1
             # "Fee due and dollars short": at period end, then daily until paid.
             if account.last_due_notice_at is None or now - account.last_due_notice_at >= timedelta(hours=23):
@@ -369,6 +458,11 @@ def _attempt_forced_sale(account, sale, state, source_id: str, out: dict) -> Non
         if shortfall_floor <= 0:
             out['skipped'] += 1  # the accrued dollars cover the fee: collectFee's job
             return
+        if _usdt_may_cover(account, state, most):
+            # No sale needed: the USDT covers the gap once converted (the
+            # sale would revert DollarsCover). Not an attempt, not a failure.
+            _covered(account, out)
+            return
         dollar = _account_dollar(account)
         legs = plan_forced_sale(account, shortfall, dollar, shortfall_floor)
     except quotes.QuoteUnavailable as exc:
@@ -401,6 +495,15 @@ def _attempt_forced_sale(account, sale, state, source_id: str, out: dict) -> Non
     try:
         row, created = relayer.send_relayer_call(account, calldata, 'smart_forced_sale', source_id, gas=gas)
     except relayer.RelayError as exc:
+        if _dollars_cover(exc):
+            # The dollars (with the USDT) cover the fee: no sale is needed.
+            # Not a failure, no alert; the USDT is converted and collectFee
+            # takes the fee on its next run.
+            SmartAccountForcedSaleLeg.objects.filter(forced_sale=sale, attempt=attempt).delete()
+            SmartAccountForcedSale.objects.filter(pk=sale.pk).update(
+                attempts=sale.attempts, last_error='', updated_at=timezone.now())
+            _covered(account, out)
+            return
         sale.attempts = attempt
         _record_sale_failure(account, sale, f'relay: {exc}', now, count_attempt=False)
         out['errors'] += 1
@@ -459,8 +562,6 @@ def _sequence(account, kind: str, prefix: str) -> str:
 
 def convert_usdt() -> dict:
     from cusd_plus import vault
-    from cusd_plus.crypto_policy import DOLLAR, DOLLAR_PLUS
-    from cusd_plus.eligibility import is_ondo_eligible
     out = {'sent': 0, 'skipped': 0, 'errors': 0}
     if not _ready():
         return {'skipped': 'disabled'}
@@ -485,15 +586,7 @@ def convert_usdt() -> dict:
             if int(chain.account_view(account.contract_address, 'status')) not in (1, 2):
                 out['skipped'] += 1
                 continue
-            dollar = DOLLAR_PLUS if is_ondo_eligible(account.owner_user) else DOLLAR
-            fee_bps = chain.conversion_fee_bps()
-            # The contract's floor is fee + 0.5%; ask for fee + 0.3%.
-            min_out = balance * (BPS - fee_bps - 30) // BPS
-            referrer, share = _referrer(account)
-            _row, created = relayer.send_relayer_call(
-                account, abi.encode_call('convertUsdt', dollar, min_out, referrer, share),
-                'smart_convert_usdt', _sequence(account, 'smart_convert_usdt', 'usdt'))
-            out['sent' if created else 'skipped'] += 1
+            out['sent' if convert_account_usdt(account) else 'skipped'] += 1
         except Exception:  # noqa: BLE001
             logger.exception('USDT conversion failed for %s', account.contract_address)
             out['errors'] += 1
@@ -689,8 +782,14 @@ def buy_rule_refusal(rule, crypto=None) -> RuleSkip | None:
 
 def due_rules():
     now = timezone.now()
+    # Only kinds the relayer runs: a Card rule (decision 35) is pulled by its
+    # spender and executeRule on it reverts BadRule.
+    # Only rules of the account's current subscription epoch: an earlier
+    # one's executeRule reverts BadRule (spec 4.4, invariant 22).
+    from django.db.models import F
     return (SmartAccountRule.objects
-            .filter(active=True, state='onchain', onchain_id__isnull=False,
+            .filter(active=True, state='onchain', onchain_id__isnull=False, kind__in=abi.EXECUTABLE_RULE_KINDS,
+                    epoch=F('smart_account__subscription_epoch'),
                     scheduled_for__lte=now, next_run_at__lte=now,
                     smart_account__status__in=('active', 'cancel_pending'),
                     smart_account__billing_status='current')
@@ -777,7 +876,12 @@ def _supersede_slot(rule, run, now) -> None:
 
 
 def _run_rule(rule, out: dict) -> None:
+    if rule.kind not in abi.EXECUTABLE_RULE_KINDS:
+        return  # never executeRule a Card (or unknown) rule: it reverts
     account = rule.smart_account
+    if int(rule.epoch) != int(account.subscription_epoch):
+        out['skipped'] += 1  # a rule of an earlier subscription never runs
+        return
     slot = rule.scheduled_for
     run, _ = SmartAccountRuleRun.objects.get_or_create(rule=rule, scheduled_for=slot)
     if run.status == 'ok':
@@ -805,8 +909,8 @@ def _run_rule(rule, out: dict) -> None:
         out['skipped'] += 1
         return
     onchain = chain.account_rule(account.contract_address, int(rule.onchain_id))
-    if not onchain['active']:
-        out['skipped'] += 1
+    if not onchain['active'] or int(onchain['epoch']) != int(rule.epoch):
+        out['skipped'] += 1  # stopped, or of an earlier epoch (the mirror lags)
         return
     if onchain['next_run_at'] > int(timezone.now().timestamp()):
         out['waiting'] += 1

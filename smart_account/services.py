@@ -48,6 +48,7 @@ MESSAGES = {
     'already_subscribed': 'Ya tienes una Cuenta inteligente activa.',
     'no_account': 'Todavía no tienes una Cuenta inteligente.',
     'account_not_active': 'Tu Cuenta inteligente no está activa.',
+    'account_inherited': 'Esta Cuenta inteligente ya pasó a tu beneficiario.',
     'payment_due': 'Tu Cuenta inteligente tiene un pago pendiente. Agrega dólares para continuar.',
     'bad_asset': 'No reconocemos ese activo.',
     'bad_amount': 'Revisa el monto.',
@@ -63,6 +64,7 @@ MESSAGES = {
     'payee_is_self': 'No puedes programar un envío a ti mismo.',
     'payee_no_wallet': 'Esa persona todavía no puede recibir en Confío.',
     'rule_not_found': 'No encontramos esa regla.',
+    'rule_epoch_changed': 'Tu suscripción cambió. Vuelve a abrir la pantalla y crea la regla de nuevo.',
     'rule_kind_mismatch': 'Esa regla es de otro tipo.',
     'rule_duplicate': 'Ya tienes esta regla. No la repitas.',
     'rule_duplicate_pending': 'Esta regla se está confirmando. No la repitas.',
@@ -107,6 +109,8 @@ MESSAGES = {
     'crypto_ack_required': 'Acepta primero los riesgos de bitcoin y oro en Invertir.',
     'review_amount_cap': 'Ese monto supera el límite de tu cuenta. Prueba con un monto menor.',
     'stock_quote_window': 'El precio se está actualizando. Inténtalo de nuevo en unos segundos.',
+    'card_not_available': 'Los pagos con tarjeta desde tu Cuenta inteligente todavía no están disponibles.',
+    'card_spender_not_allowed': 'Esa tarjeta no está habilitada para usar tu Cuenta inteligente.',
 }
 
 
@@ -338,6 +342,9 @@ def _deposit_calls(viewer, deposits, target: str):
 
 # ── subscribe / deposit / move / withdraw ───────────────────────────────
 
+RESUBSCRIBE_NOTE = 'Tus reglas y tu beneficiario anteriores no vuelven: créalos de nuevo.'
+
+
 def prepare_subscribe(viewer, plan: str, deposits, disclosures_accepted: bool) -> PreparedBatch:
     block = offer.subscribe_block(viewer.user, personal_context=True, meta=viewer.meta)
     if block:
@@ -390,6 +397,10 @@ def prepare_subscribe(viewer, plan: str, deposits, disclosures_accepted: bool) -
     calls.append(abi.call(target, abi.encode_call('subscribe', abi.PLAN_IDS[plan], fee_wei)))
     label = 'Plan anual' if plan == 'annual' else 'Plan mensual'
     summary = [f'{label} · {usd_text(fee)}'] + lines
+    if own is not None and (own.status == 'expired' or int(own.subscription_epoch) > 0):
+        # A new subscription epoch (spec 4.4): the old rules never run again
+        # and the beneficiary and any designation are cleared.
+        summary.append(RESUBSCRIBE_NOTE)
     return _register(
         viewer, 'smart_subscribe', calls, target=target, smart_account=own, summary=summary,
         payload={'plan': plan, 'fee_usd_wei': str(fee_wei),
@@ -579,6 +590,9 @@ def _existing_rule(own: SmartAccount, rule_id, kind: str) -> SmartAccountRule | 
         rule = None
     if rule is None or rule.state != 'onchain' or rule.onchain_id is None:
         raise PrepareError('rule_not_found')
+    if int(rule.epoch) != int(own.subscription_epoch):
+        # Of an earlier subscription: updateRule reverts BadRule.
+        raise PrepareError('rule_not_found')
     if rule.kind != kind:
         raise PrepareError('rule_kind_mismatch')
     return rule
@@ -636,8 +650,11 @@ def _first_run_at(own: SmartAccount, existing: SmartAccountRule | None) -> int:
 def _rule_batch(viewer, own, existing, draft_fields: dict, rule_tuple: tuple, summary: list,
                 proposal=None) -> PreparedBatch:
     with transaction.atomic():
+        # Stored on chain in the epoch it is signed in; the relay refuses it
+        # once the account's epoch moved on (relay_policy.rule_epoch_refusal).
         draft = SmartAccountRule.objects.create(
-            smart_account=own, state='draft', active=False, replaces=existing, **draft_fields)
+            smart_account=own, state='draft', active=False, replaces=existing,
+            epoch=own.subscription_epoch, **draft_fields)
         if existing is not None:
             data = abi.encode_call('updateRule', int(existing.onchain_id), rule_tuple)
         else:
@@ -1078,6 +1095,45 @@ def prepare_buy_rule(viewer, rule_id, asset_key: str, amount_usd, frequency: str
         amount=amount, frequency=frequency), rule_tuple, summary, proposal)
 
 
+def prepare_card_rule(viewer, rule_id, spender: str, amount_usd, frequency: str,
+                      first_run_at=None, proposal=None) -> PreparedBatch:
+    """A Card rule (decision 35): the card issuer's spender may pull up to
+    `amount_usd` (gross of the 0.9% exit fee) per fixed period of the
+    frequency's minimum gap (1, 7, 14 or 28 days). Off until
+    SMART_ACCOUNT_CARD_RULES_ENABLED; the spender must be allowed in the
+    mirror AND on chain (factory.cardSpenderAllowed, which includes the card
+    pause). The owner signs and passes Face, like a send rule. Confío IA+
+    never proposes one. Stopping it is prepare_cancel_rule, never gated."""
+    from . import cards
+    _require_enabled()
+    if not cards.creation_enabled():
+        raise PrepareError('card_not_available')
+    own = _own_active(viewer)
+    _require_no_identity_hold(viewer.user)
+    _check_frequency(frequency)
+    amount = _parse_usd(amount_usd)
+    existing = _existing_rule(own, rule_id, 'card')
+    first_run_at = requested_first_run(first_run_at, frequency, floor=_first_run_at(own, existing))
+    address = str(spender or '').strip().lower()
+    row = cards.allowed_spender(address)
+    if row is None or not _chain(chain.card_spender_allowed, address):
+        raise PrepareError('card_spender_not_allowed')
+    _refuse_duplicate_create(viewer, own, existing, 'card', amount, frequency, payee_address=address)
+    token_in = account_dollar_token(own, viewer.user, viewer.meta)
+    rule_tuple = abi.rule_input('card', frequency, token_in, payee=address,
+                                amount_usd_wei=int(amount * WAD), first_run_at=first_run_at)
+    days = cards.period_days(frequency)
+    summary = [f'{row.display_label} puede usar hasta {usd_text(amount)} de tu Cuenta inteligente cada '
+               f'{"día" if days == 1 else f"{days} días"}',
+               'Cada pago con tarjeta incluye la comisión de salida de 0,9% dentro de ese límite.']
+    from . import payouts
+    authorization = payouts.create_card_authorization(
+        viewer, account=own, spender=address, amount=amount, frequency=frequency)
+    return _rule_batch(viewer, own, existing, dict(
+        kind='card', token_in=token_in, payee_address=address, standing_authorization=authorization,
+        amount=amount, frequency=frequency), rule_tuple, summary, proposal)
+
+
 def _require_stock_minimum(amount: Decimal) -> None:
     """A stock rule whose order (quotes.stock_buy_notional) would be below
     Ondo's minimum could never run: refused here, with the smallest amount
@@ -1096,12 +1152,19 @@ def _require_stock_minimum(amount: Decimal) -> None:
 
 def prepare_cancel_rule(viewer, rule_id, proposal=None) -> PreparedBatch:
     _require_configured()
+    # cancelRule works in every lifecycle state (Expired and payment due
+    # included) except Inherited, where it reverts IsInherited.
     own = _own_any(viewer)
+    if own.status == 'inherited':
+        raise PrepareError('account_inherited')
     try:
         rule = SmartAccountRule.objects.filter(smart_account=own, internal_id=uuid.UUID(str(rule_id))).first()
     except (ValueError, TypeError):
         rule = None
     if rule is None or rule.state != 'onchain' or rule.onchain_id is None:
+        raise PrepareError('rule_not_found')
+    if int(rule.epoch) != int(own.subscription_epoch):
+        # Of an earlier subscription: already dead on chain (BadRule).
         raise PrepareError('rule_not_found')
     return _register(viewer, 'smart_rule_cancel',
                      [abi.call(own.contract_address, abi.encode_call('cancelRule', int(rule.onchain_id)))],

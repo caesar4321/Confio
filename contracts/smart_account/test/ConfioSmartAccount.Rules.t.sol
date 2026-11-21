@@ -75,7 +75,7 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
     function test_createRule_storesWhatTheOwnerSigned() public {
         IConfioSmartAccount.RuleInput memory r = _rule(SEND, address(cusd), 25e18);
         r.payee = carol;
-        r.firstRunAt = uint64(block.timestamp + 3 days);
+        r.firstRunAt = uint64(vm.getBlockTimestamp() + 3 days);
         uint256 id = _create(r);
         assertEq(id, 1);
         assertEq(acct.nextRuleId(), 2);
@@ -86,10 +86,10 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         assertEq(stored.tokenIn, address(cusd));
         assertEq(stored.payee, carol);
         assertEq(stored.amountUsd, 25e18);
-        assertEq(stored.nextRunAt, block.timestamp + 3 days);
+        assertEq(stored.nextRunAt, vm.getBlockTimestamp() + 3 days);
 
         _runReverts(ConfioSmartAccount.TooEarly.selector, id, _send(CUSD_));
-        vm.warp(block.timestamp + 3 days);
+        vm.warp(vm.getBlockTimestamp() + 3 days);
         _run(id, _send(CUSD_));
         assertEq(cusd.balanceOf(carol), 25e18);
     }
@@ -164,7 +164,7 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         vm.prank(alice, relayer);
         acct.cancelRule(id);
         assertFalse(acct.rule(id).active);
-        vm.warp(block.timestamp + 30 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 30 days - 1);
         _runReverts(ConfioSmartAccount.BadRule.selector, id, _send(CUSD_));
         vm.startPrank(alice, relayer);
         vm.expectRevert(ConfioSmartAccount.BadRule.selector);
@@ -255,9 +255,9 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
 
         // At most once per minimum gap (weekly: 7 days).
         _runReverts(ConfioSmartAccount.TooEarly.selector, id, _send(CUSD_));
-        vm.warp(block.timestamp + 7 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 7 days - 1);
         _runReverts(ConfioSmartAccount.TooEarly.selector, id, _send(CUSD_));
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _run(id, _send(CUSD_));
         assertEq(cusd.balanceOf(carol), 80e18);
 
@@ -266,7 +266,7 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         assertEq(stored.payee, carol);
         assertEq(stored.amountUsd, 40e18);
         assertEq(stored.tokenIn, address(cusd));
-        assertEq(stored.nextRunAt, block.timestamp + 7 days);
+        assertEq(stored.nextRunAt, vm.getBlockTimestamp() + 7 days);
     }
 
     function test_executeRule_onlyRelayer() public {
@@ -287,10 +287,10 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         r.frequency = f;
         uint256 id = _create(r);
         _run(id, _send(CUSD_));
-        assertEq(acct.rule(id).nextRunAt, block.timestamp + gap);
-        vm.warp(block.timestamp + gap - 1);
+        assertEq(acct.rule(id).nextRunAt, vm.getBlockTimestamp() + gap);
+        vm.warp(vm.getBlockTimestamp() + gap - 1);
         _runReverts(ConfioSmartAccount.TooEarly.selector, id, _send(CUSD_));
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _run(id, _send(CUSD_));
     }
 
@@ -319,11 +319,11 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         uint256 id = _create(r);
         _run(id, _send(CUSD_));
         // Ten days pass with no run.
-        vm.warp(block.timestamp + 10 days);
+        vm.warp(vm.getBlockTimestamp() + 10 days);
         _run(id, _send(CUSD_));
         _runReverts(ConfioSmartAccount.TooEarly.selector, id, _send(CUSD_));
         assertEq(cusd.balanceOf(carol), 2e18, "one run, not ten");
-        assertEq(acct.rule(id).nextRunAt, block.timestamp + 1 days);
+        assertEq(acct.rule(id).nextRunAt, vm.getBlockTimestamp() + 1 days);
     }
 
     // ── dollar amounts (4.4) ────────────────────────────────────────────
@@ -338,7 +338,7 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         _run(id, _send(PLUS));
         uint256 shares1 = plus.balanceOf(carol);
 
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         _growPPlus(180);
         uint256 p2 = plus.pPlus();
         assertGt(p2, p1);
@@ -378,7 +378,7 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
 
         // At most once per minimum gap.
         _runReverts(ConfioSmartAccount.TooEarly.selector, id, abi.encode(bridge, uint256(1)));
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
         _run(id, abi.encode(bridge, uint256(1)));
         assertEq(cusd.balanceOf(address(acct)), 800e18);
     }
@@ -514,7 +514,7 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         assertLe(cusd.balanceOf(address(acct)) - cusdBefore, (80e18 * 5) / 10_000 + 2);
 
         // Next period, price moved again: same data, same exact USDT.
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
         _growPPlus(40);
         _run(id, data);
         assertEq(usdt.balanceOf(bridge), 2 * net);
@@ -574,7 +574,7 @@ contract ConfioSmartAccountRulesTest is SmartAccountBase {
         _noAllowances(address(acct));
 
         // More than the rule's amount: the approval is the limit.
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
         bytes memory tooMuch = _buyData(address(swapRouter), _swapBuyData(CUSD_, address(btcb), 50e18 + 1), 1);
         vm.prank(relayer, relayer);
         vm.expectRevert();

@@ -264,7 +264,7 @@ contract ConfioSmartAccountForkTest is Test {
         vm.mockCall(
             feed,
             abi.encodeCall(IFeed.latestRoundData, ()),
-            abi.encode(round, answer, block.timestamp, block.timestamp, answeredIn)
+            abi.encode(round, answer, vm.getBlockTimestamp(), vm.getBlockTimestamp(), answeredIn)
         );
     }
 
@@ -272,7 +272,7 @@ contract ConfioSmartAccountForkTest is Test {
         vm.warp(acct.paidUntil());
         vm.prank(KMS, KMS);
         acct.startPaymentNotice();
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
     }
 
     function _legs(address venue, address token, uint256 maxIn, bytes memory data)
@@ -304,7 +304,7 @@ contract ConfioSmartAccountForkTest is Test {
             asset: address(stock),
             price: price,
             quantity: quantity,
-            expiration: block.timestamp + 300,
+            expiration: vm.getBlockTimestamp() + 300,
             side: side,
             additionalData: bytes32(0)
         });
@@ -351,13 +351,14 @@ contract ConfioSmartAccountForkTest is Test {
         assertEq(IFeed(XAU_FEED).decimals(), 8);
         (uint256 btc, uint256 btcAt) = _feedPrice(BTC_FEED);
         (uint256 xau, uint256 xauAt) = _feedPrice(XAU_FEED);
-        console2.log("BTC / USD (8 dec):", btc, "age s:", block.timestamp - btcAt);
-        console2.log("XAU / USD (8 dec):", xau, "age s:", block.timestamp - xauAt);
+        console2.log("BTC / USD (8 dec):", btc, "age s:", vm.getBlockTimestamp() - btcAt);
+        console2.log("XAU / USD (8 dec):", xau, "age s:", vm.getBlockTimestamp() - xauAt);
         assertGt(btc, 1_000e8);
         assertGt(xau, 500e8);
-        assertLe(block.timestamp - btcAt, 1 hours, "BTC feed older than the account's maximum age");
-        // The gold feed stops while the gold market is closed: informative.
-        if (block.timestamp - xauAt > 26 hours) console2.log("XAU feed is stale now (market closed)");
+        assertLe(vm.getBlockTimestamp() - btcAt, 1 hours, "BTC feed older than the account's maximum age");
+        // XAU/USD on BSC beats every 600 s, weekends included (P3-3): it
+        // must be inside the account's 2-hour limit at any live block.
+        assertLe(vm.getBlockTimestamp() - xauAt, 2 hours, "XAU feed older than the account's maximum age");
     }
 
     // ── subscription and the fee, live vaults ───────────────────────────
@@ -367,7 +368,7 @@ contract ConfioSmartAccountForkTest is Test {
         _giveCusd(address(acct), 40e18);
         _subscribe();
         assertEq(_bal(CUSD, address(collector)), MONTHLY);
-        assertEq(acct.paidUntil(), block.timestamp + 30 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 30 days);
 
         vm.warp(acct.paidUntil());
         vm.prank(KMS, KMS);
@@ -435,7 +436,7 @@ contract ConfioSmartAccountForkTest is Test {
         uint256 gotUsd = ((_bal(CUSD_PLUS, address(acct)) - plusBefore) * ILivePlus(CUSD_PLUS).pPlus()) / 1e18;
         uint256 goldRef = (gold * xauPrice * 1e18) / 1e14;
         console2.log("XAUt sale: got / feed value (bps):", (gotUsd * 10_000) / goldRef);
-        if (block.timestamp - xauAt <= 26 hours) {
+        if (vm.getBlockTimestamp() - xauAt <= 2 hours) {
             assertGe(gotUsd, (goldRef * 9_910 * 9_700) / 1e8, "live XAUt execution below the feed tolerance");
         }
         assertEq(IERC20(BTCB).allowance(address(acct), SWAP_ROUTER), 0);
@@ -486,7 +487,7 @@ contract ConfioSmartAccountForkTest is Test {
         uint256 shares = (20e18 * 1e18 + p - 1) / p;
         assertEq(_bal(CUSD_PLUS, carol), shares);
 
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         _restampFeeds();
         uint256 acctPlus = _bal(CUSD_PLUS, address(acct));
         uint256 acctCusd = _bal(CUSD, address(acct));
@@ -575,6 +576,49 @@ contract ConfioSmartAccountForkTest is Test {
         assertEq(IERC20(CUSD_PLUS).allowance(address(acct), CUSD), 0);
     }
 
+    /// Decision 35 on the live vaults: a card spender's own transaction (no
+    /// sponsor as origin) pulls exact USDT from both dollars. cUSD+ exits
+    /// through the live redeemToUsdt (unwrapToCusd is sponsor-gated).
+    function test_fork_cardPull_bothDollars_exactUsdt_noSponsor() public {
+        if (!_forked()) return;
+        address spender = makeAddr("forkCardIssuer");
+        vm.prank(SAFE);
+        factory.setCardSpender(spender, true);
+        _giveCusd(address(acct), MONTHLY + 100e18);
+        _givePlus(address(acct), 200e18);
+        _subscribe();
+        uint256 feeBps = CusdVault(CUSD).feeBps();
+        address[2] memory dollars = [CUSD, CUSD_PLUS];
+        for (uint256 i = 0; i < 2; ++i) {
+            IConfioSmartAccount.RuleInput memory r = _rule(IConfioSmartAccount.RuleKind.Card, dollars[i], 80e18);
+            r.payee = spender;
+            uint256 id = _createRule(r);
+            uint256 exactUsdt = 41.37e18;
+            uint256 gross = (exactUsdt * 10_000 + (10_000 - feeBps) - 1) / (10_000 - feeBps);
+            uint256 before = _bal(USDT, spender);
+            uint256 acctUsdt = _bal(USDT, address(acct));
+            uint256 cusdBefore = _bal(CUSD, address(acct));
+            vm.prank(spender, spender);
+            acct.cardPull(id, exactUsdt);
+            assertEq(_bal(USDT, spender) - before, exactUsdt, "exact USDT");
+            assertEq(acct.cardSpentUsd(id), gross);
+            assertEq(gross - CusdVault(CUSD).feeFor(gross), exactUsdt);
+            if (dollars[i] == CUSD) {
+                assertEq(cusdBefore - _bal(CUSD, address(acct)), gross);
+            } else {
+                assertEq(_bal(CUSD, address(acct)), cusdBefore, "cUSD untouched");
+                uint256 excess = _bal(USDT, address(acct)) - acctUsdt;
+                console2.log("cUSD+ card pull, USDT margin kept:", excess);
+                assertLe(excess, (gross * 6) / 10_000 + 1e6, "about the margin stays");
+            }
+            vm.prank(spender, spender);
+            vm.expectRevert(ConfioSmartAccount.CapExceeded.selector);
+            acct.cardPull(id, exactUsdt);
+            assertEq(IERC20(dollars[i]).allowance(address(acct), CUSD), 0);
+            assertEq(IERC20(dollars[i]).allowance(address(acct), CUSD_PLUS), 0);
+        }
+    }
+
     function test_fork_buyRule_bitcoin_withReferral() public {
         if (!_forked()) return;
         _giveCusd(address(acct), MONTHLY + 100e18);
@@ -648,7 +692,7 @@ contract ConfioSmartAccountForkTest is Test {
         acct.forcedSale(legs, MONTHLY, address(0), 0);
         assertEq(before - _bal(token, address(acct)), amount);
         assertEq(acct.forcedSaleForPeriod(), period);
-        assertEq(acct.paidUntil(), block.timestamp + 30 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 30 days);
         assertEq(acct.billingStatus(), 0);
         assertLt(acct.dollarsUsd(), 1.8e18, "only the margin is left");
         assertEq(_bal(token, alice) + _bal(CUSD, alice) + _bal(CUSD_PLUS, alice), 0, "nothing to the owner");
@@ -686,7 +730,7 @@ contract ConfioSmartAccountForkTest is Test {
         vm.mockCall(
             BTC_FEED,
             abi.encodeCall(IFeed.latestRoundData, ()),
-            abi.encode(round, (answer * 110) / 100, block.timestamp, block.timestamp, answeredIn)
+            abi.encode(round, (answer * 110) / 100, vm.getBlockTimestamp(), vm.getBlockTimestamp(), answeredIn)
         );
         uint256 amount = _unitsFor(BTCB, BTC_FEED, (MONTHLY * 11_300) / 10_000);
         vm.prank(KMS, KMS);
@@ -814,23 +858,23 @@ contract ConfioSmartAccountForkTest is Test {
         // First claim, cancelled by an unrelated owner-signed action.
         vm.prank(bob, bob);
         acct.initiateClaim();
-        vm.warp(block.timestamp + 60 days);
+        vm.warp(vm.getBlockTimestamp() + 60 days);
         vm.prank(alice, KMS);
         acct.cancelClaim();
-        assertEq(acct.claimCooldownUntil(), block.timestamp + 30 days);
+        assertEq(acct.claimCooldownUntil(), vm.getBlockTimestamp() + 30 days);
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.Cooldown.selector);
         acct.initiateClaim();
 
         // Cooldown, second claim, the full window.
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         vm.prank(bob, bob);
         acct.initiateClaim();
-        vm.warp(block.timestamp + 90 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 90 days - 1);
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.TooEarly.selector);
         acct.executeClaim();
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(bob, bob);
         acct.executeClaim();
         assertEq(acct.owner(), bob);

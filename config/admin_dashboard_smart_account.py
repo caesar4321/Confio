@@ -175,6 +175,18 @@ def _build(w):
          'url': _link('smartaccountrulerun', status__exact=key, scheduled_for__gte=since)}
         for key, label in SmartAccountRuleRun.STATUS_CHOICES
     ]
+    # Card rules (decision 35): pulled by the issuer, never run by the relayer.
+    from smart_account.models import SmartAccountCardPause, SmartAccountCardPull, SmartAccountCardSpender
+    card_pulls = SmartAccountCardPull.objects.order_by().filter(pulled_at__gte=since).aggregate(
+        n=Count('id'), usd=Sum('usd_spent'))
+    cards = {
+        'pulls': card_pulls['n'],
+        'pulls_usd': card_pulls['usd'] or Decimal('0'),
+        'pulls_url': _link('smartaccountcardpull', pulled_at__gte=since),
+        'spenders_allowed': SmartAccountCardSpender.objects.filter(allowed=True).count(),
+        'spenders_url': _link('smartaccountcardspender'),
+        'paused': SmartAccountCardPause.is_paused(),
+    }
 
     # ── Beneficiaries ────────────────────────────────────────────────────
     beneficiaries = SmartAccountBeneficiary.objects.order_by()
@@ -266,6 +278,7 @@ def _build(w):
             'runs': run_rows,
             'skip_reasons': _reasons(runs.filter(status='skipped')),
             'fail_reasons': _reasons(runs.filter(status='failed')),
+            'cards': cards,
         },
         'beneficiaries': {'rows': designation_rows, 'claims': claim_info},
         'ops': ops,

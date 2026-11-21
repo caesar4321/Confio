@@ -49,6 +49,7 @@ interface ISmartAccountCusdPlus {
     function subscribeAndMint(uint256 usdtIn, uint256 minUsdyOut, address recipient) external;
     function wrapCusd(uint256 cusdIn, uint256 minUsdyOut, address recipient) external;
     function unwrapToCusd(uint256 shares, uint256 minCusdOut, address recipient) external;
+    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to) external;
 }
 
 /// The cUSD vault (it IS the cUSD token). Only what the account calls.
@@ -159,10 +160,16 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     /// Bitcoin/gold forced sale: at most 3% below the feed, after the entry
     /// fee (C2).
     uint256 internal constant FEED_TOLERANCE_BPS = 300;
+    /// Chainlink BTC/USD and XAU/USD on BSC both run a 600 s heartbeat (and
+    /// XAU/USD keeps updating on weekends), so each limit is several
+    /// heartbeats. If Chainlink ever lengthens a heartbeat past its limit,
+    /// only that token's forced sales stop (fee collection); no owner,
+    /// beneficiary or rule path reads a feed.
     uint256 internal constant BTC_FEED_MAX_AGE = 1 hours;
-    uint256 internal constant XAU_FEED_MAX_AGE = 26 hours;
-    /// 5.5 fixes no age for the CONFIO price reference; the looser of the two
-    /// above is used so a daily reference is acceptable.
+    uint256 internal constant XAU_FEED_MAX_AGE = 2 hours;
+    /// 5.5 fixes no age for the CONFIO price reference, which does not exist
+    /// yet and may be a once-a-day reference: 26 hours accepts a 24-hour
+    /// heartbeat with slack. It matters only once the Safe sets confioSale.
     uint256 internal constant CONFIO_FEED_MAX_AGE = 26 hours;
 
     /// convertUsdt: the relayer's floor may sit at most this far below the
@@ -176,6 +183,10 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     /// so rounding and a small gap between the vault's and Ondo's price
     /// cannot leave the unwrap short. The excess stays here as cUSD.
     uint256 internal constant PAYOUT_UNWRAP_MARGIN_BPS = 5;
+    /// A cUSD+ card pull redeems this many wei more again, so the floor
+    /// roundings of a very small pull (where 5 bps is zero) cannot leave it
+    /// a wei short. It stays here as USDT with the margin.
+    uint256 internal constant CARD_REDEEM_ROUNDING = 10;
 
     /// A factory read may burn at most this much gas, so a broken or hostile
     /// factory cannot starve an owner call (invariant 20).
@@ -236,6 +247,16 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     address public confioSaleVenue;
     address public confioSalePriceRef;
 
+    /// Card rules (decision 35): gross USD taken in the period that starts
+    /// at the rule's nextRunAt.
+    mapping(uint256 => uint256) public cardSpentUsd;
+
+    /// Bumped by every subscribe(), which is allowed only once the previous
+    /// subscription has ended (Unsubscribed or Expired); renewals never bump
+    /// it. A rule lives only in the epoch it was stored in, so a
+    /// re-subscription never revives the rules of an ended one.
+    uint64 public subscriptionEpoch;
+
     // ═════════════════════════ Errors ═══════════════════════════════════
     error NotFactory();
     error NotOwner();
@@ -279,6 +300,9 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     error Cooldown();
     error ConfioSaleUnset();
     error AlreadyLatched();
+    error NotSpender();
+    /// The factory does not (or cannot be read to) allow this card spender.
+    error SpenderNotAllowed();
 
     constructor(
         address factory,
@@ -348,6 +372,16 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         // count for this one (4.6); _charge clears the notice.
         cancelRequested = false;
         forcedSaleForPeriod = 0;
+        // Every subscribe starts a new subscription (the previous one, if
+        // any, has ended): the rules of the old epoch are dead, and the
+        // beneficiary and any designation go with it. A new subscription
+        // needs a new designation and acceptance. A claim pending on the
+        // Expired account was already ended by the touch above.
+        ++subscriptionEpoch;
+        address pending = pendingBeneficiary;
+        if (pending != address(0)) emit DesignationWithdrawn(pending);
+        address removed = _dropBeneficiary();
+        if (removed != address(0)) emit BeneficiaryRemoved(removed);
         _accrue();
         _charge(plan_, fee);
         emit Subscribed(plan_, fee, paidUntil);
@@ -443,15 +477,17 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     function updateRule(uint256 id, RuleInput calldata input) external {
         _ownerTouch();
         if (!_active()) revert BadState();
-        if (!_rules[id].active) revert BadRule();
+        if (!_live(_rules[id])) revert BadRule();
         _storeRule(id, input);
         emit RuleUpdated(id);
     }
 
+    /// Stopping a rule is always safe: any lifecycle state (Expired and
+    /// payment due included) except Inherited.
     function cancelRule(uint256 id) external {
         _ownerTouch();
-        if (!_active()) revert BadState();
-        if (!_rules[id].active) revert BadRule();
+        if (inherited) revert IsInherited();
+        if (!_live(_rules[id])) revert BadRule();
         _rules[id].active = false;
         emit RuleCancelled(id);
     }
@@ -500,13 +536,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     function removeBeneficiary() external {
         if (msg.sender != owner) revert NotOwner();
         if (inherited) revert IsInherited();
-        _endClaim(false);
-        address removed = beneficiary;
-        _clearPending();
-        beneficiary = address(0);
-        challengeWindow = 0;
-        claimCooldownUntil = 0;
-        emit BeneficiaryRemoved(removed);
+        emit BeneficiaryRemoved(_dropBeneficiary());
     }
 
     /// Explicit touch. A no-op success with no claim pending, so the relay
@@ -598,7 +628,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         _requireRelayer();
         if (_current() || noticeStartedAt != 0) revert BadState();
         _accrue();
-        if (_dollarsUsd() >= _feeFor(_renewalPlan())) revert DollarsCover();
+        if (_covers(_dollarsUsd(), _feeFor(_renewalPlan()))) revert DollarsCover();
         noticeStartedAt = uint64(block.timestamp);
         emit PaymentNoticeStarted(paidUntil, uint64(block.timestamp + _forcedSaleNotice()));
     }
@@ -620,7 +650,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         Plan charged = _renewalPlan();
         uint256 fee = _feeFor(charged);
         uint256 dollarsBefore = _dollarsUsd();
-        if (dollarsBefore >= fee) revert DollarsCover();
+        if (_covers(dollarsBefore, fee)) revert DollarsCover();
 
         for (uint256 i = 0; i < legs.length; ++i) {
             _saleLeg(legs[i], period);
@@ -649,7 +679,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         _requireRelayer();
         if (!_current()) revert BadState();
         Rule storage r = _rules[id];
-        if (!r.active) revert BadRule();
+        if (!_live(r)) revert BadRule();
         if (block.timestamp < r.nextRunAt) revert TooEarly();
         r.nextRunAt = uint64(block.timestamp) + _minGap(r.frequency);
         _arm(referrer, shareBps);
@@ -658,12 +688,16 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         // The rule amount is dollars. For cUSD+ the share limit is computed
         // here from pPlus, never supplied by the relayer (4.4).
         uint256 limit = tokenIn == CUSD ? r.amountUsd : _toShares(r.amountUsd, _pPlus());
-        if (r.kind == RuleKind.Send) {
+        RuleKind kind = r.kind;
+        if (kind == RuleKind.Send) {
             _runSend(id, tokenIn, r.payee, limit, data);
-        } else if (r.kind == RuleKind.Payout) {
+        } else if (kind == RuleKind.Payout) {
             _runPayout(id, r, limit, data);
-        } else {
+        } else if (kind == RuleKind.Buy) {
             _runBuy(id, tokenIn, r.tokenOut, limit, data);
+        } else {
+            // A Card rule is pulled by its spender, never run by the relayer.
+            revert BadRule();
         }
     }
 
@@ -687,9 +721,9 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         uint256 before = _balance(token);
         IERC20(USDT).forceApprove(token, usdtIn);
         if (dollar == DOLLAR) {
-            ISmartAccountCusd(CUSD).mintWithFee(usdtIn, minDollarsOut, address(this));
+            _call(CUSD, abi.encodeCall(ISmartAccountCusd.mintWithFee, (usdtIn, minDollarsOut, address(this))));
         } else {
-            ISmartAccountCusdPlus(CUSD_PLUS).subscribeAndMint(usdtIn, 0, address(this));
+            _call(CUSD_PLUS, abi.encodeCall(ISmartAccountCusdPlus.subscribeAndMint, (usdtIn, 0, address(this))));
         }
         IERC20(USDT).forceApprove(token, 0);
         // cUSD at par; cUSD+ shares gained times pPlus.
@@ -697,6 +731,74 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         if (dollar == DOLLAR_PLUS) dollarsOut = (dollarsOut * _pPlus()) / WAD;
         if (dollarsOut < minDollarsOut) revert Slippage();
         emit UsdtConverted(dollar, usdtIn, dollarsOut);
+    }
+
+    // ═════════════════════════ Card spender (decision 35) ═══════════════
+
+    /// The card issuer's spender pulls exactly `usdtOut` USDT, pushed to it
+    /// in this call through the normal 0.9% exit. The gross (USDT plus the
+    /// exit fee) counts against the rule's amount for the period: fixed
+    /// periods of the frequency's minimum gap from the rule's first run, as
+    /// many pulls per period as fit. Not a relayer function, so the relayer
+    /// pause does not stop it; the factory's spender allowlist and card
+    /// pause do.
+    function cardPull(uint256 id, uint256 usdtOut) external nonReentrant {
+        Rule storage r = _rules[id];
+        if (!_live(r) || r.kind != RuleKind.Card) revert BadRule();
+        if (msg.sender != r.payee) revert NotSpender();
+        // As a rule run: Active (CancelPending included, claim pending or
+        // not, decision 25) and Current. Inherited is never Active.
+        if (!_active() || !_current()) revert BadState();
+        if (!_cardSpenderAllowed(msg.sender)) revert SpenderNotAllowed();
+        if (usdtOut == 0) revert BadAmount();
+        uint64 start = r.nextRunAt;
+        if (block.timestamp < start) revert TooEarly();
+        uint64 gap = _minGap(r.frequency);
+        uint256 spent = cardSpentUsd[id];
+        if (block.timestamp >= start + gap) {
+            // Missed periods are skipped; the cap never carries over.
+            r.nextRunAt = start + ((uint64(block.timestamp) - start) / gap) * gap;
+            spent = 0;
+        }
+        _accrue();
+        // The smallest gross whose net after cUSD's ceil-rounded fee is
+        // exactly usdtOut: ceil(usdtOut * BPS / (BPS - feeBps)).
+        uint256 feeBps = _conversionFeeBps();
+        uint256 gross = (usdtOut * BPS + (BPS - feeBps) - 1) / (BPS - feeBps);
+        spent += gross;
+        // Counted before any token moves: no pull, re-entrant or not, can
+        // see room that an earlier one already used.
+        if (spent > r.amountUsd) revert CapExceeded();
+        cardSpentUsd[id] = spent;
+        // Both dollars exit through their own 0.9% exit to this account, and
+        // exactly usdtOut is pushed on; no allowance is ever given. cUSD+
+        // cannot take the Payout path: unwrapToCusd is sponsor-gated and a
+        // spender's transaction has no sponsor as origin. cUSD+'s own
+        // redeemToUsdt is sized like the Payout unwrap (gross plus the
+        // margin); its excess, about the margin, stays as USDT for
+        // convertUsdt. USDT the account already held is never used.
+        uint256 usdtBefore = _balance(USDT);
+        uint256 outBefore = _balanceOf(USDT, msg.sender);
+        if (r.tokenIn == CUSD_PLUS) {
+            _call(
+                CUSD_PLUS,
+                abi.encodeCall(
+                    ISmartAccountCusdPlus.redeemToUsdt,
+                    (
+                        _toShares(gross + (gross * PAYOUT_UNWRAP_MARGIN_BPS) / BPS + CARD_REDEEM_ROUNDING, _pPlus()),
+                        usdtOut,
+                        address(this)
+                    )
+                )
+            );
+        } else {
+            _call(CUSD, abi.encodeCall(ISmartAccountCusd.redeemWithFee, (gross, usdtOut, address(this))));
+        }
+        if (_balance(USDT) < usdtBefore + usdtOut) revert BalanceFell();
+        IERC20(USDT).safeTransfer(msg.sender, usdtOut);
+        uint256 delivered = _balanceOf(USDT, msg.sender) - outBefore;
+        if (delivered != usdtOut) revert Slippage();
+        emit CardPulled(id, msg.sender, usdtOut, gross);
     }
 
     // ═════════════════════════ Anyone ═══════════════════════════════════
@@ -735,8 +837,11 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         return _dollarsUsd();
     }
 
-    function rule(uint256 id) external view returns (Rule memory) {
-        return _rules[id];
+    /// `active` is the effective state: false for a rule of an earlier
+    /// subscription epoch, whatever was stored.
+    function rule(uint256 id) external view returns (Rule memory r) {
+        r = _rules[id];
+        r.active = _live(_rules[id]);
     }
 
     /// 0 Unsubscribed, 1 Active, 2 CancelPending, 3 Expired, 4 Inherited.
@@ -779,6 +884,14 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         emit ClaimCancelled(beneficiary, until);
     }
 
+    /// isCardSpender && !cardPaused in one read. An unreadable factory
+    /// fails closed: only card pulls (and Card rule creation) stop.
+    function _cardSpenderAllowed(address spender) private view returns (bool) {
+        (bool ok, uint256 allowed) =
+            _factoryRead(abi.encodeCall(IConfioSmartAccountFactory.cardSpenderAllowed, (spender)), 0x20);
+        return ok && allowed == 1;
+    }
+
     function _requireBeneficiary() private view {
         if (msg.sender != beneficiary || msg.sender == address(0)) revert NotBeneficiary();
     }
@@ -795,7 +908,10 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     /// Safe. An unreadable factory counts as paused: only the relayer
     /// functions stop (I-15).
     function _requireRelayer() private view {
-        if (msg.sender != tx.origin || !ISmartAccountCusdPlus(CUSD_PLUS).isSponsor(msg.sender)) revert NotRelayer();
+        if (
+            msg.sender != tx.origin
+                || _read(CUSD_PLUS, abi.encodeCall(ISmartAccountCusdPlus.isSponsor, (msg.sender))) != 1
+        ) revert NotRelayer();
         if (!_active()) revert BadState();
         (bool ok, uint256 paused) = _factoryRead(abi.encodeCall(IConfioSmartAccountFactory.relayerPaused, ()), 0x20);
         if (!ok || paused != 0) revert RelayerPaused();
@@ -817,6 +933,23 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         pendingBeneficiary = address(0);
         pendingChallengeWindow = 0;
         pendingBeneficiaryExpiresAt = 0;
+    }
+
+    /// Ends any claim (no cooldown), the designation and the accepted
+    /// beneficiary with their window and cooldown. Returns the beneficiary.
+    function _dropBeneficiary() private returns (address removed) {
+        _endClaim(false);
+        removed = beneficiary;
+        _clearPending();
+        beneficiary = address(0);
+        challengeWindow = 0;
+        claimCooldownUntil = 0;
+    }
+
+    /// A stored rule runs only while active and of the current
+    /// subscription epoch.
+    function _live(Rule storage r) private view returns (bool) {
+        return r.active && r.epoch == subscriptionEpoch;
     }
 
     // ═════════════════════════ Internals: factory reads ═════════════════
@@ -928,7 +1061,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     }
 
     function _pPlus() private view returns (uint256 p) {
-        p = ISmartAccountCusdPlus(CUSD_PLUS).pPlus();
+        p = _read(CUSD_PLUS, abi.encodeCall(ISmartAccountCusdPlus.pPlus, ()));
         if (p == 0) revert BadAmount();
     }
 
@@ -941,6 +1074,14 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         return shares == 0 ? cusd : cusd + (shares * _pPlus()) / WAD;
     }
 
+    /// No notice and no forced sale while the dollars, or the dollars plus
+    /// the USDT convertUsdt would turn into dollars (net of the cUSD entry
+    /// fee), cover the fee: the relayer converts the USDT first. USDT short
+    /// of the gap (dust) does not block a sale.
+    function _covers(uint256 dollars, uint256 fee) private view returns (bool) {
+        return dollars >= fee || (_balance(USDT) * (BPS - _conversionFeeBps())) / BPS >= fee - dollars;
+    }
+
     /// Shares worth `usd` at share price `p`, rounded up (5.1, 4.4). Plain
     /// checked arithmetic: dollar amounts are far below the overflow bound.
     function _toShares(uint256 usd, uint256 p) private pure returns (uint256) {
@@ -948,7 +1089,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     }
 
     function _conversionFeeBps() private view returns (uint256 fee) {
-        fee = ISmartAccountCusd(CUSD).feeBps();
+        fee = _read(CUSD, abi.encodeCall(ISmartAccountCusd.feeBps, ()));
         if (fee > MAX_CONVERSION_FEE_BPS) fee = MAX_CONVERSION_FEE_BPS;
     }
 
@@ -957,13 +1098,49 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     function _arm(address referrer, uint256 shareBps) private {
         if (referrer == address(0)) return;
         if (referrer == owner) revert SelfReferral();
-        ISmartAccountCusd(CUSD).armReferral(referrer, shareBps);
+        _call(CUSD, abi.encodeCall(ISmartAccountCusd.armReferral, (referrer, shareBps)));
     }
 
     // ═════════════════════════ Internals: transfers ═════════════════════
 
+    // Calls to the fixed vaults and plain reads go through these two
+    // helpers instead of typed high-level calls: each typed call site costs
+    // its own code-size check and return decoding, and together they were
+    // about 2 KB of the 24 KB limit. Behaviour is the same for every target
+    // here. _call targets only CUSD and CUSD_PLUS, which the constructor
+    // requires to have code (a proxy's code cannot be removed), returns are
+    // never used (balances are measured), and a revert is bubbled as is.
+    // _read requires a full word back, so a target without code (no
+    // return data) reverts as a typed call would; callers compare words
+    // strictly (a flag must equal 1, an address its 160-bit value).
+
+    function _call(address target, bytes memory data) private {
+        (bool ok, bytes memory ret) = target.call(data);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+    }
+
+    function _read(address target, bytes memory data) private view returns (uint256 word) {
+        (bool ok, bytes memory ret) = target.staticcall(data);
+        if (!ok || ret.length < 32) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+        assembly ("memory-safe") {
+            word := mload(add(ret, 0x20))
+        }
+    }
+
     function _balance(address token) private view returns (uint256) {
-        return IERC20(token).balanceOf(address(this));
+        return _balanceOf(token, address(this));
+    }
+
+    function _balanceOf(address token, address who) private view returns (uint256) {
+        return _read(token, abi.encodeCall(IERC20.balanceOf, (who)));
     }
 
     function _send(address token, address to, uint256 amount) private {
@@ -990,8 +1167,8 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         address newOwner = owner;
         if (to == newOwner) return;
         if (
-            to.codehash != CLONE_CODEHASH || IConfioSmartAccount(to).owner() != newOwner
-                || IConfioSmartAccount(to).inherited()
+            to.codehash != CLONE_CODEHASH || _read(to, abi.encodeCall(IConfioSmartAccount.owner, ())) != uint160(newOwner)
+                || _read(to, abi.encodeCall(IConfioSmartAccount.inherited, ())) != 0
         ) revert BadDestination();
     }
 
@@ -1022,6 +1199,11 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
                 && input.payoutRef == bytes32(0);
         } else if (input.kind == RuleKind.Payout) {
             ok = input.payoutRef != bytes32(0) && input.payee == address(0) && input.tokenOut == address(0);
+        } else if (input.kind == RuleKind.Card) {
+            // The spender must be allowlisted now and on every pull. The
+            // factory refuses to allowlist zero; this account could never
+            // pull from itself, since it never calls cardPull.
+            ok = input.tokenOut == address(0) && input.payoutRef == bytes32(0) && _cardSpenderAllowed(input.payee);
         } else {
             // Buy: bitcoin or gold through the swap router from either
             // dollar; anything else is a stock, which takes cUSD+ only.
@@ -1040,7 +1222,8 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
             payee: input.payee,
             payoutRef: input.payoutRef,
             amountUsd: input.amountUsd,
-            nextRunAt: firstRun
+            nextRunAt: firstRun,
+            epoch: subscriptionEpoch
         });
     }
 
@@ -1053,19 +1236,19 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         if (payeeDollar > DOLLAR) revert BadCall();
         address tokenOut = payeeDollar == DOLLAR_PLUS ? CUSD_PLUS : CUSD;
         uint256 inBefore = _balance(tokenIn);
-        uint256 outBefore = IERC20(tokenOut).balanceOf(payee);
+        uint256 outBefore = _balanceOf(tokenOut, payee);
         if (tokenOut == tokenIn) {
             IERC20(tokenIn).safeTransfer(payee, limit);
         } else if (tokenIn == CUSD_PLUS) {
-            ISmartAccountCusdPlus(CUSD_PLUS).unwrapToCusd(limit, minOut, payee);
+            _call(CUSD_PLUS, abi.encodeCall(ISmartAccountCusdPlus.unwrapToCusd, (limit, minOut, payee)));
         } else {
             IERC20(CUSD).forceApprove(CUSD_PLUS, limit);
             // The vault's floor is in USDY units; the share floor is below.
-            ISmartAccountCusdPlus(CUSD_PLUS).wrapCusd(limit, 0, payee);
+            _call(CUSD_PLUS, abi.encodeCall(ISmartAccountCusdPlus.wrapCusd, (limit, 0, payee)));
             IERC20(CUSD).forceApprove(CUSD_PLUS, 0);
         }
         uint256 spent = _spent(tokenIn, inBefore, limit);
-        uint256 got = IERC20(tokenOut).balanceOf(payee) - outBefore;
+        uint256 got = _balanceOf(tokenOut, payee) - outBefore;
         if (got == 0 || got < minOut) revert Slippage();
         emit RuleExecuted(id, tokenIn, tokenOut, spent, got);
     }
@@ -1087,7 +1270,7 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
         address tokenIn = r.tokenIn;
         bool plusIn = tokenIn == CUSD_PLUS;
         uint256 inBefore = _balance(tokenIn);
-        uint256 outBefore = IERC20(USDT).balanceOf(destination);
+        uint256 outBefore = _balanceOf(USDT, destination);
         uint256 gross = limit;
         uint256 cusdBefore;
         if (plusIn) {
@@ -1095,12 +1278,15 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
             if (gross == 0 || gross > r.amountUsd) revert BadAmount();
             cusdBefore = _balance(CUSD);
             uint256 shares = _toShares(gross + (gross * PAYOUT_UNWRAP_MARGIN_BPS) / BPS, _pPlus());
-            ISmartAccountCusdPlus(CUSD_PLUS).unwrapToCusd(shares > limit ? limit : shares, gross, address(this));
+            _call(
+                CUSD_PLUS,
+                abi.encodeCall(ISmartAccountCusdPlus.unwrapToCusd, (shares > limit ? limit : shares, gross, address(this)))
+            );
         }
-        ISmartAccountCusd(CUSD).redeemWithFee(gross, minUsdtOut, destination);
+        _call(CUSD, abi.encodeCall(ISmartAccountCusd.redeemWithFee, (gross, minUsdtOut, destination)));
         if (_balance(CUSD) < cusdBefore) revert BalanceFell();
+        uint256 usdtOut = _balanceOf(USDT, destination) - outBefore;
         uint256 spent = _spent(tokenIn, inBefore, limit);
-        uint256 usdtOut = IERC20(USDT).balanceOf(destination) - outBefore;
         if (usdtOut == 0 || usdtOut < minUsdtOut || (plusIn && usdtOut != minUsdtOut)) revert Slippage();
         emit PayoutSent(id, r.payoutRef, destination, tokenIn, spent, usdtOut);
         emit RuleExecuted(id, tokenIn, USDT, spent, usdtOut);
@@ -1174,12 +1360,18 @@ contract ConfioSmartAccount is IConfioSmartAccount, ReentrancyGuardTransient {
     }
 
     /// C2: the route is the relayer's choice, so the dollars received per
-    /// unit sold are held to the feed. A stale feed (gold on a weekend)
-    /// refuses the sale; it is retried later like any failed sale.
+    /// unit sold are held to the feed. A feed older than its maximum age
+    /// (a Chainlink outage, or a lengthened heartbeat) refuses the sale; it
+    /// is retried later like any failed sale.
     function _requireFeedPrice(address token, address feed, uint256 maxAge, uint256 sold, uint256 got) private view {
         (, int256 answer,, uint256 updatedAt,) = ISmartAccountPriceFeed(feed).latestRoundData();
         if (answer <= 0 || block.timestamp > updatedAt + maxAge) revert StaleFeed();
-        uint256 scale = 10 ** (uint256(IERC20Metadata(token).decimals()) + ISmartAccountPriceFeed(feed).decimals());
+        // Checked: absurd decimals overflow and revert.
+        uint256 scale = 10
+            ** (
+                _read(token, abi.encodeCall(IERC20Metadata.decimals, ()))
+                    + _read(feed, abi.encodeCall(ISmartAccountPriceFeed.decimals, ()))
+            );
         uint256 refUsd = (sold * uint256(answer) * WAD) / scale;
         uint256 floor = (refUsd * (BPS - _conversionFeeBps()) * (BPS - FEED_TOLERANCE_BPS)) / (BPS * BPS);
         if (got < floor) revert BelowFeed();

@@ -20,10 +20,12 @@ interface IConfioSmartAccount {
         Annual
     }
 
+    /// Card (decision 35) is appended: the values of the others are fixed.
     enum RuleKind {
         Send,
         Payout,
-        Buy
+        Buy,
+        Card
     }
 
     enum Frequency {
@@ -44,13 +46,16 @@ interface IConfioSmartAccount {
         address tokenIn;
         /// Buy: the asset bought. Zero otherwise.
         address tokenOut;
-        /// Send: the Confío user's wallet that is paid. Zero otherwise.
+        /// Send: the Confío user's wallet that is paid. Card: the card
+        /// issuer's spender, allowlisted in the factory. Zero otherwise.
         address payee;
         /// Payout: hash of the saved bank destination. Zero otherwise.
         bytes32 payoutRef;
-        /// Always US dollars, 18 decimals. Never token units.
+        /// Always US dollars, 18 decimals. Never token units. Card: the most
+        /// the spender may take per period, gross of the exit fee.
         uint256 amountUsd;
-        /// Earliest first run (unix seconds). Zero = now.
+        /// Earliest first run (unix seconds). Zero = now. Card: start of the
+        /// first period.
         uint64 firstRunAt;
     }
 
@@ -63,7 +68,13 @@ interface IConfioSmartAccount {
         address payee;
         bytes32 payoutRef;
         uint256 amountUsd;
+        /// Card: start of the current period, which ends one minimum gap of
+        /// `frequency` later (1, 7, 14 or 28 days).
         uint64 nextRunAt;
+        /// subscriptionEpoch() when the rule was created or last updated. A
+        /// rule of an earlier epoch never runs; rule(id) reports it with
+        /// active == false.
+        uint64 epoch;
     }
 
     /// One leg of a forced sale. `data` is the venue calldata
@@ -76,6 +87,9 @@ interface IConfioSmartAccount {
     }
 
     // ── Events ──────────────────────────────────────────────────────────
+    /// Every Subscribed starts a new subscription epoch: all earlier rules
+    /// are dead, and the beneficiary and any designation are cleared (with
+    /// DesignationWithdrawn / BeneficiaryRemoved when there was one).
     event Subscribed(Plan plan, uint256 feeUsd, uint64 paidUntil);
     event PlanChanged(Plan nextPlan);
     event SubscriptionCancelled(uint64 paidUntil);
@@ -100,6 +114,9 @@ interface IConfioSmartAccount {
     event ClaimCancelled(address indexed beneficiary, uint64 cooldownUntil);
     event ClaimExecuted(address indexed previousOwner, address indexed newOwner);
     event ConfioSaleLatched(address venue, address priceRef);
+    /// `usdSpent` is the gross cUSD redeemed (the USDT plus the 0.9% exit
+    /// fee), the amount counted against the rule's cap for the period.
+    event CardPulled(uint256 indexed id, address indexed spender, uint256 usdtOut, uint256 usdSpent);
 
     // ── Setup (factory only) ────────────────────────────────────────────
     function initialize(address owner_) external;
@@ -161,6 +178,16 @@ interface IConfioSmartAccount {
 
     function convertUsdt(uint8 dollar, uint256 minDollarsOut, address referrer, uint256 shareBps) external;
 
+    // ── Card spender (decision 35) ──────────────────────────────────────
+    /// msg.sender == rule(id).payee of an active Card rule, allowlisted in
+    /// the factory (factory.cardSpenderAllowed). Delivers exactly `usdtOut`
+    /// USDT to the caller through cUSD's fee-bearing exit (from cUSD+ after
+    /// a fee-free unwrap) in this call; no allowance is ever given. The
+    /// gross cUSD counts against amountUsd for the current period. Lifecycle
+    /// Active and billing Current, like a rule run; not subject to the
+    /// relayer pause.
+    function cardPull(uint256 id, uint256 usdtOut) external;
+
     // ── Anyone ──────────────────────────────────────────────────────────
     function returnAsset(address token) external;
     function latchConfioSale() external;
@@ -193,7 +220,15 @@ interface IConfioSmartAccount {
     function claimCooldownUntil() external view returns (uint64);
 
     function nextRuleId() external view returns (uint256);
+    /// `active` is effective: false for a rule of an earlier epoch.
     function rule(uint256 id) external view returns (Rule memory);
+    /// Bumped by every subscribe (never by a renewal). Zero before the
+    /// first subscription.
+    function subscriptionEpoch() external view returns (uint64);
+    /// Card: gross USD taken in the period that starts at rule(id).nextRunAt.
+    /// Stale (in effect zero) once that period has ended; the next pull
+    /// resets it.
+    function cardSpentUsd(uint256 id) external view returns (uint256);
 
     function confioSaleVenue() external view returns (address);
     function confioSalePriceRef() external view returns (address);

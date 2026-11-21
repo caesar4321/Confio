@@ -86,6 +86,24 @@ contract ConfioSmartAccountAssetsTest is SmartAccountBase {
         acct.withdraw(address(cusd), 0);
     }
 
+    /// Balance reads go through a raw staticcall (size audit): a "token"
+    /// with no code, or one that answers less than a word, still reverts
+    /// the call as a typed call would, and moves nothing.
+    function test_withdrawAll_ofANonContractOrShortAnsweringToken_reverts() public {
+        _giveCusd(address(acct), 5e18);
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(cusd);
+        tokens[1] = eve;
+        _asOwner();
+        vm.expectRevert();
+        acct.withdrawAll(tokens);
+        tokens[1] = address(new ArmingStranger()); // code, but no balanceOf
+        _asOwner();
+        vm.expectRevert();
+        acct.withdrawAll(tokens);
+        assertEq(cusd.balanceOf(address(acct)), 5e18);
+    }
+
     function test_account_cannotReceiveBnb() public {
         vm.deal(eve, 1 ether);
         vm.prank(eve);
@@ -392,7 +410,7 @@ contract ConfioSmartAccountAssetsTest is SmartAccountBase {
                 acct.initiateClaim();
                 claimExecutableAt = acct.claimExecutableAt();
             }
-            vm.warp(block.timestamp + 7 days);
+            vm.warp(vm.getBlockTimestamp() + 7 days);
             _freshFeeds();
             uint256 shortfall = MONTHLY - acct.dollarsUsd();
             uint256 btcBefore = btcb.balanceOf(address(acct));
@@ -410,7 +428,7 @@ contract ConfioSmartAccountAssetsTest is SmartAccountBase {
         }
 
         // Four periods of 37 days have passed: the window is over.
-        assertGe(block.timestamp, claimExecutableAt);
+        assertGe(vm.getBlockTimestamp(), claimExecutableAt);
         vm.prank(bob, bob);
         acct.executeClaim();
         uint256 remaining = btcb.balanceOf(address(acct));

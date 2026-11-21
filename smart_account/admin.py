@@ -4,7 +4,8 @@ are read-only: they are written by smart_account/reconcile.py only."""
 from django.contrib import admin
 
 from .models import (
-    SmartAccount, SmartAccountBeneficiary, SmartAccountCharge, SmartAccountClaim, SmartAccountEvent,
+    SmartAccount, SmartAccountBeneficiary, SmartAccountCardPause, SmartAccountCardPull, SmartAccountCardSpender,
+    SmartAccountCharge, SmartAccountClaim, SmartAccountEvent,
     SmartAccountForcedSale, SmartAccountForcedSaleLeg, SmartAccountPagoMovilDestination, SmartAccountPayout,
     SmartAccountPreparedAction,
     SmartAccountRelayTx, SmartAccountRule, SmartAccountRuleRun, SmartAccountScanCursor,
@@ -170,6 +171,37 @@ class SmartAccountWatchAdmin(ReadOnlyAdmin):
         return SmartAccountWatch.all_objects.select_related('smart_account', 'user')
 
 
+class SmartAccountCardSpenderAdmin(admin.ModelAdmin):
+    """Card issuers' spenders (decision 35). `allowed` mirrors the factory's
+    CardSpenderSet and only the Safe changes it on chain; ops set only the
+    label the owner sees. Rows appear from the chain, never by hand."""
+    list_display = ('address', 'label', 'allowed', 'set_block', 'set_tx', 'updated_at')
+    list_filter = ('allowed',)
+    search_fields = ('address', 'label', 'set_tx')
+    fields = ('address', 'label', 'allowed', 'set_block', 'set_log_index', 'set_tx', 'created_at', 'updated_at')
+    readonly_fields = ('address', 'allowed', 'set_block', 'set_log_index', 'set_tx', 'created_at', 'updated_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class SmartAccountCardPauseAdmin(ReadOnlyAdmin):
+    """The factory's cardPaused flag (Safe-set), mirrored."""
+    list_display = ('paused', 'set_block', 'set_tx', 'updated_at')
+
+
+class SmartAccountCardPullAdmin(ReadOnlyAdmin):
+    list_display = ('pulled_at', 'smart_account', 'onchain_rule_id', 'rule', 'spender', 'usd_spent',
+                    'usdt_out_wei', 'spent_in_period', 'period_start', 'tx_hash', 'notified_at')
+    list_filter = ('spender', ('rule', admin.EmptyFieldListFilter))
+    search_fields = ('tx_hash', 'spender', 'smart_account__contract_address', 'smart_account__owner_user__username')
+    raw_id_fields = ('smart_account', 'rule', 'event')
+    date_hierarchy = 'pulled_at'
+
+
 class SmartAccountScanCursorAdmin(ReadOnlyAdmin):
     list_display = ('key', 'block_number', 'updated_at')
 
@@ -190,5 +222,8 @@ REGISTRY = (
     (SmartAccountPreparedAction, SmartAccountPreparedActionAdmin),
     (SmartAccountTargetAllocation, SmartAccountTargetAllocationAdmin),
     (SmartAccountWatch, SmartAccountWatchAdmin),
+    (SmartAccountCardSpender, SmartAccountCardSpenderAdmin),
+    (SmartAccountCardPause, SmartAccountCardPauseAdmin),
+    (SmartAccountCardPull, SmartAccountCardPullAdmin),
     (SmartAccountScanCursor, SmartAccountScanCursorAdmin),
 )

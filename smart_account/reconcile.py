@@ -22,9 +22,10 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from . import abi, chain, notifications
+from . import abi, cards, chain, notifications
 from .models import (
-    SmartAccount, SmartAccountBeneficiary, SmartAccountCharge, SmartAccountClaim, SmartAccountEvent,
+    SmartAccount, SmartAccountBeneficiary, SmartAccountCardPause, SmartAccountCardPull, SmartAccountCardSpender,
+    SmartAccountCharge, SmartAccountClaim, SmartAccountEvent,
     SmartAccountForcedSale, SmartAccountForcedSaleLeg, SmartAccountPayout, SmartAccountPreparedAction,
     SmartAccountRule, SmartAccountRuleRun, SmartAccountScanCursor,
 )
@@ -403,6 +404,37 @@ def _apply_factory(event) -> list:
         return _account_created(event)
     if event.name == 'FeeScheduled':
         return _fee_scheduled(event)
+    if event.name == 'CardSpenderSet':
+        return _card_spender_set(event)
+    if event.name == 'CardPausedSet':
+        return _card_paused_set(event)
+    return []
+
+
+def _newer(row, event) -> bool:
+    """`event` comes after the one that last set `row` (replays and
+    out-of-order re-applies never move a flag back)."""
+    if row.set_block is None:
+        return True
+    return (int(event.block_number), int(event.log_index)) > (int(row.set_block), int(row.set_log_index or 0))
+
+
+def _card_spender_set(event) -> list:
+    address = str(event.args['spender']).lower()
+    row, _ = SmartAccountCardSpender.objects.select_for_update().get_or_create(address=address)
+    if _newer(row, event):
+        row.allowed = bool(event.args['allowed'])
+        row.set_block, row.set_log_index, row.set_tx = event.block_number, event.log_index, event.tx_hash
+        row.save()
+    return []
+
+
+def _card_paused_set(event) -> list:
+    row, _ = SmartAccountCardPause.objects.select_for_update().get_or_create(pk=1)
+    if _newer(row, event):
+        row.paused = bool(event.args['paused'])
+        row.set_block, row.set_log_index, row.set_tx = event.block_number, event.log_index, event.tx_hash
+        row.save()
     return []
 
 
@@ -516,7 +548,55 @@ def _fee_scheduled(event) -> list:
     return effects
 
 
+def _epoch_of(event) -> int:
+    """The subscriptionEpoch this Subscribed started: every subscribe bumps
+    it by one and nothing else does (spec 4.4, invariant 22), so it is the
+    number of the account's Subscribed events up to and including this one.
+    Deterministic on replay and out of order; needs no RPC (the reconciler
+    reads every log of a known account from its creation block on)."""
+    from django.db.models import Q
+    block, index = int(event.block_number), int(event.log_index)
+    return SmartAccountEvent.objects.filter(
+        Q(block_number__lt=block) | Q(block_number=block, log_index__lte=index),
+        address__iexact=event.address, name='Subscribed').count()
+
+
+def _end_earlier_epoch(account, event) -> None:
+    """A new subscription epoch: every rule of an earlier one is dead on
+    chain (rule(id).active is false; executeRule, cardPull, updateRule and
+    cancelRule revert BadRule). The mirror stops and unschedules them and
+    revokes their payment authorizations, as a RuleCancelled would."""
+    epoch = account.subscription_epoch
+    for rule in SmartAccountRule.all_objects.filter(smart_account=account, state='onchain', epoch__lt=epoch):
+        rule.active = False
+        rule.state = 'cancelled'
+        rule.deactivated_reason = 'subscription_ended'
+        rule.scheduled_for = None
+        rule.save(update_fields=['active', 'state', 'deactivated_reason', 'scheduled_for', 'updated_at'])
+        if rule.standing_authorization is not None:
+            _revoke(rule.standing_authorization, 'subscription_ended')
+    # subscribe() cleared the beneficiary and any designation, emitting
+    # DesignationWithdrawn / BeneficiaryRemoved first (lower log index, so
+    # already applied). Anything still standing here is a mirror the chain
+    # disagrees with: cleared the same way, and ops hear of it.
+    leftover = list(SmartAccountBeneficiary.objects.filter(
+        smart_account=account, state__in=('pending_acceptance', 'active', 'stale_address')))
+    for row in leftover:
+        row.state = 'removed'
+        row.removed_at = event.block_time
+        row.save(update_fields=['state', 'removed_at', 'updated_at'])
+        SmartAccountClaim.objects.filter(beneficiary_row=row, state='pending').update(
+            state='cancelled', cancelled_at=event.block_time, cancelled_tx=event.tx_hash)
+    if leftover:
+        _ops_alert(f'Cuenta inteligente: Subscribed en {account.contract_address} con {len(leftover)} '
+                   f'designación(es) espejo aún vigentes ({event.tx_hash}). Quitadas como en la cadena.',
+                   f'smart_subscribed_leftover_benef_{event.tx_hash}')
+
+
 def _subscribed(account, event):
+    # Never moves back on a replay of an earlier Subscribed.
+    account.subscription_epoch = max(int(account.subscription_epoch or 0), _epoch_of(event))
+    _end_earlier_epoch(account, event)
     account.plan = abi.PLAN_KEYS[int(event.args['plan'])]
     account.next_plan = ''
     account.paid_until = _dt(event.args['paidUntil'])
@@ -657,9 +737,22 @@ def _rule_from_chain(account, onchain_id: int, rule: SmartAccountRule | None, dr
     rule.scheduled_for = rule.next_run_at
     if keep_slot is not None and (rule.scheduled_for is None or keep_slot > rule.scheduled_for):
         rule.scheduled_for = keep_slot
+    if rule.kind == 'card':
+        # Pulled by its spender, never scheduled; next_run_at is the start
+        # of the current period (set from the event by _card_stored).
+        rule.scheduled_for = None
     rule.replaces = None
+    # The epoch the contract stored the rule in. `active` is already the
+    # effective flag (false for an earlier epoch).
+    rule.epoch = int(data['epoch'])
     rule.active = bool(data['active'])
+    if rule.epoch < int(account.subscription_epoch or 0):
+        rule.active = False
+        rule.state = 'cancelled'
     rule.deactivated_reason = ''
+    if rule.state == 'cancelled' and rule.epoch < int(account.subscription_epoch or 0):
+        rule.deactivated_reason = 'subscription_ended'
+        rule.scheduled_for = None
     rule.payee_address = data['payee'] if int(data['payee'], 16) else ''
     rule.payout_ref = data['payout_ref'] if int(data['payout_ref'], 16) else ''
     # Off-chain attributes come from the draft the owner prepared, and only
@@ -698,6 +791,19 @@ def _rule_from_chain(account, onchain_id: int, rule: SmartAccountRule | None, dr
             rule.deactivated_reason = 'no_standing_authorization'
     elif rule.kind == 'buy':
         rule.asset_key = _asset_key_for(rule.token_out)
+    elif rule.kind == 'card':
+        from .payouts import card_authorization_problem
+        if carried is not None and carried['standing_authorization'] is not None:
+            rule.standing_authorization = carried['standing_authorization']
+        if card_authorization_problem(rule, data) is not None:
+            # The chain lets the spender pull whatever the mirror says: the
+            # rule stays active here (the owner sees it and can stop it), and
+            # ops hear that nobody authorized it with Face through Confío.
+            rule.standing_authorization = None
+            if rule.active:
+                _ops_alert(f'Cuenta inteligente: regla de tarjeta {onchain_id} en {account.contract_address} sin '
+                           f'autorización con Face en Confío (gastador {rule.payee_address}).',
+                           f'smart_card_unauthorized_{account.contract_address}_{onchain_id}')
     rule.deleted_at = None
     rule.save()
     return rule
@@ -725,7 +831,9 @@ def _rule_created(account, event):
     draft = _draft_rule(event, account, 'rule_pk')
     if draft is not None and draft.state != 'draft':
         draft = None
-    _rule_from_chain(account, onchain_id, existing, draft)
+    rule = _rule_from_chain(account, onchain_id, existing, draft)
+    if rule.kind == 'card':
+        _card_stored(account, event, rule, kept_spent=Decimal(0))
     from . import funnel
     user, plan = account.owner_user, account.plan
     return [lambda: funnel.record(user, 'rule_created', plan=plan)]
@@ -739,6 +847,8 @@ def _rule_updated(account, event):
         draft = None
     old_authorization = existing.standing_authorization if existing is not None else None
     keep_slot = existing.scheduled_for if existing is not None and existing.state == 'onchain' else None
+    # updateRule keeps cardSpentUsd (spec 4.4): the mirror's count carries.
+    kept_spent = Decimal(existing.card_spent_usd or 0) if existing is not None else None
     if existing is not None and draft is not None:
         # Carry the draft's off-chain attributes onto the row that keeps the id.
         for name in ('payout_method', 'pagomovil_destination', 'payout_ref', 'payout_rail', 'standing_authorization',
@@ -750,9 +860,68 @@ def _rule_updated(account, event):
         draft.save(update_fields=['replaces', 'deleted_at'])
     else:
         rule = _rule_from_chain(account, onchain_id, existing, draft, keep_slot=keep_slot)
+    if rule.kind == 'card':
+        _card_stored(account, event, rule, kept_spent=kept_spent)
     if old_authorization is not None and old_authorization.pk != getattr(rule.standing_authorization, 'pk', None):
         _revoke(old_authorization, 'rule_updated')
     return []
+
+
+def _card_stored(account, event, rule, *, kept_spent) -> None:
+    """A Card rule's period after createRule / updateRule, from the event,
+    not from the chain's current state (a later pull may already have moved
+    it): start = max(firstRunAt, block time). `kept_spent` is the count the
+    contract carries (0 on create); None when the mirror never knew it, then
+    read from the chain (best effort: later pulls may be in it)."""
+    action = _action_for_tx(event.tx_hash, account.contract_address)
+    first_run = cards.first_run_from_calls(action.calls if action is not None else None,
+                                           account.contract_address, rule.onchain_id)
+    latest = int(rule.next_run_at.timestamp()) if rule.next_run_at else 0
+    rule.next_run_at = cards.first_period_start(event.block_time, latest, rule.frequency, first_run)
+    if kept_spent is None:
+        # Raises when unreadable: the event stays unapplied and is retried.
+        kept_spent = chain.usd(chain.card_spent_usd_wei(account.contract_address, rule.onchain_id))
+    rule.card_spent_usd = kept_spent
+    rule.scheduled_for = None
+    rule.save(update_fields=['next_run_at', 'card_spent_usd', 'scheduled_for', 'updated_at'])
+
+
+def _card_pulled(account, event):
+    """The spender took exactly usdtOut USDT; usdSpent (gross) counted
+    against the rule's cap for its period. One SmartAccountCardPull per
+    event; the rule's period and count follow the contract's arithmetic."""
+    if SmartAccountCardPull.objects.filter(event=event).exists():
+        return []
+    args = event.args
+    onchain_id = int(args['id'])
+    spender = str(args['spender']).lower()
+    gross = chain.usd(int(args['usdSpent']))
+    rule = (SmartAccountRule.all_objects.select_for_update()
+            .filter(smart_account=account, onchain_id=onchain_id).first())
+    period_start = spent = None
+    if rule is None or rule.kind != 'card':
+        _ops_alert(f'Cuenta inteligente: CardPulled de la regla {onchain_id} en {account.contract_address} sin '
+                   f'regla de tarjeta espejo ({event.tx_hash}). Registrado; revisar a mano.',
+                   f'smart_card_pull_norule_{event.tx_hash}_{event.log_index}')
+        rule = None
+    else:
+        if (rule.payee_address or '').lower() != spender:
+            _ops_alert(f'Cuenta inteligente: CardPulled por {spender}, que no es el gastador de la regla '
+                       f'{onchain_id} ({rule.payee_address}) en {account.contract_address} ({event.tx_hash}).',
+                       f'smart_card_pull_spender_{event.tx_hash}_{event.log_index}')
+        period_start, spent = cards.apply_pull(rule, event.block_time, gross)
+        rule.save(update_fields=['next_run_at', 'card_spent_usd', 'updated_at'])
+    pull = SmartAccountCardPull.objects.create(
+        smart_account=account, rule=rule, event=event, onchain_rule_id=onchain_id, spender=spender,
+        usdt_out_wei=str(int(args['usdtOut'])), usd_spent=gross, period_start=period_start,
+        spent_in_period=spent, tx_hash=event.tx_hash, block_number=event.block_number,
+        pulled_at=event.block_time)
+
+    def _after():
+        if SmartAccountCardPull.objects.filter(pk=pull.pk, notified_at__isnull=True).update(
+                notified_at=timezone.now()):
+            notifications.card_pulled(pull)
+    return _balances_changed(account, event) + [_after]
 
 
 def _revoke(authorization, reason: str) -> None:
@@ -1264,4 +1433,5 @@ _HANDLERS = {
     'ClaimCancelled': _claim_cancelled,
     'ClaimExecuted': _claim_executed,
     'ConfioSaleLatched': _confio_latched,
+    'CardPulled': _card_pulled,
 }

@@ -7,6 +7,8 @@ cusd_plus/sponsor_7702.py can import it at load time.
 """
 from __future__ import annotations
 
+import re
+
 from eth_abi import decode as abi_decode
 from eth_abi import encode as abi_encode
 from eth_utils import keccak
@@ -19,9 +21,13 @@ PLAN_IDS = {'monthly': PLAN_MONTHLY, 'annual': PLAN_ANNUAL}
 PLAN_KEYS = {v: k for k, v in PLAN_IDS.items()}
 PERIOD_DAYS = {'monthly': 30, 'annual': 365}
 
-RULE_SEND, RULE_PAYOUT, RULE_BUY = 0, 1, 2
-RULE_KIND_IDS = {'send': RULE_SEND, 'payout': RULE_PAYOUT, 'buy': RULE_BUY}
+# Card (decision 35) is appended: the values of the others are fixed.
+RULE_SEND, RULE_PAYOUT, RULE_BUY, RULE_CARD = 0, 1, 2, 3
+RULE_KIND_IDS = {'send': RULE_SEND, 'payout': RULE_PAYOUT, 'buy': RULE_BUY, 'card': RULE_CARD}
 RULE_KIND_KEYS = {v: k for k, v in RULE_KIND_IDS.items()}
+# Kinds the relayer runs with executeRule. A Card rule is pulled by its
+# allowlisted spender (cardPull); executeRule on it reverts BadRule.
+EXECUTABLE_RULE_KINDS = ('send', 'payout', 'buy')
 
 FREQUENCY_IDS = {'daily': 0, 'weekly': 1, 'biweekly': 2, 'monthly': 3}
 FREQUENCY_KEYS = {v: k for k, v in FREQUENCY_IDS.items()}
@@ -34,7 +40,9 @@ STATUS_KEYS = {0: 'none', 1: 'active', 2: 'cancel_pending', 3: 'expired', 4: 'in
 BILLING_KEYS = {0: 'current', 1: 'payment_due', 2: 'notice', 3: 'sale_allowed'}
 
 RULE_INPUT_ABI = '(uint8,uint8,address,address,address,bytes32,uint256,uint64)'
-RULE_ABI = '(uint8,uint8,bool,address,address,address,bytes32,uint256,uint64)'
+# rule(id): ... nextRunAt, epoch. `active` is effective: false for a rule of
+# an earlier subscription epoch (spec 4.4), whatever was stored.
+RULE_ABI = '(uint8,uint8,bool,address,address,address,bytes32,uint256,uint64,uint64)'
 SALE_LEG_ABI = '(address,address,uint256,bytes)'
 
 # name -> (signature, argument types)
@@ -71,6 +79,9 @@ FUNCTIONS = {
     # anyone
     'returnAsset': ('returnAsset(address)', ['address']),
     'latchConfioSale': ('latchConfioSale()', []),
+    # card spender (decision 35): the issuer's allowlisted spender calls it,
+    # never Confío's relay or an owner batch. Encoded for tests and decoding.
+    'cardPull': ('cardPull(uint256,uint256)', ['uint256', 'uint256']),
     # factory
     'createAccount': ('createAccount()', []),
     # factory, relayer-only (audit fix to decision 26): a 1-hour approval of
@@ -89,6 +100,17 @@ FACTORY_VIEWS = {
     'generationOf': ('generationOf(address)', ['address'], ['uint64']),
     'predictAddress': ('predictAddress(address)', ['address'], ['address']),
     'predictAddressAt': ('predictAddressAt(address,uint64)', ['address', 'uint64'], ['address']),
+    # Card spenders (decision 35): the Safe's allowlist and global card pause.
+    'isCardSpender': ('isCardSpender(address)', ['address'], ['bool']),
+    'cardPaused': ('cardPaused()', [], ['bool']),
+    'cardSpenderAllowed': ('cardSpenderAllowed(address)', ['address'], ['bool']),
+}
+# Account views that take arguments, as (signature, argument types, return
+# types); the no-argument ones are chain._ACCOUNT_VIEWS.
+ACCOUNT_ARG_VIEWS = {
+    # Card: gross USD taken in the period that starts at rule(id).nextRunAt
+    # (stale, in effect zero, once that period ended).
+    'cardSpentUsd': ('cardSpentUsd(uint256)', ['uint256'], ['uint256']),
 }
 
 
@@ -96,11 +118,40 @@ def selector(signature: str) -> str:
     return keccak(text=signature)[:4].hex()
 
 
+# Custom errors of ConfioSmartAccount the server acts on, by name; checked
+# against the contract source in test_abi. A relayer call's simulation
+# carries the 4-byte selector of the revert (revert_error).
+ACCOUNT_ERRORS = (
+    'NotOwner', 'NotRelayer', 'RelayerPaused', 'BadState', 'IsInherited', 'BadPlan', 'FeeAboveMax',
+    'DollarsShort', 'DollarsCover', 'AlreadySold', 'CapExceeded', 'BadRule', 'TooEarly', 'Slippage',
+)
+# What each means for the owner, in Spanish; unknown ones get no message.
+ERROR_MESSAGES = {
+    'IsInherited': 'Esta Cuenta inteligente ya pasó a tu beneficiario.',
+    'BadRule': 'Esa regla ya no está activa.',
+    'BadState': 'Tu Cuenta inteligente no permite esta acción ahora.',
+    'DollarsCover': 'Tus dólares cubren la renovación: no hace falta vender nada.',
+}
+
+
 SELECTORS = {name: selector(sig) for name, (sig, _types) in FUNCTIONS.items()}
 NAME_BY_SELECTOR = {sel: name for name, sel in SELECTORS.items()}
 SEL_TRANSFER = selector('transfer(address,uint256)')
 SEL_TRADE = SELECTORS['trade']
 SEL_CANCEL_CLAIM = SELECTORS['cancelClaim']
+ERROR_SELECTORS = {selector(f'{name}()'): name for name in ACCOUNT_ERRORS}
+
+
+def revert_error(text) -> str | None:
+    """The account error named by a revert's data (as a node reports it in
+    an eth_call failure: 0x + selector, possibly inside a message), or None.
+    Only selectors in ACCOUNT_ERRORS are recognised."""
+    found = re.findall(r'0x([0-9a-fA-F]{8})', str(text or ''))
+    for candidate in found:
+        name = ERROR_SELECTORS.get(candidate.lower())
+        if name is not None:
+            return name
+    return None
 
 OWNER_FUNCTIONS = frozenset({
     'subscribe', 'changePlan', 'cancelSubscription', 'undoCancel', 'withdraw', 'withdrawAll',
@@ -110,6 +161,8 @@ OWNER_FUNCTIONS = frozenset({
 BENEFICIARY_FUNCTIONS = frozenset({'acceptBeneficiary', 'initiateClaim', 'executeClaim'})
 RELAYER_FUNCTIONS = frozenset({'collectFee', 'startPaymentNotice', 'forcedSale', 'executeRule', 'convertUsdt'})
 KEEPER_FUNCTIONS = frozenset({'returnAsset', 'latchConfioSale'})
+# Called by a card issuer's spender only; never in a batch or relay kind.
+SPENDER_FUNCTIONS = frozenset({'cardPull'})
 
 # Sponsored-batch kinds (blockchain.SponsoredBatch.kind) and the account
 # functions each may contain besides deposits' ERC-20 transfer, the factory's
@@ -337,6 +390,9 @@ ACCOUNT_EVENTS = {
     'ClaimCancelled': [('address', True, 'beneficiary'), ('uint64', False, 'cooldownUntil')],
     'ClaimExecuted': [('address', True, 'previousOwner'), ('address', True, 'newOwner')],
     'ConfioSaleLatched': [('address', False, 'venue'), ('address', False, 'priceRef')],
+    # Decision 35: usdSpent is the gross counted against the rule's cap.
+    'CardPulled': [('uint256', True, 'id'), ('address', True, 'spender'), ('uint256', False, 'usdtOut'),
+                   ('uint256', False, 'usdSpent')],
 }
 FACTORY_EVENTS = {
     'AccountCreated': [('address', True, 'owner'), ('address', True, 'account')],
@@ -351,6 +407,8 @@ FACTORY_EVENTS = {
                             ('uint64', False, 'window'), ('uint64', False, 'expiresAt')],
     'AcceptanceApproved': [('address', True, 'account'), ('address', True, 'beneficiary'),
                            ('uint64', False, 'expiresAt')],
+    'CardSpenderSet': [('address', True, 'spender'), ('bool', False, 'allowed')],
+    'CardPausedSet': [('bool', False, 'paused')],
 }
 
 

@@ -157,6 +157,16 @@ def acceptance_approved_until(account: str, beneficiary: str) -> int:
                      [account, beneficiary], ['uint64'])[0])
 
 
+def card_spender_allowed(spender: str) -> bool:
+    """factory.cardSpenderAllowed: isCardSpender(spender) && !cardPaused, the
+    one read an account makes at Card rule creation and on every pull."""
+    return bool(_factory_view('cardSpenderAllowed', spender))
+
+
+def card_paused() -> bool:
+    return bool(_factory_view('cardPaused'))
+
+
 def confio_sale() -> tuple[str, str]:
     venue, ref = _view(factory_address(), 'confioSale()', [], [], ['address', 'address'])
     return venue.lower(), ref.lower()
@@ -173,6 +183,8 @@ _ACCOUNT_VIEWS = [
     ('claimStartedAt', 'uint64'), ('claimExecutableAt', 'uint64'), ('claimCooldownUntil', 'uint64'),
     ('nextRuleId', 'uint256'), ('confioSaleVenue', 'address'), ('confioSalePriceRef', 'address'),
     ('status', 'uint8'), ('billingStatus', 'uint8'), ('claimStatus', 'uint8'),
+    # Bumped by every subscribe, never by a renewal (spec 4.4, invariant 22).
+    ('subscriptionEpoch', 'uint64'),
 ]
 
 
@@ -240,13 +252,23 @@ def feed_price_usd(feed: str, max_age: int) -> Decimal | None:
 
 def account_rule(address: str, rule_id: int) -> dict:
     row = _view(address, 'rule(uint256)', ['uint256'], [int(rule_id)], [abi.RULE_ABI])[0]
-    kind, frequency, active, token_in, token_out, payee, payout_ref, amount_usd, next_run_at = row
+    kind, frequency, active, token_in, token_out, payee, payout_ref, amount_usd, next_run_at, epoch = row
+    # `active` is the contract's effective flag: false for a rule of an
+    # earlier subscription epoch, whatever was stored.
     return {
         'kind': abi.RULE_KIND_KEYS[kind], 'frequency': abi.FREQUENCY_KEYS[frequency], 'active': bool(active),
         'token_in': token_in.lower(), 'token_out': token_out.lower(), 'payee': payee.lower(),
         'payout_ref': '0x' + bytes(payout_ref).hex(), 'amount_usd_wei': int(amount_usd),
-        'next_run_at': int(next_run_at),
+        'next_run_at': int(next_run_at), 'epoch': int(epoch),
     }
+
+
+def card_spent_usd_wei(address: str, rule_id: int) -> int:
+    """cardSpentUsd(id): gross USD (18 decimals) taken in the period that
+    starts at rule(id).nextRunAt. Stale (in effect zero) once that period
+    ended; the contract resets it on the next pull."""
+    signature, arg_types, out_types = abi.ACCOUNT_ARG_VIEWS['cardSpentUsd']
+    return int(_view(address, signature, arg_types, [int(rule_id)], out_types)[0])
 
 
 def has_code(address: str) -> bool:

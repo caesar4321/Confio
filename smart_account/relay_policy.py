@@ -450,6 +450,61 @@ def _check_shape(action, calls: list, user, signer: str) -> None:
         _check_inherited_destination(calls, user, signer, target)
     if kind == 'smart_trade':
         _check_trade(calls, target)
+    if kind == 'smart_rule':
+        _check_card_rule(calls, target)
+    if kind in ('smart_rule', 'smart_rule_cancel'):
+        _check_rule_epoch(action, calls, target, own)
+
+
+def _check_rule_epoch(action, calls: list, target: str, own) -> None:
+    """Rules live in one subscription epoch (spec 4.4, invariant 22). A
+    create is relayed only in the epoch it was prepared in (a re-subscribe
+    in between is a new subscription, whose rules the owner sets again), and
+    an updateRule / cancelRule only for a rule of the current epoch (one of
+    an earlier epoch reverts BadRule). cancelRule is otherwise allowed in
+    every lifecycle state the owner still holds: an inherited account is
+    never the signer's own (smart_account_not_registered)."""
+    from .models import SmartAccountRule
+    if own is None or own.contract_address.lower() != target:
+        raise _error('smart_account_not_registered')
+    epoch = int(own.subscription_epoch)
+    draft_pk = (action.payload or {}).get('rule_pk')
+    if draft_pk:
+        draft = SmartAccountRule.all_objects.filter(pk=draft_pk).first()
+        if draft is not None and int(draft.epoch) != epoch:
+            raise _error('rule_epoch_changed')
+    for c in calls:
+        if c['to'] != target:
+            continue
+        name, args = abi.decode_call(c['data'])
+        if name not in ('updateRule', 'cancelRule'):
+            continue
+        rule = SmartAccountRule.all_objects.filter(smart_account=own, onchain_id=int(args[0])).first()
+        if rule is None or int(rule.epoch) != epoch:
+            raise _error('rule_epoch_changed')
+
+
+def _check_card_rule(calls: list, target: str) -> None:
+    """A createRule / updateRule of kind Card (decision 35) is relayed only
+    while Card rules are switched on and its spender is allowed in the
+    mirror and on chain (factory.cardSpenderAllowed: allowlist and card
+    pause). The contract checks the allowlist too; this keeps a refused
+    rule off the sponsor's gas and off a stale prepare."""
+    from . import cards
+    for c in calls:
+        if c['to'] != target:
+            continue
+        name, args = abi.decode_call(c['data'])
+        if name not in ('createRule', 'updateRule'):
+            continue
+        rule_input = args[0] if name == 'createRule' else args[1]
+        if int(rule_input[0]) != abi.RULE_CARD:
+            continue
+        spender = str(rule_input[4]).lower()
+        if not cards.creation_enabled():
+            raise _error('card_not_available')
+        if cards.allowed_spender(spender) is None or not chain.card_spender_allowed(spender):
+            raise _error('card_spender_not_allowed')
 
 
 def _check_inherited_destination(calls: list, user, signer: str, target: str) -> None:
@@ -547,10 +602,13 @@ def face_refusal(action, user) -> str | None:
                 pk=payload['rule_pk']).first()
             if draft is None:
                 return 'smart_action_not_prepared'
-            if draft.kind != 'send':
+            # Send and Card rules (decision 35) let money leave to someone
+            # else with nobody present: their Face authorization is checked.
+            if draft.kind not in ('send', 'card'):
                 return None
             authorization = draft.standing_authorization
-            if authorization is None or authorization.revoked_at is not None or authorization.kind != 'send':
+            if (authorization is None or authorization.revoked_at is not None
+                    or authorization.kind != draft.kind):
                 return FACE_STEP_UP_MESSAGE
             key, required = authorization.face_action_key, authorization.face_required
         elif action.kind == 'smart_beneficiary' and any(

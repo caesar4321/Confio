@@ -11,10 +11,17 @@ import {IPancakeSmartRouter} from "crypto-swap/ConfioSwapRouter.sol";
 /// unit tests (CusdVault, CusdPlusVault, ConfioStockRouter,
 /// ConfioSwapRouter) are the real ones.
 
+interface ITokenCallback {
+    function onTokenReceived(address from, uint256 value) external;
+}
+
 contract MockToken is ERC20 {
     uint8 private immutable _dec;
     /// When set, every transfer reverts (a paused or frozen token).
     bool public broken;
+    /// Recipients called back on every transfer to them (an ERC-777-style
+    /// hook), to test re-entrancy through a token.
+    mapping(address => bool) public callsBack;
 
     constructor(string memory n, uint8 dec) ERC20(n, n) {
         _dec = dec;
@@ -37,9 +44,14 @@ contract MockToken is ERC20 {
         broken = v;
     }
 
+    function setCallsBack(address who, bool v) external {
+        callsBack[who] = v;
+    }
+
     function _update(address from, address to, uint256 value) internal override {
         require(!broken || from == address(0), "token broken");
         super._update(from, to, value);
+        if (callsBack[to]) ITokenCallback(to).onTokenReceived(from, value);
     }
 }
 
@@ -259,5 +271,35 @@ contract EvilSwapRouter {
         MockToken(tokenOut).mint(msg.sender, 1e10);
         victim.seize(msg.sender, 1);
         return 1e10;
+    }
+}
+
+interface ICardPull {
+    function cardPull(uint256 id, uint256 usdtOut) external;
+}
+
+/// A card spender that, when paid, tries to pull again from inside the
+/// token transfer. It records whether the re-entrant pull got through.
+contract ReentrantCardSpender is ITokenCallback {
+    address public account;
+    uint256 public ruleId;
+    uint256 public again;
+    bool public reentered;
+    bool public reentrySucceeded;
+    bytes public reentryError;
+
+    function pull(address account_, uint256 id, uint256 usdtOut, uint256 again_) external {
+        account = account_;
+        ruleId = id;
+        again = again_;
+        ICardPull(account_).cardPull(id, usdtOut);
+    }
+
+    function onTokenReceived(address, uint256) external {
+        if (reentered || again == 0) return;
+        reentered = true;
+        (bool ok, bytes memory ret) = account.call(abi.encodeCall(ICardPull.cardPull, (ruleId, again)));
+        reentrySucceeded = ok;
+        reentryError = ret;
     }
 }

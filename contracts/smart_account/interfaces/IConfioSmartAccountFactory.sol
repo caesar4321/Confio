@@ -69,6 +69,21 @@ interface IConfioSmartAccountFactory {
     /// Once only.
     function setConfioSale(address venue, address priceRef) external;
 
+    // ── Card spenders (decision 35) ────────────────────────────────────
+    // A Card rule's payee must be allowlisted here when the rule is created
+    // and on every pull, so the Safe can cut a compromised issuer at once.
+    // The Safe can only withhold: the payee and the cap are the owner's.
+    event CardSpenderSet(address indexed spender, bool allowed);
+    event CardPausedSet(bool paused);
+
+    function isCardSpender(address spender) external view returns (bool);
+    function setCardSpender(address spender, bool allowed) external;
+    /// Stops every card pull (and Card rule creation) on every account.
+    function cardPaused() external view returns (bool);
+    function setCardPaused(bool paused) external;
+    /// isCardSpender(spender) && !cardPaused(): the one read an account makes.
+    function cardSpenderAllowed(address spender) external view returns (bool);
+
     // ── Designation approvals (audit fix to decision 26) ───────────────
     // A tx.origin gate on the account proves only that a sponsor started the
     // transaction, not that the relay checked THIS designation. The relayer

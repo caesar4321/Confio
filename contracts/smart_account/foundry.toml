@@ -7,7 +7,13 @@ cache_path = "cache"
 libs = ["../ondo_stocks/node_modules", "../ondo_stocks/lib"]
 allow_paths = ["../cusd_plus", "../ondo_stocks", "../crypto_swap"]
 optimizer = true
-optimizer_runs = 200
+# Size is the binding constraint (the account implementation must fit
+# EIP-170). via_ir at 100 runs was the smallest of 1/50/100/200 runs with
+# and without via_ir; see the size table in the spec (section 10.2).
+# Tests read the clock with vm.getBlockTimestamp(): under via_ir a
+# block.timestamp read after vm.warp in the same test can be stale.
+optimizer_runs = 100
+via_ir = true
 solc = "0.8.26"
 
 [fuzz]

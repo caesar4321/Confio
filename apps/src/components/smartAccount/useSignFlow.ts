@@ -111,6 +111,8 @@ export const POLICY_COPY: Record<string, string> = {
   smart_action_consumed: 'Esta operación ya se había enviado, así que no la enviamos otra vez. Revisa tus movimientos.',
   rule_duplicate: 'Ya tienes esta regla. No la repitas. No se movió nada.',
   rule_duplicate_pending: 'Esta regla se está confirmando. No la repitas. No se movió nada.',
+  rule_epoch_changed: 'Tu suscripción cambió. Vuelve a abrir la pantalla y crea la regla de nuevo. No se movió nada.',
+  account_inherited: 'Esta Cuenta inteligente ya pasó a tu beneficiario. No se movió nada.',
   smart_action_not_prepared: 'La operación ya no coincide con la que preparamos. No se movió nada. Vuelve a prepararla.',
   smart_action_mismatch: 'La operación ya no coincide con la que preparamos. No se movió nada. Vuelve a prepararla.',
   claim_cancel_required: 'Tu beneficiario pidió tu cuenta mientras firmabas. No se movió nada. Vuelve a preparar la operación: al firmarla, su pedido se cancela.',

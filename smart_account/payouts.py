@@ -319,6 +319,55 @@ def send_authorization_problem(rule, onchain: dict | None = None) -> str | None:
     return None
 
 
+def card_binding_hash(account_address: str, spender: str, amount: Decimal, frequency: str) -> str:
+    body = json.dumps({
+        'kind': 'card', 'account': (account_address or '').lower(), 'spender': (spender or '').lower(),
+        'amount': format(Decimal(amount).quantize(Decimal('0.01')), 'f'), 'frequency': frequency,
+    }, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
+def create_card_authorization(viewer, *, account, spender: str, amount: Decimal, frequency: str):
+    """A Card rule (decision 35) lets a card issuer pull from the account
+    with nobody present: the same full Face step-up as a send rule, claimed
+    once when the rule is created or edited and bound to (account, spender,
+    cap, period)."""
+    digest = card_binding_hash(account.contract_address, spender, amount, frequency)
+    return _authorize(
+        viewer, 'card', digest, 'smart_account_card_rule',
+        {'account': account.contract_address.lower(), 'spender': spender.lower(),
+         'amount': format(amount, 'f'), 'frequency': frequency},
+        'Confirma con Confío Face para autorizar tu tarjeta.',
+        create={},
+        terms=dict(payout_destination=None, payee_address=spender.lower(), rail='',
+                   amount_usd=amount, frequency=frequency))
+
+
+def card_authorization_problem(rule, onchain: dict | None = None) -> str | None:
+    """Why this Card rule has no valid Face authorization through Confío
+    (bound to the rule AS IT IS ON CHAIN: spender, cap, period), or None.
+    The server cannot stop a pull; this only tells ops and the mirror."""
+    authorization = rule.standing_authorization
+    if authorization is None or authorization.revoked_at is not None or authorization.kind != 'card':
+        return 'no_standing_authorization'
+    if authorization.face_required and not authorization.face_action_key:
+        return 'no_standing_authorization'
+    if authorization.user_id != rule.smart_account.owner_user_id:
+        return 'no_standing_authorization'
+    if onchain is not None:
+        if onchain.get('kind') not in (None, 'card'):
+            return 'authorization_mismatch'
+        spender = onchain['payee']
+        amount = (Decimal(onchain['amount_usd_wei']) / Decimal(10 ** 18)).quantize(Decimal('0.01'))
+        frequency = onchain['frequency']
+    else:
+        spender, amount, frequency = rule.payee_address, rule.amount, rule.frequency
+    if authorization.binding_hash != card_binding_hash(rule.smart_account.contract_address, spender, amount,
+                                                       frequency):
+        return 'authorization_mismatch'
+    return None
+
+
 def authorization_problem(rule) -> str | None:
     """Why this payment rule may not run, or None. Also used by the daily
     sweep that deactivates a rule whose saved destination changed."""

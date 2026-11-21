@@ -70,7 +70,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
     function _assertCancelledWithCooldown() internal view {
         assertEq(acct.claimStartedAt(), 0, "claim cancelled");
         assertEq(acct.claimExecutableAt(), 0);
-        assertEq(acct.claimCooldownUntil(), block.timestamp + 30 days, "cooldown set");
+        assertEq(acct.claimCooldownUntil(), vm.getBlockTimestamp() + 30 days, "cooldown set");
         assertEq(acct.beneficiary(), bob, "beneficiary stays");
     }
 
@@ -102,12 +102,12 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _name(bob, 365 days);
         _approveName(acct, bob, 180 days);
         vm.expectEmit(true, false, false, true, address(acct));
-        emit BeneficiaryNamed(bob, 180 days, uint64(block.timestamp + 30 days));
+        emit BeneficiaryNamed(bob, 180 days, uint64(vm.getBlockTimestamp() + 30 days));
         _asOwner();
         acct.setBeneficiary(bob, 180 days);
         assertEq(acct.pendingBeneficiary(), bob);
         assertEq(acct.pendingChallengeWindow(), 180 days);
-        assertEq(acct.pendingBeneficiaryExpiresAt(), block.timestamp + 30 days);
+        assertEq(acct.pendingBeneficiaryExpiresAt(), vm.getBlockTimestamp() + 30 days);
         assertEq(acct.beneficiary(), address(0), "not a beneficiary until accepted");
     }
 
@@ -156,10 +156,10 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _approveName(acct, bob, 180 days);
         assertEq(
             factory.designationApprovedUntil(address(acct), keccak256(abi.encode(bob, uint64(180 days)))),
-            block.timestamp + 1 hours
+            vm.getBlockTimestamp() + 1 hours
         );
         uint256 snap = vm.snapshotState();
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
         _asOwner();
         vm.expectRevert(notApproved);
         acct.setBeneficiary(bob, 180 days);
@@ -186,7 +186,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         // Expired.
         _approveAccept(acct, bob);
         snap = vm.snapshotState();
-        vm.warp(block.timestamp + 1 hours);
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
         vm.prank(bob, relayer);
         vm.expectRevert(notApproved);
         acct.acceptBeneficiary();
@@ -206,12 +206,12 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
     function test_pendingDesignation_lapsesAfterThirtyDays() public {
         _enableInheritance();
         _name(bob, 180 days);
-        vm.warp(block.timestamp + 30 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 30 days - 1);
         uint256 snap = vm.snapshotState();
         _accept(bob);
         vm.revertToState(snap);
 
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _approveAccept(acct, bob);
         vm.prank(bob, relayer);
         vm.expectRevert(ConfioSmartAccount.DesignationExpired.selector);
@@ -286,7 +286,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         vm.expectRevert(NOT_BENEFICIARY);
         acct.initiateClaim();
         _initiate(carol);
-        assertEq(acct.claimExecutableAt(), block.timestamp + 180 days);
+        assertEq(acct.claimExecutableAt(), vm.getBlockTimestamp() + 180 days);
     }
 
     function test_onlyTheBeneficiaryCanInitiateAndExecute() public {
@@ -298,13 +298,13 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
             acct.initiateClaim();
         }
         vm.expectEmit(true, false, false, true, address(acct));
-        emit ClaimInitiated(bob, uint64(block.timestamp + 90 days));
+        emit ClaimInitiated(bob, uint64(vm.getBlockTimestamp() + 90 days));
         _initiate(bob);
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.ClaimAlreadyPending.selector);
         acct.initiateClaim();
 
-        _warpPaid(block.timestamp + 90 days);
+        _warpPaid(vm.getBlockTimestamp() + 90 days);
         for (uint256 i = 0; i < others.length; ++i) {
             if (others[i] == alice) continue; // an owner call would cancel the claim
             vm.prank(others[i], others[i]);
@@ -344,7 +344,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
 
     function test_executeClaim_withoutAClaim_reverts() public {
         _withBeneficiary();
-        vm.warp(block.timestamp + 20 days);
+        vm.warp(vm.getBlockTimestamp() + 20 days);
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.TooEarly.selector);
         acct.executeClaim();
@@ -360,14 +360,14 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _name(bob, 90 days);
         _initiate(bob);
         uint64 executableAt = acct.claimExecutableAt();
-        assertEq(executableAt, block.timestamp + 365 days, "the window as it stood at initiation");
+        assertEq(executableAt, vm.getBlockTimestamp() + 365 days, "the window as it stood at initiation");
 
         _accept(bob);
         assertEq(acct.challengeWindow(), 90 days, "applies to later claims only");
         assertEq(acct.claimExecutableAt(), executableAt, "execution not brought forward");
         assertEq(acct.claimStartedAt() != 0, true, "the same person's claim stays pending");
 
-        _warpPaid(block.timestamp + 91 days);
+        _warpPaid(vm.getBlockTimestamp() + 91 days);
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.TooEarly.selector);
         acct.executeClaim();
@@ -389,7 +389,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         assertEq(acct.claimExecutableAt(), 0);
         assertEq(acct.claimCooldownUntil(), 0, "the new beneficiary starts without a cooldown");
         assertEq(acct.beneficiary(), carol);
-        vm.warp(block.timestamp + 90 days);
+        vm.warp(vm.getBlockTimestamp() + 90 days);
         vm.prank(bob, bob);
         vm.expectRevert(NOT_BENEFICIARY);
         acct.executeClaim();
@@ -400,7 +400,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _pendingClaim();
         _approveName(acct, bob, 180 days);
         vm.expectEmit(true, false, false, true, address(acct));
-        emit ClaimCancelled(bob, uint64(block.timestamp + 30 days));
+        emit ClaimCancelled(bob, uint64(vm.getBlockTimestamp() + 30 days));
         _asOwner();
         acct.setBeneficiary(bob, 180 days);
         _assertCancelledWithCooldown();
@@ -414,7 +414,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         acct.initiateClaim();
         vm.warp(cooldown);
         _initiate(bob);
-        assertEq(acct.claimExecutableAt(), block.timestamp + 180 days);
+        assertEq(acct.claimExecutableAt(), vm.getBlockTimestamp() + 180 days);
     }
 
     function test_namingSomeoneNewDuringAClaim_cancelsWithCooldown_oldKeepsStandingUntilAcceptance() public {
@@ -422,13 +422,13 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _name(carol, 180 days);
         _assertCancelledWithCooldown();
         // Bob keeps standing: after the cooldown he can claim again.
-        vm.warp(block.timestamp + 30 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 30 days - 1);
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.Cooldown.selector);
         acct.initiateClaim();
         // Carol accepts inside her 30 days: Bob loses standing then.
         _accept(carol);
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(bob, bob);
         vm.expectRevert(NOT_BENEFICIARY);
         acct.initiateClaim();
@@ -443,7 +443,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         assertEq(acct.claimStartedAt(), 0);
         assertEq(acct.claimCooldownUntil(), 0, "the cooldown goes with the designation");
         assertEq(acct.beneficiary(), address(0));
-        vm.warp(block.timestamp + 90 days);
+        vm.warp(vm.getBlockTimestamp() + 90 days);
         vm.prank(bob, bob);
         vm.expectRevert(NOT_BENEFICIARY);
         acct.executeClaim();
@@ -484,7 +484,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
     function test_touch_withdrawOfAZeroValueToken() public {
         _pendingClaim();
         vm.expectEmit(true, false, false, true, address(acct));
-        emit ClaimCancelled(bob, uint64(block.timestamp + 30 days));
+        emit ClaimCancelled(bob, uint64(vm.getBlockTimestamp() + 30 days));
         vm.prank(alice, alice);
         acct.withdraw(address(tsla), 0);
         _assertCancelledWithCooldown();
@@ -521,14 +521,14 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _asOwner();
         acct.cancelSubscription();
         _assertCancelledWithCooldown();
-        vm.warp(block.timestamp + 30 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 30 days - 1);
         // CancelPending is still Active for a claim.
         vm.prank(bob, bob);
         vm.expectRevert(ConfioSmartAccount.Cooldown.selector);
         acct.initiateClaim();
         _asOwner();
         acct.undoCancel();
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _asRelayer();
         acct.collectFee();
         _initiate(bob);
@@ -550,13 +550,16 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _initiate(bob);
         assertEq(acct.claimStatus(), 1);
         vm.expectEmit(true, false, false, true, address(acct));
-        emit ClaimCancelled(bob, uint64(block.timestamp + 30 days));
+        emit ClaimCancelled(bob, uint64(vm.getBlockTimestamp() + 30 days));
         _asOwner();
         acct.undoCancel();
         _assertCancelledWithCooldown();
         assertFalse(acct.cancelRequested());
     }
 
+    /// A claim still pending on an Expired account is ended by the
+    /// re-subscription's touch, and the new subscription drops the
+    /// beneficiary altogether (new epoch): bob cannot resume or re-start.
     function test_touch_subscribe_afterExpiry() public {
         _withBeneficiary();
         _asOwner();
@@ -564,8 +567,18 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _initiate(bob);
         vm.warp(acct.paidUntil());
         assertEq(acct.status(), 3);
+        vm.expectEmit(true, false, false, true, address(acct));
+        emit ClaimCancelled(bob, uint64(vm.getBlockTimestamp() + 30 days));
+        vm.expectEmit(true, false, false, true, address(acct));
+        emit BeneficiaryRemoved(bob);
         _subscribe(M);
-        _assertCancelledWithCooldown();
+        assertEq(acct.claimStartedAt(), 0, "claim cancelled");
+        assertEq(acct.claimExecutableAt(), 0);
+        assertEq(acct.beneficiary(), address(0), "beneficiary dropped");
+        assertEq(acct.challengeWindow(), 0);
+        assertEq(acct.claimCooldownUntil(), 0);
+        vm.expectRevert(NOT_BENEFICIARY);
+        _initiate(bob);
     }
 
     function test_touch_trade() public {
@@ -584,7 +597,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         uint256 id = acct.createRule(r);
         _assertCancelledWithCooldown();
 
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         _asRelayer();
         acct.collectFee();
         _initiate(bob);
@@ -592,7 +605,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         acct.updateRule(id, r);
         _assertCancelledWithCooldown();
 
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         _asRelayer();
         acct.collectFee();
         _initiate(bob);
@@ -605,7 +618,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _pendingClaim();
         _name(carol, 180 days);
         _assertCancelledWithCooldown();
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         _asRelayer();
         acct.collectFee();
         _initiate(bob);
@@ -691,7 +704,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         // Nor can a new claim start on an Expired account.
         vm.prank(alice, alice);
         acct.cancelClaim();
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         vm.prank(bob, bob);
         vm.expectRevert(BAD_STATE);
         acct.initiateClaim();
@@ -705,22 +718,22 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         for (uint256 i = 0; i < 6; ++i) {
             uint256 cusdBefore = cusd.balanceOf(address(acct));
             _initiate(bob);
-            assertEq(acct.claimExecutableAt(), block.timestamp + 90 days, "a full window every time");
-            _warpPaid(block.timestamp + 89 days);
+            assertEq(acct.claimExecutableAt(), vm.getBlockTimestamp() + 90 days, "a full window every time");
+            _warpPaid(vm.getBlockTimestamp() + 89 days);
             cusdBefore = cusd.balanceOf(address(acct));
             vm.prank(alice, alice);
             acct.cancelClaim();
-            assertEq(acct.claimCooldownUntil(), block.timestamp + 30 days);
+            assertEq(acct.claimCooldownUntil(), vm.getBlockTimestamp() + 30 days);
 
             // Immediate re-claim reverts during the cooldown.
             vm.prank(bob, bob);
             vm.expectRevert(ConfioSmartAccount.Cooldown.selector);
             acct.initiateClaim();
-            _warpPaid(block.timestamp + 30 days - 1);
+            _warpPaid(vm.getBlockTimestamp() + 30 days - 1);
             vm.prank(bob, bob);
             vm.expectRevert(ConfioSmartAccount.Cooldown.selector);
             acct.initiateClaim();
-            _warpPaid(block.timestamp + 1);
+            _warpPaid(vm.getBlockTimestamp() + 1);
             assertEq(btcb.balanceOf(address(acct)), 1e18, "no asset moved");
             assertEq(btcb.balanceOf(bob) + cusd.balanceOf(bob) + cusd.balanceOf(alice), 0);
             assertEq(acct.owner(), alice);
@@ -748,7 +761,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         acct.cancelSubscription();
         _initiate(bob);
         vm.warp(acct.claimExecutableAt());
-        assertLt(block.timestamp, acct.paidUntil());
+        assertLt(vm.getBlockTimestamp(), acct.paidUntil());
         assertEq(acct.status(), 2, "still CancelPending");
         _execute(bob);
         assertEq(acct.owner(), bob);
@@ -756,7 +769,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         assertFalse(acct.cancelRequested(), "the cancellation is cleared with the rest");
         assertEq(acct.paidUntil(), 0);
         // Nothing returns to the old owner afterwards.
-        vm.warp(block.timestamp + 400 days);
+        vm.warp(vm.getBlockTimestamp() + 400 days);
         vm.expectRevert(ConfioSmartAccount.IsInherited.selector);
         acct.returnAsset(address(cusd));
     }
@@ -774,18 +787,18 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         assertEq(acct.claimStartedAt(), 0, "bob's claim ended");
         assertEq(acct.claimCooldownUntil(), 0);
         _initiate(carol);
-        assertEq(acct.claimExecutableAt(), block.timestamp + 180 days);
+        assertEq(acct.claimExecutableAt(), vm.getBlockTimestamp() + 180 days);
     }
 
     function test_acceptBeneficiary_onAnExpiredAccount_reverts() public {
         _enableInheritance();
-        vm.warp(block.timestamp + 5 days);
+        vm.warp(vm.getBlockTimestamp() + 5 days);
         _name(bob, 180 days);
         _asOwner();
         acct.cancelSubscription();
         vm.warp(acct.paidUntil());
         assertEq(acct.status(), 3, "Expired");
-        assertLt(block.timestamp, acct.pendingBeneficiaryExpiresAt(), "the naming itself is still live");
+        assertLt(vm.getBlockTimestamp(), acct.pendingBeneficiaryExpiresAt(), "the naming itself is still live");
         _approveAccept(acct, bob);
         vm.prank(bob, relayer);
         vm.expectRevert(BAD_STATE);
@@ -823,7 +836,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         _name(bob, max);
         _accept(bob);
         _initiate(bob);
-        assertEq(acct.claimExecutableAt(), block.timestamp + max, "no overflow at the ceiling");
+        assertEq(acct.claimExecutableAt(), vm.getBlockTimestamp() + max, "no overflow at the ceiling");
     }
 
     // ── through the real ConfioBatchDelegate (7702, decision 9) ─────────
@@ -841,7 +854,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         returns (uint256 nonce, uint256 deadline, bytes memory sig)
     {
         nonce = ConfioBatchDelegate(payable(alice)).nonces();
-        deadline = block.timestamp + 1 hours;
+        deadline = vm.getBlockTimestamp() + 1 hours;
         bytes32 digest = ConfioBatchDelegate(payable(alice)).hashExecute(calls, nonce, deadline, bytes32(0));
         (uint8 v, bytes32 r, bytes32 s_) = vm.sign(key, digest);
         sig = abi.encodePacked(r, s_, v);
@@ -863,7 +876,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         calls[0] = ConfioBatchDelegate.Call(address(cusd), 0, abi.encodeCall(cusd.transfer, (carol, 5e18)));
         calls[1] = ConfioBatchDelegate.Call(address(acct), 0, abi.encodeCall(acct.cancelClaim, ()));
         vm.expectEmit(true, false, false, true, address(acct));
-        emit ClaimCancelled(bob, uint64(block.timestamp + 30 days));
+        emit ClaimCancelled(bob, uint64(vm.getBlockTimestamp() + 30 days));
         _relay(key, calls);
         assertEq(cusd.balanceOf(carol), 5e18, "the unrelated call ran");
         _assertCancelledWithCooldown();
@@ -906,7 +919,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
     function _cancelAndReadCooldown() internal returns (uint256) {
         vm.prank(alice, alice);
         acct.cancelClaim();
-        return acct.claimCooldownUntil() - block.timestamp;
+        return acct.claimCooldownUntil() - vm.getBlockTimestamp();
     }
 
     function test_cooldown_followsTheFactoryInsideItsBounds() public {
@@ -958,7 +971,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         vm.prank(alice, alice);
         acct.withdraw{gas: 400_000}(address(cusd), 1e18);
         assertEq(cusd.balanceOf(alice), 1e18);
-        assertEq(acct.claimCooldownUntil(), block.timestamp + 30 days);
+        assertEq(acct.claimCooldownUntil(), vm.getBlockTimestamp() + 30 days);
     }
 
     // ── execution and the withdraw-only box (6.5, 6.6, I-12, I-13) ──────
@@ -1034,7 +1047,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         uint256 id = acct.createRule(r);
         _inherit();
         usdt.mint(address(acct), 1e18);
-        vm.warp(block.timestamp + 400 days);
+        vm.warp(vm.getBlockTimestamp() + 400 days);
 
         // Relayer functions.
         vm.startPrank(relayer, relayer);
@@ -1068,7 +1081,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         acct.createRule(r);
         vm.expectRevert(BAD_STATE);
         acct.updateRule(id, r);
-        vm.expectRevert(BAD_STATE);
+        vm.expectRevert(ConfioSmartAccount.IsInherited.selector);
         acct.cancelRule(id);
         vm.expectRevert(BAD_STATE);
         acct.trade(address(swapRouter), buy, address(cusd), address(btcb), 1e18, 1);
@@ -1185,7 +1198,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         // To the new owner's own Cuenta inteligente, no deadline.
         ConfioSmartAccount bobs = _create(bob);
         assertEq(address(bobs), predicted);
-        vm.warp(block.timestamp + 1_000 days);
+        vm.warp(vm.getBlockTimestamp() + 1_000 days);
         vm.prank(bob, bob);
         acct.withdrawAll(tokens, address(bobs));
         assertEq(cusd.balanceOf(address(bobs)), balance - 10e18);
@@ -1472,7 +1485,6 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
     /// transactions: no sponsor anywhere in the call chain, relayer paused,
     /// nobody collecting fees.
     function test_directPath_withoutConfio() public {
-        _withBeneficiary();
         btcb.mint(address(acct), 1e18);
         _giveCusd(address(acct), 2_000e18);
         // Annual, so the subscription outlives the window with no relayer.
@@ -1481,6 +1493,8 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
         vm.warp(acct.paidUntil());
         _giveCusd(address(acct), 0);
         _subscribe(IConfioSmartAccount.Plan.Annual);
+        // Named under this subscription (a new one drops the old naming).
+        _withBeneficiary();
         vm.prank(safe);
         factory.setRelayerPaused(true);
         vm.prank(safe);
@@ -1488,7 +1502,7 @@ contract ConfioSmartAccountInheritanceTest is SmartAccountBase {
 
         vm.prank(bob, bob);
         acct.initiateClaim();
-        vm.warp(block.timestamp + 90 days);
+        vm.warp(vm.getBlockTimestamp() + 90 days);
         vm.prank(bob, bob);
         acct.executeClaim();
         uint256 balance = cusd.balanceOf(address(acct));

@@ -54,11 +54,11 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
     function test_subscribe_takesFirstFeeInCusd() public {
         _giveCusd(address(acct), 20e18);
         vm.expectEmit(false, false, false, true, address(acct));
-        emit FeeCollected(M, MONTHLY, MONTHLY, 0, 0, uint64(block.timestamp + 30 days));
+        emit FeeCollected(M, MONTHLY, MONTHLY, 0, 0, uint64(vm.getBlockTimestamp() + 30 days));
         _subscribe(M);
         assertEq(cusd.balanceOf(address(collector)), MONTHLY);
         assertEq(cusd.balanceOf(address(acct)), 20e18 - MONTHLY);
-        assertEq(acct.paidUntil(), block.timestamp + 30 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 30 days);
         assertEq(uint8(acct.plan()), uint8(M));
         assertEq(acct.status(), 1);
         assertEq(acct.billingStatus(), 0);
@@ -135,7 +135,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
     function test_subscribe_annual() public {
         _giveCusd(address(acct), ANNUAL);
         _subscribe(A);
-        assertEq(acct.paidUntil(), block.timestamp + 365 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 365 days);
         assertEq(acct.periodSeconds(), 365 days);
         assertEq(cusd.balanceOf(address(collector)), ANNUAL);
     }
@@ -155,7 +155,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         assertEq(acct.billingStatus(), 1, "PaymentDue");
         _asRelayer();
         acct.collectFee();
-        assertEq(acct.paidUntil(), block.timestamp + 30 days, "exactly one period from the block time");
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 30 days, "exactly one period from the block time");
         assertEq(cusd.balanceOf(address(collector)), 2 * MONTHLY);
 
         _asRelayer();
@@ -169,7 +169,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         vm.warp(acct.paidUntil() + 5 days);
         _asRelayer();
         acct.collectFee();
-        assertEq(acct.paidUntil(), block.timestamp + 30 days, "lapsed days are not charged");
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 30 days, "lapsed days are not charged");
     }
 
     function test_collectFee_revertsWhenShort() public {
@@ -298,7 +298,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
 
     function test_scheduledPriceChange_appliesFromTheRenewalAfterEffectiveAt() public {
         _subscribedMonthly(100e18);
-        uint64 effectiveAt = uint64(block.timestamp + 45 days);
+        uint64 effectiveAt = uint64(vm.getBlockTimestamp() + 45 days);
         vm.prank(safe);
         factory.scheduleFee(1, 19.99e18, effectiveAt);
 
@@ -359,7 +359,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         vm.prank(alice, alice);
         acct.withdraw(address(cusd), 1e18);
         assertEq(cusd.balanceOf(alice), 1e18);
-        assertEq(acct.claimCooldownUntil(), block.timestamp + 30 days, "fallback cooldown");
+        assertEq(acct.claimCooldownUntil(), vm.getBlockTimestamp() + 30 days, "fallback cooldown");
         address[] memory tokens = new address[](1);
         tokens[0] = address(cusd);
         vm.prank(alice, alice);
@@ -367,11 +367,11 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         vm.prank(alice, alice);
         acct.cancelClaim();
 
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         // (Alice's period is now over and unpaid; a claim does not need it.)
         vm.prank(bob, bob);
         acct.initiateClaim();
-        vm.warp(block.timestamp + 90 days);
+        vm.warp(vm.getBlockTimestamp() + 90 days);
         vm.prank(bob, bob);
         acct.executeClaim();
         assertEq(acct.owner(), bob);
@@ -409,7 +409,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         acct.withdraw(address(cusd), 10e18);
         _asRelayer();
         acct.startPaymentNotice();
-        assertEq(acct.noticeStartedAt(), block.timestamp);
+        assertEq(acct.noticeStartedAt(), vm.getBlockTimestamp());
         assertEq(acct.billingStatus(), 2, "Notice");
         _asRelayer();
         vm.expectRevert(ConfioSmartAccount.BadState.selector);
@@ -421,6 +421,59 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         acct.collectFee();
         assertEq(acct.noticeStartedAt(), 0);
         assertEq(acct.billingStatus(), 0);
+    }
+
+    /// P3-2: USDT the relayer can convert first counts towards the fee,
+    /// net of cUSD's entry fee (0.9% here). Smallest USDT that covers `gap`.
+    function _usdtCovering(uint256 gap) internal pure returns (uint256) {
+        return (gap * 10_000 + (10_000 - FEE_BPS) - 1) / (10_000 - FEE_BPS);
+    }
+
+    function test_startPaymentNotice_refusedWhileUsdtCoversTheGap() public {
+        _subscribedMonthly(4e18);
+        vm.warp(acct.paidUntil());
+        uint256 need = _usdtCovering(MONTHLY - 4e18);
+
+        // One wei short of covering (net of the entry fee): a notice starts.
+        uint256 snap = vm.snapshotState();
+        usdt.mint(address(acct), need - 1);
+        _asRelayer();
+        acct.startPaymentNotice();
+        vm.revertToState(snap);
+
+        // Exactly covering: refused; the relayer converts and collects.
+        usdt.mint(address(acct), need);
+        _asRelayer();
+        vm.expectRevert(ConfioSmartAccount.DollarsCover.selector);
+        acct.startPaymentNotice();
+        _asRelayer();
+        acct.convertUsdt(CUSD_, (need * (10_000 - FEE_BPS)) / 10_000, address(0), 0);
+        _asRelayer();
+        acct.collectFee();
+        assertEq(acct.billingStatus(), 0);
+        assertEq(acct.noticeStartedAt(), 0);
+    }
+
+    function test_forcedSale_refusedWhileUsdtCoversTheShortfall_dustDoesNotBlock() public {
+        _subscribedMonthly(1e18);
+        tsla.mint(address(acct), 1e18);
+        uint256 shortfall = MONTHLY - 1e18;
+        // Dust USDT from before the notice: it does not stop the notice.
+        usdt.mint(address(acct), 0.5e18);
+        _toSaleAllowed();
+        IConfioSmartAccount.SaleLeg[] memory legs = _legs(_stockLeg(tsla, shortfall + 0.01e18));
+
+        // USDT arriving during the notice that covers the shortfall: no sale.
+        uint256 snap = vm.snapshotState();
+        usdt.mint(address(acct), _usdtCovering(shortfall) - 0.5e18);
+        _saleReverts(ConfioSmartAccount.DollarsCover.selector, legs, 0);
+        vm.revertToState(snap);
+
+        // Dust that does not cover it: the sale runs and the dust stays.
+        legs = _legs(_stockLeg(tsla, shortfall + 0.01e18));
+        _sale(legs, 0, address(0), 0);
+        assertEq(acct.billingStatus(), 0);
+        assertEq(usdt.balanceOf(address(acct)), 0.5e18);
     }
 
     function test_forcedSale_revertsBeforeNotice_beforeNoticeEnds_twice_withDollars_onDollars() public {
@@ -439,9 +492,9 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         // Notice running, not over.
         _asRelayer();
         acct.startPaymentNotice();
-        vm.warp(block.timestamp + 7 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 7 days - 1);
         _saleReverts(ConfioSmartAccount.BadState.selector, legs, 0);
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         assertEq(acct.billingStatus(), 3, "SaleAllowed");
 
         // A dollar is not sold for dollars.
@@ -489,7 +542,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         assertGt(plus.balanceOf(address(collector)), 0);
         assertLt(acct.dollarsUsd(), 0.05e18, "only the rounding margin is left");
         assertEq(acct.forcedSaleForPeriod(), period, "the unpaid period, not the new one");
-        assertEq(acct.paidUntil(), block.timestamp + 30 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 30 days);
         assertEq(acct.noticeStartedAt(), 0);
         assertEq(acct.billingStatus(), 0);
         assertEq(cusd.balanceOf(alice) + plus.balanceOf(alice) + tsla.balanceOf(alice), 0, "nothing to the owner");
@@ -579,7 +632,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
 
         _sale(_legs(_stockLeg(tsla, 75e18), _cryptoLeg(btcb, BTC_PRICE, PLUS, 75e18)), 0, address(0), 0);
         assertEq(acct.forcedSaleForPeriod(), period);
-        assertEq(acct.paidUntil(), block.timestamp + 365 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 365 days);
         assertLt(acct.dollarsUsd(), 0.05e18);
         assertLt(tsla.balanceOf(address(acct)), 0.3e18);
         assertLt(btcb.balanceOf(address(acct)), 0.0009e18);
@@ -654,13 +707,17 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _toSaleAllowed();
         IConfioSmartAccount.SaleLeg memory leg = _cryptoLeg(xaut, XAU_PRICE, PLUS, MONTHLY + 0.01e18);
 
-        // Weekend: the gold feed last moved 26 hours and a second ago.
-        xauFeed.set(4_000e8, block.timestamp - 26 hours - 1);
+        // XAU/USD on BSC beats every 600 s, weekends included: two hours
+        // and a second without an update is an outage, and refuses.
+        xauFeed.set(4_000e8, vm.getBlockTimestamp() - 2 hours - 1);
         _saleReverts(ConfioSmartAccount.StaleFeed.selector, _legs(leg), 0);
         assertEq(acct.billingStatus(), 3);
+        // A day-old answer (the old 26-hour limit) is refused too.
+        xauFeed.set(4_000e8, vm.getBlockTimestamp() - 24 hours);
+        _saleReverts(ConfioSmartAccount.StaleFeed.selector, _legs(leg), 0);
 
         // Exactly at the limit it is still fresh.
-        xauFeed.set(4_000e8, block.timestamp - 26 hours);
+        xauFeed.set(4_000e8, vm.getBlockTimestamp() - 2 hours);
         _sale(_legs(leg), 0, address(0), 0);
         assertEq(acct.billingStatus(), 0);
     }
@@ -670,11 +727,11 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         btcb.mint(address(acct), 1e18);
         _toSaleAllowed();
         IConfioSmartAccount.SaleLeg memory leg = _cryptoLeg(btcb, BTC_PRICE, PLUS, MONTHLY + 0.01e18);
-        btcFeed.set(100_000e8, block.timestamp - 1 hours - 1);
+        btcFeed.set(100_000e8, vm.getBlockTimestamp() - 1 hours - 1);
         _saleReverts(ConfioSmartAccount.StaleFeed.selector, _legs(leg), 0);
-        btcFeed.set(0, block.timestamp);
+        btcFeed.set(0, vm.getBlockTimestamp());
         _saleReverts(ConfioSmartAccount.StaleFeed.selector, _legs(leg), 0);
-        btcFeed.set(100_000e8, block.timestamp - 1 hours);
+        btcFeed.set(100_000e8, vm.getBlockTimestamp() - 1 hours);
         _sale(_legs(leg), 0, address(0), 0);
     }
 
@@ -704,7 +761,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         assertEq(tsla.balanceOf(alice), 0, "nothing returned");
 
         // Days later the market is back.
-        vm.warp(block.timestamp + 3 days);
+        vm.warp(vm.getBlockTimestamp() + 3 days);
         gm.setHalted(false);
         vm.prank(safe);
         stockRouter.unpause();
@@ -728,7 +785,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         vm.expectRevert(ConfioSmartAccount.DollarsShort.selector);
         acct.collectFee();
 
-        vm.warp(block.timestamp + 400 days);
+        vm.warp(vm.getBlockTimestamp() + 400 days);
         assertEq(acct.billingStatus(), 3, "stays SaleAllowed indefinitely");
         assertEq(btcb.balanceOf(address(acct)), all, "nothing taken partially");
         assertEq(cusd.balanceOf(address(acct)), 2e18);
@@ -749,7 +806,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _asRelayer();
         acct.startPaymentNotice();
         IConfioSmartAccount.SaleLeg[] memory sizedForOld = _legs(_cryptoLeg(btcb, BTC_PRICE, CUSD_, MONTHLY + 0.01e18));
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
         _freshFeeds();
         assertEq(acct.feeUsd(), 19.99e18);
 
@@ -777,10 +834,10 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _saleReverts(ConfioSmartAccount.BadState.selector, legs, 0);
         _asRelayer();
         acct.startPaymentNotice();
-        vm.warp(block.timestamp + 7 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 7 days - 1);
         _freshFeeds();
         _saleReverts(ConfioSmartAccount.BadState.selector, legs, 0);
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _freshFeeds();
         _sale(legs, 0, address(0), 0);
     }
@@ -798,11 +855,11 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         );
         IConfioSmartAccount.SaleLeg[] memory legs = _legs(_cryptoLeg(btcb, BTC_PRICE, CUSD_, MONTHLY + 0.01e18));
 
-        vm.warp(block.timestamp + 3 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 3 days - 1);
         _freshFeeds();
         assertEq(acct.billingStatus(), 2);
         _saleReverts(ConfioSmartAccount.BadState.selector, legs, 0);
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _freshFeeds();
         assertEq(acct.billingStatus(), 3);
         _sale(legs, 0, address(0), 0);
@@ -833,7 +890,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         acct.latchConfioSale();
 
         // The Safe sets it once (the reference must be live to be set).
-        feed.set(0.5e8, block.timestamp);
+        feed.set(0.5e8, vm.getBlockTimestamp());
         vm.expectRevert();
         factory.setConfioSale(address(venue), address(feed));
         vm.startPrank(safe);
@@ -853,9 +910,9 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _saleReverts(ConfioSmartAccount.BelowFeed.selector, _legs(_confioLeg(address(venue), 34e18)), 0);
         venue.setPrice(0.5e18);
         // Stale reference.
-        feed.set(0.5e8, block.timestamp - 26 hours - 1);
+        feed.set(0.5e8, vm.getBlockTimestamp() - 26 hours - 1);
         _saleReverts(ConfioSmartAccount.StaleFeed.selector, _legs(_confioLeg(address(venue), 31e18)), 0);
-        feed.set(0.5e8, block.timestamp);
+        feed.set(0.5e8, vm.getBlockTimestamp());
 
         // 31 CONFIO at US$0.50 = US$15.50: covers 14.99, inside the cap.
         vm.expectEmit(false, false, false, true, address(acct));
@@ -886,7 +943,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         assertEq(acct.confioSaleVenue(), address(venue));
         assertEq(acct.feeUsd(), MONTHLY, "fee unchanged");
         _toSaleAllowed();
-        feed.set(0.5e8, block.timestamp);
+        feed.set(0.5e8, vm.getBlockTimestamp());
 
         // The CONFIO venue cannot sell bitcoin or a stock.
         uint256 amount = _unitsForNet(15e18, BTC_PRICE, 18);
@@ -943,7 +1000,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _asRelayer();
         acct.collectFee();
         assertEq(cusd.balanceOf(address(collector)), ANNUAL + MONTHLY);
-        assertEq(acct.paidUntil(), block.timestamp + 30 days, "the new plan's length");
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 30 days, "the new plan's length");
         assertEq(uint8(acct.plan()), uint8(M));
         assertEq(uint8(acct.nextPlan()), uint8(NONE));
     }
@@ -968,7 +1025,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _asRelayer();
         acct.collectFee();
         assertEq(cusd.balanceOf(address(collector)), MONTHLY + ANNUAL);
-        assertEq(acct.paidUntil(), block.timestamp + 365 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 365 days);
         assertEq(uint8(acct.plan()), uint8(A));
     }
 
@@ -1108,11 +1165,11 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         vm.expectRevert(bad);
         acct.returnAsset(address(cusd));
         // SaleAllowed.
-        vm.warp(block.timestamp + 7 days);
+        vm.warp(vm.getBlockTimestamp() + 7 days);
         assertEq(acct.billingStatus(), 3);
         vm.expectRevert(bad);
         acct.returnAsset(address(cusd));
-        vm.warp(block.timestamp + 1000 days);
+        vm.warp(vm.getBlockTimestamp() + 1000 days);
         vm.expectRevert(bad);
         acct.returnAsset(address(cusd));
     }
@@ -1145,7 +1202,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _subscribe(A);
         assertEq(acct.status(), 1);
         assertFalse(acct.cancelRequested());
-        assertEq(acct.paidUntil(), block.timestamp + 365 days);
+        assertEq(acct.paidUntil(), vm.getBlockTimestamp() + 365 days);
         vm.expectRevert(ConfioSmartAccount.BadState.selector);
         acct.returnAsset(address(cusd));
     }
@@ -1195,10 +1252,10 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         _saleReverts(ConfioSmartAccount.BadState.selector, legs, 0);
         _asRelayer();
         acct.startPaymentNotice();
-        vm.warp(block.timestamp + 7 days - 1);
+        vm.warp(vm.getBlockTimestamp() + 7 days - 1);
         _freshFeeds();
         _saleReverts(ConfioSmartAccount.BadState.selector, legs, 0);
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _freshFeeds();
         _sale(legs, 0, address(0), 0);
     }
@@ -1244,7 +1301,7 @@ contract ConfioSmartAccountBillingTest is SmartAccountBase {
         acct.cancelClaim();
         vm.prank(bob, bob);
         acct.initiateClaim();
-        vm.warp(block.timestamp + 90 days);
+        vm.warp(vm.getBlockTimestamp() + 90 days);
         vm.prank(bob, bob);
         acct.executeClaim();
         assertEq(acct.owner(), bob);

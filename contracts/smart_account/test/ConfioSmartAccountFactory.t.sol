@@ -25,6 +25,8 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
     event Swept(address indexed token, uint256 amount);
     event DesignationApproved(address indexed account, address indexed beneficiary, uint64 window, uint64 expiresAt);
     event AcceptanceApproved(address indexed account, address indexed beneficiary, uint64 expiresAt);
+    event CardSpenderSet(address indexed spender, bool allowed);
+    event CardPausedSet(bool paused);
 
     // ── accounts ────────────────────────────────────────────────────────
 
@@ -44,6 +46,8 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
         assertEq(factory.forcedSaleNotice(), 7 days);
         assertFalse(factory.inheritanceEnabled());
         assertFalse(factory.relayerPaused());
+        assertFalse(factory.cardPaused());
+        assertFalse(factory.isCardSpender(alice));
         (address venue, address priceRef) = factory.confioSale();
         assertEq(venue, address(0));
         assertEq(priceRef, address(0));
@@ -157,8 +161,8 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
     // ── prices (decision 24) ────────────────────────────────────────────
 
     function test_scheduleFee_needsThirtyDaysNotice_andAppliesAtEffectiveAt() public {
-        uint64 soon = uint64(block.timestamp + 30 days - 1);
-        uint64 ok = uint64(block.timestamp + 30 days);
+        uint64 soon = uint64(vm.getBlockTimestamp() + 30 days - 1);
+        uint64 ok = uint64(vm.getBlockTimestamp() + 30 days);
         vm.expectRevert();
         factory.scheduleFee(1, 19.99e18, ok);
 
@@ -197,12 +201,12 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
 
         // A later change starts from the price in force.
         vm.prank(safe);
-        factory.scheduleFee(1, 24.99e18, uint64(block.timestamp + 40 days));
+        factory.scheduleFee(1, 24.99e18, uint64(vm.getBlockTimestamp() + 40 days));
         assertEq(factory.feeUsd(1), 19.99e18);
         // Rescheduling replaces a change still waiting; never sooner than 30 days.
         vm.prank(safe);
-        factory.scheduleFee(1, 9.99e18, uint64(block.timestamp + 30 days));
-        vm.warp(block.timestamp + 30 days);
+        factory.scheduleFee(1, 9.99e18, uint64(vm.getBlockTimestamp() + 30 days));
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         assertEq(factory.feeUsd(1), 9.99e18);
     }
 
@@ -302,15 +306,20 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
         _withBeneficiary();
 
         vm.startPrank(safe, safe);
-        factory.scheduleFee(1, 29.99e18, uint64(block.timestamp + 30 days));
-        factory.scheduleFee(2, 299.99e18, uint64(block.timestamp + 30 days));
+        factory.scheduleFee(1, 29.99e18, uint64(vm.getBlockTimestamp() + 30 days));
+        factory.scheduleFee(2, 299.99e18, uint64(vm.getBlockTimestamp() + 30 days));
         factory.setChallengeWindow(90 days, false);
         factory.setClaimCooldown(1 days);
         factory.setForcedSaleNotice(3 days);
         factory.setRelayerPaused(true);
         factory.setConfioSale(address(dex), address(btcFeed));
+        factory.setCardSpender(safe, true);
+        factory.setCardPaused(true);
         factory.pause();
-        // On the account itself the Safe is nobody.
+        // On the account itself the Safe is nobody, an allowlisted card
+        // spender included: it has no Card rule the owner signed.
+        vm.expectRevert(ConfioSmartAccount.BadRule.selector);
+        acct.cardPull(1, 1);
         vm.expectRevert(ConfioSmartAccount.NotOwner.selector);
         acct.withdraw(address(cusd), 1);
         vm.expectRevert(ConfioSmartAccount.NotOwner.selector);
@@ -349,7 +358,7 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
         assertEq(factory.CUSD_PLUS(), address(plus));
         assertEq(factory.STOCK_ROUTER(), address(stockRouter));
         bytes32 key = keccak256(abi.encode(bob, uint64(180 days)));
-        uint64 until = uint64(block.timestamp + 1 hours);
+        uint64 until = uint64(vm.getBlockTimestamp() + 1 hours);
 
         vm.expectEmit(true, true, false, true, address(factory));
         emit DesignationApproved(address(acct), bob, 180 days, until);
@@ -420,9 +429,82 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
         vm.stopPrank();
         bytes32 key = keccak256(abi.encode(bob, uint64(180 days)));
         bytes32 outer = keccak256(abi.encode(address(acct), uint256(8)));
-        assertEq(uint256(vm.load(address(factory), keccak256(abi.encode(key, outer)))), block.timestamp + 1 hours);
+        assertEq(uint256(vm.load(address(factory), keccak256(abi.encode(key, outer)))), vm.getBlockTimestamp() + 1 hours);
         outer = keccak256(abi.encode(address(acct), uint256(9)));
-        assertEq(uint256(vm.load(address(factory), keccak256(abi.encode(bob, outer)))), block.timestamp + 1 hours);
+        assertEq(uint256(vm.load(address(factory), keccak256(abi.encode(bob, outer)))), vm.getBlockTimestamp() + 1 hours);
+    }
+
+    // ── card spenders (decision 35) ─────────────────────────────────────
+
+    function test_cardSpenders_safeOnly_zeroRefused_pauseIsGlobal() public {
+        address issuer = makeAddr("issuer");
+        vm.expectRevert();
+        factory.setCardSpender(issuer, true);
+        vm.prank(relayer, relayer);
+        vm.expectRevert();
+        factory.setCardSpender(issuer, true);
+        vm.prank(eve);
+        vm.expectRevert();
+        factory.setCardPaused(true);
+
+        vm.startPrank(safe);
+        vm.expectRevert(bytes("zero spender"));
+        factory.setCardSpender(address(0), true);
+        vm.expectEmit(true, false, false, true, address(factory));
+        emit CardSpenderSet(issuer, true);
+        factory.setCardSpender(issuer, true);
+        vm.stopPrank();
+        assertTrue(factory.isCardSpender(issuer));
+        assertTrue(factory.cardSpenderAllowed(issuer));
+        assertFalse(factory.cardSpenderAllowed(eve));
+
+        vm.expectEmit(false, false, false, true, address(factory));
+        emit CardPausedSet(true);
+        vm.prank(safe);
+        factory.setCardPaused(true);
+        assertTrue(factory.isCardSpender(issuer), "the allowlist is kept");
+        assertFalse(factory.cardSpenderAllowed(issuer), "paused");
+        vm.prank(safe);
+        factory.setCardPaused(false);
+        assertTrue(factory.cardSpenderAllowed(issuer));
+
+        vm.prank(safe);
+        factory.setCardSpender(issuer, false);
+        assertFalse(factory.cardSpenderAllowed(issuer));
+        // The relayer pause does not touch cards, nor the card pause relayers.
+        vm.prank(safe);
+        factory.setRelayerPaused(true);
+        vm.prank(safe);
+        factory.setCardSpender(issuer, true);
+        assertTrue(factory.cardSpenderAllowed(issuer));
+    }
+
+    /// UUPS: the card storage is appended after generationOf (slot 10):
+    /// isCardSpender at 11, cardPaused at 12; every earlier slot keeps its
+    /// meaning (`forge inspect ConfioSmartAccountFactory storage-layout`).
+    function test_cardSpenders_storageIsAppended() public {
+        address issuer = makeAddr("issuer");
+        vm.startPrank(safe);
+        factory.setCardSpender(issuer, true);
+        factory.setCardPaused(true);
+        factory.setRelayerPaused(true);
+        vm.stopPrank();
+        assertEq(uint256(vm.load(address(factory), keccak256(abi.encode(issuer, uint256(11))))), 1);
+        assertEq(uint256(vm.load(address(factory), bytes32(uint256(12)))), 1);
+        // Slot 5 still packs claimCooldown, forcedSaleNotice,
+        // inheritanceEnabled and relayerPaused.
+        uint256 slot5 = uint256(vm.load(address(factory), bytes32(uint256(5))));
+        assertEq(uint64(slot5), 30 days);
+        assertEq(uint64(slot5 >> 64), 7 days);
+        assertEq(uint8(slot5 >> 136), 1, "relayerPaused");
+        // implementation at 0, accountOf at 1, generationOf at 10.
+        assertEq(address(uint160(uint256(vm.load(address(factory), bytes32(uint256(0)))))), address(implementation));
+        assertEq(uint256(vm.load(address(factory), keccak256(abi.encode(alice, uint256(10))))), 0);
+        assertEq(
+            address(uint160(uint256(vm.load(address(factory), keccak256(abi.encode(alice, uint256(1))))))),
+            address(acct),
+            "accountOf at 1"
+        );
     }
 
     // ── setConfioSale validation (audit P3) ─────────────────────────────
@@ -442,18 +524,18 @@ contract ConfioSmartAccountFactoryTest is SmartAccountBase {
         vm.expectRevert(bytes("price ref: round"));
         factory.setConfioSale(address(dex), address(noRounds));
         // A zero or negative answer.
-        feed.set(0, block.timestamp);
+        feed.set(0, vm.getBlockTimestamp());
         vm.expectRevert(bytes("price ref: stale"));
         factory.setConfioSale(address(dex), address(feed));
-        feed.set(-1, block.timestamp);
+        feed.set(-1, vm.getBlockTimestamp());
         vm.expectRevert(bytes("price ref: stale"));
         factory.setConfioSale(address(dex), address(feed));
         // Older than 26 hours.
-        feed.set(0.5e8, block.timestamp - 26 hours - 1);
+        feed.set(0.5e8, vm.getBlockTimestamp() - 26 hours - 1);
         vm.expectRevert(bytes("price ref: stale"));
         factory.setConfioSale(address(dex), address(feed));
         // Exactly 26 hours old is accepted.
-        feed.set(0.5e8, block.timestamp - 26 hours);
+        feed.set(0.5e8, vm.getBlockTimestamp() - 26 hours);
         factory.setConfioSale(address(dex), address(feed));
         vm.stopPrank();
         (address venue, address priceRef) = factory.confioSale();

@@ -6,8 +6,11 @@ import * as service from '../../services/smartAccount';
 import {
   account, failedRead, flush, hasTappable, offer, ok, prepared, rule, tap, text,
 } from '../../components/smartAccount/testing/fixtures';
-import { SmartAccountRulesScreen, ruleNote, ruleSubtitle } from '../SmartAccountRulesScreen';
-import { SmartAccountRuleEditScreen, cryptoBlockedMessage, cryptoBuyAllowed } from '../SmartAccountRuleEditScreen';
+import { SmartAccountRulesScreen, payoutKindSubtitle, ruleNote, ruleSubtitle } from '../SmartAccountRulesScreen';
+import {
+  SmartAccountRuleEditScreen, cryptoBlockedMessage, cryptoBuyAllowed, payoutEmptyCopy, pendingStepBody,
+} from '../SmartAccountRuleEditScreen';
+import { pagoMovilFieldErrors } from '../../components/smartAccount/PagoMovilDestinationForm';
 import { DEX_TRADING_UI_ENABLED } from '../../config/features';
 import { HELP_WATCHES } from '../../components/smartAccount/help';
 
@@ -629,5 +632,193 @@ describe('a Confío IA+ proposal (decision 34)', () => {
     expect(HELP_WATCHES.paragraphs[1]).toContain('una regla que se repite hasta que la detengas');
     expect(HELP_WATCHES.paragraphs[1]).toContain('Si solo querías una compra, detenla después de la primera.');
     expect(HELP_WATCHES.paragraphs[1]).not.toContain('mensual');
+  });
+});
+
+describe('card and unknown rules (decision 35)', () => {
+  const card = rule({ id: 'c1', kind: 'card', amountUsd: '100.00', frequency: 'monthly', nextRunAt: null,
+    payeeName: 'Tarjeta Confío', payeeHandle: null });
+  const unknown = rule({ id: 'u1', kind: 'something_new', amountUsd: '20.00', payeeName: null, payeeHandle: null });
+
+  beforeEach(() => {
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ rules: [rule(), card, unknown] })));
+    api.fetchSmartAccountCardRules.mockResolvedValue(ok([{
+      ruleId: 'c1', spenderLabel: 'Tarjeta Confío', active: true, capUsd: '100.00', spentUsd: '30.00',
+      remainingUsd: '70.00', periodDays: 28, periodStart: '2026-11-10T00:00:00Z', periodEnd: '2026-12-08T00:00:00Z',
+      recentPulls: [{ pulledAt: '2026-11-20T12:00:00Z', usdSpent: '30.00', usdtOut: '29.73', txHash: '0x1' }],
+    }]));
+  });
+
+  it('formats a card rule and any unknown kind without crashing', () => {
+    const { ruleTitle } = require('../../components/smartAccount/format');
+    expect(ruleTitle(card)).toBe('Tarjeta Confío: hasta US$100.00');
+    expect(ruleTitle(unknown)).toBe('Regla automática de US$20.00');
+    expect(ruleSubtitle(card)).toBe('Límite cada 28 días');
+    expect(ruleSubtitle({ ...card, active: false })).toBe('detenida');
+    expect(ruleSubtitle(unknown)).toBe('activa');
+  });
+
+  it('lists them in the rules list', async () => {
+    await mount(<SmartAccountRulesScreen />);
+    const out = text(tree);
+    expect(out).toContain('Tarjeta Confío: hasta US$100.00');
+    expect(out).toContain('Regla automática de US$20.00');
+  });
+
+  it('opens a card rule read-only, with its room this period and only the stop', async () => {
+    setRouteParams({ ruleId: 'c1' });
+    await mount(<SmartAccountRuleEditScreen />);
+    const out = text(tree);
+    expect(out).toContain('Tarjeta Confío: hasta US$100.00');
+    expect(out).toContain('US$70.00');
+    expect(out).toContain('comisión de salida de 0,9%');
+    expect(hasTappable(tree, 'rule-review')).toBe(false);
+    expect(hasTappable(tree, 'rule-destination')).toBe(false);
+    await tap(tree, 'rule-stop');
+    expect(api.prepareSmartAccountCancelRule).toHaveBeenCalledWith('c1');
+  });
+
+  it('still shows a card rule when its period read fails', async () => {
+    api.fetchSmartAccountCardRules.mockResolvedValue(failedRead);
+    setRouteParams({ ruleId: 'c1' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).toContain('Tarjeta Confío: hasta US$100.00');
+    expect(hasTappable(tree, 'rule-stop')).toBe(true);
+  });
+
+  it('opens an unknown kind read-only too', async () => {
+    setRouteParams({ ruleId: 'u1' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).toContain('no se puede cambiar desde esta versión');
+    expect(hasTappable(tree, 'rule-review')).toBe(false);
+    expect(api.fetchSmartAccountCardRules).not.toHaveBeenCalled();
+  });
+});
+
+describe('Pago Móvil destinations from the payout picker', () => {
+  const saved = { payoutMethodId: 'pmv', rail: 've_pagomovil', label: 'Pago Móvil · Banesco · 4567', holderName: 'Ana Pérez', available: true };
+
+  beforeEach(() => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ payoutRails: ['ve_pagomovil'] })));
+    api.fetchSmartAccountPayoutMethods.mockResolvedValue(ok([]));
+    api.fetchSmartAccountPagoMovilBanks.mockResolvedValue(ok([{ code: '0134', name: 'Banesco' }, { code: '0102', name: 'Banco de Venezuela' }]));
+    (api.saveSmartAccountPagoMovilDestination as jest.Mock).mockResolvedValue(
+      { success: true, errorCode: null, errorMessage: null, payoutMethod: saved });
+  });
+
+  it('the empty state never sends the user to Enviar for Pago Móvil, and offers the form', async () => {
+    setRouteParams({ kind: 'payout' });
+    await mount(<SmartAccountRuleEditScreen />);
+    const out = text(tree);
+    expect(out).toContain('Agrega una cuenta Pago Móvil');
+    expect(out).not.toContain('desde Enviar');
+    expect(hasTappable(tree, 'Agregar cuenta Pago Móvil')).toBe(true);
+  });
+
+  it('adds an account, selects it, and signs the rule naming it', async () => {
+    setRouteParams({ kind: 'payout' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'Agregar cuenta Pago Móvil');
+    await flush();
+    expect(hasTappable(tree, 'pagomovil-save')).toBe(true);
+    await tap(tree, 'pagomovil-save');  // nothing filled: local checks, nothing sent
+    expect(api.saveSmartAccountPagoMovilDestination).not.toHaveBeenCalled();
+    expect(text(tree)).toContain('Elige el banco.');
+    await tap(tree, 'pagomovil-bank');
+    await tap(tree, 'pagomovil-bank-0134');
+    await type('pagomovil-phone', '0414 1234567');
+    await type('pagomovil-id', 'v12345678');
+    await type('pagomovil-name', 'Ana Pérez');
+    await tap(tree, 'pagomovil-save');
+    await flush();
+    expect(api.saveSmartAccountPagoMovilDestination).toHaveBeenCalledWith(
+      { phone: '0414 1234567', bankCode: '0134', idNumber: 'v12345678', holderName: 'Ana Pérez' });
+    expect(text(tree)).toContain('Pago Móvil · Banesco · 4567');
+    await type('rule-amount', '25');
+    await tap(tree, 'rule-review');
+    expect(api.prepareSmartAccountPayoutRule).toHaveBeenCalledWith(expect.objectContaining({ payoutMethodId: 'pmv', amountUsd: '25.00' }));
+  });
+
+  it('shows the server message when the account is refused, and keeps the form', async () => {
+    (api.saveSmartAccountPagoMovilDestination as jest.Mock).mockResolvedValue(
+      { success: false, errorCode: 'bad_pagomovil_destination', errorMessage: 'La cédula debe tener el formato V12345678.', payoutMethod: null });
+    setRouteParams({ kind: 'payout' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'Agregar cuenta Pago Móvil');
+    await flush();
+    await tap(tree, 'pagomovil-bank');
+    await tap(tree, 'pagomovil-bank-0102');
+    await type('pagomovil-phone', '04141234567');
+    await type('pagomovil-id', 'V12345678');
+    await type('pagomovil-name', 'Ana');
+    await tap(tree, 'pagomovil-save');
+    await flush();
+    expect(text(tree)).toContain('La cédula debe tener el formato V12345678.');
+    expect(hasTappable(tree, 'pagomovil-save')).toBe(true);
+  });
+
+  it('the saved-accounts sheet offers to add one next to the saved list', async () => {
+    api.fetchSmartAccountPayoutMethods.mockResolvedValue(ok([saved]));
+    setRouteParams({ kind: 'payout' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-destination');
+    expect(text(tree)).toContain('Pago Móvil · Banesco · 4567');
+    expect(hasTappable(tree, 'payout-add-pagomovil')).toBe(true);
+  });
+
+  it('copy: Pago Móvil is added here, other rails from Enviar', () => {
+    expect(payoutEmptyCopy([])).toBe('Los pagos automáticos a cuenta bancaria todavía no están disponibles para ti.');
+    expect(payoutEmptyCopy(['co_breb'])).toContain('desde Enviar');
+    expect(payoutEmptyCopy(['ve_pagomovil'])).toBe('Agrega una cuenta Pago Móvil y podrás pagarle de forma automática.');
+    expect(payoutEmptyCopy(['ve_pagomovil', 'co_breb'])).toBe('Agrega aquí una cuenta Pago Móvil. Las cuentas Bre-B se guardan desde Enviar.');
+    expect(payoutKindSubtitle(['ve_pagomovil'])).toContain('o a una Pago Móvil que agregues');
+    expect(payoutKindSubtitle(['co_breb'])).toBe('A una cuenta que ya guardaste: Bre-B.');
+  });
+
+  it('local checks mirror the server format', () => {
+    const ok_ = pagoMovilFieldErrors({ bank: { code: '0134', name: 'Banesco' }, phone: '+58 414-123-4567', idNumber: '12345678', holderName: 'Ana P' });
+    expect(ok_).toEqual({ bank: '', phone: '', idNumber: '', holderName: '' });
+    const bad = pagoMovilFieldErrors({ bank: null, phone: '0212 1234567', idNumber: 'X1', holderName: ' ' });
+    expect(Object.values(bad).every(Boolean)).toBe(true);
+  });
+});
+
+describe('audit copy fixes', () => {
+  it('the pending-step notice names Confío IA+ only for a proposal', () => {
+    expect(pendingStepBody(true)).toContain('Confío IA+');
+    expect(pendingStepBody(false)).toBe('No lo repitas. Cuando aparezca en tus reglas, ya está lista.');
+  });
+
+  it('a manual rule whose signature is still confirming never mentions an IA+ proposal', async () => {
+    api.prepareSmartAccountSendRule.mockResolvedValue({ ...prepared(), success: false, errorCode: 'rule_duplicate_pending',
+      errorMessage: 'Esa regla se está confirmando.' } as any);
+    setRouteParams({ kind: 'send' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-destination');
+    await tap(tree, 'pick-ana');
+    await type('rule-amount', '10');
+    await tap(tree, 'rule-review');
+    await flush();
+    const out = text(tree);
+    expect(out).toContain('Cuando aparezca en tus reglas, ya está lista.');
+    expect(out).not.toContain('Confío IA+');
+  });
+
+  it('a card limit with no known frequency reads "por período", never "cada día"', async () => {
+    const { cardPeriodLabel, cardPeriodDays } = require('../../components/smartAccount/format');
+    expect(cardPeriodLabel(cardPeriodDays(null))).toBe('por período');
+    expect(cardPeriodLabel(cardPeriodDays('fortnightly_v2'))).toBe('por período');
+    expect(cardPeriodLabel(0)).toBe('por período');
+    expect(cardPeriodLabel(1)).toBe('cada día');
+    expect(cardPeriodLabel(28)).toBe('cada 28 días');
+    const card = rule({ id: 'c2', kind: 'card', amountUsd: '40.00', frequency: null as any, nextRunAt: null,
+      payeeName: 'Tarjeta Confío', payeeHandle: null });
+    expect(ruleSubtitle(card)).toBe('Límite por período');
+    api.fetchSmartAccount.mockResolvedValue(ok(account({ rules: [card] })));
+    api.fetchSmartAccountCardRules.mockResolvedValue(failedRead);
+    setRouteParams({ ruleId: 'c2' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).toContain('hasta US$40.00 por período');
+    expect(text(tree)).not.toContain('cada día');
   });
 });

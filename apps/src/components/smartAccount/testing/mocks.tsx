@@ -107,7 +107,7 @@ jest.mock('../../../services/smartAccount', () => {
   const actual = jest.requireActual('../../../services/smartAccount');
   const mocked: Record<string, unknown> = { ...actual };
   Object.keys(actual).forEach((key) => {
-    if (/^(fetch|prepare|decline|delete|signAndSubmit)/.test(key)) {
+    if (/^(fetch|prepare|decline|delete|save|signAndSubmit)/.test(key)) {
       mocked[key] = jest.fn();
     }
   });
