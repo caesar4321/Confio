@@ -112,7 +112,8 @@ class WrapMintScanTests(TestCase):
     def test_a_new_epoch_voids_clean_marks(self):
         self._scan_cusd()
         self._wrap('0x' + 'fd' * 32, 990)
-        self.head = 1_000 + tasks.CUSD_MAX_LAG_BLOCKS + 10  # fell behind: a gap
+        cache.delete(tasks.CUSD_CURSOR_KEY)  # the cursor was lost: an unknown gap
+        self.head = 7_000
         self._scan_cusd()
         tx = '0x' + 'fe' * 32
         self._wrap(tx, self.head - 5)

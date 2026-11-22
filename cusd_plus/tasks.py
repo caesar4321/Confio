@@ -17,7 +17,7 @@ import threading
 import time
 
 from django.db import models
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import ROUND_DOWN, Decimal
 
 import requests
@@ -364,6 +364,88 @@ def _address_topic(address: str) -> str:
     return '0x' + address.lower().replace('0x', '').rjust(64, '0')
 
 
+# The inbound scanners' rule: a cursor moves only past a window whose every
+# log was handled or saved for retry, and only after that was written.
+USDT_CURSOR_KEY = 'cusd_plus_bsc_scan_cursor'
+USDT_RETRY_KEY = 'cusd_plus_bsc_scan_retry'
+SCAN_LOCK_ID = 0x62736373  # pg advisory lock: one scan at a time ('bscs')
+SHARE_CURSOR_KEY = 'cusd_plus_bsc_share_scan_cursor'
+SHARE_RETRY_KEY = 'cusd_plus_bsc_share_scan_retry'
+CUSD_RETRY_KEY = 'cusd_plus_cusd_scan_retry'
+# A backlog is read this many new blocks per run: a range the public RPCs
+# serve, and progress that survives a restart.
+SCAN_MAX_BLOCKS_PER_RUN = 5_000
+SCAN_RETRY_ALERT_EVERY = 120  # about hourly at one run per 30 s
+
+
+def _log_id(log: dict) -> str:
+    return f"{log.get('transactionHash')}:{log.get('logIndex')}".lower()
+
+
+class _NotYet(Exception):
+    """Not judgeable yet: saved for retry, and not an error."""
+
+
+def _log_block(log: dict) -> int | None:
+    try:
+        return int(log.get('blockNumber'), 16)
+    except (TypeError, ValueError):
+        return None
+
+
+def _log_recipient(log: dict) -> str:
+    topics = log.get('topics') or []
+    return ('0x' + str(topics[2])[-40:]).lower() if len(topics) > 2 else ''
+
+
+def _retry_owners(retry_key: str, registered: dict) -> dict:
+    """`registered`, plus whose each saved log was when it failed: a wallet
+    re-enrolled since must not drop it."""
+    from django.core.cache import cache
+
+    saved = (cache.get(retry_key) or {}).values()
+    return {**{_log_recipient(e['log']): e['account_id'] for e in saved if e.get('account_id')},
+            **registered}
+
+
+def _with_retries(retry_key: str, logs: list) -> list:
+    """The window's logs after the ones saved for retry, each once."""
+    from django.core.cache import cache
+
+    pending = {i: entry['log'] for i, entry in (cache.get(retry_key) or {}).items()}
+    pending.update((_log_id(log), log) for log in logs)
+    return list(pending.values())
+
+
+def _save_retries(retry_key: str, seen: list, failed: list, owners: dict,
+                  scanned_to: int | None = None) -> None:
+    """Save what this pass could not handle and drop what it did.
+
+    Call before advancing the cursor: if this write raises, the cursor stays.
+    A failing log is retried every run, however old, and holds back nothing.
+    One at or below `scanned_to` was handled by an earlier run (`replay`)."""
+    from django.core.cache import cache
+
+    saved = cache.get(retry_key) or {}
+    failed_ids = {_log_id(log) for log, _ in failed}
+    handled = {_log_id(log) for log in seen} - failed_ids
+    updated = {i: entry for i, entry in saved.items() if i not in handled}
+    for log, exc in failed:
+        log_id = _log_id(log)
+        entry = saved.get(log_id)
+        if entry is None:
+            block = _log_block(log)
+            entry = {'log': log, 'attempts': 0, 'account_id': owners.get(_log_recipient(log)),
+                     'replay': None not in (block, scanned_to) and block <= scanned_to}
+        attempts = entry['attempts'] + (exc is not None)  # waiting is no failure
+        updated[log_id] = {**entry, 'attempts': attempts}
+        if exc is not None and (attempts == 1 or attempts % SCAN_RETRY_ALERT_EVERY == 0):
+            logger.error('%s: %s not processed (attempt %s), will retry',
+                         retry_key, log_id, attempts, exc_info=exc)
+    if updated != saved:
+        cache.set(retry_key, updated, None)
+
+
 @shared_task(name='cusd_plus.monitor_bridge_arrivals')
 def monitor_bridge_arrivals():
     """BSC USDT inbound scanner — the BNB sibling of blockchain.scan_inbound_deposits.
@@ -391,11 +473,29 @@ def monitor_bridge_arrivals():
         delivery still needs. Support resolves those by hand.
 
     Batched eth_getLogs per address chunk (topics accept an ADDRESS ARRAY,
-    so cost grows with users/800, not users) over a global cursor with a
+    so cost grows with users/800, not users) over one cursor per pass with a
     rewind margin; idempotency comes from monotonic status transitions and
-    the src_tx_id dedupe on deposit rows.
+    the src_tx_id dedupe on deposit rows. A cursor is saved only after its
+    window is processed, so a killed run is replayed whole, however old.
     STUCK is judged by chain silence only — never by a vendor API.
     """
+    from django.db import connection
+
+    # Overlapping runs would overwrite each other's retries and cursors. A
+    # session lock, not a cache key: it dies with a killed worker.
+    with connection.cursor() as db:
+        db.execute('SELECT pg_try_advisory_lock(%s)', [SCAN_LOCK_ID])
+        if not db.fetchone()[0]:
+            logger.info('BSC deposit scan already running')
+            return
+    try:
+        _scan_inbound()
+    finally:
+        with connection.cursor() as db:
+            db.execute('SELECT pg_advisory_unlock(%s)', [SCAN_LOCK_ID])
+
+
+def _scan_inbound() -> None:
     from django.core.cache import cache
     from conversion.models import Conversion
 
@@ -405,6 +505,9 @@ def monitor_bridge_arrivals():
         status__in=('SRC_COMMITTED', 'STUCK'),
         is_deleted=False,
     ).exclude(user_bsc_address='')[:500])
+    # One unreadable address would fail the getLogs of every wallet's scan.
+    conversions = [c for c in conversions
+                   if re.fullmatch(r'0x[0-9a-fA-F]{40}', c.user_bsc_address or '')]
     conv_watch = {c.user_bsc_address.lower(): c for c in conversions}
 
     registered = _registered_bsc_addresses()  # addr -> account_id
@@ -457,31 +560,44 @@ def monitor_bridge_arrivals():
         return
 
     rewind = int(getattr(settings, 'CUSD_PLUS_BSC_SCAN_REWIND_BLOCKS', 100))
-    from_block = cache.get('cusd_plus_bsc_scan_cursor') or max(latest_block - 1200, 0)
-    from_block = max(int(from_block) - rewind, 0)
+    cursor = cache.get(USDT_CURSOR_KEY)
+    if latest_block <= 0 or (cursor is not None and latest_block < int(cursor)):
+        # A node behind what was scanned: nothing new, and no cursor moves back.
+        _scan_failed('blockNumber', RuntimeError(f'head {latest_block} is behind cursor {cursor}'))
+        return
+    if cursor is None:
+        cursor = max(latest_block - 1200, 0)
+        # Saved now: a killed cold run must not restart from a later head.
+        cache.set(USDT_CURSOR_KEY, cursor, None)
+    cursor = int(cursor)
+    # The cUSD+ pass starts where the USDT cursor is, then keeps its own.
+    cache.add(SHARE_CURSOR_KEY, cursor, None)
+    to_block = min(latest_block, cursor + SCAN_MAX_BLOCKS_PER_RUN)
+    from_block = max(cursor - rewind, 0)
 
     logs: list[dict] = []
     addrs = sorted(watch_all)
     for i in range(0, len(addrs), 800):
         try:
             logs += _get_logs_chunked(
-                from_block, latest_block,
+                from_block, to_block,
                 [TRANSFER_TOPIC, None,
                  [_address_topic(a) for a in addrs[i:i + 800]]],
             )
         except Exception as exc:  # noqa: BLE001
             _scan_failed('getLogs', exc)
             return  # cursor untouched — next run rescans the window
-    cache.set('cusd_plus_bsc_scan_cursor', latest_block, None)
     if failures:
         logger.info('BSC deposit scanner recovered after %s failed runs', failures)
     cache.set(_FAILURE_KEY, 0, None)
 
     now = timezone.now()
     min_deposit = Decimal(str(getattr(settings, 'CUSD_PLUS_MIN_EXTERNAL_DEPOSIT_USD', 1)))
-    arrived: dict[str, dict] = {}
+    arrived: dict[int, list[dict]] = {}
+    owners = _retry_owners(USDT_RETRY_KEY, registered)
     system_addrs = _system_addresses()
-    for log in logs:
+
+    def handle(log):
         key = ('0x' + log['topics'][2][-40:]).lower()
         sender = ('0x' + log['topics'][1][-40:]).lower()
         raw_units = int(log['data'], 16)
@@ -495,7 +611,7 @@ def monitor_bridge_arrivals():
         _mark_receipt_balances_stale(key, {'blockNumber': log.get('blockNumber')})
         from payment_accounts.activity import arrival_owned
         if arrival_owned(log['transactionHash'], key):
-            continue
+            return
         # An arrival is a DEPOSIT only if it came from outside Confío. This
         # pass filters on the RECIPIENT topic alone, so it used to record our
         # own outflows as inbound money: redeemToUsdt pays the cUSD+ vault's
@@ -524,25 +640,55 @@ def monitor_bridge_arrivals():
                 and _source_row_covers(log['transactionHash'], key):
             logger.info('USDT to %s from internal %s (%s) — already recorded',
                         key, sender, log['transactionHash'])
-            continue
+            return
+        # A replay can be older than the watch sets: a transfer a ramp already
+        # claimed stays that ramp's, even once linked and out of ramp_addrs.
+        from ramps.models import RampTransaction
+        if RampTransaction.objects.filter(
+                metadata__bsc_arrival_tx_hash=log['transactionHash'].lower(),
+                metadata__bsc_arrival_log_index=int(log.get('logIndex', '0x0'), 16),
+                actor_address__iexact=key).exists():
+            return
+        block = int(log.get('blockNumber') or hex(latest_block), 16)
+        # Older than any on-time run reads (a beat plus its rewind): a replay,
+        # a backlog or a retry, judged as of the block's own time.
+        late = block < latest_block - 2 * rewind
+
+        def mined_at() -> int:
+            return int(_rpc('eth_getBlockByNumber', [hex(block), False])['timestamp'], 16)
+
         conv = conv_watch.get(key)
+        if conv is not None:
+            if Conversion.objects.filter(
+                    user_bsc_address__iexact=key, bridge_arrival_tx=log['transactionHash'],
+                    is_deleted=False).exclude(pk=conv.pk).exists():
+                return  # an earlier saga's delivery, replayed
+            # Late, judge as an on-time scan would have: money that landed
+            # before this saga was committed is a deposit, not its delivery.
+            if conv.src_committed_at and late:
+                mined = mined_at()
+                if mined < conv.src_committed_at.timestamp():
+                    # Another saga at this address may already have been waiting.
+                    conv = next((c for c in reversed(conversions)
+                                 if c.user_bsc_address.lower() == key and c.src_committed_at
+                                 and c.src_committed_at.timestamp() <= mined), None)
         if conv is not None:
             floor_units = int(float(conv.to_amount) * 0.9 * 1e18)
             if raw_units >= floor_units:
-                arrived[key] = log
+                arrived.setdefault(conv.pk, []).append(log)
             else:
                 logger.info(
                     'below-floor USDT arrival at conversion address %s (%s) — left for support',
                     key, log['transactionHash'],
                 )
-            continue
-        account_id = registered.get(key)
+            return
+        account_id = owners.get(key)
         if account_id is None:
             logger.info(
                 'USDT arrival at unregistered watched address %s (%s)',
                 key, log['transactionHash'],
             )
-            continue
+            return
         amount_usd = (Decimal(raw_units) / Decimal(10 ** 18)).quantize(
             Decimal('0.000001'), rounding=ROUND_DOWN)
         if amount_usd < min_deposit:
@@ -550,26 +696,23 @@ def monitor_bridge_arrivals():
                 'dust USDT arrival at %s (%s USDT, %s) — below deposit minimum',
                 key, amount_usd, log['transactionHash'],
             )
-            continue
+            return
         source = 'external_deposit'
         if key in ramp_addrs:
-            try:
-                from ramps.signals import attribute_bsc_ramp_arrival
-                matched_ramp = attribute_bsc_ramp_arrival(
-                    actor_address=key,
-                    amount=amount_usd,
-                    tx_hash=log['transactionHash'],
-                    log_index=int(log.get('logIndex', '0x0'), 16),
-                    sender_address=sender,
-                )
-                if matched_ramp is not None:
-                    source = 'ramp'
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    'BSC ramp arrival attribution failed for %s',
-                    log['transactionHash'],
-                )
-        _record_inbound_deposit(
+            # A failure raises, and the log is retried: guessing "deposit"
+            # here would file a ramp's delivery under a stranger's.
+            from ramps.signals import attribute_bsc_ramp_arrival
+            matched_ramp = attribute_bsc_ramp_arrival(
+                actor_address=key,
+                amount=amount_usd,
+                tx_hash=log['transactionHash'],
+                log_index=int(log.get('logIndex', '0x0'), 16),
+                sender_address=sender,
+                mined_at=datetime.fromtimestamp(mined_at(), tz=dt_timezone.utc) if late else None,
+            )
+            if matched_ramp is not None:
+                source = 'ramp'
+        recorded = _record_inbound_deposit(
             account_id=account_id,
             to_addr=key,
             amount_usd=amount_usd,
@@ -579,32 +722,73 @@ def monitor_bridge_arrivals():
             now=now,
             from_addr='0x' + log['topics'][1][-40:],
         )
+        if recorded is False:
+            raise RuntimeError('deposit receipt not written')
 
-    for addr, conv in conv_watch.items():
-        log = arrived.get(addr)
-        if log:
+    logs = _with_retries(USDT_RETRY_KEY, logs)
+    failed: list[tuple[dict, Exception | None]] = []
+    for log in logs:
+        try:
+            handle(log)
+        except Exception as exc:  # noqa: BLE001 — one log must not stall the rest
+            failed.append((log, exc))
+
+    caught_up = to_block == latest_block
+    unresolved = {_log_recipient(log) for log, _ in failed}
+    for conv in conversions:
+        addr = conv.user_bsc_address.lower()
+        candidates = arrived.get(conv.pk)
+        if candidates and addr in unresolved:
+            # One of its transfers is unreadable so far, maybe the delivery.
+            failed.extend((each, None) for each in candidates)
+            continue
+        if candidates:
+            # Nearest the quote, then earliest: position in the list says
+            # nothing once retries and backlogs are read together.
+            quote = int(Decimal(str(conv.to_amount)) * 10 ** 18)
+            log = min(candidates, key=lambda each: (
+                abs(int(each['data'], 16) - quote),
+                int(each.get('blockNumber') or '0x0', 16), int(each.get('logIndex') or '0x0', 16)))
+            others = [each for each in candidates if each is not log]
             # The quote was only a pre-bridge estimate. From this point on,
             # to_amount is the exact six-decimal USDT amount observed on BSC;
             # leg C and its reservation must never try to mint the larger
             # source-side amount or a stale quote.
-            _mark_bridge_arrived(conv, log, now)
+            try:
+                _mark_bridge_arrived(conv, log, now)
+            except Exception as exc:  # noqa: BLE001
+                failed.extend((each, exc) for each in candidates)
+                continue
+            # One transfer completes one saga. The next run reads the rest
+            # against a fresh watch set: another saga's, or a deposit.
+            failed.extend((each, None) for each in others)
             logger.info(
                 'conversion %s: USDT arrived on BNB (%s)',
                 conv.internal_id, log['transactionHash'],
             )
             # TODO(cusd+): websocket event + push nudge if the app is closed.
         elif (
-            conv.status == 'SRC_COMMITTED'
+            # Silence is proven only at the head, with no arrival left to retry.
+            caught_up
+            and conv_watch[addr] is conv
+            and addr not in unresolved
+            and conv.status == 'SRC_COMMITTED'
             and conv.src_committed_at
             and now - conv.src_committed_at > timeout
         ):
             conv.status = 'STUCK'
-            conv.save(update_fields=['status', 'updated_at'])
+            try:
+                conv.save(update_fields=['status', 'updated_at'])
+            except Exception:  # noqa: BLE001 — judged again next run
+                logger.exception('could not mark conversion %s STUCK', conv.internal_id)
+                continue
             logger.error(
                 'conversion %s STUCK: no USDT arrival on BNB after %s (src tx %s). '
                 'Support diagnostic: allbridge_diagnose("%s")',
                 conv.internal_id, timeout, conv.from_transaction_hash, conv.internal_id,
             )
+    _save_retries(USDT_RETRY_KEY, logs, failed, owners)
+    cache.set(USDT_CURSOR_KEY, to_block, None)
 
     # ── cUSD+ (vault share) inbound pass (Phase 2) ──────────────────────
     # External cUSD+ receives (another wallet sends shares directly) get a
@@ -619,13 +803,23 @@ def monitor_bridge_arrivals():
     except Exception:  # noqa: BLE001
         logger.exception('cUSD inbound scan failed (USDT pipeline unaffected)')
     try:
-        _scan_cusd_plus_arrivals(registered, from_block, latest_block, min_deposit)
+        # Its own cursor: a failure here must not inherit the USDT pass's progress.
+        share_cursor = int(cache.get(SHARE_CURSOR_KEY))
+        share_to = min(latest_block, share_cursor + SCAN_MAX_BLOCKS_PER_RUN)
+        wraps_upto = cache.get(CUSD_CURSOR_KEY) if getattr(settings, 'CUSD_VAULT_ADDRESS', '') else None
+        if share_cursor <= latest_block and _scan_cusd_plus_arrivals(
+                registered, max(share_cursor - rewind, 0), share_to, min_deposit, wraps_upto):
+            cache.set(SHARE_CURSOR_KEY, share_to, None)
     except Exception:  # noqa: BLE001
         logger.exception('cUSD+ inbound scan failed (USDT pipeline unaffected)')
 
 
 def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: int,
-                             min_deposit) -> None:
+                             min_deposit, wraps_upto: int | None = None) -> bool:
+    """True once every log in the window is handled or saved for retry.
+
+    `wraps_upto`: how far the cUSD pass got. A wrap past it waits, since what
+    it converted may be a deposit that pass is about to record."""
     from users.number_format import format_usd
     from decimal import ROUND_DOWN as _RD
 
@@ -633,7 +827,7 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
 
     vault_addr = (getattr(settings, 'CUSD_PLUS_VAULT_ADDRESS', '') or '').lower()
     if not vault_addr or not registered:
-        return
+        return False
 
     logs: list[dict] = []
     addrs = sorted(registered)
@@ -644,8 +838,10 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
              [_address_topic(a) for a in addrs[i:i + 800]]],
             address=vault_addr,
         )
+    logs = _with_retries(SHARE_RETRY_KEY, logs)
+    owners = _retry_owners(SHARE_RETRY_KEY, registered)
     if not logs:
-        return
+        return True
 
     pps_wad = cp_vault.p_plus_wad()
 
@@ -675,7 +871,8 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
             return False
 
     system_addrs = _system_addresses()
-    for log in logs:
+
+    def handle(log):
         sender = ('0x' + log['topics'][1][-40:]).lower()
         # Skip a transfer only when a feature already recorded it. This pass
         # used to exclude REGISTERED senders alone, and no contract of ours
@@ -689,10 +886,10 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         key = ('0x' + log['topics'][2][-40:]).lower()
         if (sender in system_addrs or sender in registered or sender == '0x' + '0' * 40) \
                 and _source_row_covers(log['transactionHash'], key):
-            continue  # already recorded by whichever feature moved it
-        account_id = registered.get(key)
+            return  # already recorded by whichever feature moved it
+        account_id = owners.get(key)
         if account_id is None:
-            continue
+            return
         is_mint = sender == '0x' + '0' * 40
         if is_mint and _mint_already_recorded(log['transactionHash'], key):
             # A MINT, not a deposit. The topic filter wildcards the sender, so
@@ -707,17 +904,20 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
             # unowned mint has no other app-visible record — dropping it here
             # would erase the only history of that money. Keep the row for
             # those; it just isn't an external wallet deposit (below).
-            continue
+            return
         shares = int(log['data'], 16)
         amount_usd = (Decimal(shares) * Decimal(pps_wad) / Decimal(10 ** 36)).quantize(
             Decimal('0.000001'), rounding=_RD)
         if is_mint and _is_wrap(log['transactionHash'], key):
-            owned = _wrap_owned(log['transactionHash'], key, int(log.get('blockNumber', '0x0'), 16))
+            wrap_block = int(log.get('blockNumber', '0x0'), 16)
+            if _wrap_must_wait(key, wrap_block, wraps_upto):
+                raise _NotYet
+            owned = _wrap_owned(log['transactionHash'], key, wrap_block)
             _note_cusd_clean(key)
             if owned:
-                continue  # the member's own cUSD, already in history, wrapped
+                return  # the member's own cUSD, already in history, wrapped
         if amount_usd < min_deposit:
-            continue  # dust — strangers must not spam rows/notifications
+            return  # dust — strangers must not spam rows/notifications
         # Externally-originated cUSD+ arriving at a registered address is a
         # RECEIVE with an external sender — that is exactly what a
         # SendTransaction models, and writing one gives this deposit the same
@@ -736,7 +936,17 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         account = Account.objects.filter(id=account_id).select_related(
             'user', 'business').first()
         if account is None:
-            continue
+            return
+        # transaction_hash is unique (soft-deleted rows included): a transfer
+        # sharing one can't have its own row, and retrying wouldn't change it.
+        holders = list(SendTransaction.all_objects.filter(
+            models.Q(idempotency_key=reference)
+            | models.Q(transaction_hash=log['transactionHash'])
+        ).values_list('idempotency_key', flat=True))
+        if holders:
+            if reference not in holders:
+                logger.warning('cUSD+ arrival %s gets no row: its hash is held by another', reference)
+            return
         arrival_row, created = SendTransaction.objects.get_or_create(
             idempotency_key=reference,
             defaults={
@@ -763,8 +973,11 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
             },
         )
         if not created:
-            continue  # rescan window replay
-        cp_vault.invalidate_position(key)
+            return  # rescan window replay
+        try:
+            cp_vault.invalidate_position(key)
+        except Exception:  # noqa: BLE001 — stale briefly; the push still goes
+            logger.warning('could not invalidate position for %s', key, exc_info=True)
         try:
             from users.models import Account
             from notifications import utils as notif_utils
@@ -807,13 +1020,21 @@ def _scan_cusd_plus_arrivals(registered: dict, from_block: int, latest_block: in
         except Exception:  # noqa: BLE001 — comms failure must not lose the row
             logger.exception('cUSD+ receive notification failed for %s', reference)
 
+    failed: list[tuple[dict, Exception | None]] = []
+    for log in logs:
+        try:
+            handle(log)
+        except _NotYet:
+            failed.append((log, None))
+        except Exception as exc:  # noqa: BLE001 — one log must not stall the rest
+            failed.append((log, exc))
+    _save_retries(SHARE_RETRY_KEY, logs, failed, owners)
+    return True
+
 
 CUSD_EPOCH_KEY = 'cusd_plus_cusd_epoch'
 CUSD_CURSOR_KEY = 'cusd_plus_cusd_scan_cursor'
 CUSD_CLEAN_KEY = 'cusd_plus_cusd_clean:{}'
-# A cUSD pass further behind than this restarts (a new epoch) instead of
-# reading an unbounded range the public RPCs would refuse.
-CUSD_MAX_LAG_BLOCKS = 5_000
 CUSD_CLEAN_SPANS = 5
 
 
@@ -851,6 +1072,19 @@ def _wrap_owned(tx_hash: str, holder: str, wrap_block: int) -> bool:
     except Exception:  # noqa: BLE001 — never drop a mint on a lookup error
         logger.exception('wrap ownership check failed for %s', tx_hash)
         return False
+
+
+def _wrap_must_wait(holder: str, wrap_block: int, wraps_upto: int | None) -> bool:
+    """Could cUSD this wrap converted still get its own row?"""
+    from django.core.cache import cache
+
+    if wraps_upto is not None and wrap_block > int(wraps_upto):
+        return True
+    # An arrival up to the wrap waiting for its retry. (One that failed only
+    # on a replay already has its row.)
+    return any(not entry.get('replay') and _log_recipient(entry['log']) == holder
+               and (_log_block(entry['log']) or 0) <= wrap_block
+               for entry in (cache.get(CUSD_RETRY_KEY) or {}).values())
 
 
 def _is_wrap(tx_hash: str, holder: str) -> bool:
@@ -934,23 +1168,33 @@ def _scan_cusd_arrivals(registered: dict, latest_block: int, min_deposit, rewind
     if not cusd or not registered:
         return
     # Its own cursor, advanced only once a window is fully processed: a
-    # failed pass rescans. A gap it can't read (first run, cache loss, far
-    # behind) starts a new epoch, which voids every holder's clean mark.
+    # failed pass rescans, and one far behind catches up without skipping.
+    # A gap it can't know (first run, cache loss) starts a new epoch, which
+    # voids every holder's clean mark.
     cursor = cache.get(CUSD_CURSOR_KEY)
-    epoch = cache.get(CUSD_EPOCH_KEY)
-    if cursor is None or not epoch or latest_block - int(cursor) > CUSD_MAX_LAG_BLOCKS:
+    scanned_to = None if cursor is None else int(cursor)
+    if scanned_to is not None and latest_block < scanned_to:
+        return
+    if cursor is None:
         from_block = max(latest_block - rewind, 0)
         cache.set(CUSD_EPOCH_KEY, {'id': uuid.uuid4().hex, 'from': from_block}, None)
+        cache.set(CUSD_CURSOR_KEY, from_block, None)
+        to_block = latest_block
     else:
         from_block = max(int(cursor) - rewind, 0)
+        to_block = min(latest_block, int(cursor) + SCAN_MAX_BLOCKS_PER_RUN)
+        if not cache.get(CUSD_EPOCH_KEY):
+            cache.set(CUSD_EPOCH_KEY, {'id': uuid.uuid4().hex, 'from': from_block}, None)
     logs: list[dict] = []
     addrs = sorted(registered)
     for i in range(0, len(addrs), 800):
         logs += _get_logs_chunked(
-            from_block, latest_block,
+            from_block, to_block,
             [TRANSFER_TOPIC, None, [_address_topic(a) for a in addrs[i:i + 800]]],
             address=cusd,
         )
+    logs = _with_retries(CUSD_RETRY_KEY, logs)
+    owners = _retry_owners(CUSD_RETRY_KEY, registered)
     internal = _system_addresses() | {'0x' + '0' * 40}
     escrow = (getattr(settings, 'MARKETPLACE_ESCROW_ADDRESS', '') or '').lower()
     if escrow:
@@ -958,23 +1202,28 @@ def _scan_cusd_arrivals(registered: dict, latest_block: int, min_deposit, rewind
     # One row per transaction and holder (transaction_hash is unique): the
     # transfers a stranger's transaction sends one member are summed.
     arrivals: dict[tuple, dict] = {}
-    for log in logs:
+    failed: list[tuple[dict, Exception | None]] = []
+
+    def collect(log):
         sender = ('0x' + log['topics'][1][-40:]).lower()
         key = ('0x' + log['topics'][2][-40:]).lower()
         # A Confío member's wallet sends only through the app's flows, each
         # writing its own row (whose hash may not be saved yet when the
         # transfer is mined), so it is never an outside deposit.
-        if registered.get(key) is None or sender in internal or sender in registered:
-            continue
+        if owners.get(key) is None or sender in internal or sender in registered:
+            return
+        units, block = int(log['data'], 16), int(log.get('blockNumber', '0x0'), 16)
         group = arrivals.setdefault((log['transactionHash'].lower(), key),
-                                    {'sender': sender, 'units': 0, 'block': int(log.get('blockNumber', '0x0'), 16)})
-        group['units'] += int(log['data'], 16)
-    for (tx_hash, key), group in arrivals.items():
-        sender, account_id = group['sender'], registered[key]
+                                    {'sender': sender, 'units': 0, 'block': block, 'logs': []})
+        group['units'] += units
+        group['logs'].append(log)
+
+    def record(tx_hash, key, group):
+        sender, account_id = group['sender'], owners[key]
         if _source_row_covers(tx_hash, key):
-            continue  # recorded: by a feature, or by this pass on a rewound run
+            return  # recorded: by a feature, or by this pass on a rewound run
         if SponsoredBatch.objects.filter(tx_hash__iexact=tx_hash).exists():
-            continue  # a Confío flow's own batch: it records what it moves
+            return  # a Confío flow's own batch: it records what it moves
         amount_usd = (Decimal(group['units']) / Decimal(10 ** 18)).quantize(
             Decimal('0.000001'), rounding=ROUND_DOWN)
         # No row for this one: dust (strangers must not spam rows), or a hash
@@ -984,10 +1233,10 @@ def _scan_cusd_arrivals(registered: dict, latest_block: int, min_deposit, rewind
         if amount_usd < min_deposit or SendTransaction.all_objects.filter(
                 transaction_hash__iexact=tx_hash).exists():
             _close_cusd_clean(key, group['block'])
-            continue
+            return
         account = Account.objects.filter(id=account_id).select_related('user', 'business').first()
         if account is None:
-            continue
+            return
         reference = f"cu:{tx_hash[2:58]}"
         row, created = SendTransaction.objects.get_or_create(
             idempotency_key=reference,
@@ -1011,7 +1260,7 @@ def _scan_cusd_arrivals(registered: dict, latest_block: int, min_deposit, rewind
             },
         )
         if not created or not account.user_id:
-            continue
+            return
         try:
             from notifications import utils as notif_utils
             from notifications.models import NotificationType as NotifType
@@ -1041,7 +1290,24 @@ def _scan_cusd_arrivals(registered: dict, latest_block: int, min_deposit, rewind
             )
         except Exception:  # noqa: BLE001 — comms failure must not lose the row
             logger.exception('cUSD receive notification failed for %s', reference)
-    cache.set(CUSD_CURSOR_KEY, latest_block, None)
+
+    unread: dict[str, Exception] = {}
+    for log in logs:
+        try:
+            collect(log)
+        except Exception as exc:  # noqa: BLE001 — one log must not stall the rest
+            failed.append((log, exc))
+            unread[str(log.get('transactionHash')).lower()] = exc
+    for (tx_hash, key), group in arrivals.items():
+        try:
+            if tx_hash in unread:
+                raise unread[tx_hash]  # one row per group: never record part of one
+            record(tx_hash, key, group)
+        except Exception as exc:  # noqa: BLE001
+            # The clean span stays: a later wrap waits for the retry instead.
+            failed.extend((each, exc) for each in group['logs'])
+    _save_retries(CUSD_RETRY_KEY, logs, failed, owners, scanned_to)
+    cache.set(CUSD_CURSOR_KEY, to_block, None)
 
 
 def _system_addresses() -> set:
@@ -1269,6 +1535,8 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
       - rescans of a plain deposit are deduped by the receipt itself, in
         _record_deposit_receipt — a cursor rewind makes rescans routine.
 
+    Returns False when the receipt could not be written (retry it).
+
     (Known trade-off: SendTransaction.transaction_hash is UNIQUE, so a single
     tx carrying transfers to several registered addresses records only the
     first — wallet sends are one transfer per tx, and the rest stays visible
@@ -1277,7 +1545,7 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
     from conversion.models import Conversion
 
     if Conversion.objects.filter(
-        user_bsc_address=to_addr, bridge_arrival_tx=tx_hash, is_deleted=False,
+        user_bsc_address__iexact=to_addr, bridge_arrival_tx=tx_hash, is_deleted=False,
     ).exists():
         return
     account = Account.objects.filter(id=account_id).select_related('user', 'business').first()
@@ -1297,7 +1565,7 @@ def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, so
     # (record_savings_mint below), so a conversion row means "this happened",
     # never "this is promised". The bridge saga is unaffected: those rows are
     # born at CREATED by prepare_leg_ab and only ADVANCE through here.
-    _record_deposit_receipt(
+    return _record_deposit_receipt(
         account=account, is_business=is_business, to_addr=to_addr,
         from_addr=from_addr, amount_usd=amount_usd, tx_ref=tx_ref,
         tx_hash=tx_hash, source=source, conv=None,
@@ -1492,6 +1760,7 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
     created, None while the arrival is still transient or an older client has
     not converted it yet — in which case the RECEIPT makes the path idempotent
     because conversion-row dedupe cannot fire on a cursor rewind.
+    Returns False when nothing durable was written (retry it).
     """
     from send.models import SendTransaction
     from payment_accounts.activity import arrival_owned
@@ -1564,7 +1833,7 @@ def _record_deposit_receipt(*, account, is_business, to_addr, from_addr,
                 'receipt write failed and there is no conversion row; '
                 'suppressing the notification so a rescan can retry',
                 to_addr, tx_hash)
-            return
+            return False
     try:
         from notifications import utils as notif_utils
         from notifications.models import NotificationType as NotifType

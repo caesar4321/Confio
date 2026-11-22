@@ -335,9 +335,12 @@ def find_provider_tx_hash(value) -> str | None:
 
 
 def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
-                               tx_hash: str, log_index: int,
-                               sender_address: str = '') -> RampTransaction | None:
-    """Persist provider-order attribution when its BSC USDT transfer lands."""
+                               tx_hash: str, log_index: int, sender_address: str = '',
+                               mined_at=None) -> RampTransaction | None:
+    """Persist provider-order attribution when its BSC USDT transfer lands.
+
+    `mined_at`: given for a transfer read late (a replay, a backlog), which
+    can only deliver an order that already existed when it was mined."""
     address = (actor_address or '').lower()
     if not address or not tx_hash or amount <= 0:
         return None
@@ -376,6 +379,8 @@ def attribute_bsc_ramp_arrival(*, actor_address: str, amount: Decimal,
             actor_address__iexact=address, conversion__isnull=True,
             created_at__gte=timezone.now() - BSC_RAMP_ATTRIBUTION_WINDOW,
         ).exclude(status='FAILED').order_by('created_at'))
+        if mined_at is not None:
+            candidates = [ramp for ramp in candidates if ramp.created_at <= mined_at]
         explicit_matches = []
         sender_matches = []
         for ramp in candidates:
