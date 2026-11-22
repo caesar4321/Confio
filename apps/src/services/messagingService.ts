@@ -18,6 +18,7 @@ import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 import { extractFcmTransactionData } from '../utils/fcmData';
 import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
 import { androidChannelFor, createCommunityChannel } from './notificationChannels';
+import { isCalendarNudge } from '../assistant/calendar/nudge';
 
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
 const DEVICE_ID_SERVICE = 'confio_device_id';
@@ -512,7 +513,7 @@ class MessagingService {
         }
 
         notifee.getInitialNotification().then(initialNotification => {
-          if (initialNotification?.notification?.data) {
+          if (initialNotification?.notification?.data && !isCalendarNudge(initialNotification.notification.id)) {
             console.log('[MessagingService] App opened from Notifee notification (killed state):', initialNotification.notification);
             this.handleNotificationData(initialNotification.notification.data);
           }
@@ -548,6 +549,10 @@ class MessagingService {
     notifee.onForegroundEvent(({ type, detail }) => {
       console.log('[MessagingService] ===== NOTIFEE FOREGROUND EVENT =====');
       console.log('[MessagingService] Event type:', type);
+      // Calendar nudges: their id and time come from the person's agenda.
+      if (isCalendarNudge(detail.notification?.id)) {
+        return;
+      }
       console.log('[MessagingService] Event detail:', JSON.stringify(detail, null, 2));
 
       if (type === EventType.PRESS) {

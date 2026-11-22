@@ -13,6 +13,7 @@ import { getSessionCredentials, isSessionObserverInstalled, onSessionReset } fro
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { forgetCalendarOnSignOut } from '../assistant/calendar/signOut';
 import { contactService, setDefaultPhoneRegion } from '../services/contactService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { applyReviewLink, setReviewLinkApplier, takePendingReviewLink } from '../services/reviewLink';
@@ -1447,6 +1448,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               } catch (prefetchErr) {}
             })();
           } else {
+            void forgetCalendarOnSignOut();
             setIsAuthenticated(false);
             navigateToScreen('Auth');
           }
@@ -1456,6 +1458,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           navigateToScreen('Auth');
         }
       } else {
+        // The session ended before this start (the keystore-error path below stays untouched).
+        void forgetCalendarOnSignOut();
         setIsAuthenticated(false);
         navigateToScreen('Auth');
       }
@@ -1519,6 +1523,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // cached data (balances, history, unpublished posts). clearStore() also
   // cancels in-flight queries and does not refetch.
   const clearSignedOutCache = async () => {
+    // A session the server ended never reaches authService.signOut.
+    await forgetCalendarOnSignOut();
     try {
       await apolloClient.clearStore();
     } catch (error) {

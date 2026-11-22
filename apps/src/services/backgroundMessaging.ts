@@ -4,6 +4,7 @@ import notificationDedup from './notificationDeduplication';
 import { savePendingNotificationOpen } from './notificationOpenStore';
 import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 import { androidChannelFor, createCommunityChannel } from './notificationChannels';
+import { isCalendarNudge } from '../assistant/calendar/nudge';
 
 // Register background handler
 setBackgroundMessageHandler(getMessaging(), async remoteMessage => {
@@ -67,7 +68,7 @@ setBackgroundMessageHandler(getMessaging(), async remoteMessage => {
 
 // Background event handler for Notifee
 notifee.onBackgroundEvent(async ({ type, detail }) => {
-  if (type === EventType.PRESS && detail.notification) {
+  if (type === EventType.PRESS && detail.notification && !isCalendarNudge(detail.notification.id)) {
     logBreadcrumb(
       `notifee.onBackgroundEvent.PRESS | ${describeTypes({
         title: detail.notification.title,

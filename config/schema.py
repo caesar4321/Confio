@@ -28,6 +28,7 @@ from notifications import schema as notifications_schema
 from inbox import schema as inbox_schema
 from teams import schema as teams_schema
 from assistant import schema as assistant_schema
+from assistant import calendar_schema as assistant_calendar_schema
 from blockchain import schema as blockchain_schema
 from billing import schema as billing_schema
 from smart_account import schema as smart_account_schema
@@ -70,6 +71,7 @@ class Mutation(
 	inbox_schema.Mutation,
 	teams_schema.TeamsMutation,
 	assistant_schema.Mutation,
+	assistant_calendar_schema.Mutation,
 	blockchain_schema.Mutation,
 	billing_schema.Mutation,
 	smart_account_schema.Mutation,

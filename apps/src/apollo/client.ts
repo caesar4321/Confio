@@ -252,6 +252,8 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet',
     'StartAssistantVoice', 'ConnectAssistantVoice', 'RunAssistantVoiceTool', 'LogAssistantVoice',
     'UpdateAssistantProfile', 'UseAssistantPet', 'DeleteAssistantPet',
+    // Calendar titles the person ticked.
+    'AnalyzeAssistantCalendar',
     // Wallet recovery diagnostics describe a user's backup files. Shapes
     // only by construction, but never echo them into error logs.
     'ReportWalletRecoveryDiagnostic',
@@ -262,6 +264,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   // above just redacted. Extensions carry server-side detail for the same
   // reason, so they go with it.
   const redactErrorText = isMembershipClaim || shouldNeverMutateSession(operation.operationName)
+    || operation.operationName === 'AnalyzeAssistantCalendar'
     || VE_PAGOMOVIL_SENSITIVE_OPERATIONS.includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {

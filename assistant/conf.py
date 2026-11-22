@@ -44,6 +44,11 @@ DEFAULTS = {
     },
     'CONFIO_ASSISTANT_TRANSCRIBE_PRICE_PER_MINUTE': '0.0045',
 
+    # ---- Phone calendar (assistant/calendar_context.py) ----
+    # '' = nobody, '*' = everyone, or '12,34'. OpenAI only: the consent copy names it.
+    'ASSISTANT_CALENDAR_ALLOWED_USER_IDS': '',
+    'ASSISTANT_CALENDAR_MODEL': 'gpt-6-luna',
+
     # ---- Launch switches (2026-10-04: free launch) ----
     # Confio Assistant ships free: text, voice notes, analysis, pets. Realtime voice
     # (and the wake word, which opens a call) stay built but dark: realtime is

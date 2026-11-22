@@ -106,7 +106,8 @@ class LoggingGraphQLView(GraphQLView):
                     'claimInstitutionMembership', 'applyCobreBreb', 'brebLocationChallenge', 'verifyBrebLocation'))
                 # Wallet recovery diagnostics are sanitized in the resolver,
                 # but this log runs BEFORE that, on the raw body.
-                sensitive = membership_claim or 'reportWalletRecoveryDiagnostic' in routed_query
+                sensitive = membership_claim or any(field in routed_query for field in (
+                    'reportWalletRecoveryDiagnostic', 'analyzeAssistantCalendar'))
                 if _should_log_graphql_request_details():
                     logger.info("GraphQL Query: %s", '[redacted]' if sensitive else query)
                     logger.info("GraphQL Variables: %s", '[redacted]' if sensitive else body.get('variables', {}))

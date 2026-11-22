@@ -28,6 +28,7 @@ import { ApolloClient } from '@apollo/client';
 import { AccountManager, AccountContext, requireKeyedAccountType } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
+import { forgetCalendarOnSignOut } from '../assistant/calendar/signOut';
 import {
   decideWalletReenrollmentAfterRestore,
   selectRestoredAddressForCollision,
@@ -2720,6 +2721,8 @@ export class AuthService {
     try {
       console.log('Starting sign out process...');
       this.driveAccessToken = null;
+      // First: a later step that throws must not leave the agenda behind.
+      await forgetCalendarOnSignOut();
 
       // 1. Sign out from Firebase (if there's a current user)
       const currentUser = this.auth.currentUser;

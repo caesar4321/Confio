@@ -11,6 +11,7 @@ import {
 } from './notificationOpenStore';
 import { confirmedReceiptContext, extractFcmTransactionData } from '../utils/fcmData';
 import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
+import { isCalendarNudge } from '../assistant/calendar/nudge';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -571,7 +572,7 @@ export class PushNotificationService {
 
       if (!this.pendingNotification) {
         const notifeeInitialNotification = await notifee.getInitialNotification();
-        if (notifeeInitialNotification?.notification?.data) {
+        if (notifeeInitialNotification?.notification?.data && !isCalendarNudge(notifeeInitialNotification.notification.id)) {
           console.log('[PushNotificationService] Restoring initial notification from Notifee');
           this.pendingNotification = {
             data: notifeeInitialNotification.notification.data as Record<string, string>,
