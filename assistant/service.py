@@ -21,7 +21,7 @@ from inbox.models import SupportMessage
 from inbox.push_service import send_support_staff_push
 from inbox.schema import get_or_create_support_conversation
 
-from . import photos
+from . import confirm, photos
 from . import conf, context as context_rules, guide, memory
 from .engine import (AssistantUnavailable, Viewer, categorize_movements, general_while_waiting, human_mode_active,
                      run_turn, third_party_text)
@@ -401,7 +401,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                     .filter(Q(reply_message__isnull=False) | Q(error='pending')).exists()):
                 return None
             user_message, proposal = pending_message, None
-            pending_watch = None
+            pending_watch = pending_action = None
         else:
             if photo_url and (human or remaining_turns(user) <= 0):
                 # Changed while the photo was being read (the team took the
@@ -416,6 +416,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             # A proposal lives for exactly one user message, whatever path it takes.
             proposal = take_pending_categorization(conversation)
             pending_watch = take_pending_watch(conversation)
+            pending_action = confirm.take(conversation)
         if turn is not None:
             turn.user_message = user_message
             turn.save(update_fields=['user_message'])
@@ -455,7 +456,13 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name,
                      request_meta=request_meta)
     if remembering and memory.asks_to_forget(conversation, clean):
-        proposal = pending_watch = None  # "ok olvida todo" is not the yes to a pending question
+        proposal = pending_watch = pending_action = None  # "ok olvida todo" is not the yes to a pending question
+    if pending_action and not waiting and not photo_url:
+        answered = confirm.answer(conversation, viewer, clean, pending_action, user_message,
+                                  can_navigate=can_navigate)
+        if answered is not None:
+            return _answer_to_question(conversation, viewer, user_message, turn, pending_action, answered,
+                                       remaining=remaining - 1, transcript=transcript)
     confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
     confirmed_tool = 'categorize_transactions:confirmed'
     if confirmed is None:
@@ -552,6 +559,13 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     # At most one paid-offer chip, chosen and capped by the server.
     paid_chip = None
+    if result.payment_intent or waiting:
+        result.pending_action = None
+    if result.pending_action:
+        # The question is written by code and is the whole reply: nothing beside it to answer, open or sign.
+        result.actions, result.rule_proposal = [], None
+        result.pending_categorization = result.pending_watch = None
+        result.reply = result.pending_action['question']
     if result.payment_intent:
         # The card is the reply's one action (see engine.PAYMENT_CHIP).
         result.actions = [a for a in result.actions if a.get('target') == 'payment_intent']
@@ -582,7 +596,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     try:
         from . import paid_chips
         from .engine import allowed_destinations
-        if not waiting and not from_memory and not result.rule_proposal and not result.payment_intent:
+        if (not waiting and not from_memory and not result.rule_proposal and not result.payment_intent
+                and not result.pending_action):
             earlier = ' · '.join(m.body or '' for m in [m for m in history if m.sender_type == 'USER'][-3:-1])
             paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)), earlier)
     except Exception:  # noqa: BLE001 - a probe must never break the answer
@@ -618,6 +633,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             paid_chips.log_shown(viewer, paid_chip)
         except Exception:  # noqa: BLE001 - analytics never break the reply
             logger.exception('Confio Assistant: paid chip logging failed')
+    if result.pending_action:
+        confirm.store(conversation, viewer, result.pending_action, reply)
     if result.pending_categorization:
         _store_pending_categorization(conversation, viewer, result.pending_categorization, reply)
     elif result.pending_watch:
@@ -639,6 +656,42 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     return AskOutcome(user_message=user_message, reply_message=reply, actions=result.actions,
                       mode='HUMAN' if waiting else 'AI',
                       remaining_turns=remaining - 1, transcript=transcript, data_changed=bool(result.writes))
+
+
+def _answer_to_question(conversation, viewer, user_message, turn, pending, answered, *, remaining, transcript):
+    """The reply to a yes or a no to code's question (confirm.py): written by code, never the model."""
+    done, text, extra = answered
+    actions = list(extra.get('actions') or [])
+    metadata = {'ai': True, 'actions': actions}
+    if extra.get('payment_intent'):
+        metadata['payment_intent'] = extra['payment_intent']
+    with transaction.atomic():
+        lock_user(viewer.user)
+        if actions and any(
+                not confirm.is_yes(body, pending)      # the same "sí", sent twice, is no second thought
+                for body in conversation.messages.filter(sender_type='USER', created_at__gt=user_message.created_at)
+                .values_list('body', flat=True)):
+            # They wrote again while it was being prepared ("no, cancela"): no card.
+            done, actions, extra = False, [], {}
+            text = {'pt': 'Não deixei o cartão: você escreveu depois. Se ainda quiser, me peça de novo.',
+                    'en': "I didn't leave the card: you wrote after that. If you still want it, ask me again."}.get(
+                pending.get('lang'), 'No dejé la tarjeta: escribiste algo después. Si todavía lo quieres, pídemelo '
+                                     'de nuevo.')
+            metadata = {'ai': True, 'actions': []}
+        reply = _append(conversation, sender_type='AGENT', body=text, metadata=metadata)
+    if extra.get('payment_intent'):
+        try:
+            from payment_accounts import payment_intents
+            payment_intents.attach_message(extra['payment_intent']['id'], reply.pk, retire_earlier=True)
+        except Exception:  # noqa: BLE001 - the reply stands; the card stays unreachable (fails closed)
+            logger.exception('Confio Assistant: payment intent not attached to its message')
+    turn.reply_message = reply
+    turn.tools = [{'name': f"{pending.get('kind')}:answered", 'ok': bool(done)}]
+    turn.actions = actions
+    turn.error = ''
+    turn.save(update_fields=['reply_message', 'tools', 'actions', 'error'])
+    return AskOutcome(user_message=user_message, reply_message=reply, actions=actions, remaining_turns=remaining,
+                      mode='AI', transcript=transcript)
 
 
 # --------------------------------------------------------------------------- #

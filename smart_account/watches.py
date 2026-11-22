@@ -29,6 +29,7 @@ from . import assets as assets_mod, chain
 from .assistant_ops import (
     OpsRefused, _asset_label, _check_buy_amount, _resolve_asset, _usd, _viewer, operable_account, rule_chip,
     said_number,
+    said_usd,
 )
 from .models import SmartAccountWatch
 
@@ -177,8 +178,9 @@ def propose(user, *, said: str, kind: str, asset=None, currency=None, threshold=
     if action_asset or action_amount_usd:
         if not (action_asset and action_amount_usd):
             raise OpsRefused('Para dejarte una compra lista dime en qué y cuánto.')
-        if not said_number(said, action_amount_usd):
-            raise OpsRefused('Dime tú el monto de la compra, en números: yo no elijo cuánto invertir.', 'not_said')
+        if not said_usd(said, action_amount_usd, level=threshold):
+            raise OpsRefused('Dime tú el monto de la compra en dólares, en números: yo no elijo ni convierto cuánto '
+                             'invertir.', 'not_said')
         buy = _resolve_asset(viewer, action_asset, said)
         amount = _decimal(action_amount_usd, 'el monto').quantize(Decimal('0.01'))
         _check_buy_amount(buy['asset_key'], amount, buy['name'])

@@ -935,7 +935,15 @@ def _other_unit(said, amount):
 
 def prepare_from_request(owner, user, texts, *, rail=None, recipient=None, amount_usd=None, meta=None,
                          client=None):
-    """The assistant's path for any payment. Everything that decides where
+    """request_from_words, priced into a card."""
+    request, source = request_from_words(owner, user, texts, rail=rail, recipient=recipient, amount_usd=amount_usd,
+                                         meta=meta)
+    return prepare(owner, user, created_by='assistant', source=source, request=request, client=client,
+                   retire_earlier=False)
+
+
+def request_from_words(owner, user, texts, *, rail=None, recipient=None, amount_usd=None, meta=None, around=None):
+    """The assistant's path for any payment; nothing is prepared or saved. Everything that decides where
     money goes comes from the owner's own typed words (`texts`): the code, or
     the recipient and the amount. The model only says which of them to use;
     a recipient or an amount that is not in those words is refused."""
@@ -965,8 +973,15 @@ def prepare_from_request(owner, user, texts, *, rail=None, recipient=None, amoun
                 # 500 for @pedro. Who and how much come from what the owner
                 # stated ("mándale 20 dólares", then "la llave es …").
                 messages = [text for text in messages if '?' not in text and '¿' not in text]
-            with_amount = [text for text in messages if amount is not None and _amount_written(text, amount)]
-            if not with_amount:
+            from .dollars import other_money, said_dollars
+            # As dollars, or plain with no other money in play ("500 a @ana en bolívares" is not US$500), in
+            # anything they said: questions, voice, captions and long pastes too. A code's own text is not theirs.
+            named = [str(text or '').replace(code, ' ') if code else str(text or '')
+                     for text in [*(around or ()), *worded]]
+            if amount is None or not said_dollars(messages, amount, around=named):
+                if amount is not None and any(other_money(text) for text in named):
+                    raise _refuse('not_said', 'Dime el monto en dólares y escríbelo con la palabra (por ejemplo: '
+                                              '"20 dólares"). No lo convierto yo de otra moneda.')
                 if amount is not None and _other_unit(' · '.join(messages), amount):
                     raise _refuse('not_said', 'Dime el monto en dólares (por ejemplo: "20 dólares"). Desde el chat '
                                               'los envíos se preparan en dólares.')
@@ -1000,8 +1015,7 @@ def prepare_from_request(owner, user, texts, *, rail=None, recipient=None, amoun
     except IntentRefused as exc:
         _track(None, 'refused', user=user, reason=exc.code, created_by='assistant')
         raise
-    return prepare(owner, user, created_by='assistant', source=source, request=request, client=client,
-                   retire_earlier=False)
+    return request, source
 
 
 def attach_message(intent_id, message_id, *, retire_earlier=False):

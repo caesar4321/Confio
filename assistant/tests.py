@@ -4338,214 +4338,108 @@ class StockTradeCardTests(TestCase):
                 'propose_stock_trade', {'side': 'buy', 'asset': 'Apple', 'amount_usd': 20, 'sell_all': False}),
                 {'error': 'herramienta desconocida: propose_stock_trade'})
 
-    def test_a_buy_card_carries_only_what_the_person_wrote(self):
+    def test_a_proposal_is_a_question_and_never_a_card(self):
         belt = self._belt('compra 20 dólares de Apple')
         out = self._propose(belt)
-        self.assertTrue(out['ok'])
-        self.assertIn('Todavía no se compró', out['nota'])
-        self.assertEqual(belt.result.actions, [
-            {'type': 'trade', 'ticker': 'AAPL', 'target': 'buy:20.00', 'label': 'Comprar US$20 de Apple Inc.'}])
-        # One card per answer.
-        self.assertFalse(self._propose(belt)['ok'])
-        # Cents, as people write them.
-        cents = self._belt('quiero comprar 20,50 de AAPL')
-        self._propose(cents, amount_usd=20.5)
-        self.assertEqual(cents.result.actions[0]['target'], 'buy:20.50')
-        self.assertEqual(cents.result.actions[0]['label'], 'Comprar US$20,50 de Apple Inc.')
-
-    def test_what_the_model_adds_on_its_own_never_reaches_a_card(self):
-        for said, kwargs, why in (
-                ((), {}, 'debe escribir'),                                               # a call, a tapped chip
-                (('compra 20 dólares de la que más subió',), {}, 'no nombró'),          # the model picked Apple
-                (('compra Apple',), {}, 'no está escrito'),                              # the model picked 20
-                (('compra 20 bolívares de Apple',), {}, 'no está escrito'),              # another unit
-                (('compra 5 acciones de Apple',), {'amount_usd': 5}, 'número de acciones'),
-                (('compra 1 dólar de Apple',), {'amount_usd': 1}, 'mínimo'),
-                (('compra 20 de Apple',), {'found': None}, 'No encontré'),
-                (('compra 20 de Apple',), {'eligible': False}, 'no puede comprar'),
-                (('vende todo',), {'side': 'sell', 'sell_all': True}, 'no nombró'),
-        ):
-            belt = self._belt(*said)
-            out = self._propose(belt, **kwargs)
-            self.assertFalse(out['ok'], said)
-            self.assertIn(why, out['motivo'], said)
-            self.assertEqual(belt.result.actions, [], said)
-        # Read from the web in this same message: nothing is prepared.
-        belt = self._belt('compra 20 de Apple')
-        belt.saw_web = True
-        self.assertFalse(self._propose(belt)['ok'])
-        # A payment or a rule already proposed in this answer.
-        belt = self._belt('compra 20 de Apple')
-        belt.result.payment_intent = {'id': 'x'}
-        self.assertFalse(self._propose(belt)['ok'])
-
-    def test_only_a_request_in_dollars_for_an_asset_named_where_assets_go(self):
-        refused = (
-            ('¿cuánto serían 100 dólares de Apple?', 100, self.APPLE),          # a question is not a request
-            ('compra Apple cuando llegue a 150', 150, self.APPLE),              # a price level
-            ('compra Apple si baja 5 %', 5, self.APPLE),
-            ('tengo 25 años, compra Apple', 25, self.APPLE),
-            ('compra 3 Apple', 3, self.APPLE),                                  # most likely shares
-            ('compra 1.000 acciones de Apple', 1000, self.APPLE),
-            ('compra 20 euros de Apple', 20, self.APPLE),
-            ('compra 500 bolos de Apple', 500, self.APPLE),
-            ('compra 20k de Apple', 20, self.APPLE),
-            ('compra no 20 sino algo de Apple', 20, self.APPLE),
-            ('compra 20 dólares de la mejor acción', 20, ('DE', 'Deere & Company')),   # "de" is not Deere
-            ('uso la app, compra 20 dólares', 20, ('APP', 'AppLovin')),
-            ('compra 20 dólares para mi meta', 20, ('META', 'Meta Platforms')),
-            ('mi meta es ahorrar, compra 20 dólares', 20, ('META', 'Meta Platforms')),
-            ('x' * 280 + ' compra 20 dólares de Apple', 20, self.APPLE),        # a long pasted text
-        )
-        for said, amount, found in refused:
-            belt = self._belt(said)
-            with patch('assistant.trades._probes', side_effect=lambda ticker, name: {ticker.lower(), name.split()[0].lower()}):
-                out = self._propose(belt, amount_usd=amount, found=found)
-            self.assertFalse(out['ok'], said)
-            self.assertEqual(belt.result.actions, [], said)
-        accepted = (
-            ('compra US$20 de Apple', 20, self.APPLE, 'buy:20.00'),
-            ('compra $20 de apple', 20, self.APPLE, 'buy:20.00'),
-            ('quiero invertir 50 en Apple', 50, self.APPLE, 'buy:50.00'),
-            ('compra 20 dólares en acciones de Apple', 20, self.APPLE, 'buy:20.00'),
-            ('compra 1.500,50 dólares de AAPL', 1500.5, self.APPLE, 'buy:1500.50'),
-            ('compra 20 de DE', 20, ('DE', 'Deere & Company'), 'buy:20.00'),     # in its own capitals
-            ('compra 20 de meta', 20, ('META', 'Meta Platforms'), 'buy:20.00'),  # right where an asset goes
-        )
-        for said, amount, found, target in accepted:
-            belt = self._belt(said)
-            with patch('assistant.trades._probes', side_effect=lambda ticker, name: {ticker.lower(), name.split()[0].lower()}):
-                out = self._propose(belt, amount_usd=amount, found=found)
-            self.assertTrue(out['ok'], (said, out))
-            self.assertEqual(belt.result.actions[0]['target'], target, said)
-        # The verb is theirs too: the model cannot turn a sale into a purchase, or the reverse.
-        self.assertIn('vender, no de comprar', self._propose(self._belt('vende 20 de Apple'))['motivo'])
-        self.assertIn('no escribió que quiere vender',
-                      self._propose(self._belt('compra 20 de Apple'), side='sell')['motivo'])
-        self.assertIn('no escribió que quiere comprar', self._propose(self._belt('20 dólares de Apple'))['motivo'])
-
-    ANT = ('ANT', 'Anthropic, PBC')
-
-    def _thread(self, *lines):
-        start = timezone.now() - timedelta(minutes=len(lines))
-        return [SimpleNamespace(sender_type='USER' if who == 'u' else 'AGENT', body=body,
-                                metadata={'ai': True, 'actions': list(extra)} if who == 'a' else {},
-                                created_at=start + timedelta(minutes=n))
-                for n, (who, body, *extra) in enumerate(lines)]
-
-    def _in_thread(self, history, found=ANT, amount=1.02, side='buy', sell_all=False, other=False):
-        from .engine import payment_texts
-
-        belt = self._belt(*payment_texts(history), account=SimpleNamespace(bsc_address='0x' + 'a' * 40))
-        belt.turn_history = history
-        probes = {found[0].lower(), found[1].split()[0].lower().strip(',')}
-        with patch('assistant.trades._probes', return_value=probes), \
-                patch('assistant.trades._names_other', return_value=other), \
-                patch('assistant.engine._holdings', return_value='desconocido'):
-            out = self._propose(belt, side=side, asset=found[1], amount_usd=amount, sell_all=sell_all, found=found)
-        return out, belt.result.actions
-
-    ASKED = (('u', 'Cómo compro acciones de Anthropic'),
-             ('a', 'Encontré Anthropic, PBC (ANT). Toca la tarjeta para abrirla.'),
-             ('u', 'Quiero comprar por 1.02 dólares'))
-
-    def test_a_request_said_over_several_messages_leaves_the_card(self):
-        card = [{'type': 'trade', 'ticker': 'ANT', 'target': 'buy:1.02', 'label': 'Comprar US$1,02 de Anthropic, PBC'}]
-        for lines in (
-                self.ASKED,
-                (('u', '¿Cómo compro acciones de Anthropic?'), ('a', '¿Cuántos dólares?'), ('u', '1,02')),
-                (('u', 'compra Anthropic'), ('a', '¿Cuántos dólares?'), ('u', 'por 1.02')),
-                (('u', 'quiero invertir 1.02 dólares'), ('a', '¿En cuál?'), ('u', 'Anthropic')),
-                (('u', 'compra Anthropic por 1.02'),),
-                (('u', 'compra Anthropic por US$ 1,02'),),
-        ):
-            out, actions = self._in_thread(self._thread(*lines))
-            self.assertTrue(out['ok'], (lines, out))
-            self.assertEqual(actions, card, lines)
-
-    def test_yes_to_the_question_of_exactly_this_trade_leaves_the_card(self):
-        for question in ('No se pudo. ¿Quieres comprar US$1,02 de Anthropic?',
-                         '¿Quieres comprar US$1,02 de Anthropic, PBC?',
-                         'La acción es Anthropic. Confírmame si quieres comprar Anthropic por US$1,02.'):
-            out, _actions = self._in_thread(self._thread(*self.ASKED, ('a', '¿Seguimos?'), ('u', 'Sí'),
-                                                         ('a', question), ('u', 'Sí')))
-            self.assertTrue(out['ok'], (question, out))
-        out, actions = self._in_thread(self._thread(
-            ('u', 'vende todas mis acciones de Anthropic'), ('a', '¿Seguimos?'), ('u', 'sí'),
-            ('a', '¿Quieres vender todas tus acciones de Anthropic?'), ('u', 'Sí')),
-            side='sell', amount=None, sell_all=True)
         self.assertTrue(out['ok'], out)
-        self.assertEqual(actions[0]['target'], 'sell:all')
+        self.assertEqual(belt.result.actions, [])
+        self.assertEqual(belt.result.pending_action['question'],
+                         '¿Quieres comprar US$20 (dólares) de Apple Inc. (AAPL)? Responde sí o no.')
+        self.assertEqual(belt.result.pending_action['data'],
+                         {'side': 'buy', 'ticker': 'AAPL', 'sell_all': False, 'amount': '20.00'})
+        # One thing to answer per reply.
+        self.assertFalse(self._propose(belt)['ok'])
 
-    def test_yes_never_adopts_what_the_person_did_not_write(self):
-        card = {'type': 'trade', 'ticker': 'ANT', 'target': 'buy:1.02', 'label': 'x'}
-        ask = ('a', '¿Quieres comprar US$1,02 de Anthropic?')
-        gap = (('a', '¿Seguimos?'), ('u', 'sí'))
-        for lines, kwargs in (
-                # the assistant chose the asset, or the amount
-                ((('u', 'qué me recomiendas con 1.02 dólares'), *gap, ask, ('u', 'sí')), {}),
-                ((('u', 'qué tal Anthropic'), *gap, ask, ('u', 'sí')), {}),
-                # a yes to another question: a choice, another amount, another verb
-                ((*self.ASKED, *gap, ('a', '¿Quieres comprar US$1,02 de Anthropic o de Apple?'), ('u', 'sí')), {}),
-                ((*self.ASKED, *gap, ('a', '¿Quieres comprar US$50 de Anthropic?'), ('u', 'sí')), {}),
-                ((*self.ASKED, *gap, ('a', '¿Quieres vender US$1,02 de Anthropic?'), ('u', 'sí')), {}),
-                ((*self.ASKED, *gap, ('a', '¿Cuál acción quieres comprar por US$1,02?'), ('u', 'sí')), {}),
-                # what was asked was served by a card already
-                ((*self.ASKED, ('a', 'Lista.', card), ('u', 'gracias'), ask, ('u', 'sí')), {}),
-                # they said no, changed the amount or the asset, or only thanked
-                ((*self.ASKED, ask, ('u', 'no, gracias')), {}),
-                ((*self.ASKED, ask, ('u', 'gracias')), {}),
-                ((('u', 'compra 1.02 dólares de Anthropic'), ('a', '¿Seguro?'), ('u', 'mejor 50')), {}),
-                ((('u', 'compra 1.02 dólares de Anthropic'), ('a', '¿Seguro?'), ('u', 'mejor compra Tesla')),
-                 {'other': True}),
+    def test_the_question_keeps_the_assistant_from_choosing(self):
+        for said, amount in (
+                ('qué me recomiendas', 20), ('compra 20 de Tesla', 20), ('compra Apple', 20),
+                ('compra 20 de Apple', 200), ('compra Apple por 1.02 dólares', 102),
+                ('compra 500 de Apple en pesos', 500), ('compra 500 de Apple, en bolívares', 500),
+                ('compra 20 acciones de Apple', 20), ('compra 20 euros de Apple', 20),
+                ('¿cuánto serían 100 de Apple?', 100), ('Apple ' + 'texto pegado ' * 80 + ' 20', 20),
         ):
-            out, actions = self._in_thread(self._thread(*lines), **kwargs)
-            self.assertFalse(out['ok'], lines)
-            self.assertEqual(actions, [], lines)
+            belt = self._belt(said)
+            self.assertFalse(self._propose(belt, amount_usd=amount)['ok'], said)
+            self.assertIsNone(belt.result.pending_action, said)
+            self.assertEqual(belt.result.actions, [], said)
 
-    def test_a_decimal_is_never_read_as_hundreds(self):
-        for said, wrong in (('compra 1.02 dólares de Anthropic', 102), ('compra 1,02 dólares de Anthropic', 102),
-                            ('compra 20,5 dólares de Anthropic', 205), ('compra 1.500,50 dólares de Anthropic', 150050),
-                            ('compra 2.000 dólares de Anthropic', 2)):
-            out, actions = self._in_thread(self._thread(('u', said)), amount=wrong)
-            self.assertFalse(out['ok'], said)
-            self.assertEqual(actions, [], said)
+    def test_said_over_several_messages_is_asked(self):
+        for lines, side, amount, sell_all in (
+                (('compra Apple', '20'), 'buy', 20, False),
+                (('¿cómo compro acciones de Apple?', 'por 1.02 dólares'), 'buy', 1.02, False),
+                (('quiero vender', 'Apple', 'toda'), 'sell', None, True),
+                (('quiero salir de Apple', 'el 100%'), 'sell', None, True),
+                (('vende todo lo que tengo de apple',), 'sell', None, True),
+                (('mi apple la quiero vender', 'solo una parte', '3'), 'sell', 3, False),
+        ):
+            belt = self._belt(*reversed(lines))
+            with patch('assistant.trades._held', return_value='desconocido'):
+                self.assertTrue(self._propose(belt, side=side, amount_usd=amount, sell_all=sell_all)['ok'], lines)
+            self.assertEqual(belt.result.pending_action['data']['sell_all'], sell_all, lines)
+            self.assertEqual(belt.result.actions, [], lines)
+
+    def test_the_question_is_in_their_language(self):
+        for said, start in (('I want to sell my Apple', 'Do you want to sell your whole position in'),
+                            ('quero vender minha Apple', 'Você quer vender toda a sua posição em'),
+                            ('quiero vender mi Apple', '¿Quieres vender toda tu posición en')):
+            belt = self._belt(said)
+            with patch('assistant.trades._held', return_value='desconocido'):
+                self._propose(belt, side='sell', amount_usd=None, sell_all=True)
+            self.assertTrue(belt.result.pending_action['question'].startswith(start), said)
+
+    def test_what_people_call_it_finds_it(self):
+        spy = ('SPY', 'SPDR S&P 500 ETF')
+        belt = self._belt('compra 20 dólares del S&P 500')
+        with patch('assistant.trades.offered', return_value=True), \
+                patch('assistant.market.listed_asset', side_effect=lambda query: spy if query == 'SPY' else None), \
+                patch('cusd_plus.eligibility.check_stock_buy_eligibility', return_value=True):
+            out = belt.call('propose_stock_trade', {'side': 'buy', 'asset': 'S&P 500', 'amount_usd': 20, 'sell_all': False})
+        self.assertTrue(out['ok'], out)
+        self.assertEqual(belt.result.pending_action['data']['ticker'], 'SPY')
+
+    def test_a_word_many_assets_share_names_none(self):
+        from . import trades
+        self.assertFalse(trades._named(['compra 20 de ishares'], 'IBIT', 'iShares Bitcoin Trust'))
+        self.assertTrue(trades._named(['compra 20 de google'], 'GOOGL', 'Alphabet Inc.'))
+        self.assertTrue(trades._named(['vende mi tesla'], 'TSLA', 'Tesla'))
+        self.assertFalse(trades._named(['compra 20 de algo'], 'DE', 'Deere & Company'))
+        self.assertTrue(trades._named(['compra 20 de DE'], 'DE', 'Deere & Company'))
+        self.assertTrue(trades._named(['compra 20 de capital one'], 'COF', 'Capital One Financial'))
+        self.assertTrue(trades._named(['compra 20 de brk.b'], 'BRK.B', 'Berkshire Hathaway'))
+        self.assertTrue(trades._named(['compra 20 del s&p 500'], 'SPY', 'SPDR S&P 500 ETF'))
 
     def test_a_refusal_never_tells_the_person_about_tools(self):
-        out = self._propose(self._belt('compra Apple'))
+        out = self._propose(self._belt('qué me recomiendas'))
         self.assertIn('No menciones herramientas', out['como_decirlo'])
 
-    def test_a_name_shared_by_several_assets_does_not_name_one(self):
+    def test_a_sale_needs_the_holding(self):
+        with patch('assistant.trades._held', return_value=[]):
+            out = self._propose(self._belt('vende 10 de Apple'), side='sell', amount_usd=10)
+            self.assertIn('no hay nada que vender', out['motivo'])
+        # The only thing they hold needs no name; with two, it does.
+        with patch('assistant.trades._held', return_value=[{'ticker': 'AAPL'}]):
+            self.assertTrue(self._propose(self._belt('vende todo'), side='sell', amount_usd=None, sell_all=True)['ok'])
+        with patch('assistant.trades._held', return_value=[{'ticker': 'AAPL'}, {'ticker': 'TSLA'}]):
+            self.assertFalse(self._propose(self._belt('vende todo'), side='sell', amount_usd=None, sell_all=True)['ok'])
+        # A buy never sells all, whatever the model sent.
+        belt = self._belt('compra 20 de Apple todo')
+        self._propose(belt, sell_all=True)
+        self.assertFalse(belt.result.pending_action['data']['sell_all'])
+
+    def test_their_yes_checks_everything_again(self):
         from . import trades
-
-        listings = [{'s': 'IBITon', 't': 'IBIT', 'n': 'iShares Bitcoin Trust'}, {'s': 'ETHAon', 't': 'ETHA', 'n': 'iShares Ethereum Trust'},
-                    {'s': 'AAPLon', 't': 'AAPL', 'n': 'Apple Inc.'}]
-        with patch('cusd_plus.gm_api.all_market', return_value=listings), \
-                patch('cusd_plus.schema._gm_listing', side_effect=lambda item: (item['s'], item['t'], item['n'])):
-            self.assertEqual(trades._probes('AAPL', 'Apple Inc.'), {'aapl', 'apple'})
-            self.assertEqual(trades._probes('IBIT', 'iShares Bitcoin Trust'), {'ibit'})
-            self.assertEqual(trades._probes('GOOGL', 'Alphabet Inc.') & {'google', 'youtube'}, {'google', 'youtube'})
-
-    def test_yes_after_a_card_does_not_leave_a_second_card(self):
-        from .engine import payment_texts
-
-        now = timezone.now()
-
-        def message(sender, body, minutes, **metadata):
-            return SimpleNamespace(sender_type=sender, body=body, metadata=metadata,
-                                   created_at=now + timedelta(minutes=minutes))
-
-        asked = message('USER', 'compra 20 dólares de Apple', 0)
-        card = message('AGENT', 'Revisa la tarjeta.', 1,
-                       actions=[{'type': 'trade', 'ticker': 'AAPL', 'target': 'buy:20.00', 'label': 'x'}])
-        yes = message('USER', 'sí, dale', 2)
-        self.assertEqual(payment_texts([asked, card, yes]), ['sí, dale'])
-        # A top-up form answered it too.
-        form = message('AGENT', 'Aquí está.', 1, actions=[{'type': 'form', 'target': 'topup:BOB=500', 'label': 'x'}])
-        self.assertEqual(payment_texts([message('USER', 'recarga 500', 0), form, yes]), ['sí, dale'])
-        # With no card in between, the two messages are one request.
-        plain = message('AGENT', '¿Cuánto quieres comprar?', 1, actions=[])
-        self.assertEqual(payment_texts([asked, plain, yes]), ['sí, dale', 'compra 20 dólares de Apple'])
+        data = {'side': 'sell', 'ticker': 'AAPL', 'sell_all': True, 'amount': None}
+        with patch('assistant.market.listed_asset', return_value=self.APPLE):
+            with patch('assistant.trades.offered', return_value=False):
+                self.assertEqual(trades.confirmed(self._belt(), data)[2], {})
+            with patch('assistant.trades.offered', return_value=True):
+                with patch('assistant.trades._held', return_value=[]):
+                    self.assertFalse(trades.confirmed(self._belt(), data)[0])
+                with patch('assistant.trades._held', return_value=[{'ticker': 'AAPL'}]):
+                    done, _reply, extra = trades.confirmed(self._belt(), data)
+        self.assertTrue(done)
+        self.assertEqual(extra['actions'], [{'type': 'trade', 'ticker': 'AAPL', 'target': 'sell:all',
+                                             'label': 'Vender todo Apple Inc.'}])
 
     def test_a_reply_beside_a_card_never_says_the_trade_happened(self):
         from . import trades
@@ -4554,38 +4448,6 @@ class StockTradeCardTests(TestCase):
             self.assertTrue(trades.DONE_CLAIM.search(said), said)
         for said in ('Revisa la tarjeta y toca Aprobar.', 'Puedes comprar desde la tarjeta.'):
             self.assertFalse(trades.DONE_CLAIM.search(said), said)
-
-    def test_a_sale_needs_the_holding_and_all_of_it_only_when_they_said_so(self):
-        account = SimpleNamespace(bsc_address='0x' + 'a' * 40)
-        holding = [{'ticker': 'AAPL', 'nombre': 'Apple Inc.', 'valor_usd': '35.10'}]
-        with patch('assistant.engine._holdings', return_value=[]):
-            out = self._propose(self._belt('vende 10 de Apple', account=account), side='sell', amount_usd=10)
-            self.assertIn('no hay nada que vender', out['motivo'])
-        with patch('assistant.engine._holdings', return_value=holding):
-            belt = self._belt('vende 10 de Apple', account=account)
-            out = self._propose(belt, side='sell', amount_usd=10)
-            self.assertEqual((out['ok'], out['tiene']), (True, '35.10'))
-            self.assertEqual(belt.result.actions[0],
-                             {'type': 'trade', 'ticker': 'AAPL', 'target': 'sell:10.00', 'label': 'Vender US$10 de Apple Inc.'})
-            # "All of it" is theirs to say, tied to the verb, and never when denied or said in passing.
-            for said in ('vende mis Apple', 'vende Apple pero no todo', 'vende Apple, gracias por todo',
-                         'sobre todo vende Apple', 'vende 10 de Apple, eso es todo', 'vende todo Apple 10'):
-                belt = self._belt(said, account=account)
-                self.assertFalse(self._propose(belt, side='sell', amount_usd=None, sell_all=True)['ok'], said)
-                self.assertEqual(belt.result.actions, [], said)
-            # "todo bien" a moment ago is not "sell all" now.
-            belt = self._belt('vende mi Apple', 'todo bien', account=account)
-            self.assertFalse(self._propose(belt, side='sell', amount_usd=None, sell_all=True)['ok'])
-            belt = self._belt('vende todas mis acciones de Apple', account=account)
-            self.assertTrue(self._propose(belt, side='sell', amount_usd=None, sell_all=True)['ok'])
-            self.assertEqual(belt.result.actions[0]['target'], 'sell:all')
-        # The holdings were never read on this server: the phone checks the real balance.
-        with patch('assistant.engine._holdings', return_value='desconocido'):
-            self.assertTrue(self._propose(self._belt('vende 10 de Apple', account=account), side='sell', amount_usd=10)['ok'])
-        # A buy never sells all, whatever the model sent.
-        belt = self._belt('compra 20 de Apple todo')
-        self._propose(belt, sell_all=True)
-        self.assertEqual(belt.result.actions[0]['target'], 'buy:20.00')
 
     def _card_message(self, user=None, actions=None, hours_ago=0):
         from inbox.models import SupportConversation, SupportMessage

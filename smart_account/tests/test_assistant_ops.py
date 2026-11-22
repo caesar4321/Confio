@@ -96,6 +96,7 @@ class SplitMathTests(OpsBase):
         self.assertIsNone(periods)
 
 
+@mock.patch('smart_account.assistant_ops.PAYING_RULES_PAUSED', False)  # what they do outside the chat pause
 class ProposeRuleTests(OpsBase):
     def propose(self, said, **kw):
         return ops.propose_rule(self.owner, said=said, meta=BUILD, tz=UTC, **kw)
@@ -416,6 +417,7 @@ class WatchConfirmationTests(WatchTests):
         self.assertEqual(SmartAccountWatch.objects.count(), 1)
 
 
+@mock.patch('smart_account.assistant_ops.PAYING_RULES_PAUSED', False)  # what they do outside the chat pause
 class PayeeMustBeSaidTests(OpsBase):
     """The payee or destination of a proposed rule is in the owner's own
     words this turn, or already one the owner pays by rule."""

@@ -40,6 +40,12 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 OPERABLE = ('active', 'cancel_pending')
+# Who gets money every month, and how much, read out of a sentence: paused
+# with the chat's typed payments (assistant/engine.py, 2026-11-22). Stopping
+# a rule, and the buy rules, still work from the chat.
+PAYING_RULES_PAUSED = True
+PAYING_RULES_REFUSAL = ('Por ahora no creo ni cambio desde el chat reglas que envían o pagan a alguien. Hazlo en tu '
+                        'Cuenta inteligente, en Reglas: ahí escribes el monto y lo ves antes de firmar.')
 FREQUENCIES = ('daily', 'weekly', 'biweekly', 'monthly')
 WEEKDAYS_ES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
 FIRST_RUN_HOUR = 10  # local time of the owner
@@ -119,6 +125,12 @@ def said_number(said: str, value) -> bool:
         return Decimal(str(value)) in numbers_in(said)
     except Exception:  # noqa: BLE001
         return False
+
+
+def said_usd(said: str, value, *, level=None) -> bool:
+    """They wrote this as that many dollars. `said`: their messages joined by ' · ', oldest first."""
+    from payment_accounts.dollars import said_dollars
+    return said_dollars(list(reversed(str(said or '').split(' · '))), value, level=level)
 
 
 def _norm(text: str) -> str:
@@ -482,9 +494,10 @@ def _amount(value, said, *, required: bool) -> Decimal | None:
         if required:
             raise OpsRefused('Dime el monto en dólares, en números.')
         return None
-    if not said_number(said, value):
-        # The amount must be the owner's: never one the assistant picked.
-        raise OpsRefused('Dime tú el monto en dólares, en números: yo no elijo cuánto mover.', 'not_said')
+    if not said_usd(said, value):
+        # The amount must be the owner's, and in dollars: never one the assistant picked or converted.
+        raise OpsRefused('Dime tú el monto en dólares, en números (por ejemplo "20 dólares"): yo no elijo ni '
+                         'convierto cuánto mover.', 'not_said')
     try:
         return services._parse_usd(Decimal(str(value)).quantize(CENT))
     except services.PrepareError as exc:
@@ -607,6 +620,8 @@ def propose_rule(user, *, said: str, action: str, kind: str | None = None, rule_
     kind = existing.kind if existing is not None else kind
     if kind not in ('send', 'payout', 'buy'):
         raise OpsRefused('Una regla puede enviar a alguien de Confío, pagar a una cuenta bancaria guardada o invertir.')
+    if PAYING_RULES_PAUSED and kind in ('send', 'payout'):
+        raise OpsRefused(PAYING_RULES_REFUSAL, 'paused')
     frequency = frequency or (existing.frequency if existing else None)
     if frequency not in FREQUENCIES:
         raise OpsRefused('¿Cada cuánto? Puede ser cada día, cada semana, cada dos semanas o cada mes.')

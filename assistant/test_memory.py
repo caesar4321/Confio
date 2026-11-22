@@ -421,19 +421,21 @@ class LaunderingTests(Base):
         self.assertNotIn('Mallory', json.dumps(provider.turns()[0]['input']))
 
     def test_a_reply_that_used_stored_data_is_never_what_a_trade_yes_confirms(self):
-        from . import trades
-        now = timezone.now()
+        from unittest import mock
 
-        def history(**metadata):
-            return [SimpleNamespace(sender_type='USER', body='compra 50 dólares de Apple', metadata={},
-                                    created_at=now - timedelta(minutes=2)),
-                    SimpleNamespace(sender_type='AGENT', body='¿Confirmas comprar 50 dólares de Apple?',
-                                    metadata={'ai': True, **metadata}, created_at=now - timedelta(minutes=1)),
-                    SimpleNamespace(sender_type='USER', body='sí', metadata={}, created_at=now)]
-
-        args = ('AAPL', 'Apple Inc.', {'aapl', 'apple'}, 'buy', Decimal('50.00'), False)
-        self.assertTrue(trades._confirmed(history(), *args))
-        self.assertFalse(trades._confirmed(history(recalled=True), *args))
+        from . import confirm
+        # Only code's stored question is confirmed (assistant/confirm.py), and only as the message just before
+        # the yes: a reply that used stored data neither is one nor may stand between.
+        recalled_id, question_id = 7, 6
+        conversation = mock.MagicMock()
+        before = conversation.messages.filter.return_value.exclude.return_value.order_by.return_value
+        before.values_list.return_value.first.return_value = recalled_id
+        viewer = SimpleNamespace(user=SimpleNamespace(pk=1), account=SimpleNamespace(id=2))
+        message = SimpleNamespace(pk=8, metadata={}, created_at=timezone.now())
+        self.assertIsNone(confirm.answer(conversation, viewer, 'sí', None, message))
+        pending = {'kind': 'trade', 'user_id': 1, 'account_id': 2, 'reply_id': question_id,
+                   'data': {'side': 'buy', 'ticker': 'AAPL', 'sell_all': False, 'amount': '50.00'}}
+        self.assertIsNone(confirm.answer(conversation, viewer, 'sí', pending, message))
 
     def test_who_can_be_operated_for_never_gets_older_messages(self):
         """Their tools take less than the owner's words (a delete, a cancel, an existing payee)."""

@@ -1192,7 +1192,6 @@ class OwnerWordsTests(PaymentIntentBase):
         # A refusal always has words, even for a code with no stock message.
         self.assertTrue(str(payment_intents._refuse('rail')))
 
-    @mock.patch('assistant.engine.TYPED_AMOUNTS_PAUSED', False)  # what it does outside the pause
     def test_the_tool_passes_only_what_the_person_typed_and_words_every_level(self):
         from zoneinfo import ZoneInfo
         from assistant.engine import Toolbelt, TurnResult, Viewer
@@ -1206,8 +1205,17 @@ class OwnerWordsTests(PaymentIntentBase):
             belt.payment_texts = ['mándale 15 dólares a @ana.silva']
             out = belt.call('prepare_payment', {'rail': 'confio_send', 'recipient': 'ana.silva', 'amount_usd': 15})
             self.assertTrue(out['ok'], out)
-            self.assertEqual(out['pago_preparado']['nombre'], 'cuenta de Confío')
-            self.assertEqual(out['pago_preparado']['recibe_exactamente'], '15.00 USD')
+            # A typed amount is asked first, by code; only their yes makes the card.
+            self.assertIsNone(belt.result.payment_intent)
+            pending = belt.result.pending_action
+            self.assertIn('US$15 (dólares) a @ana.silva', pending['question'])
+            from assistant import sends
+            done, _reply, extra = sends.confirmed(belt, pending['data'], 'es')
+            self.assertTrue(done)
+            from payment_accounts.models import PaymentIntent
+            made = PaymentIntent.objects.get(internal_id=extra['payment_intent']['id'])
+            self.assertEqual(made.payee_level, 'confio_account')
+            self.assertEqual((made.amount_local, made.currency), (Decimal('15.00'), 'USD'))
             other = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
             other.payment_texts = ['hola']
             denied = other.call('prepare_payment', {'rail': 'confio_send', 'recipient': 'ana.silva', 'amount_usd': 15})
