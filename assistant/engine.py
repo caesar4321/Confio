@@ -157,7 +157,9 @@ def payment_texts(history):
         def carded(m):
             metadata = getattr(m, 'metadata', None) or {}
             return metadata.get('payment_intent') or any(
-                isinstance(a, dict) and a.get('type') == 'trade' for a in metadata.get('actions') or [])
+                isinstance(a, dict) and (a.get('type') == 'trade' or (
+                    a.get('type') == 'form' and str(a.get('target') or '').startswith('topup')))
+                for a in metadata.get('actions') or [])
         return any(carded(m) for m in later)
 
     mine = [m for m in history if own(m)]
@@ -1516,6 +1518,10 @@ class Toolbelt:
             # A stock bought or sold from a card in the chat.
             if trades.offered(self):
                 specs.append(trades.SPEC)
+            # What they want Confío for, when they say it in words.
+            from . import first_use
+            if first_use.due(self.viewer):
+                specs.append(first_use.spec())
         return specs
 
     def call(self, name, args):
@@ -1535,6 +1541,11 @@ class Toolbelt:
             if self.waiting_for_team or not trades.offered(self):
                 return {'error': f'herramienta desconocida: {name}'}
             return trades.propose(self, **args)
+        if name == 'note_first_use':
+            from . import first_use
+            if self.waiting_for_team:
+                return {'error': f'herramienta desconocida: {name}'}
+            return first_use.note(self, **args)
         handler = {
             'navigate': self.navigate,
             'show_steps': self.show_steps,

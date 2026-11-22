@@ -66,7 +66,10 @@ class TrailStop:
 @dataclass(frozen=True)
 class Chip:
     label: str
-    kind: str  # navigate | probe | dismiss
+    # navigate | probe | dismiss, and in the home conversation: pet (opens the
+    # pet's picker), skip (no, and on to the next step now), ask (the chip's
+    # own words are sent as the person's question; the step stays).
+    kind: str
     answer: str = ''
     trail: tuple = ()
 
@@ -98,7 +101,25 @@ class Step:
     chips: tuple = ()
 
 
+# The first conversation where the chat is Inicio (2026-11-22): the person
+# meets their assistant and makes it theirs, then says in their own words
+# what they want Confío for. What they write is more exact than a chip, and
+# the conversation guides them from it; the chips here only answer what
+# people ask first ("what is this?"), plus a way out.
+OPENING_STEPS = ('opening', 'opening_words')
+MEET_MAX_SHOWS = 3
+
 STEPS = {
+    'meet': Step(
+        'meet', 'Soy tu asistente en Confío. Puedes ponerme un nombre y elegir cómo me veo.',
+        brief='Salúdala por su nombre, di que eres su asistente en Confío y que puede ponerte un nombre y elegir '
+              'cómo te ves.',
+        chips=(Chip('Elegir cómo te ves', 'pet'), Chip('Seguir así', 'skip'))),
+    'opening_words': Step(
+        'opening', 'Cuéntame con tus palabras: ¿para qué te gustaría usar Confío?',
+        brief='Pregúntale para qué le gustaría usar Confío y pídele que te lo cuente con sus palabras.',
+        chips=(Chip('¿Qué es Confío?', 'ask'), Chip('¿Qué puedo hacer aquí?', 'ask'),
+               Chip('¿Mi dinero está seguro?', 'ask'), Chip('No sé todavía', 'probe', answer='other'))),
     'opening': Step(
         'opening', '¿Para qué te gustaría usar Confío?',
         brief='Salúdala por su nombre, di que eres su asistente y pregúntale para qué le gustaría usar Confío.',
@@ -222,9 +243,9 @@ def _resting(row, now, conversation=False):
     how often it was shown so it stops holding the real step back."""
     if row is None:
         return False
-    if row.step == 'opening' and (row.dismissed_at or row.accepted_at):
+    if row.step in OPENING_STEPS and (row.dismissed_at or row.accepted_at):
         return True
-    if conversation and row.step == 'opening' and row.shown_count >= OPENING_MAX_SHOWS_IN_CONVERSATION:
+    if conversation and row.step in OPENING_STEPS and row.shown_count >= OPENING_MAX_SHOWS_IN_CONVERSATION:
         return True
     return any(moment and now - moment < rest for moment, rest in (
         (row.shown_at, SHOWN_REST), (row.accepted_at, ACCEPTED_REST), (row.dismissed_at, DISMISSED_REST)))
@@ -375,12 +396,34 @@ def current_key(viewer, request_meta):
     rows = {r.step: r for r in AssistantGuideStep.objects.filter(user=viewer.user)}
     answer = ProbeAnswer.objects.filter(user=viewer.user, probe_id=PROBE_ID).values_list('answer', flat=True).first()
     conversation = conversation_home(request_meta)
+    if conversation and _meet_due(viewer, rows.get('meet'), now):
+        return 'meet'
     if state.funded:
         return _funded_key(viewer, state, rows, answer, now, conversation)
-    if not answer and not _resting(rows.get('opening'), now, conversation):
-        return 'opening'
+    if not answer:
+        if not conversation:
+            if not _resting(rows.get('opening'), now, conversation):
+                return 'opening'
+        # In words there. Someone who already refused the chips is not asked again.
+        elif not any(_resting(rows.get(key), now, conversation) for key in OPENING_STEPS):
+            return 'opening_words'
     key = _unfunded_key(viewer, state, answer)
     return None if key is None or _resting(rows.get(key), now, conversation) else key
+
+
+def _meet_due(viewer, row, now):
+    """Meeting the assistant, once: until they chose (a name, a look) or said
+    no, a few showings at most, and never to someone who already made it theirs."""
+    if row is not None and (row.accepted_at or row.dismissed_at or row.shown_count >= MEET_MAX_SHOWS
+                            or (row.shown_at and now - row.shown_at < SHOWN_REST)):
+        return False
+    try:
+        from .models import AssistantProfile, Mascot
+        profile = AssistantProfile.objects.filter(user=viewer.user).first()
+    except Exception:  # noqa: BLE001 - unknown: no step
+        logger.warning('Confio Assistant: pet profile unavailable for the guide', exc_info=True)
+        return False
+    return profile is None or (not profile.mascot_name and profile.mascot == Mascot.CONFI)
 
 
 def _usable_text(text, fallback):
@@ -647,7 +690,7 @@ def record_event(viewer, key, event, *, answer=None, funded=False, detail=''):
         AssistantGuideStep.objects.filter(pk=row.pk).update(dismissed_at=now)
     elif event == 'accepted':
         AssistantGuideStep.objects.filter(pk=row.pk).update(accepted_at=now)
-        if key == 'opening' and answer:
+        if key in OPENING_STEPS and answer:
             record_probe_answer(viewer.user, PROBE_ID, answer, funded=funded)
             # A test account walks on from the first meeting as a new person
             # would: its real identity decides, only its money is ignored.

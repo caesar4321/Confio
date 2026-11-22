@@ -3192,14 +3192,72 @@ class GuideStepTests(TestCase):
         from . import guide
         from .models import AssistantGuideStep
         self._answer()
+        self._met()
         guide.record_event(self._viewer(), 'top_up', 'shown', detail='conversation')
         self.assertIsNone(self._key(meta=self.CONVERSATION))
         self.assertIsNone(self._key())
-        AssistantGuideStep.objects.filter(user=self.user).update(
+        AssistantGuideStep.objects.filter(user=self.user, step='top_up').update(
             shown_at=timezone.now() - guide.SHOWN_REST - timedelta(minutes=1))
         self.assertEqual(self._key(meta=self.CONVERSATION), 'top_up')
         guide.record_event(self._viewer(), 'top_up', 'dismissed')
         self.assertIsNone(self._key(meta=self.CONVERSATION))
+
+    def _met(self):
+        from . import guide
+        guide.record_event(self._viewer(), 'meet', 'accepted')
+
+    def test_in_the_conversation_a_person_first_meets_their_assistant_once(self):
+        from . import guide
+        from .models import AssistantGuideStep, AssistantProfile
+
+        # Not where the tabs are: there is no chat to meet it in.
+        self.assertEqual(self._key(), 'opening')
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'meet')
+        found = guide.STEPS['meet']
+        self.assertEqual([(c.label, c.kind) for c in found.chips], [('Elegir cómo te ves', 'pet'), ('Seguir así', 'skip')])
+        # Someone with money already in the app meets it too.
+        self.assertEqual(self._key(meta=self.CONVERSATION, funded=True), 'meet')
+        # Shown today and left there: the next step is not held back, and tomorrow it asks again.
+        guide.record_event(self._viewer(), 'meet', 'shown', detail='conversation')
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening_words')
+        AssistantGuideStep.objects.filter(user=self.user, step='meet').update(
+            shown_at=timezone.now() - guide.SHOWN_REST - timedelta(minutes=1))
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'meet')
+        # "Seguir así" (or choosing) settles it for good, and the next step comes right away.
+        guide.record_event(self._viewer(), 'meet', 'dismissed')
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening_words')
+        # Never to someone who already made it theirs.
+        AssistantGuideStep.objects.filter(user=self.user).delete()
+        AssistantProfile.objects.update_or_create(user=self.user, defaults={'mascot_name': 'Luna'})
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening_words')
+        # At most three showings.
+        AssistantProfile.objects.filter(user=self.user).update(mascot_name='')
+        AssistantGuideStep.objects.create(user=self.user, step='meet', shown_count=3)
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening_words')
+
+    def test_in_the_conversation_the_reason_is_asked_in_words(self):
+        from . import guide
+
+        self._met()
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening_words')
+        step = guide.STEPS['opening_words']
+        self.assertEqual(step.stage, 'opening')                     # the same stage in the numbers
+        self.assertIn('con tus palabras', step.text)
+        # What people ask first, sent as their own question; and one way out.
+        self.assertEqual([(c.label, c.kind, c.answer) for c in step.chips], [
+            ('¿Qué es Confío?', 'ask', ''), ('¿Qué puedo hacer aquí?', 'ask', ''), ('¿Mi dinero está seguro?', 'ask', ''),
+            ('No sé todavía', 'probe', 'other')])
+        # "No sé todavía" is an answer like any chip's: the guide moves on.
+        guide.record_event(self._viewer(), 'opening_words', 'accepted', answer='other')
+        self.assertEqual(ProbeAnswer.objects.get(user=self.user).answer, 'other')
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'top_up')
+
+    def test_someone_who_refused_the_chips_is_not_asked_again_in_words(self):
+        from . import guide
+
+        self._met()
+        guide.record_event(self._viewer(), 'opening', 'dismissed')
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'top_up')
 
     def test_in_the_conversation_the_opening_question_is_asked_twice_at_most(self):
         """Answered in words or left under newer messages, nothing else would
@@ -3207,14 +3265,15 @@ class GuideStepTests(TestCase):
         from . import guide
         from .models import AssistantGuideStep
         day = guide.SHOWN_REST + timedelta(minutes=1)
-        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening')
-        guide.record_event(self._viewer(), 'opening', 'shown', detail='conversation')
+        self._met()
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening_words')
+        guide.record_event(self._viewer(), 'opening_words', 'shown', detail='conversation')
         # Resting today: the real step is not held back meanwhile.
         self.assertEqual(self._key(meta=self.CONVERSATION), 'top_up')
-        AssistantGuideStep.objects.filter(user=self.user, step='opening').update(shown_at=timezone.now() - day)
-        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening')
-        guide.record_event(self._viewer(), 'opening', 'shown', detail='conversation')
-        AssistantGuideStep.objects.filter(user=self.user, step='opening').update(shown_at=timezone.now() - day)
+        AssistantGuideStep.objects.filter(user=self.user, step='opening_words').update(shown_at=timezone.now() - day)
+        self.assertEqual(self._key(meta=self.CONVERSATION), 'opening_words')
+        guide.record_event(self._viewer(), 'opening_words', 'shown', detail='conversation')
+        AssistantGuideStep.objects.filter(user=self.user, step='opening_words').update(shown_at=timezone.now() - day)
         # Twice shown, never answered: done there, while the card would ask again.
         self.assertEqual(self._key(meta=self.CONVERSATION), 'top_up')
         self.assertEqual(self._key(), 'opening')
@@ -4184,6 +4243,58 @@ def here_keys():
     return set(here.NOTIFICATIONS)
 
 
+class FirstUseInWordsTests(TestCase):
+    """What the person wants Confío for, written by them and filed by the model (assistant/first_use.py)."""
+
+    CONVERSATION = {'HTTP_X_CONFIO_HOME': 'conversation'}
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='ana_words', email='words@example.com', password='x',
+                                             firebase_uid='fb-words', first_name='Ana')
+
+    def _belt(self, meta=None, **viewer):
+        base = dict(user=self.user, account=None, account_type='personal', business_id=None, is_business_owner=False,
+                    tz=ZoneInfo('UTC'), request_meta=self.CONVERSATION if meta is None else meta)
+        return Toolbelt(Viewer(**{**base, **viewer}), TurnResult(reply=''), analyses_left=0)
+
+    def _names(self, belt):
+        return {spec.get('name') for spec in belt.specs()}
+
+    def test_offered_until_they_have_said_it_and_only_where_the_chat_is_inicio(self):
+        from .models import AssistantGuideStep
+
+        self.assertIn('note_first_use', self._names(self._belt()))
+        self.assertNotIn('note_first_use', self._names(self._belt(meta={})))
+        self.assertNotIn('note_first_use', self._names(self._belt(account_type='business', business_id=1)))
+        belt = self._belt()
+        with patch('assistant.suggestions._state', return_value=SimpleNamespace(funded=False)):
+            out = belt.call('note_first_use', {'reason': 'family'})
+        self.assertTrue(out['ok'])
+        self.assertIn('No se lo menciones', out['nota'])
+        self.assertEqual(belt.result.actions, [])                              # nothing to show: it is a note
+        answer = ProbeAnswer.objects.get(user=self.user)
+        self.assertEqual((answer.probe_id, answer.answer, answer.funded), ('first_use_2026_10', 'family', False))
+        # The opening step is done, as if a chip had been tapped.
+        self.assertIsNotNone(AssistantGuideStep.objects.get(user=self.user, step='opening_words').accepted_at)
+        # Said once: the tool goes, and a second note changes nothing.
+        self.assertNotIn('note_first_use', self._names(self._belt()))
+        self.assertFalse(self._belt().call('note_first_use', {'reason': 'invest'})['ok'])
+        self.assertEqual(ProbeAnswer.objects.get(user=self.user).answer, 'family')
+
+    def test_only_the_reasons_the_guide_knows(self):
+        from . import first_use
+        from .suggestions import PROBE_KEYS
+
+        self.assertEqual(set(first_use.REASONS), PROBE_KEYS)
+        self.assertEqual(first_use.spec()['parameters']['properties']['reason']['enum'], list(first_use.REASONS))
+        self.assertFalse(self._belt().call('note_first_use', {'reason': 'lottery'})['ok'])
+        self.assertFalse(ProbeAnswer.objects.filter(user=self.user).exists())
+        # While the team owns the thread nothing is noted.
+        waiting = self._belt()
+        waiting.waiting_for_team = True
+        self.assertIn('error', waiting.call('note_first_use', {'reason': 'family'}))
+
+
 class StockTradeCardTests(TestCase):
     """A stock bought or sold from a card in the chat (assistant/trades.py)."""
 
@@ -4347,6 +4458,9 @@ class StockTradeCardTests(TestCase):
                        actions=[{'type': 'trade', 'ticker': 'AAPL', 'target': 'buy:20.00', 'label': 'x'}])
         yes = message('USER', 'sí, dale', 2)
         self.assertEqual(payment_texts([asked, card, yes]), ['sí, dale'])
+        # A top-up form answered it too.
+        form = message('AGENT', 'Aquí está.', 1, actions=[{'type': 'form', 'target': 'topup:BOB=500', 'label': 'x'}])
+        self.assertEqual(payment_texts([message('USER', 'recarga 500', 0), form, yes]), ['sí, dale'])
         # With no card in between, the two messages are one request.
         plain = message('AGENT', '¿Cuánto quieres comprar?', 1, actions=[])
         self.assertEqual(payment_texts([asked, plain, yes]), ['sí, dale', 'compra 20 dólares de Apple'])
@@ -4531,11 +4645,11 @@ class TopupLimitsTests(TestCase):
         self.assertTrue(out['ok'])
         self.assertIn('Todavía no se creó nada', out['nota'])
         self.assertEqual(belt.result.actions, [
-            {'type': 'do', 'target': 'top_up:BOB=500', 'label': 'Recargar 500 bolivianos'}])
-        self.assertFalse(self._propose(belt, 500)['ok'])            # one card per answer
+            {'type': 'form', 'target': 'topup:BOB=500', 'label': 'Recargar 500 bolivianos'}])
+        self.assertFalse(self._propose(belt, 500)['ok'])            # one form per answer
         cents = self._belt('BO', 'recarga 1.500,50')
         self.assertTrue(self._propose(cents, 1500.5)['ok'])
-        self.assertEqual(cents.result.actions[0], {'type': 'do', 'target': 'top_up:BOB=1500.50',
+        self.assertEqual(cents.result.actions[0], {'type': 'form', 'target': 'topup:BOB=1500.50',
                                                    'label': 'Recargar 1.500,50 bolivianos'})
 
     def test_a_topup_card_never_carries_an_amount_the_person_did_not_write_in_their_currency(self):
@@ -4544,6 +4658,7 @@ class TopupLimitsTests(TestCase):
                 (('quiero recargar',), 500, 'no está en su mensaje'),          # the model picked it
                 (('quiero recargar 50 dólares',), 50, 'en dólares'),           # never converted by the model
                 (('recarga US$50',), 50, 'en dólares'),
+                (('recarga 500 $us',), 500, 'en dólares'),
                 (('mi teléfono es 70012345',), 500, 'no está en su mensaje'),
                 (('quiero recargar 100 bolivianos',), 100, 'mínimo por recarga es 350'),
                 (('quiero recargar 90000',), 90000, 'máximo por recarga es 56.000'),
@@ -4553,6 +4668,93 @@ class TopupLimitsTests(TestCase):
             self.assertFalse(out['ok'], said)
             self.assertIn(why, out['motivo'], said)
             self.assertEqual(belt.result.actions, [], said)
+
+    def test_dollars_written_any_way_are_never_taken_as_the_local_currency(self):
+        from . import topup_limits
+
+        def how(said, amount=500, fiat='BOB'):
+            return topup_limits._written([said], Decimal(str(amount)), fiat)
+
+        for said in ('recarga 500 dólares', 'recarga USD 500', 'recarga US$ 500', 'recarga US$500', 'recarga usd500',
+                     'recarga 500 $us', 'recarga $us 500', 'recarga $us500', 'recarga 500 en dólares', 'recarga 500 dls',
+                     'recarga 500 u$s', 'recarga 500 de mis dólares', 'recarga $500', 'recarga 500usd'):
+            self.assertEqual(how(said), 'dollars', said)
+        for said in ('recarga 500', 'quiero recargar 500 bolivianos', 'recarga Bs 500', 'recarga 1.500,50'):
+            self.assertEqual(how(said, 1500.5 if '1.500' in said else 500), 'local', said)
+        # Where the peso sign is the country's own, "$500" is pesos.
+        self.assertEqual(how('recarga $500', fiat='MXN'), 'local')
+        self.assertEqual(how('recarga 500 dólares', fiat='MXN'), 'dollars')
+        # Denied, glued to something else, or simply not there.
+        self.assertEqual(how('no recargues 500, mejor 400'), '')
+        self.assertEqual(how('no recargues 500, mejor 400', 400), 'local')
+        self.assertEqual(how('recarga 20k', 20), '')
+        self.assertEqual(how('mi cuenta es 500-22'), '')
+
+    def test_a_question_or_a_pasted_text_fills_in_no_amount(self):
+        for said in ('¿puedo recargar 500?', 'x' * 290 + ' recarga 500'):
+            belt = self._belt('BO', said)
+            out = self._propose(belt, 500)
+            self.assertFalse(out['ok'], said)
+            self.assertEqual(belt.result.actions, [], said)
+
+    def test_the_provider_is_read_once_per_turn_even_when_it_is_down(self):
+        from ramps.koywe_client import KoyweError
+
+        from . import here, topup_limits
+
+        belt = self._belt('BO', 'recarga 500')
+        with patch('ramps.koywe_client.KoyweClient.get_public_ramp_limits', side_effect=KoyweError('down')) as read, \
+                patch('ramps.bolivia_qr.koywe_replaced', return_value={'top_up': False}):
+            topup_limits.offered(belt)
+            here.forms_for(belt.viewer, belt)
+            belt.specs()
+            belt.call('propose_topup', {'amount': 500})
+            topup_limits.data(belt.viewer)
+        self.assertEqual(read.call_count, 1)
+
+    def test_the_forms_message_keeps_the_order_it_created(self):
+        from inbox.models import SupportConversation, SupportMessage
+        from ramps.models import RampTransaction
+
+        from . import topup_limits
+
+        user = User.objects.create_user(username='ana_order', email='order@example.com', password='x', firebase_uid='fb-order')
+        account = Account.objects.create(user=user, account_type='personal', account_index=0)
+        conversation = SupportConversation.objects.create(user=user, account=account, status='OPEN')
+
+        def message(actions, hours_ago=0):
+            row = SupportMessage.objects.create(conversation=conversation, sender_type='AGENT', body='x',
+                                                metadata={'ai': True, 'actions': actions})
+            if hours_ago:
+                SupportMessage.objects.filter(pk=row.pk).update(created_at=timezone.now() - timedelta(hours=hours_ago))
+            return row
+
+        form = message([{'type': 'form', 'target': 'topup:BOB=500', 'label': 'Recargar 500 bolivianos'}])
+        self.assertEqual(topup_limits.card(user, form.pk), ('none', None))
+        RampTransaction.objects.create(provider='koywe', direction='ON_RAMP', provider_order_id='ord-1', actor_user=user,
+                                       country_code='BO', fiat_currency='BOB', fiat_amount=Decimal('500'))
+        # Only their own order, on their own top-up form.
+        other = User.objects.create_user(username='otra_order', email='oo@example.com', password='x', firebase_uid='fb-oo')
+        self.assertFalse(topup_limits.attach(other, form.pk, 'ord-1'))
+        self.assertFalse(topup_limits.attach(user, form.pk, 'ord-999'))
+        self.assertFalse(topup_limits.attach(user, message([{'type': 'form', 'target': 'profile_name'}]).pk, 'ord-1'))
+        self.assertTrue(topup_limits.attach(user, form.pk, 'ord-1', 'QRI-BO', '  QR   Simple  '))
+        state, order = topup_limits.card(user, str(form.pk))
+        self.assertEqual(state, 'order')
+        self.assertEqual(order, {'order_id': 'ord-1', 'country_code': 'BO', 'fiat_currency': 'BOB', 'fiat_amount': '500',
+                                 'payment_method_code': 'QRI-BO', 'payment_method_display': 'QR Simple'})
+        # Kept once: a second order never replaces it.
+        RampTransaction.objects.create(provider='koywe', direction='ON_RAMP', provider_order_id='ord-2', actor_user=user)
+        self.assertFalse(topup_limits.attach(user, form.pk, 'ord-2'))
+        self.assertEqual(topup_limits.card(user, form.pk)[1]['order_id'], 'ord-1')
+        # A method the app made up is not kept; a form lasts a day; other messages are not forms.
+        second = message([{'type': 'form', 'target': 'topup', 'label': 'Recargar'}])
+        topup_limits.attach(user, second.pk, 'ord-2', 'drop table;', 'x')
+        self.assertEqual(topup_limits.card(user, second.pk)[1]['payment_method_code'], '')
+        self.assertEqual(topup_limits.card(user, message([{'type': 'form', 'target': 'topup'}], hours_ago=25).pk), ('expired', None))
+        self.assertEqual(topup_limits.card(user, message([{'type': 'navigate'}]).pk), ('gone', None))
+        self.assertEqual(topup_limits.card(other, form.pk), ('gone', None))
+        self.assertEqual(topup_limits.card(user, 'pending-1'), ('gone', None))
 
     def test_the_topup_card_is_offered_only_where_recargar_ahora_is_the_persons_way(self):
         from . import topup_limits
@@ -4572,6 +4774,21 @@ class TopupLimitsTests(TestCase):
         # Not offered: calling it by name does nothing.
         belt = self._belt('VE', 'recarga 500')
         self.assertEqual(self._propose(belt, 500), {'error': 'herramienta desconocida: propose_topup'})
+
+    def test_with_no_amount_the_empty_topup_form_is_left_where_recargar_ahora_applies(self):
+        from . import here
+
+        bolivia = self._belt('BO', 'quiero recargar')
+        with patch('ramps.koywe_client.KoyweClient.get_public_ramp_limits', return_value=self.LIMITS), \
+                patch('ramps.bolivia_qr.koywe_replaced', return_value={'top_up': False}):
+            self.assertIn('topup', here.forms_for(bolivia.viewer, bolivia))
+            out = bolivia.call('ask_details', {'form': 'topup'})
+            self.assertTrue(out['ok'])
+            self.assertEqual(bolivia.result.actions, [{'type': 'form', 'target': 'topup', 'label': 'Recargar'}])
+            # One form per answer: the one with an amount does not pile on.
+            self.assertFalse(bolivia.call('propose_topup', {'amount': 500})['ok'])
+            venezuela = self._belt('VE', 'quiero recargar')
+            self.assertNotIn('topup', here.forms_for(venezuela.viewer, venezuela))
 
     def test_the_providers_minimum_in_the_persons_own_currency(self):
         out, read = self._data('BO', {'on_ramp_min_amount': Decimal('350'), 'on_ramp_max_amount': Decimal('56000')})

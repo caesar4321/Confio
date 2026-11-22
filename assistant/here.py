@@ -55,6 +55,10 @@ FORMS = {
     'agenda_pagomovil': ('Guardar un contacto de Pago Móvil',
                          'guardar en su Agenda a alguien a quien le envía por Pago Móvil (teléfono, cédula, banco)',
                          True),
+    # A top-up created here (assistant/topup_limits.py says where it is offered).
+    'topup': ('Recargar',
+              'crear una recarga con su banco local aquí mismo: escribe cuánto paga en su moneda, elige cómo paga, ve '
+              'cuánto recibe y la crea; las instrucciones para pagar quedan en la conversación', False),
     'investor_bio': ('Escribir mi descripción',
                      'escribir o cambiar la descripción de su perfil de inversor en Comunidad (una línea, hasta 140 '
                      'caracteres, sin enlaces; se revisa antes de guardarse)', False),
@@ -80,6 +84,10 @@ def forms_for(viewer, belt=None):
     # changed (users.schema.UpdateUserProfile refuses it), so no form for it.
     keys = [] if getattr(viewer.user, 'is_identity_verified', False) else ['profile_name']
     keys.append('investor_bio')
+    if belt is not None:
+        from . import topup_limits
+        if topup_limits.offered(belt):
+            keys.append('topup')
     try:
         from security.geo import country_of
         if (country_of(viewer.user) or '').upper() == 'VE':

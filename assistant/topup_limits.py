@@ -31,7 +31,19 @@ def _amount(value):
 
 def _limits(viewer):
     """(None, fiat, minimum, maximum, live, country) for a person whose top-up
-    goes through Koywe now, else (why not, ...)"""
+    goes through Koywe now, else (why not, ...). Read once per turn: several
+    tools ask, and a provider that is down must not be waited for each time."""
+    cached = getattr(viewer, '_topup_limits', None)
+    if cached is None:
+        cached = _read_limits(viewer)
+        try:
+            viewer._topup_limits = cached
+        except Exception:  # noqa: BLE001 - a viewer that cannot hold it just reads again
+            pass
+    return cached
+
+
+def _read_limits(viewer):
     from ramps.koywe import get_country_ramp_config, on_ramp_paused
     from ramps.koywe_client import KoyweClient, KoyweError
     from security.geo import country_of
@@ -93,20 +105,21 @@ def data(viewer):
 
 
 # ── a top-up started from the chat ──────────────────────────────────────────
-# The assistant leaves a card that opens "Recargar ahora" with the amount the
-# person wrote already filled in: `{'type': 'do', 'target': 'top_up:BOB=200'}`.
-# The order itself is still created by that screen, with every check it has
-# (identity, address, the provider's quote, Confío Face); the card saves the
-# typing, and the phone only fills the amount in when the screen is in that
-# same currency.
+# The assistant leaves the top-up form under its answer, with the amount the
+# person wrote already filled in: `{'type': 'form', 'target': 'topup:BOB=200'}`
+# (with no amount it is `ask_details` with the form `topup`). The person sees
+# what they get and creates the order there; the phone runs every check the
+# top-up screen has (identity, address, the provider's quote, Confío Face)
+# and the server enforces them again. The amount is filled in only when the
+# form is in that same currency.
 PROPOSE = 'propose_topup'
 PROPOSE_SPEC = {
     'type': 'function',
     'name': PROPOSE,
     'description': ('Cuando la persona quiere recargar con su banco local y escribió cuánto, en su moneda ("quiero '
-                    'recargar 500 bolivianos"): deja una tarjeta que abre la recarga con ese monto ya escrito. '
-                    'Solo con el monto que ella escribió, en su moneda local (no en dólares). Si no dijo el monto, '
-                    'pregúntalo o abre la recarga con `navigate`.'),
+                    'recargar 500 bolivianos"): deja bajo tu respuesta el formulario de recarga con ese monto ya '
+                    'escrito, para que la cree aquí mismo. Solo con el monto que ella escribió, en su moneda local '
+                    '(no en dólares). Si no dijo el monto, deja el formulario vacío con `ask_details` (topup).'),
     'parameters': {
         'type': 'object',
         'properties': {'amount': {'type': 'number', 'description': 'En la moneda local de la persona, como lo escribió.'}},
@@ -115,11 +128,20 @@ PROPOSE_SPEC = {
     },
     'strict': True,
 }
-_DOLLARS = {'dolar', 'dolares', 'usd', 'us$', 'dollar', 'dollars', 'usdt', 'usdc', 'cusd'}
+# Every way people write dollars around a number: "50 dólares", "USD 50",
+# "US$ 50", "$us 50" (Bolivia), "50 dls", "50 en dólares", "50 de mis dólares".
+_DOLLARS = {'dolar', 'dolares', 'usd', 'us$', '$us', 'u$s', 'us', 'usd$', 'dls', 'dolaritos', 'verdes', 'dollar',
+            'dollars', 'usdt', 'usdc', 'cusd'}
+_GLUED = ('us$', '$us', 'u$s', 'usd', '$')
+# Where the peso sign is not the country's own, a bare "$" means dollars.
+_DOLLAR_SIGN_IS_FOREIGN = {'BOB', 'PEN', 'BRL', 'VES', 'PYG', 'GTQ'}
+_NO = {'no', 'ni', 'nunca', 'sin', 'tampoco'}
+_EDGE = '.,;:!?¡¿()"\''
+CARD_HOURS = 24
 
 
 def offered(belt) -> bool:
-    """Where the card can be drawn and "Recargar ahora" is this person's way
+    """Where the form can be drawn and "Recargar ahora" is this person's way
     to top up: the chat is Inicio, their own personal account, Koywe's
     top-up open in their country and not replaced by another rail."""
     from .prompts import conversation_home
@@ -137,19 +159,20 @@ def offered(belt) -> bool:
         return False
 
 
-def _written(texts, amount):
-    """How the person wrote this number in their own messages: 'local' (on
-    its own, or with their currency), 'dollars' (every time with dollars),
-    or '' (it is not there). The token must be a number and nothing else."""
+def _written(texts, amount, fiat=''):
+    """How the person wrote this number in what they asked: 'local' (on its
+    own, or with their currency), 'dollars' (every time with a dollar word or
+    sign near it), or '' (it is not there as a number of its own, or they
+    denied it: "no 500, mejor 400")."""
     from payment_accounts.payment_intents import _amount_values, _fold
 
     seen = dollars = 0
     for text in texts:
-        words = _fold(text).split()
-        for index, raw in enumerate(words):
-            token = raw.strip('.,;:!?¡¿()')
-            lead = token.startswith(('us$', '$'))
-            number = token.removeprefix('us$').removeprefix('$')
+        words = [_fold(raw).strip(_EDGE) for raw in text.split()]
+        for index, token in enumerate(words):
+            sign = next((mark for mark in _GLUED if token.startswith(mark) and token != mark), '')
+            tail = next((mark for mark in _GLUED if not sign and token.endswith(mark) and token != mark), '')
+            number = token[len(sign):] if sign else token[:-len(tail)] if tail else token
             if not number or not number[0].isdigit() or not all(ch.isdigit() or ch in '.,' for ch in number):
                 continue
             try:
@@ -162,11 +185,14 @@ def _written(texts, amount):
                     continue
             except ArithmeticError:
                 continue
+            before = words[max(0, index - 3):index]
+            if set(before) & _NO:
+                continue
             seen += 1
-            near = {words[index + 1].strip('.,;:!?¡¿()')} if index + 1 < len(words) else set()
-            if index + 2 < len(words) and words[index + 1] == 'de':
-                near.add(words[index + 2].strip('.,;:!?¡¿()'))
-            dollars += bool(lead and token.startswith('us$')) or bool(near & _DOLLARS)
+            glued = sign or tail
+            near = set(words[max(0, index - 2):index] + words[index + 1:index + 4])
+            dollars += bool((glued and (glued != '$' or fiat in _DOLLAR_SIGN_IS_FOREIGN)) or near & _DOLLARS
+                            or ('$' in near and fiat in _DOLLAR_SIGN_IS_FOREIGN))
     return '' if not seen else 'dollars' if seen == dollars else 'local'
 
 
@@ -175,12 +201,12 @@ def propose(belt, amount):
 
     from .engine import CURRENCY_NAMES_ES
 
-    if any(str(action.get('target') or '').startswith('top_up:') for action in belt.result.actions):
-        return {'ok': False, '_denied': True, 'motivo': 'Una tarjeta de recarga por respuesta.'}
+    if any(action.get('type') == 'form' for action in belt.result.actions):
+        return {'ok': False, '_denied': True, 'motivo': 'Ya hay un formulario en esta respuesta: uno a la vez.'}
     texts = belt.payment_texts
     if not texts:
         return {'ok': False, '_denied': True,
-                'motivo': 'La persona debe escribir el monto en un mensaje. Mientras tanto abre la recarga con navigate.'}
+                'motivo': 'La persona debe escribir el monto en un mensaje. Deja el formulario vacío con ask_details (topup).'}
     why, fiat, minimum, maximum, _live, _country = _limits(belt.viewer)
     if why:
         return {'ok': False, 'motivo': why}
@@ -189,22 +215,99 @@ def propose(belt, amount):
         value = Decimal(str(amount)).quantize(Decimal('0.01'))
     except (InvalidOperation, TypeError, ValueError):
         return {'ok': False, '_denied': True, 'motivo': 'Falta el monto: pregúntaselo.'}
-    how = _written(texts, value)
+    # A request, not a question or a pasted text (as for a trade card).
+    from .trades import _requests
+    texts = _requests(texts)
+    if not texts:
+        return {'ok': False, '_denied': True,
+                'motivo': 'Eso fue una pregunta, no un pedido: respóndela. Si quiere recargar, deja el formulario '
+                          'vacío con ask_details (topup).'}
+    how = _written(texts, value, fiat)
     if not how:
         return {'ok': False, '_denied': True,
                 'motivo': f'Ese monto no está en su mensaje: pregúntale cuántos {currency} quiere recargar.'}
     if how == 'dollars':
         return {'ok': False, '_denied': True,
                 'motivo': (f'Lo escribió en dólares, y la recarga se escribe en {currency}: no lo conviertas tú. '
-                           f'Pregúntale cuántos {currency}, o abre la recarga con navigate para que vea el cambio.')}
+                           f'Pregúntale cuántos {currency}, o deja el formulario vacío con ask_details (topup): ahí ve '
+                           'cuánto recibe según lo que pague.')}
     if value < Decimal(str(minimum)):
         return {'ok': False, 'motivo': f'El mínimo por recarga es {_amount(minimum)} {currency}.'}
     if maximum is not None and value > Decimal(str(maximum)):
         return {'ok': False, 'motivo': f'El máximo por recarga es {_amount(maximum)} {currency}.'}
     plain = f'{value:.2f}'.removesuffix('.00')
     label = f'Recargar {_amount(value)} {currency}'
-    belt.result.actions.append({'type': 'do', 'target': f'top_up:{fiat}={plain}', 'label': label})
-    return {'ok': True, 'tarjeta': label,
-            'nota': ('Todavía no se creó nada: quedó una tarjeta bajo tu respuesta que abre la recarga con ese monto '
-                     'ya escrito. Dile que la toque: ahí ve cuánto recibe y confirma. No digas cuánto le llegará '
-                     'ni que la recarga ya está hecha.')}
+    belt.result.actions.append({'type': 'form', 'target': f'topup:{fiat}={plain}', 'label': label})
+    return {'ok': True, 'formulario': label,
+            'nota': ('Todavía no se creó nada: quedó el formulario de recarga bajo tu respuesta con ese monto ya '
+                     'escrito. Dile que elija cómo paga y toque Crear recarga: ahí ve cuánto recibe, y las '
+                     'instrucciones para pagar quedan en la conversación. No digas cuánto le llegará ni que la '
+                     'recarga ya está hecha.')}
+
+
+# ── the order a form created ────────────────────────────────────────────────
+# The form's message keeps the order it created, so the conversation shows
+# that order again after the app restarts (never the form, ready to create a
+# second one), and a form is live for a day only.
+
+def _form_message(user, message_id):
+    from inbox.models import SupportMessage
+
+    try:
+        message = SupportMessage.objects.filter(pk=int(message_id), conversation__user=user).first()
+    except (TypeError, ValueError):
+        return None
+    if message is None or message.sender_type == 'USER':
+        return None
+    actions = (message.metadata or {}).get('actions') or []
+    mine = any(isinstance(a, dict) and a.get('type') == 'form' and str(a.get('target') or '').split(':')[0] == 'topup'
+               for a in actions)
+    return message if mine else None
+
+
+def _order_row(user, order_id):
+    from ramps.models import RampTransaction
+
+    return RampTransaction.objects.filter(
+        provider='koywe', direction='ON_RAMP', provider_order_id=str(order_id or ''), actor_user=user,
+    ).exclude(provider_order_id='').first()
+
+
+def attach(user, message_id, order_id, method_code='', method_display=''):
+    """The form of this message created this order. Kept once; only the
+    person's own form and their own order."""
+    import re
+
+    from inbox.models import SupportMessage
+
+    message = _form_message(user, message_id)
+    if message is None or (message.metadata or {}).get('topup_order') or _order_row(user, order_id) is None:
+        return False
+    code = method_code if re.fullmatch(r'[A-Za-z0-9_-]{1,24}', method_code or '') else ''
+    display = ' '.join(str(method_display or '').split())[:40]
+    metadata = {**(message.metadata or {}), 'topup_order': {'id': str(order_id), 'method': code, 'method_name': display}}
+    SupportMessage.objects.filter(pk=message.pk).update(metadata=metadata)
+    return True
+
+
+def card(user, message_id):
+    """(state, order) for the form of this message: 'order' with what the
+    card needs, 'none' (the form is live), 'expired' or 'gone'."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    message = _form_message(user, message_id)
+    if message is None:
+        return 'gone', None
+    kept = (message.metadata or {}).get('topup_order') or {}
+    row = _order_row(user, kept.get('id')) if kept.get('id') else None
+    if row is not None:
+        return 'order', {
+            'order_id': row.provider_order_id, 'country_code': row.country_code, 'fiat_currency': row.fiat_currency,
+            'fiat_amount': None if row.fiat_amount is None else f'{row.fiat_amount.normalize():f}',
+            'payment_method_code': kept.get('method') or '', 'payment_method_display': kept.get('method_name') or '',
+        }
+    if timezone.now() - message.created_at > timedelta(hours=CARD_HOURS):
+        return 'expired', None
+    return 'none', None

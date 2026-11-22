@@ -73,7 +73,8 @@ def minutes_left(user):
 # The cards, buttons and forms of the chat (assistant/here.py) have nothing to be drawn on in a call.
 TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions', 'prepare_payment', 'act_here',
                    'propose_username', 'notification_settings', 'ask_details', 'customize_pet',
-                   'privacy_settings', 'propose_referrer', 'propose_stock_trade', 'propose_topup'}
+                   'privacy_settings', 'propose_referrer', 'propose_stock_trade', 'propose_topup',
+                   'note_first_use'}
 
 
 def _realtime_tools(belt):

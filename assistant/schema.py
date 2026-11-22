@@ -92,6 +92,35 @@ class AssistantStockTradeType(graphene.ObjectType):
     tx_hash = graphene.String()
 
 
+class AssistantTopUpType(graphene.ObjectType):
+    # none | order | expired | gone (assistant/topup_limits.py)
+    status = graphene.String(required=True)
+    order_id = graphene.String()
+    country_code = graphene.String()
+    fiat_currency = graphene.String()
+    fiat_amount = graphene.String()
+    payment_method_code = graphene.String()
+    payment_method_display = graphene.String()
+
+
+class AttachAssistantTopUp(graphene.Mutation):
+    """The top-up form of this message created this order: the conversation keeps it."""
+    class Arguments:
+        message_id = graphene.ID(required=True)
+        order_id = graphene.String(required=True)
+        payment_method_code = graphene.String()
+        payment_method_display = graphene.String()
+
+    success = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, message_id, order_id, payment_method_code='', payment_method_display=''):
+        from . import topup_limits
+        return AttachAssistantTopUp(success=topup_limits.attach(
+            info.context.user, message_id, order_id, payment_method_code or '', payment_method_display or ''))
+
+
 class ClaimAssistantStockTrade(graphene.Mutation):
     """The one request a stock-trade card may sign now. Empty while another
     is out, once a batch is on record, or after the card expired."""
@@ -444,6 +473,16 @@ class Query(graphene.ObjectType):
         if not key or not conf.get('CONFIO_ASSISTANT_ENABLED'):
             return None
         return AssistantWakeWordType(access_key=key)
+
+    assistant_top_up = graphene.Field(
+        AssistantTopUpType, required=True, message_id=graphene.ID(required=True),
+        description="The order the top-up form on one of the viewer's own assistant messages created, if any.")
+
+    @login_required
+    def resolve_assistant_top_up(self, info, message_id):
+        from . import topup_limits
+        status, order = topup_limits.card(info.context.user, message_id)
+        return AssistantTopUpType(status=status, **(order or {}))
 
     assistant_stock_trade = graphene.Field(
         AssistantStockTradeType, required=True, message_id=graphene.ID(required=True),
@@ -873,4 +912,5 @@ class Mutation(graphene.ObjectType):
     return_to_assistant = ReturnToAssistant.Field()
     update_assistant_profile = UpdateAssistantProfile.Field()
     claim_assistant_stock_trade = ClaimAssistantStockTrade.Field()
+    attach_assistant_top_up = AttachAssistantTopUp.Field()
     release_assistant_stock_trade = ReleaseAssistantStockTrade.Field()

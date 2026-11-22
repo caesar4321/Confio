@@ -42,6 +42,7 @@ DESTINATIONS = {
     # chat (2026-11-22). Each has a FALLBACK for builds that predate it.
     'charge': 'Cobrar: un QR de cobro de Confío con el monto que pongas, para que otro usuario de Confío te pague.',
     'invite': 'Invitar y ganar: invitar por WhatsApp, tu código de invitación y cómo funciona el programa.',
+    'founder': 'El fundador: quién es Julian Moon, sus mensajes en la app y dónde seguirlo (TikTok, Instagram, YouTube, Facebook, WhatsApp).',
     'commissions': 'Mis comisiones: lo que has ganado por las personas que invitaste.',
     'agenda': 'Agenda: tus cuentas bancarias guardadas y las de las personas a quienes envías.',
     'ramp_history': 'Historial de tus recargas y retiros con el banco.',
@@ -82,6 +83,7 @@ BUSINESS_OWNER_ONLY = {'payroll', 'employees'}
 FALLBACKS = {
     'charge': 'home',
     'invite': 'profile',
+    'founder': 'profile',
     'commissions': 'profile',
     'agenda': 'profile',
     'ramp_history': 'home',
