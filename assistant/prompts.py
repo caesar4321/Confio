@@ -8,7 +8,7 @@ prompt cache reuses it; the per-user line goes last."""
 import re
 from pathlib import Path
 
-from .destinations import DESTINATIONS
+from .destinations import CONVERSATION_DESTINATIONS, DESTINATIONS
 from .rails import topup_route
 
 # Approved answers to product questions, reviewed by the team (assistant/faq.md).
@@ -32,7 +32,25 @@ def dex_offered(meta) -> bool:
     return crypto_risk.platform_allowed(meta) and perps_risk.platform_allowed(meta)
 
 
-def faq_text(*, dex=True):
+# The app map differs between the five-tab app and the conversation home
+# (docs/designs/ai-assistant-first-redesign.md 7): faq.md carries both, each
+# inside its own markers, and the build says which one it is.
+_LAYOUT_BLOCKS = {name: re.compile(rf'^\[\[{name}\]\]\n.*?^\[\[/{name}\]\]\n', re.S | re.M)
+                  for name in ('tabs', 'conversation')}
+
+
+def conversation_home(meta) -> bool:
+    """This build's Inicio is the conversation (no tab bar)."""
+    return str((meta or {}).get('HTTP_X_CONFIO_HOME', '') or '').strip().lower() == 'conversation'
+
+
+def _for_layout(text, conversation):
+    drop, keep = ('tabs', 'conversation') if conversation else ('conversation', 'tabs')
+    text = _LAYOUT_BLOCKS[drop].sub('', text)
+    return text.replace(f'[[{keep}]]\n', '').replace(f'[[/{keep}]]\n', '')
+
+
+def faq_text(*, dex=True, conversation=False):
     """The FAQ with values that live in code filled in, so a policy change
     (the local-account opening fee) never needs a second edit here."""
     from django.conf import settings
@@ -61,7 +79,7 @@ def faq_text(*, dex=True):
                 'Las cuentas que pagaron la apertura anterior de US$10 no pagan mantenimiento.')
     text = FAQ if dex else _DEX_BLOCK.sub(DEX_NOT_OFFERED_FAQ, FAQ)
     text = text.replace('[[dex]]\n', '').replace('[[/dex]]\n', '')
-    return text.replace('{local_account_fee}', fee)
+    return _for_layout(text, conversation).replace('{local_account_fee}', fee)
 
 SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 
@@ -213,10 +231,10 @@ IA_PLUS_IN_SMART_ACCOUNT = (
 # Toolbelt.smart_ops): the assistant operates the account, within limits.
 SMART_ACCOUNT_OPS_SECTION = """
 ## Confío IA+: operas su Cuenta inteligente (la persona confirma cada cambio)
-- Esta persona tiene Cuenta inteligente con Confío IA+. Cuando pide crear, cambiar, detener o pausar una regla ("compra US$10 de bitcoin cada mes", "manda US$50 a mamá el día 1", "págale 100 dólares a mi casero por Bre-B cada mes"), usa `propose_smart_account_rule`. Para cambiar o detener una regla existente, primero `smart_account_rules` para su regla_id; para pagar a una cuenta bancaria, el cuenta_id de sus cuentas guardadas.
+- Esta persona tiene Cuenta inteligente con Confío IA+. Cuando pide crear, cambiar, detener o pausar una regla ("compra US$10 de bitcoin cada mes", "manda US$50 a mamá el día 1", "págale 100 dólares a mi casero por CLABE cada mes"), usa `propose_smart_account_rule`. Para cambiar o detener una regla existente, primero `smart_account_rules` para su regla_id. Para pagar a una cuenta bancaria: el cuenta_id de una cuenta guardada, o una cuenta nueva con los datos que ELLA escribe (CLABE: los 18 dígitos y, si quiere, el nombre de quien recibe; Pix: la chave completa, y si son 11 dígitos pregúntale si es CPF o celular, no lo adivines; Pago Móvil: teléfono, banco, cédula y nombre); la herramienta la guarda en sus cuentas. Si no tiene la cuenta guardada, pídele el número de CLABE (no solo un nombre) y nunca digas que no se puede porque no hay una guardada. Si la herramienta responde que ese pago no puede funcionar (cuenta local, monto o costos), dile ese mismo motivo y no lo propongas. Si la cuenta dice titular no verificado por el banco, dilo: debe revisar que el número sea el correcto.
 - La herramienta solo prepara la propuesta: la app agrega el botón "Revisar y firmar" y el cambio existe solo cuando la persona lo revisa en la pantalla de la regla y lo firma. Cuenta la propuesta en una o dos frases simples y nunca digas que ya quedó hecho.
 - Solo propones lo que la persona dijo, con sus palabras: el monto, la persona, la cuenta, la inversión, el día, los porcentajes y el nivel de una alerta. Si falta un dato, pregúntalo. Nunca elijas tú qué comprar, cuánto, un reparto ni un nivel de alerta, aunque te lo pida: puedes explicar opciones y riesgos, pero la decisión y las cifras son suyas. Nunca propongas vender: la cuenta no automatiza ventas.
-- Tipos de regla: enviar a alguien de Confío (le llega en su dólar), pagar a una cuenta bancaria guardada, invertir (acciones; bitcoin y oro donde estén disponibles). Frecuencias: cada día, semana, dos semanas o mes; un día de la semana o del mes es el inicio de la regla (mensual: día 1 a 28).
+- Tipos de regla: enviar a alguien de Confío (le llega en su dólar), pagar a una cuenta bancaria (guardada o nueva), invertir (acciones; bitcoin y oro donde estén disponibles). Frecuencias: cada día, semana, dos semanas o mes; un día de la semana o del mes es el inicio de la regla (mensual: día 1 a 28).
 - "Pausar" una regla: no existe pausa; se detiene y después se puede crear de nuevo. Dilo así.
 - "Ahorra / guarda X cada mes": no hay regla de ahorro. Su dólar de Confío ya es su saldo dentro de la cuenta; ofrece lo que sí existe (enviar, pagar, invertir).
 - Objetivo de reparto ("mantén 70/30 entre SPY y bitcoin"): `propose_target_allocation` con los porcentajes y el total que ELLA dijo. Se mantiene solo con compras nuevas, nunca vendiendo. Si se aleja del objetivo, puedes ofrecer repartir las próximas compras (next_split). Si el monto es muy chico para mover la proporción, dilo tal cual.
@@ -340,6 +358,16 @@ GUIDE_OPENING_NOTE = ('\n\nEscribe un solo mensaje corto para abrir la conversac
 GUIDE_STEERING_NOTE = ('\n\nLa persona sigue su guía de primeros pasos. Responde primero lo que pregunta, en dos frases '
                        'como máximo, y termina invitándola a seguir con este paso: {step} Si lo que pide es una tarea '
                        'general (traducir, redactar, explicar un tema), respóndela completa y no la conectes con el paso.\n')
+# The same step said in the home conversation (no card): the reply is part of
+# a conversation about it, not a caption under a card. Answer in full, ask
+# back when it helps, and only then offer the step, in the person's terms.
+GUIDE_CONVERSATION_NOTE = ('\n\nLe acabas de proponer este paso en la conversación: {step} Lo que escribe ahora es su '
+                           'respuesta. Respóndela de verdad y con el largo que necesite: si pregunta algo (costo, '
+                           'tiempo, si es seguro, qué necesita), contéstalo con las respuestas aprobadas; si duda, '
+                           'pregúntale qué le frena; si cuenta para qué quiere usar Confío, parte de eso. Después, si '
+                           'viene al caso, ofrécele seguir con el paso con sus propias palabras; debajo de tu mensaje '
+                           'tiene los botones para hacerlo, no hace falta que se los describas. Si lo que pide es otra '
+                           'cosa (una tarea general, otra función), ayúdala con eso y no vuelvas al paso.\n')
 # Where Koywe's top-up is paused and the person's local account stands in.
 LOCAL_ACCOUNT_TOPUP_NOTE = ('En su país «Recargar ahora» está en pausa y no aparece en la app: para recargar se usa '
                             '{entry} (Recibir → {entry}), una cuenta local a su nombre. No le digas que use '
@@ -373,9 +401,11 @@ IDENTITY_NOTES = {
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
                         ia_plus_bundled=False, identity=None, ve_topup=None, ve_send=None, dex=True,
                         local_account_topup='', bo_withdraw=None, smart_account_open=False,
-                        smart_account_real=False, smart_account_ops=False):
-    lines = '\n'.join(f'- `{key}`: {DESTINATIONS[key]}' for key in destinations)
-    prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE).replace('{faq}', faq_text(dex=dex))
+                        smart_account_real=False, smart_account_ops=False, conversation=False):
+    described = {**DESTINATIONS, **CONVERSATION_DESTINATIONS} if conversation else DESTINATIONS
+    lines = '\n'.join(f'- `{key}`: {described[key]}' for key in destinations)
+    prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE)
+              .replace('{faq}', faq_text(dex=dex, conversation=conversation))
               + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open, smart_account_real)
               + (SMART_ACCOUNT_OPS_SECTION if smart_account_ops else '')
               + DESTINATIONS_SECTION.format(destinations=lines))

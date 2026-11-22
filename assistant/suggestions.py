@@ -57,6 +57,29 @@ MAX_STARTERS = 4
 # mis primeros dólares?" up to 4 times in 5 minutes, 2026-10-14).
 ASKED_WINDOW_HOURS = 24
 
+# ── The conversation home (docs/designs/ai-assistant-first-redesign.md 7) ──
+# There the assistant is a general one that also handles the person's money,
+# and chips about money alone would say otherwise. The chips are personal
+# first (what needs attention, their situation, what they themselves have
+# been asking for) and one is a general suggestion of ours.
+#
+# How far back "what they have been asking for" looks.
+HISTORY_DAYS = 30
+HISTORY_MESSAGES = 120
+# General things people ask an assistant for: (id, chip, words that show the
+# person asked for that kind of thing). Matched on their own past messages,
+# never on a model's reading of them: no call, no cost, nothing stored.
+GENERAL_KINDS = (
+    ('general.translate', 'Tradúceme un texto', ('traduc', 'traducir', 'traducción', 'en inglés', 'al inglés', 'al español')),
+    ('general.write', 'Ayúdame a escribir un mensaje', ('redact', 'escríbeme', 'escribeme', 'una carta', 'un correo',
+                                                         'un mensaje para', 'mejora este texto', 'corrige')),
+    ('general.explain', 'Explícame un tema en simple', ('explícame', 'explicame', 'resúmeme', 'resumeme', 'resumen de',
+                                                        'mi tarea', 'la tarea', 'qué significa', 'que significa')),
+    ('general.plan', 'Ayúdame a planear un viaje', ('viaje', 'vuelo', 'itinerario', 'pasaje', 'hotel')),
+    ('general.cook', 'Dame una idea para cocinar hoy', ('receta', 'cocinar', 'qué cocino', 'que cocino', 'almuerzo', 'cena')),
+    ('general.news', '¿Qué pasó hoy en las noticias?', ('noticia', 'qué pasó', 'que paso', 'último momento')),
+)
+
 
 @dataclass(frozen=True)
 class Suggestion:
@@ -195,15 +218,15 @@ def _norm(text):
     return ' '.join((text or '').lower().split())
 
 
-def _recently_asked(viewer) -> set:
-    """What this person sent the assistant in the last ASKED_WINDOW_HOURS."""
+def _own_messages(viewer, *, since, limit):
+    """What this person sent the assistant from this account since `since`,
+    newest first, normalized. Empty on any failure: chips are a nicety."""
     user = getattr(viewer, 'user', None)
     if user is None or not getattr(user, 'pk', None):
-        return set()
+        return []
     try:
         from inbox.models import SupportMessage
 
-        since = timezone.now() - timedelta(hours=ASKED_WINDOW_HOURS)
         # This account's thread only: a question asked from the business account
         # doesn't hide the chip in the personal one.
         scope = {'conversation__user': user}
@@ -212,11 +235,88 @@ def _recently_asked(viewer) -> set:
         elif getattr(viewer, 'account', None) is not None:
             scope['conversation__account'] = viewer.account
         bodies = (SupportMessage.objects.filter(sender_type='USER', created_at__gte=since, **scope)
-                  .order_by('-created_at').values_list('body', flat=True)[:50])
-        return {_norm(b) for b in bodies}
+                  .order_by('-created_at').values_list('body', flat=True)[:limit])
+        return [_norm(b) for b in bodies]
     except Exception:  # noqa: BLE001 - chips are a nicety: never fail the screen over them
         logger.warning('suggestions: recent questions unavailable', exc_info=True)
-        return set()
+        return []
+
+
+def _recently_asked(viewer) -> set:
+    """What this person sent the assistant in the last ASKED_WINDOW_HOURS."""
+    return set(_own_messages(viewer, since=timezone.now() - timedelta(hours=ASKED_WINDOW_HOURS), limit=50))
+
+
+def _general_chips(viewer, now=None):
+    """(theirs, ours) for the conversation home.
+
+    theirs: the general things this person has actually been asking for,
+    most asked first (a chip to do it again). ours: the one general
+    suggestion of the day, the same all day for one person and different
+    from the next person's, taken from the kinds they have not shown yet,
+    so it also tells them something the assistant can do that they have
+    not tried."""
+    now = now or timezone.now()
+    history = _own_messages(viewer, since=now - timedelta(days=HISTORY_DAYS), limit=HISTORY_MESSAGES)
+    counts = []
+    for id_, chip, words in GENERAL_KINDS:
+        hits = sum(1 for body in history if any(word in body for word in words))
+        counts.append((hits, _s(id_, chip)))
+    theirs = [chip for hits, chip in sorted(counts, key=lambda pair: -pair[0]) if hits > 0]
+    untried = [chip for hits, chip in counts if hits == 0] or [chip for _hits, chip in counts]
+    user_id = getattr(getattr(viewer, 'user', None), 'pk', None) or 0
+    ours = untried[(now.toordinal() + user_id) % len(untried)]
+    return theirs, ours
+
+
+def _top_holding(viewer):
+    """The ticker of the stock this person holds most of, by value; None when
+    they hold none or it cannot be read without a chain scan."""
+    address = getattr(getattr(viewer, 'account', None), 'bsc_address', '') or ''
+    if not address:
+        return None
+    try:
+        from cusd_plus.gm_holdings import known_holdings_units
+
+        if not known_holdings_units(address):
+            return None  # nothing held (or never read): no price lookup either
+        from .engine import _holdings
+
+        rows = _holdings(address, limit=1)
+        return rows[0]['ticker'] if isinstance(rows, list) and rows else None
+    except Exception:  # noqa: BLE001 - a chip, never a failed screen
+        logger.warning('suggestions: holdings unavailable', exc_info=True)
+        return None
+
+
+def _has_local_rate(country):
+    """There is a dollar rate to tell for this person's own currency (the
+    one the app shows beside their balance)."""
+    try:
+        from exchange_rates.currency_mapping import COUNTRY_TO_CURRENCY
+        from exchange_rates.services import exchange_rate_service
+
+        code = COUNTRY_TO_CURRENCY.get((country or '').upper())
+        if not code or code == 'USD':
+            return False
+        return any(getattr(exchange_rate_service.get_current_rate_row(code, 'USD', kind), 'rate', None)
+                   for kind in ('parallel', 'average', 'official'))
+    except Exception:  # noqa: BLE001
+        logger.warning('suggestions: local rate unavailable', exc_info=True)
+        return False
+
+
+def _own_chips(viewer, state):
+    """(stock, rate): chips written from this person's own facts, each None
+    when the fact is not there. No amounts and no other people's names: a
+    chip is on screen even while the balance is hidden, and its text is sent
+    as the person's own message."""
+    if state.employee:
+        return None, None
+    ticker = _top_holding(viewer)
+    stock = _s('own.stock', f'¿Cómo va {ticker} hoy?', f'¿Cómo va {ticker} hoy y por qué se movió?') if ticker else None
+    rate = _s('own.rate', '¿A cuánto está el dólar hoy?') if _has_local_rate(state.country) else None
+    return stock, rate
 
 
 def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
@@ -280,7 +380,28 @@ def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
     hints = fresh(attention + (situation if screen in ('', 'Home') else []) + SCREEN_HINTS.get(screen, []))
     # Starters never filter down to nothing: an empty list makes the app fall back
     # to its own built-in chips, which don't fit employees or no-rail countries.
-    starters = list({s.id: s for s in (fresh(attention + starters) or attention + starters)}.values())[:MAX_STARTERS]
+    ranked = list({s.id: s for s in (fresh(attention + starters) or attention + starters)}.values())
+    from .prompts import conversation_home
+
+    if conversation_home(request_meta):
+        # Personal first, one general suggestion of ours last: what needs
+        # attention, their own facts (a stock they hold, the dollar in their
+        # currency) around the top of their money situation, what they
+        # themselves keep asking for, then more of their situation.
+        theirs, ours = _general_chips(viewer)
+        theirs = fresh(theirs)
+        if not fresh([ours]):  # asked today already: the next one they have not
+            ours = next((c for c in (_s(i, t) for i, t, _w in GENERAL_KINDS)
+                         if c.id != ours.id and fresh([c]) and c not in theirs), ours)
+        stock, rate = _own_chips(viewer, state)
+        # Pagar is the round button beside these chips: no chip for it here.
+        money = [s for s in ranked if s not in attention and s.id != 'pay.qr']
+        personal = (attention + fresh([stock] if stock else []) + money[:1] + fresh([rate] if rate else [])
+                    + theirs[:1] + money[1:] + theirs[1:])
+        personal = [s for s in {s.id: s for s in personal}.values() if s.id != ours.id]
+        starters = personal[:MAX_STARTERS - 1] + [ours]
+    else:
+        starters = ranked[:MAX_STARTERS]
     return Suggestions(hints=hints, starters=starters, probe=probe_payload() if wants_probe(state) else None)
 
 

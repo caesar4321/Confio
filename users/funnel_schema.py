@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import json
 import ipaddress
+import re
 
 import graphene
 from security.geo import country_of
@@ -41,7 +42,14 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     'paid_offer_interest',
     # Paid Cuenta inteligente funnel (spec 7.9); `stage` and `plan` in properties.
     'smart_account_funnel',
+    # Which doors of Inicio people use, five tabs vs the conversation home
+    # (docs/designs/ai-assistant-first-redesign.md 9); slugs only, see below.
+    'home_nav_tapped',
 })
+
+# home_nav_tapped keeps three short slugs and nothing else a client sends.
+HOME_NAV_SURFACES = frozenset({'tabs', 'home', 'header', 'drawer', 'composer', 'floating'})
+_HOME_NAV_TARGET = re.compile(r'^[a-z][a-z0-9_]{0,23}$')
 
 # smart_account_funnel stages a client may emit. Everything the chain proves
 # (subscribed, first_deposit, rule_created, beneficiary_set, cancelled) is
@@ -153,6 +161,18 @@ class TrackFunnelEvent(graphene.Mutation):
                           'plan': plan if plan in ('annual', 'monthly') else ''}
             from users.paid_offers import app_version
             properties['app_version'] = app_version(getattr(info.context, 'META', {}))
+
+        if event_name == 'home_nav_tapped':
+            surface, target = properties.get('surface'), properties.get('target')
+            if (surface not in HOME_NAV_SURFACES or not isinstance(target, str)
+                    or not _HOME_NAV_TARGET.match(target)):
+                # Not logged: an invalid value is whatever a client typed.
+                logger.info('[funnel] rejected client home_nav_tapped')
+                return cls(success=True, recorded=False)
+            from users.paid_offers import app_version
+            properties = {'surface': surface, 'target': target,
+                          'home': 'conversation' if properties.get('home') == 'conversation' else 'tabs',
+                          'app_version': app_version(getattr(info.context, 'META', {}))}
 
         if event_name == 'paid_offer_interest':
             # Server-stamped (never the client's word): which pitch the build had.

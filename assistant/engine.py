@@ -30,8 +30,8 @@ from django.utils import timezone
 from users.models_cashflow import CATEGORY_CHOICES
 
 from . import conf, market
-from .destinations import DESTINATIONS, FALLBACKS, OWNER_ONLY, PAID_OFFERS, PERSONAL_ONLY
-from .prompts import ANALYSIS_PROMPT, build_system_prompt, dex_offered
+from .destinations import CONVERSATION_DESTINATIONS, DESTINATIONS, FALLBACKS, OWNER_ONLY, PAID_OFFERS, PERSONAL_ONLY
+from .prompts import ANALYSIS_PROMPT, build_system_prompt, conversation_home, dex_offered
 
 logger = logging.getLogger(__name__)
 
@@ -736,7 +736,7 @@ def exchange_rate_data(viewer: Viewer, currency=None):
                 'tipo': RATE_TYPES_ES[kind],
                 'actualizado': f'{local:%Y-%m-%d %H:%M}' if local else 'desconocido',
                 'nota': ('Nombra la moneda completa, como aparece en un_dolar_son. '
-                         'Es el tipo de cambio de referencia que la app muestra en Inicio. En una recarga o un '
+                         'Es el tipo de cambio de referencia que la app muestra junto a tu saldo. En una recarga o un '
                          'retiro el proveedor aplica su propio cambio y sus costos, que ves antes de confirmar: no '
                          'uses esta cifra para calcular cuánto llegará en una recarga, un retiro o un envío. Nunca '
                          'conviertas un monto en ninguna dirección: ni su moneda a dólares ("¿cuánto me dan por 10 '
@@ -1146,8 +1146,8 @@ class Toolbelt:
                 'type': 'function',
                 'name': 'get_exchange_rate',
                 'description': (
-                    'Tipo de cambio de referencia del dólar en una moneda local, el mismo que la app muestra en '
-                    'Inicio. Úsala para "¿a cuánto está el dólar?" o para pasar un monto a su moneda ("¿cuánto es en '
+                    'Tipo de cambio de referencia del dólar en una moneda local, el mismo que la app muestra junto a '
+                    'tu saldo. Úsala para "¿a cuánto está el dólar?" o para pasar un monto a su moneda ("¿cuánto es en '
                     'bolivianos?"), nunca para calcular cuánto llega en una recarga o un retiro. `currency` es el código ISO (BOB, VES, ARS…); null = la moneda de su país. Di siempre '
                     'el nombre completo de la moneda que devuelve ("bolívares venezolanos", "pesos argentinos"), '
                     'para que la persona note si quería otra.'
@@ -1430,7 +1430,11 @@ class Toolbelt:
         # `target` (and `ticker`) instead.
         action = {'type': 'navigate', 'destination': FALLBACKS.get(destination, destination)}
         # What actually opened, for the model to describe (not the fallback key).
-        reply = {'ok': True, 'pantalla_abierta': DESTINATIONS[destination]}
+        # In the conversation home some keys open something else (`home` is
+        # Mi dinero): the model must not say it opened Inicio.
+        opened = (CONVERSATION_DESTINATIONS.get(destination) if conversation_home(self.viewer.request_meta)
+                  else None) or DESTINATIONS[destination]
+        reply = {'ok': True, 'pantalla_abierta': opened}
         if destination in FALLBACKS:
             action['target'] = destination
         if destination == 'stock':
@@ -1734,11 +1738,16 @@ class Toolbelt:
 # Turn
 # --------------------------------------------------------------------------- #
 
-def history_items(messages):
+def history_items(messages, photos=None):
     """SupportMessages (oldest first) as Responses input items.
 
     Staff replies stay attributed so the model doesn't contradict a person.
+    photos: {message id: data URL} for the photo messages the model may see
+    this turn (assistant/photos.py). Without it every item's content is text:
+    a photo message reads as its caption with a note that a photo came with it.
     """
+    from . import photos as photo_rules
+
     items = []
     for message in messages:
         body = (message.body or '').strip()
@@ -1751,12 +1760,25 @@ def history_items(messages):
             continue
         is_staff = (message.sender_type == 'AGENT' and not metadata.get('ai')
                     and getattr(message, 'sender_user_id', None) is not None)
+        is_photo = message.sender_type == 'USER' and photo_rules.is_photo(message)
         if not is_staff:
             # Only a real person on the team may speak as the team.
             body = _STAFF_PREFIX_SPOOF.sub('', body).strip()
-            if not body:
+            if not body and not is_photo:
                 continue
-        if message.sender_type == 'USER':
+        if is_photo:
+            # The words as cleaned above; a photo stands even with none left.
+            words = photo_rules.words(body)
+            data_url = (photos or {}).get(message.id)
+            if data_url:
+                items.append({'role': 'user', 'content': [
+                    {'type': 'input_image', 'image_url': data_url},
+                    {'type': 'input_text', 'text': words or '(La persona envió esta foto sin escribir nada.)'},
+                ]})
+            else:
+                seen = 'Foto' if photos is None else 'Foto que ya no puedes ver'
+                items.append({'role': 'user', 'content': f'[{seen}] {words}'.strip()})
+        elif message.sender_type == 'USER':
             items.append({'role': 'user', 'content': body})
         elif is_staff:
             items.append({'role': 'assistant', 'content': f'{STAFF_PREFIX} {body}'})
@@ -1774,6 +1796,7 @@ def history_items(messages):
 _SCREEN_WORDS = {
     'Invertir': 'invest', 'Recargar': 'top_up', 'Recibir': 'receive', 'Retirar': 'withdraw', 'Enviar': 'send',
     'Pagar': 'pay_qr', 'Perfil': 'profile', 'Descubrir': 'discover', 'Inicio': 'home',
+    'Mi dinero': 'home',
     'Efectivo con un agente': 'cash_directory', 'Tu mes': 'month_summary', 'la lista de acciones': 'stocks',
 }
 # Present or future only ("abriré", "te abro", "te llevo"): a past "abrí" in a
@@ -1924,7 +1947,12 @@ def _open_claimed_screen(belt, result):
         screens = set(_ANY_SCREEN.findall(sentence))
         if _NOT_NOW.search(sentence) or len(screens) != 1 or not _CLAIMED_SCREEN.match(sentence):
             return  # any doubtful claim in the reply: open nothing
-        named.add(_SCREEN_WORDS[screens.pop()])
+        word = screens.pop()
+        if word == 'Inicio' and conversation_home(belt.viewer.request_meta):
+            # There Inicio is this conversation, and the `home` key opens Mi
+            # dinero: "te llevo a Inicio" must not slide the wallet list in.
+            return
+        named.add(_SCREEN_WORDS[word])
     if len(named) == 1:
         (key,) = named
         if key in belt.destinations and belt.navigate(key).get('ok'):
@@ -1933,7 +1961,8 @@ def _open_claimed_screen(belt, result):
 
 
 def run_turn(viewer: Viewer, history, *, first_name, account_label, country, analyses_left, can_navigate=True,
-             reserve_analysis=None, reserve_news=None, reserve_web=None, waiting_for_team=False, guide_note=''):
+             reserve_analysis=None, reserve_news=None, reserve_web=None, waiting_for_team=False, guide_note='',
+             photos=None):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
     except after the model already escalated: the handoff is kept."""
     result = TurnResult(reply='')
@@ -1941,6 +1970,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news, reserve_web=reserve_web)
     belt.waiting_for_team = waiting_for_team
     belt.guide_note = guide_note
+    belt.photos = photos or {}
     said = [item['content'] for item in history_items(history) if item['role'] == 'user']
     belt.last_user_message = said[-1] if said else ''
     # Tapped answers ("Que mi dinero no pierda valor") are not the person's
@@ -1993,6 +2023,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
+        conversation=conversation_home(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
         bo_withdraw=_bo_withdraw(viewer, country),
         smart_account_ops=belt.smart_ops(),
@@ -2000,17 +2031,23 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
     system += getattr(belt, 'guide_note', '')
+    seen_photos = getattr(belt, 'photos', None) or {}
+    if seen_photos:
+        from . import photos as photo_rules
+        system += photo_rules.NOTE
     if belt.force_tool:
         system += RETRY_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')
     specs = belt.specs()
+    if seen_photos:
+        specs = [spec for spec in specs if spec.get('name') not in photo_rules.TOOLS_OFF_WITH_A_PHOTO]
     if model.startswith('claude-'):
         return _run_turn_claude(belt, result, history, system, model, effort, specs)
     payload = {
         'model': model,
         'instructions': system,
-        'input': history_items(history),
+        'input': history_items(history, photos=seen_photos),
         'tools': specs,
         # Kept at 2000: a longer reply can outrun the request timeout. A cut
         # reply says so (_with_cut_note) and the person asks to continue.
@@ -2138,11 +2175,27 @@ def _claude_usage(usage):
             'output_tokens': usage.output_tokens or 0}
 
 
+def _claude_content(content):
+    """A history item's content as Claude takes it: text as it is, a photo
+    message's parts as image and text blocks."""
+    if isinstance(content, str):
+        return content
+    blocks = []
+    for part in content:
+        if part.get('type') == 'input_image':
+            media_type, _, data = part['image_url'][len('data:'):].partition(';base64,')
+            blocks.append({'type': 'image', 'source': {'type': 'base64', 'media_type': media_type, 'data': data}})
+        else:
+            blocks.append({'type': 'text', 'text': part.get('text', '')})
+    return blocks
+
+
 def _run_turn_claude(belt, result, history, system, model, effort, specs):
     import anthropic
 
     client = _claude_client()
-    messages = [{'role': item['role'], 'content': item['content']} for item in history_items(history)]
+    messages = [{'role': item['role'], 'content': _claude_content(item['content'])}
+                for item in history_items(history, photos=getattr(belt, 'photos', None) or {})]
     while messages and messages[0]['role'] != 'user':
         messages.pop(0)
     request = {

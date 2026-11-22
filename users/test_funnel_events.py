@@ -31,6 +31,31 @@ class TrackFunnelEventTests(TestCase):
     def test_the_blocked_rail_event_is_client_emittable(self):
         self.assertIn('local_rail_blocked_interest', CLIENT_EMITTABLE_EVENTS)
 
+    def test_home_nav_taps_keep_only_their_three_slugs(self):
+        """Which doors of Inicio people use, five tabs vs the conversation
+        home: the row keeps surface, target and home, and nothing else a
+        client sends."""
+        result = self.track(event_name='home_nav_tapped', meta={'HTTP_X_CONFIO_VERSION': '5.4.0'}, properties={
+            'surface': 'drawer', 'target': 'invest', 'home': 'conversation', 'note': 'anything', 'amount': 12})
+        self.assertTrue(result.recorded)
+        row = FunnelEvent.objects.get(event_name='home_nav_tapped')
+        self.assertEqual(row.properties, {'surface': 'drawer', 'target': 'invest', 'home': 'conversation',
+                                          'app_version': '5.4.0'})
+        # Anything but the conversation home reads as the five tabs.
+        self.assertTrue(self.track(event_name='home_nav_tapped',
+                                   properties={'surface': 'tabs', 'target': 'pay', 'home': 'x'}).recorded)
+        self.assertEqual(FunnelEvent.objects.filter(event_name='home_nav_tapped', properties__home='tabs').count(), 1)
+
+    def test_home_nav_taps_with_an_unknown_surface_or_a_free_text_target_are_dropped(self):
+        for properties in ({'surface': 'elsewhere', 'target': 'invest'},
+                           {'surface': 'tabs', 'target': 'Ana Pérez <ana@example.com>'},
+                           {'surface': 'tabs', 'target': 'x' * 25},
+                           {'surface': 'tabs', 'target': 7},
+                           {'surface': 'tabs'}, {}, None):
+            with self.subTest(properties=properties):
+                self.assertFalse(self.track(event_name='home_nav_tapped', properties=properties).recorded)
+        self.assertEqual(FunnelEvent.objects.count(), 0)
+
     def test_an_unknown_event_is_never_recorded(self):
         result = self.track(event_name='not_whitelisted')
         self.assertFalse(result.recorded)

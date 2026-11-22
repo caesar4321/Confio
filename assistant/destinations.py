@@ -73,3 +73,15 @@ FALLBACKS = {
 # Keys the app opens that are never a `navigate` choice of the model: only a
 # tool attaches them (the Confío IA+ rule proposal chip).
 CHIP_ONLY = {'smart_account_rule'}
+
+
+# What the same keys open in the conversation home, where Inicio is the chat
+# itself (docs/designs/ai-assistant-first-redesign.md 7): only the entries
+# whose description changes.
+CONVERSATION_DESTINATIONS = {
+    'home': ('Mi dinero: el menú, con tu saldo total y todas tus billeteras. Inicio es esta misma conversación: '
+             'no uses esta clave para "ir a Inicio" o "volver al inicio" (ya está ahí; dilo y no abras nada).'),
+    'discover': 'Comunidad: lo que comparten otros miembros sobre su dinero.',
+    'community': 'Comunidad: lo que comparten otros miembros sobre recargas, retiros e inversiones.',
+    'messages': 'Mensajes: Julian, Confío News y mensajes directos.',
+}

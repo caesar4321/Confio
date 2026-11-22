@@ -17,6 +17,7 @@ from datetime import timedelta
 
 from django.core.cache import cache
 from django.db.models import F
+from django.db.models.functions import Least
 from django.utils import timezone
 
 from security.geo import country_of
@@ -202,12 +203,28 @@ class Guide:
     presentation: str = 'bubble'  # full | bubble; the app treats anything else as bubble
 
 
-def _resting(row, now):
+# In the conversation home the opening question is asked at most this many
+# times: left unanswered twice, it stops holding the real step back.
+OPENING_MAX_SHOWS_IN_CONVERSATION = 2
+
+
+def _resting(row, now, conversation=False):
     """Shown, accepted or refused recently. The opening question is only ever
-    optional: once answered or refused it doesn't come back."""
+    optional: once answered or refused it doesn't come back.
+
+    The rests are the same wherever the step is said: once a day at most,
+    whether it is a card over the tabs or the assistant's first message in
+    the home conversation (said every session it would greet most people
+    with the same question at every launch, forever).
+
+    conversation: there the opening question can be answered in words or
+    simply left under newer messages, which settles nothing; it is capped by
+    how often it was shown so it stops holding the real step back."""
     if row is None:
         return False
     if row.step == 'opening' and (row.dismissed_at or row.accepted_at):
+        return True
+    if conversation and row.step == 'opening' and row.shown_count >= OPENING_MAX_SHOWS_IN_CONVERSATION:
         return True
     return any(moment and now - moment < rest for moment, rest in (
         (row.shown_at, SHOWN_REST), (row.accepted_at, ACCEPTED_REST), (row.dismissed_at, DISMISSED_REST)))
@@ -306,12 +323,12 @@ def _ladder_usable(viewer, state, key):
     return True
 
 
-def _funded_key(viewer, state, rows, answer, now):
+def _funded_key(viewer, state, rows, answer, now, conversation=False):
     chosen = answer in LADDERS
     for key in LADDERS.get(answer, DEFAULT_LADDER):
         if _ladder_usable(viewer, state, key) and not _ladder_done(viewer.user, key):
             row = rows.get(key)
-            if _resting(row, now):
+            if _resting(row, now, conversation):
                 return None
             # Nobody chose investing here: after one "Ahora no" has rested, move on for good.
             if not chosen and key == 'invest' and row is not None and row.dismissed_at:
@@ -352,15 +369,18 @@ def current_key(viewer, request_meta):
     state = _state(viewer, request_meta)
     if not state.personal or state.employee:
         return None
+    from .prompts import conversation_home
+
     now = timezone.now()
     rows = {r.step: r for r in AssistantGuideStep.objects.filter(user=viewer.user)}
     answer = ProbeAnswer.objects.filter(user=viewer.user, probe_id=PROBE_ID).values_list('answer', flat=True).first()
+    conversation = conversation_home(request_meta)
     if state.funded:
-        return _funded_key(viewer, state, rows, answer, now)
-    if not answer and not _resting(rows.get('opening'), now):
+        return _funded_key(viewer, state, rows, answer, now, conversation)
+    if not answer and not _resting(rows.get('opening'), now, conversation):
         return 'opening'
     key = _unfunded_key(viewer, state, answer)
-    return None if key is None or _resting(rows.get(key), now) else key
+    return None if key is None or _resting(rows.get(key), now, conversation) else key
 
 
 def _usable_text(text, fallback):
@@ -378,7 +398,7 @@ def _generate(viewer, step, *, conversation, first_name, account_label, country)
     from .engine import (_bo_withdraw, _identity_status, _local_account_topup, _openai_post, _output_text, TurnResult, _ve_send, _ve_topup,
                          allowed_destinations)
     from .models import AssistantTurn
-    from .prompts import GUIDE_OPENING_NOTE, build_system_prompt, dex_offered
+    from .prompts import GUIDE_OPENING_NOTE, build_system_prompt, conversation_home, dex_offered
 
     local_now = timezone.now().astimezone(viewer.tz)
     system = build_system_prompt(
@@ -387,6 +407,7 @@ def _generate(viewer, step, *, conversation, first_name, account_label, country)
         identity=_identity_status(viewer), ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
+        conversation=conversation_home(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
         bo_withdraw=_bo_withdraw(viewer, country),
     ) + GUIDE_OPENING_NOTE
@@ -472,7 +493,7 @@ def current(viewer, request_meta, **context):
 def steering_note(key, country=None, viewer=None, request_meta=None):
     """For a question typed in the card: answer it, then back to this step.
     The key comes from the app, so a promise only reaches where it holds."""
-    from .prompts import GUIDE_STEERING_NOTE
+    from .prompts import GUIDE_CONVERSATION_NOTE, GUIDE_STEERING_NOTE, conversation_home
 
     step = STEPS.get(key)
     if step is None or (key in ('international_soon', 'international') and topup_route(country) != key):
@@ -486,7 +507,8 @@ def steering_note(key, country=None, viewer=None, request_meta=None):
                                 viewer=viewer if key == 'top_up' else None).name
         except Exception:  # noqa: BLE001 - the default name, never a broken reply
             logger.warning('Confio Assistant: guide entry unavailable', exc_info=True)
-    return GUIDE_STEERING_NOTE.format(step=step.brief.format(entry=entry) if step.brief else step.text)
+    note = GUIDE_CONVERSATION_NOTE if conversation_home(request_meta) else GUIDE_STEERING_NOTE
+    return note.format(step=step.brief.format(entry=entry) if step.brief else step.text)
 
 
 # Walks on request: anyone, any time, however far along they are. The model only
@@ -618,7 +640,9 @@ def record_event(viewer, key, event, *, answer=None, funded=False, detail=''):
         return
     row, _ = AssistantGuideStep.objects.get_or_create(user=viewer.user, step=key)
     if event == 'shown':
-        AssistantGuideStep.objects.filter(pk=row.pk).update(shown_count=F('shown_count') + 1, shown_at=now)
+        # Capped at the column's ceiling: a counter must never fail the write.
+        AssistantGuideStep.objects.filter(pk=row.pk).update(
+            shown_count=Least(F('shown_count') + 1, 32767), shown_at=now)
     elif event == 'dismissed':
         AssistantGuideStep.objects.filter(pk=row.pk).update(dismissed_at=now)
     elif event == 'accepted':

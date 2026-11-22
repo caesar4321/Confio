@@ -445,6 +445,9 @@ class AskAssistant(graphene.Mutation):
         screen = graphene.String(description='Route name the user is on, for context only')
         timezone = graphene.String(description='Device IANA timezone')
         guide_step = graphene.String(description='Typed in the first-steps card: steer back to this step')
+        photo_base64 = graphene.String(description='A photo sent with the message, base64. Shown to the '
+                                                   'assistant, never stored.')
+        photo_mime_type = graphene.String()
 
     success = graphene.Boolean(required=True)
     error = graphene.String()
@@ -459,16 +462,19 @@ class AskAssistant(graphene.Mutation):
     @classmethod
     @login_required
     def mutate(cls, root, info, body=None, audio_base64=None, audio_mime_type=None,
-               audio_duration_ms=None, screen=None, timezone=None, guide_step=None):
+               audio_duration_ms=None, screen=None, timezone=None, guide_step=None,
+               photo_base64=None, photo_mime_type=None):
         user, account, business, jwt_context = get_context_models(info)
         audio = (audio_base64, audio_mime_type, audio_duration_ms) if audio_base64 else None
-        if not audio and not (body or '').strip():
+        # A photo goes with typed words (or none), never with a voice note.
+        photo = (photo_base64, photo_mime_type) if photo_base64 and not audio else None
+        if not audio and not photo and not (body or '').strip():
             raise GraphQLError('Message body is required')
         try:
             # Transcription happens inside, after the quota/human-mode checks.
             outcome = service.ask(user, account, business, jwt_context, None if audio else body, audio=audio,
                                   screen=screen or '', tz_name=timezone, guide_step=guide_step or '',
-                                  request_meta=getattr(info.context, 'META', None))
+                                  photo=photo, request_meta=getattr(info.context, 'META', None))
         except ValueError as exc:
             return AskAssistant(success=False, error=str(exc), actions=[], mode='AI')
         except AssistantUnavailable as exc:

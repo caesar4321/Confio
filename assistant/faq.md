@@ -132,7 +132,7 @@
 
 ## Enviar y pagar
 - Enviar a otro usuario de Confío es gratis: Confío paga la comisión de la red.
-- La pestaña Pagar lee los QR de cobro de Confío. Si tienes una cuenta local activa, también lee QR Pix, Bre-B o el QR de tu país, y ves el tipo de cambio final antes de confirmar.
+- Pagar lee los QR de cobro de Confío. Si tienes una cuenta local activa, también lee QR Pix, Bre-B o el QR de tu país, y ves el tipo de cambio final antes de confirmar.
 - Un negocio cobra con "Cobrar" (un QR de cobro), no con su número.
 
 ## Seguridad
@@ -190,15 +190,31 @@
 
 ## Dónde está cada cosa en la app
 Úsalo solo cuando ya sabes qué quiere hacer: si no queda claro a quién o a qué se refiere (un nombre, un banco o una cuenta que no conoces), pregunta primero. Usa solo estos caminos; si lo que buscan no está aquí, no inventes uno: ábrelo con `navigate` si existe esa pantalla, o di que no estás seguro de dónde está.
-- Pestañas de abajo: Inicio · Invertir · Pagar (botón QR del centro; en cuentas de negocio es Cobrar) · Descubrir · Perfil.
+[[tabs]]
+- Pestañas de abajo: Inicio · Invertir · Pagar (botón QR del centro; en cuentas de negocio es Cobrar) · Comprar · Perfil.
 - Inicio: arriba la campana (Notificaciones) y el círculo con tu inicial (cambiar de cuenta o crear una cuenta de negocio). Tu saldo total: el ojo lo oculta y "USD ▾" lo muestra en tu moneda local. La línea del mes abre "Tu mes". Debajo, Enviar y Recibir. En "Mis Billeteras", cada fila abre su saldo e historial (no tiene botones para enviar ni recargar). La primera fila es tu dólar: dice "Confío Dollar+" si Confío Dollar+ está disponible para ti y "Confío Dollar" si no (si preguntan dónde está, mira `get_portfolio` para saber cuál ve; si no lo sabes, nombra los dos). Luego, Antiguo Confío Dollar si aún tienes saldo, Confío $CONFIO y Acciones de EE.UU.
+[[/tabs]]
+[[conversation]]
+- No hay pestañas abajo: Inicio es esta conversación. Arriba están el menú (☰), tu saldo total, lo que entró y salió este mes (dos cifras con flechas; tocarlas abre "Tu mes"; no aparecen si ocultaste tu saldo), el QR de Cobrar (en cuentas personales) y la campana (Notificaciones). Junto a donde escribes está el botón redondo con un QR: es Pagar (en cuentas de negocio es Cobrar) y se convierte en enviar cuando escribes. En Invertir, Comunidad, Comprar y Perfil, Pagar está abajo a la derecha, y arriba a la derecha el botón de la casa vuelve a Inicio.
+- Menú (☰, tocar tu saldo arriba, o deslizar la conversación hacia la derecha; se cierra deslizándolo a la izquierda): "Mi dinero" con tu saldo total (el ojo lo oculta; "USD ▾" lo muestra en tu moneda local). La línea del mes abre "Tu mes". Tus billeteras en fila (desliza para ver todas): la primera es tu dólar, que dice "Confío Dollar+" si Confío Dollar+ está disponible para ti y "Confío Dollar" si no (si preguntan dónde está, mira `get_portfolio` para saber cuál ve; si no lo sabes, nombra los dos); luego Antiguo Confío Dollar si aún tienes saldo, Inversiones, $CONFIO y Cuenta inteligente. Tu dólar, Antiguo Confío Dollar y $CONFIO abren su saldo e historial (no tienen botones para enviar ni recargar); Inversiones abre Invertir; Cuenta inteligente abre tu cuenta o su oferta. Ese menú es el lugar de tu dinero: no hay otra pantalla de billeteras. Debajo, Enviar y Recibir. Luego Inicio (vuelve a esta conversación desde cualquier pantalla), Invertir, Comunidad, Comprar, Cuenta inteligente y Mensajes. Al pie, tu nombre abre Perfil y "Cambiar" cambia de cuenta o crea una cuenta de negocio.
+[[/conversation]]
 - Recibir: tu número Confío y "Compartir" (para que otra persona con Confío te envíe). "Recargar ahora" (poner tu propio dinero; en Bolivia genera un QR por orden). Tus cuentas locales y las que puedes abrir (Pix, Bre-B, CLABE…) y "Más países". "Cobrar con QR de Confío" (un cobro que otro usuario de Confío paga desde la app; un banco no lo lee). "Efectivo con un agente". En "Avanzado": recibir USDT o $CONFIO por BNB Smart Chain (BEP20).
 - Abrir una cuenta local: Recibir → el medio (por ejemplo Bre-B, o "Más países") → "Solicitar mi…" → la app muestra requisitos y costo → "Completar apertura".
 - Enviar: busca un contacto de tu agenda (no se puede escribir un número nuevo) para enviarle a su cuenta Confío o invitarlo. "A mi propia cuenta" = retirar a una cuenta a tu nombre ("Desde mis ahorros" o "Desde mi cUSD"). Medios locales para pagar a otra persona (Pix, Bre-B, CLABE…) si tienes esa cuenta local. "Efectivo con un agente". En "Avanzado": enviar USDT o $CONFIO a una billetera externa (BEP20).
 - Pagar: cámara para escanear QR de cobro de Confío y QR locales donde están habilitados; abajo te dice en qué países. En Bolivia hoy sirve para QR de cobro de Confío; pagar QR locales de Bolivia llegará muy pronto: dilo cuando abras Pagar desde Bolivia.
 - Invertir: Acciones de EE.UU. (lista con buscador → la acción → Comprar o Vender) y la preventa de $CONFIO.
+[[tabs]]
 - Información de Confío Dollar+: "Ahorros Protegidos", desde la cifra "Ahorros" de Inicio o el "?" de la pantalla de Confío Dollar+.
+[[/tabs]]
+[[conversation]]
+- Información de Confío Dollar+: "Ahorros Protegidos", desde la cifra "Ahorros" arriba de Comunidad o el "?" de la pantalla de Confío Dollar+.
+[[/conversation]]
 - Perfil: invitar amigos ("Invitar por WhatsApp") y Mis comisiones, verificación de identidad, tu usuario Confío, dirección para recargas y retiros, Mis cuentas, Mis instituciones, Notificaciones; Seguridad (Biometría / PIN, Respaldo en la nube, Salida de emergencia); grupo de Telegram; términos y cerrar sesión. La versión de la app está al final.
 - Confío Face no es una opción de Perfil: la app te lo pide al confirmar un movimiento o al verificarte.
+[[tabs]]
 - Este chat: la burbuja flotante lo abre en cualquier pantalla. Arriba eliges con quién hablar: Confío IA, Julian o News. "✨ Tu asistente" cambia su mascota, color, nombre o foto. Mensajes no tiene un botón fijo en Inicio: se llega por la burbuja.
+[[/tabs]]
+[[conversation]]
+- Este chat es Inicio; en las demás pantallas lo abre la burbuja flotante. Julian, News y los mensajes directos están en Mensajes, dentro del menú. Para cambiar la mascota, el color, el nombre o la foto de tu asistente, toca su carita junto a su último mensaje. Para enviarme una foto de tu galería (un cartel, un recibo, una tarea, un texto para traducir), toca el botón de imagen junto a donde escribes (aquí y en la burbuja flotante) y, si quieres, agrégale un mensaje; la foto no queda guardada en la conversación. Mientras te atiende una persona del equipo no se pueden enviar fotos.
+[[/conversation]]
 - En Nicaragua, Panamá, Cuba y Ecuador no aparecen "Recargar ahora" ni "A mi propia cuenta". En Venezuela la recarga es la fila Pago Móvil de Recibir, y el retiro es la fila Pago Móvil de Enviar (no hay "A mi propia cuenta").

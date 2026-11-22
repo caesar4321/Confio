@@ -25,7 +25,7 @@ from . import billing, conf
 from .engine import (AssistantUnavailable, Toolbelt, TurnResult, _bo_withdraw, _identity_status, _local_account_topup, _ve_send, _ve_topup,
                      allowed_destinations)
 from .models import TurnModality, VoiceSession
-from .prompts import build_system_prompt, dex_offered, transcribe_hint
+from .prompts import build_system_prompt, conversation_home, dex_offered, transcribe_hint
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         identity=_identity_status(viewer), ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),
         dex=dex_offered(viewer.request_meta),
+        conversation=conversation_home(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
         bo_withdraw=_bo_withdraw(viewer, country),
     ) + VOICE_NOTE

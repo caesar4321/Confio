@@ -21,6 +21,7 @@ from inbox.models import SupportMessage
 from inbox.push_service import send_support_staff_push
 from inbox.schema import get_or_create_support_conversation
 
+from . import photos
 from . import conf, guide
 from .engine import (AssistantUnavailable, Viewer, categorize_movements, general_while_waiting, human_mode_active,
                      run_turn, third_party_text)
@@ -305,9 +306,10 @@ def _route_to_team(message):
 
 
 def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='', tz_name=None,
-        can_navigate=True, request_meta=None, guide_step='', pending_message=None):
+        can_navigate=True, request_meta=None, guide_step='', pending_message=None, photo=None):
     """Answer `body` (or a voice note: audio=(base64, mime, duration_ms)) in
-    the user's support thread.
+    the user's support thread. photo=(base64, mime): a picture sent with the
+    typed words (or with none); see assistant/photos.py.
 
     Quota is RESERVED under a short per-user lock (a pending AssistantTurn
     counts at once); transcription and model calls run outside the lock, so a
@@ -320,6 +322,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     Raises ValueError (bad input) / AssistantUnavailable (transcription down).
     """
     screen = (screen or '')[:64]
+    photo = photo if photo and not audio else None
     # 1. Reserve (short lock).
     with transaction.atomic():
         lock_user(user)
@@ -336,6 +339,23 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                 return AskOutcome(user_message=reply, reply_message=None, remaining_turns=0)
             turn = AssistantTurn.objects.create(user=user, conversation=conversation, screen=screen,
                                                 modality=TurnModality.VOICE_NOTE, error='pending')
+        if photo:
+            # Refused in words before the costly part, and nothing is recorded:
+            # people cannot open a photo (it is not kept), and a photo is
+            # never read for someone with no turns left.
+            if human:
+                raise ValueError(photos.TEAM_CANNOT_SEE)
+            if asks_for_person((body or '').strip()):
+                raise ValueError(photos.ASK_WITHOUT_PHOTO)
+            if remaining <= 0:
+                raise ValueError(photos.NO_TURNS)
+
+    # Checked and shrunk before the message is recorded: a bad file is a plain
+    # error, never a message in the thread.
+    photo_url = None
+    if photo:
+        with photos.reading(user):
+            photo_url = photos.prepare(*photo)
 
     # 2. Transcribe (no lock).
     modality, audio_seconds, transcript = TurnModality.TEXT, 0, None
@@ -356,6 +376,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     limit = conf.get('CONFIO_ASSISTANT_MAX_INPUT_CHARS')
     clean = (body or '').strip()
+    if not clean and photo_url:
+        clean = photos.ONLY_BODY
     if not clean:
         raise ValueError('Message body is required')
     if len(clean) > limit:
@@ -382,8 +404,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             user_message, proposal, wants_human = pending_message, None, False
             pending_watch = None
         else:
+            if photo_url and (human or remaining_turns(user) <= 0):
+                # Changed while the photo was being read (the team took the
+                # thread, the last turn went to another message): the same
+                # refusals as above, and still nothing recorded.
+                raise ValueError(photos.TEAM_CANNOT_SEE if human else photos.NO_TURNS)
             user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
-                                   metadata={'modality': modality, 'screen': screen})
+                                   metadata={'modality': photos.MODALITY if photo_url else modality,
+                                             'screen': screen})
             # A proposal lives for exactly one user message, whatever path it takes.
             proposal = take_pending_categorization(conversation)
             pending_watch = take_pending_watch(conversation)
@@ -416,6 +444,11 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             turn = AssistantTurn.objects.create(user=user, conversation=conversation, user_message=user_message,
                                                 screen=screen, modality=modality, error='pending')
 
+    if photo_url:
+        # Held for follow-up questions only once its turn is reserved, and
+        # outside the lock (a slow cache must not hold the person's row).
+        photos.keep(user_message, photo_url)
+
     # 4. Answer (no lock; analyses reserve their own slot).
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name,
                      request_meta=request_meta)
@@ -440,6 +473,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     else:
         history = list(conversation.messages.order_by('-created_at')[:conf.get('CONFIO_ASSISTANT_HISTORY_MESSAGES')])
         history.reverse()
+    # The photo sent just now is seen even if the cache lost it.
+    seen_photos = {**photos.for_history(history), **({user_message.id: photo_url} if photo_url else {})}
     started = time.monotonic()
     try:
         result = run_turn(
@@ -453,11 +488,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             reserve_web=_tool_reserver(user, turn, 'search_web', web_searches_left),
             can_navigate=can_navigate,
             waiting_for_team=bool(waiting),
+            photos=seen_photos,
             guide_note='' if waiting else guide.steering_note(
                 guide_step, country_of(user), viewer=viewer, request_meta=viewer.request_meta),
         )
     except AssistantUnavailable as exc:
         logger.warning('Confio Assistant unavailable: %s', exc)
+        if seen_photos:
+            photos.forget([m for m in history if m.id in seen_photos])
         metered = _meter_partial(turn, getattr(exc, 'partial', None))
         if waiting or _team_took_over(user, conversation, user_message):
             turn.error = (f'unavailable while waiting for the team ({str(exc)[:200]})' if waiting
@@ -543,7 +581,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     if result.handoff_reason:
         with transaction.atomic():
-            outcome = _handoff(conversation, state, user_message, result.handoff_reason, ai_reply=reply)
+            outcome = _handoff(conversation, state, user_message,
+                               result.handoff_reason + (photos.HANDOFF_NOTE if seen_photos else ''), ai_reply=reply)
         outcome.actions = result.actions
         outcome.remaining_turns = remaining - 1
         outcome.transcript = transcript
