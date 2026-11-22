@@ -15,6 +15,9 @@ jest.mock('../../services/localMoney', () => ({
   createAdditionalDocumentBrowserSession: jest.fn(),
   syncAdditionalDocument: jest.fn(),
 }));
+jest.mock('../../services/verificationReport', () => ({
+  verificationReport: () => ({launched: jest.fn(), end: jest.fn()}),
+}));
 jest.mock('../../services/diditService', () => ({
   getDiditErrorMessage: jest.fn(),
   getDiditResultSessionId: jest.fn(),

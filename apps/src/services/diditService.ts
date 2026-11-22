@@ -71,10 +71,12 @@ function resolveDiditStartFunction(): (sessionToken: string) => Promise<any> {
   return (sessionToken: string) => startVerification(sessionToken, undefined);
 }
 
-export async function startDiditVerification(sessionToken: unknown): Promise<any> {
+/** `onLaunch` runs only once the token and the native SDK are both there. */
+export async function startDiditVerification(sessionToken: unknown, onLaunch?: () => void): Promise<any> {
   const normalizedSessionToken = normalizeDiditSessionToken(sessionToken);
 
   const startVerification = resolveDiditStartFunction();
+  onLaunch?.();
   return startVerification(normalizedSessionToken);
 }
 

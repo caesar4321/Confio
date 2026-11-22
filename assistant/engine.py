@@ -74,7 +74,6 @@ class TurnResult:
     cached_input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: Decimal = Decimal('0')
-    handoff_reason: str = ''
     writes: list = field(default_factory=list)
     # categorize_transactions proposal awaiting the user's "sí".
     pending_categorization: dict | None = None
@@ -556,40 +555,11 @@ def _plus_net_apy():
 
 RATE_TYPES_ES = {'parallel': 'paralelo', 'average': 'promedio', 'official': 'oficial'}
 
-# Suggestion prompts that only ask how something works: never a handoff.
+# Suggestion prompts that only ask how something works.
 INFORMATIONAL_PROMPTS = {
     '¿cuánto cuesta usar confío?', '¿qué es confío y para qué me sirve?', '¿qué es confío y para qué sirve?',
     '¿es seguro? ¿quién controla mi dinero?', '¿cómo pongo mis primeros dólares en confío?',
 }
-# "¿Para cuándo habrá recargas en Ecuador?" — the WHOLE message must be this one
-# question shape: when + will-there-be + feature + "en <país>". Nothing else
-# (a status question, a follow-up sentence) ever matches, so it may escalate.
-# Plural only: "(la) recarga"/"(el) retiro" usually means their own order.
-_FEATURE = (r'(?:(?:las |los )?(?:recargas|retiros|cuentas locales)|recargar|retirar|pix|bre-?b|'
-            r'pago m[oó]vil|qr)(?: (?:por|con) (?:qr|pago m[oó]vil))?')
-_ROADMAP_QUESTION = re.compile(
-    r'(?:(?:hola|disculpa|me (?:puedes|podr[ií]as|pueden) decir|sabes|saben),? )?¿? ?'
-    r'(?:para cu[aá]ndo|cu[aá]ndo|(?:para )?qu[eé] fecha(?: m[aá]s o menos)?) '
-    r'(?:habr[aá]|estar[aá]n? disponibles?|se podr[aá]|se podr[ií]a|van a (?:tener|habilitar)) '
-    r'(?:hacer |tener |usar )?' + _FEATURE + r'(?: y ' + _FEATURE + r')? '
-    r'en (?:ecuador|venezuela|paraguay|uruguay|panam[aá]|guatemala|honduras|nicaragua|el salvador|costa rica|'
-    r'cuba|rep[uú]blica dominicana|argentina|bolivia|brasil|chile|colombia|m[eé]xico|per[uú]|espa[ñn]a|'
-    r'estados unidos|mi pa[ií]s) ?[?.]?')
-# Earlier messages that mention their own case, a number or a problem keep the
-# escalation open (false negatives are fine; a blocked escalation is not).
-_CONTEXT_PERSONAL = re.compile(r'\b(me|mi|m[ií]|mis|tengo|yo|nuestr[oa]s?|nos)\b|\b\w{3,}[éí]\b|\d|'
-                               r'\w+(me|nos)\b|persona|humano|agente|asesor|operador|ejecutivo|supervisor|'
-                               r'represent|equipo|soporte|ayuda|alguien|lleg|perd|estaf|rob|hacke|fraude|bloque|'
-                               r'congel|suspend|restring|banead|cobr|cargo|d[eé]bito|descont|devuelv|reembols|'
-                               r'devoluci|pendiente|rechaz|no puedo|no me deja|no funciona|no aparece|refleja|'
-                               r'desaparec|verific|kyc|c[eé]dula|reclam|queja|denunci|urgente|error|falla|'
-                               r'problema|plata|dinero|saldo|fondos|d[oó]lares')
-
-
-def _is_roadmap_question(text):
-    return bool(_ROADMAP_QUESTION.fullmatch(text))
-
-
 def is_tapped_text(message):
     """An informational suggestion or a first-use probe answer, sent by a tap."""
     from .suggestions import GUIDE_ANSWERS, PROBE_ANSWERS
@@ -666,20 +636,6 @@ WAITING_FOR_TEAM_NOTE = (
     'preguntarte cómo funciona la app.\n')
 
 
-def handoff_not_needed(message, earlier=''):
-    """True for questions the assistant answers itself: an informational
-    suggestion tap, or "¿para cuándo habrá X en <país>?" about the product
-    (roadmap answers are in the FAQ). Never when the person's recent messages
-    mention their own case, a number, a problem or a person."""
-    text = ' '.join((message or '').lower().split())
-    context = ' '.join((earlier or '').lower().split())
-    if not text or _CONTEXT_PERSONAL.search(context):
-        return False
-    if text in INFORMATIONAL_PROMPTS:  # an exact suggestion tap ("…controla mi dinero?" included)
-        return True
-    return _is_roadmap_question(text)
-
-
 RAMP_STATUS_ES = {'PENDING': 'pendiente', 'PROCESSING': 'en proceso', 'COMPLETED': 'completada',
                   'FAILED': 'fallida', 'AML_REVIEW': 'en revisión'}
 
@@ -712,8 +668,37 @@ def _unpaid_pago_movil_step(row):
                         '«Cancelar recarga (no pagué)».')
     if (row.status_detail or '').startswith('verify_'):
         out['ultimo_intento'] = ('Ya envió una referencia y no se encontró ese pago o el monto no coincide. Que '
-                                 'revise la referencia, la fecha y el monto; si dice que pagó, pásalo al equipo.')
+                                 'revise la referencia, la fecha y el monto; si dice que pagó, que no pague de nuevo.')
     return out
+
+
+def _koywe_rejected(row):
+    """Koywe's REJECTED top-up. It is never proof that nobody paid: an order
+    times out the same way when a real transfer was not matched to it (no
+    payment date either), so the person is asked."""
+    return (row.provider == 'koywe' and row.direction == 'on_ramp' and row.status == 'FAILED'
+            and str((row.metadata or {}).get('koywe_status') or '').upper() == 'REJECTED')
+
+
+def _rejected_order_step(row, user):
+    step = ('El proveedor rechazó o venció la orden. Eso no prueba que no pagó: nunca le digas que no pagó ni que no '
+            'hay pago. Lo primero es saber si su banco se lo descontó; si todavía no lo dijo, pregúntaselo. Si sí: '
+            'que no pague de nuevo ni cree otra orden por ese dinero, que guarde el comprobante y escriba aquí la '
+            'hora, el banco y el número de comprobante (si ya los dio, no se los pidas otra vez y dile que tú no '
+            'puedes acreditarlo). Solo si confirma que no se lo descontaron: ')
+    return step + next_order_step(row, user)
+
+
+def next_order_step(row, user):
+    """What the server would let them do once they say they were not debited."""
+    from ramps.koywe import has_unpaid_koywe_order, on_ramp_paused, on_ramp_rejection_locked
+
+    if on_ramp_paused(row.country_code) or on_ramp_rejection_locked(user):
+        return 'no le propongas crear otra orden, hoy no puede.'
+    if has_unpaid_koywe_order(user):
+        return ('ya tiene otra recarga pendiente: que siga con esa o espere a que venza; hasta entonces no '
+                'puede crear otra.')
+    return 'puede crear una orden nueva y no usar el QR o enlace anterior.'
 
 
 def topup_status_data(viewer: Viewer, days=30):
@@ -741,6 +726,8 @@ def topup_status_data(viewer: Viewer, days=30):
             'hace_minutos': int((timezone.now() - row.created_at).total_seconds() // 60),
             'monto': f'{row.fiat_amount.normalize():f} {row.fiat_currency}' if row.fiat_amount else 'desconocido',
         }
+        if _koywe_rejected(row):
+            item['que_hacer'] = _rejected_order_step(row, viewer.user)
         unpaid = _unpaid_pago_movil_step(row)
         if unpaid:
             # Asked "¿cómo se confirma el pago?" two minutes after creating
@@ -758,9 +745,9 @@ def topup_status_data(viewer: Viewer, days=30):
         'disponible': True, 'movimientos': out,
         'nota': ('Aquí solo están las recargas y retiros con proveedor de los últimos 30 días: un depósito de USDT '
                  'o un envío no aparece, así que una lista vacía no significa que no llegó nada. Si está completada, '
-                 'di cuánto llegó. Si está pendiente o en proceso desde hace poco, di que sigue en curso. Esto no '
-                 'cambia las reglas de escalar: si pide una persona, si dice que pagó y no le llegó, si lleva mucho '
-                 'tiempo pendiente, si está fallida y pagó o si está en revisión, pásalo al equipo.'),
+                 'di cuánto llegó. Si está pendiente o en proceso, di desde cuándo, sin prometer un plazo. Si está '
+                 'fallida, dilo y sigue «que_hacer» si viene. Si dice que pagó y no le llegó, que no pague de nuevo: '
+                 'sigue la regla de dinero que falta.'),
     }
 # Where a connection-based block comes from, said as a person would.
 # Covers every country in cusd_plus.eligibility.ONDO_BLOCKED (a test keeps it so).
@@ -1136,25 +1123,6 @@ class Toolbelt:
                 },
                 'strict': True,
             })
-        specs += [
-            {
-                'type': 'function',
-                'name': 'escalate_to_human',
-                'description': (
-                    'Pasa la conversación al equipo humano de Confío: el chat queda con el equipo y tú dejas de '
-                    'responder. Úsalo solo para dinero atascado o perdido, un cobro que no entiende, fraude, cuenta '
-                    'bloqueada, eliminar la cuenta, o si el usuario pide una persona. Nunca para anotar qué vas a '
-                    'responder ni para preguntas que puedes contestar tú (comisiones, cómo funciona algo).'
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {'reason': {'type': 'string', 'description': 'Resumen breve del problema para el equipo.'}},
-                    'required': ['reason'],
-                    'additionalProperties': False,
-                },
-                'strict': True,
-            },
-        ]
         if not self.viewer.is_employee:
             specs += [
                 {
@@ -1238,7 +1206,7 @@ class Toolbelt:
                 'description': (
                     'Sus recargas y retiros de los últimos 30 días (los más recientes primero): estado, monto, '
                     'cuándo los pidió y cuánto llegó. Úsala para "¿en qué estado está mi recarga?", "¿cuánto '
-                    'demora?" o "no me llegó" antes de pensar en pasar el caso al equipo.'
+                    'demora?" o "no me llegó" antes de responder.'
                 ),
                 'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
                 'strict': True,
@@ -1318,7 +1286,7 @@ class Toolbelt:
                         'Busca en la web, con fuentes, qué se informó sobre por qué se movió una acción, un índice '
                         'o el mercado. Solo hechos ya ocurridos. Después de usarla respondes sin más herramientas. '
                         'topic = una acción que muestra Confío (nombre o ticker, p. ej. "Apple", "TSLA") o un mercado ("S&P 500", '
-                        '"Nasdaq", "Dow Jones", "bolsa", "oro", "petróleo"); language = idioma del usuario.'
+                        '"Nasdaq", "Dow Jones", "bolsa", "oro", "petróleo", "Bitcoin"); language = idioma del usuario.'
                     ),
                     'parameters': {
                         'type': 'object',
@@ -1549,7 +1517,6 @@ class Toolbelt:
         handler = {
             'navigate': self.navigate,
             'show_steps': self.show_steps,
-            'escalate_to_human': self.escalate_to_human,
             'get_month_summary': self.get_month_summary,
             'get_transactions': self.get_transactions,
             'categorize_transactions': self.categorize_transactions,
@@ -1655,15 +1622,6 @@ class Toolbelt:
         if action not in self.result.actions:
             self.result.actions.append(action)
         return {**reply, **{k: v for k, v in action.items() if k != 'type'}}
-
-    def escalate_to_human(self, reason):
-        if handoff_not_needed(self.last_user_message, self.earlier_user_messages):
-            # Informational questions and "¿para cuándo…?" are answered, never
-            # handed off (the model kept escalating "¿Cuánto cuesta usar Confío?").
-            return {'ok': False, '_denied': True,
-                    'motivo': 'Esta pregunta no se pasa al equipo: contéstala tú con las respuestas aprobadas.'}
-        self.result.handoff_reason = (reason or '').strip()[:280] or 'Solicitud del usuario'
-        return {'ok': True, 'nota': 'El equipo humano verá esta conversación. Díselo al usuario en una línea.'}
 
     def get_month_summary(self, months_back=0):
         if self.viewer.is_employee:
@@ -1785,7 +1743,7 @@ class Toolbelt:
     def search_market_news(self, topic, timeframe='esta semana', language='español'):
         if market.resolve_topic(topic) is None:
             return {'encontrado': False, '_denied': True,
-                    'motivo': 'Solo puedo buscar noticias de una empresa, ticker o índice.'}
+                    'motivo': 'Solo puedo buscar noticias de una empresa, ticker, índice, oro o Bitcoin.'}
         if 'search_market_news' in self.paid_used:
             return {'disponible': False, '_denied': True, 'motivo': 'Una búsqueda de noticias por mensaje.'}
         if not self.reserve_news():
@@ -2160,16 +2118,20 @@ def _ve_send(viewer, country):
 
 
 def _identity_status(viewer):
-    """verified / pending / rejected / unverified for this person, or None
+    """verified / in_review / pending / rejected / unverified for this person, or None
     (employees: the owner's identity is not theirs to act on)."""
     if viewer.user is None or viewer.is_employee:
         return None
     try:
         from security.identity_status import has_rail_identity, identity_status
+
+        from .suggestions import waits_on_review
         status = identity_status(viewer.user)
+        if status == 'pending' and waits_on_review(viewer.user):
+            return 'in_review'
         if status == 'verified' and not has_rail_identity(viewer.user):
             # Recargar needs a document of the rail country (ramps/schema.py).
-            return 'other_country'
+            return 'other_country_in_review' if waits_on_review(viewer.user) else 'other_country'
         return status
     except Exception:  # noqa: BLE001 - unknown, never a guess
         logger.warning('Confio Assistant: identity status unavailable', exc_info=True)
@@ -2233,7 +2195,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
              reserve_analysis=None, reserve_news=None, reserve_web=None, waiting_for_team=False, guide_note='',
              photos=None):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
-    except after the model already escalated: the handoff is kept."""
+    except after the turn already saved changes."""
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news, reserve_web=reserve_web)
@@ -2263,11 +2225,8 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
         # Usage already spent (a search, an analysis) is still billed: the
         # caller meters it from here even though the turn failed.
         exc.partial = result
-        # Work already done (an escalation, saved categories) must survive a
-        # failed follow-up generation, so the caller still routes/refreshes.
-        if result.handoff_reason:
-            result.reply = 'Te paso con el equipo de Confío. Te responderán aquí mismo.'
-            return result
+        # Work already done (saved categories) must survive a failed follow-up
+        # generation, so the caller still refreshes.
         if result.writes:
             result.reply = 'Listo, ya guardé los cambios. Puedes verlos en Tu mes.'
             return result
@@ -2303,6 +2262,9 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
         bo_withdraw=_bo_withdraw(viewer, country),
         smart_account_ops=belt.smart_ops(),
     )
+    from .guide import rejected_order_note
+    from .rails import colombia_pause_note
+    system += colombia_pause_note() + rejected_order_note(viewer)
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
     system += getattr(belt, 'guide_note', '')
@@ -2403,8 +2365,6 @@ def _finish(result):
             result.reply = PAYMENT_PREPARED_REPLY
         elif result.actions:
             result.reply = 'Listo.'
-        elif result.handoff_reason:
-            result.reply = 'Te paso con el equipo de Confío. Te responderán aquí mismo.'
         else:
             raise AssistantUnavailable('empty reply')
     return result
@@ -2518,6 +2478,8 @@ def human_mode_active(state, last_staff_reply_at, now=None):
     """True while the human team owns the thread (see AssistantThreadState)."""
     now = now or timezone.now()
     window = timedelta(hours=conf.get('CONFIO_ASSISTANT_HUMAN_MODE_HOURS'))
+    if not window:
+        return False
     signals = [t for t in (getattr(state, 'handoff_at', None), last_staff_reply_at) if t]
     if not signals:
         return False

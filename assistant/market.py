@@ -157,6 +157,7 @@ MARKETS = {
     'bolsa': 'the U.S. stock market', 'mercado': 'the U.S. stock market', 'wallstreet': 'the U.S. stock market',
     'stockmarket': 'the U.S. stock market', 'oro': 'gold prices', 'gold': 'gold prices',
     'plata': 'silver prices', 'silver': 'silver prices', 'petroleo': 'oil prices', 'oil': 'oil prices',
+    'bitcoin': 'Bitcoin prices', 'btc': 'Bitcoin prices',
 }
 
 

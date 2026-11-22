@@ -32,16 +32,14 @@ from security.geo import country_of
 logger = logging.getLogger(__name__)
 
 UNAVAILABLE_REPLY = (
-    'Ahora mismo no puedo responder. Vuelve a intentarlo en un momento, '
-    'o escribe "hablar con una persona" y te atiende el equipo de Confío.'
+    'Ahora mismo no puedo responder. Vuelve a intentarlo en un momento. '
+    'Si te falta dinero, no vuelvas a pagar y guarda el comprobante.'
 )
 LIMIT_REPLY = (
     'Llegaste al límite de mensajes con Confio Assistant por hoy. Mañana seguimos. '
-    'Si es urgente, escribe "hablar con una persona".'
+    'Si te falta dinero, no vuelvas a pagar y guarda el comprobante. Si es un fraude, '
+    'no compartas códigos ni claves y repórtalo hoy a tu banco.'
 )
-HANDOFF_NOTICE = 'Te pasé con el equipo de Confío. Te responderán aquí mismo, normalmente en unas horas.'
-HUMAN_KEYWORDS = ('hablar con una persona', 'hablar con un humano', 'agente humano', 'persona real')
-HUMAN_REQUEST_MAX_CHARS = 200
 # Stored with the message, so the person sees it in their own bubble too.
 TRUNCATED_INPUT_NOTE = '… [mensaje recortado]'
 # Beside a prepared payment the reply may never say it was paid.
@@ -51,12 +49,6 @@ PAID_CLAIM = re.compile(
     r'|qued[oó]\s+pagad|fue\s+pagad|se\s+pagó|he\s+pagado|pagué|pagad[oa]\b)', re.IGNORECASE)
 CARD_CLAIM = re.compile(r'\b(tarjeta|revisar\s+y\s+pagar)\b', re.IGNORECASE)
 from .engine import PAYMENT_PREPARED_REPLY  # noqa: E402
-
-
-def asks_for_person(text):
-    """A request for a person is a short message, not a phrase inside text
-    pasted to translate or summarize."""
-    return len(text) <= HUMAN_REQUEST_MAX_CHARS and any(k in text.lower() for k in HUMAN_KEYWORDS)
 
 
 @dataclass
@@ -354,8 +346,6 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             # never read for someone with no turns left.
             if human:
                 raise ValueError(photos.TEAM_CANNOT_SEE)
-            if asks_for_person((body or '').strip()):
-                raise ValueError(photos.ASK_WITHOUT_PHOTO)
             if remaining <= 0:
                 raise ValueError(photos.NO_TURNS)
 
@@ -392,7 +382,6 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     if len(clean) > limit:
         # Pasted text: the person and the assistant both see it was cut.
         clean = clean[:limit] + TRUNCATED_INPUT_NOTE
-    wants_human = asks_for_person(clean)
 
     # 3. Record the message and route it (short lock). Human mode is checked
     # again here: staff may have replied while the note was transcribing.
@@ -410,7 +399,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                     or AssistantTurn.objects.filter(user_message=pending_message)
                     .filter(Q(reply_message__isnull=False) | Q(error='pending')).exists()):
                 return None
-            user_message, proposal, wants_human = pending_message, None, False
+            user_message, proposal = pending_message, None
             pending_watch = None
         else:
             if photo_url and (human or remaining_turns(user) <= 0):
@@ -435,10 +424,6 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             if not waiting:
                 return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
                                   transcript=transcript)
-        elif wants_human:
-            outcome = _handoff(conversation, state, user_message, 'El usuario pidió hablar con una persona')
-            outcome.transcript = transcript
-            return outcome
         if turn is None:
             remaining = remaining_turns(user)
             if remaining <= 0 and waiting:
@@ -525,8 +510,6 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     # The team may have taken the thread while the model was answering: then
     # the AI stays quiet (no reply, no screen actions) and the message waits
     # for people. The turn is still metered.
-    # Always re-check (an escalation intent from the model doesn't mean the
-    # team hasn't already taken over meanwhile).
     if not waiting and _team_took_over(user, conversation, user_message):
         turn.models_used = result.models_used
         turn.input_tokens = result.input_tokens
@@ -573,7 +556,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         from . import paid_chips
         from .engine import allowed_destinations
         if not waiting and not result.rule_proposal and not result.payment_intent:
-            paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)))
+            earlier = ' · '.join(m.body or '' for m in [m for m in history if m.sender_type == 'USER'][-3:-1])
+            paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)), earlier)
     except Exception:  # noqa: BLE001 - a probe must never break the answer
         logger.exception('Confio Assistant: paid chip selection failed')
         result.actions = [a for a in result.actions if a.get('target') not in ('ia_plus', 'cuenta_inteligente')]
@@ -619,15 +603,6 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     turn.latency_ms = int((time.monotonic() - started) * 1000)
     turn.save()
 
-    if result.handoff_reason:
-        with transaction.atomic():
-            outcome = _handoff(conversation, state, user_message,
-                               result.handoff_reason + (photos.HANDOFF_NOTE if seen_photos else ''), ai_reply=reply)
-        outcome.actions = result.actions
-        outcome.remaining_turns = remaining - 1
-        outcome.transcript = transcript
-        outcome.data_changed = bool(result.writes)
-        return outcome
     return AskOutcome(user_message=user_message, reply_message=reply, actions=result.actions,
                       mode='HUMAN' if waiting else 'AI',
                       remaining_turns=remaining - 1, transcript=transcript, data_changed=bool(result.writes))
@@ -786,17 +761,6 @@ def _analysis_reserver(user, turn):
     return _tool_reserver(user, turn, 'analyze_finances', analyses_left)
 
 
-def _handoff(conversation, state, user_message, reason, ai_reply=None):
-    with transaction.atomic():
-        state.handoff_at = timezone.now()
-        state.handoff_reason = reason[:280]
-        state.save(update_fields=['handoff_at', 'handoff_reason', 'updated_at'])
-        reply = ai_reply or _append(conversation, sender_type='AGENT', body=HANDOFF_NOTICE,
-                                    metadata={'ai': True, 'handoff': True})
-    _route_to_team(user_message)
-    return AskOutcome(user_message=user_message, reply_message=reply, mode='HUMAN')
-
-
 def append_voice_transcript(conversation, user, entries):
     """Realtime turns land in the same thread as text, marked REALTIME."""
     saved = []
@@ -814,20 +778,6 @@ def append_voice_transcript(conversation, user, entries):
                                  metadata={'ai': True, 'client_reported': True,
                                            'modality': TurnModality.REALTIME}))
     return saved
-
-
-def handoff_from_voice(conversation, reason):
-    """escalate_to_human during a call: same handoff as text turns."""
-    state = thread_state(conversation)
-    state.handoff_at = timezone.now()
-    state.handoff_reason = (reason or 'Llamada con Confio Assistant')[:280]
-    state.save(update_fields=['handoff_at', 'handoff_reason', 'updated_at'])
-    # The model wrote this reason: it routes the call to the team but never
-    # comes back to the model as something the user said.
-    note = _append(conversation, sender_type='USER', sender_user=conversation.user,
-                   body=f'(Desde una llamada con Confio Assistant) {state.handoff_reason}',
-                   metadata={'modality': TurnModality.REALTIME, 'handoff_note': True})
-    _route_to_team(note)
 
 
 def _last_message(conversation):
@@ -862,7 +812,7 @@ def return_to_ai(user, account, business, jwt_context=None, *, request_meta=None
             outcome = ask(user, account, business, jwt_context, pending.body, screen=screen, tz_name=tz_name,
                           request_meta=request_meta, pending_message=pending)
             if outcome is not None and outcome.mode == 'HUMAN':
-                conversation.returned_mode = 'HUMAN'  # the answer handed it back to the team
+                conversation.returned_mode = 'HUMAN'  # people took the thread meanwhile
         except Exception:  # noqa: BLE001 - coming back must work even if the answer fails
             logger.exception('Confio Assistant: answering the pending message after return failed')
     return conversation

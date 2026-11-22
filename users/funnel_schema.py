@@ -45,7 +45,11 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     # Which doors of Inicio people use, five tabs vs the conversation home
     # (docs/designs/ai-assistant-first-redesign.md 9); slugs only, see below.
     'home_nav_tapped',
+    # Where a verification attempt ended inside Didit's SDK; `outcome` only.
+    'verification_sdk_result',
 })
+
+VERIFICATION_SDK_OUTCOMES = frozenset({'launched', 'completed', 'cancelled', 'failed', 'not_launched'})
 
 # home_nav_tapped keeps three short slugs and nothing else a client sends.
 HOME_NAV_SURFACES = frozenset({'tabs', 'home', 'header', 'drawer', 'composer', 'floating'})
@@ -173,6 +177,14 @@ class TrackFunnelEvent(graphene.Mutation):
             properties = {'surface': surface, 'target': target,
                           'home': 'conversation' if properties.get('home') == 'conversation' else 'tabs',
                           'app_version': app_version(getattr(info.context, 'META', {}))}
+
+        if event_name == 'verification_sdk_result':
+            outcome = properties.get('outcome') if isinstance(properties, dict) else None
+            if not isinstance(outcome, str) or outcome not in VERIFICATION_SDK_OUTCOMES:
+                logger.info('[funnel] rejected client verification_sdk_result')
+                return cls(success=True, recorded=False)
+            from users.paid_offers import app_version
+            properties = {'outcome': outcome, 'app_version': app_version(getattr(info.context, 'META', {}))}
 
         if event_name == 'paid_offer_interest':
             # Server-stamped (never the client's word): which pitch the build had.

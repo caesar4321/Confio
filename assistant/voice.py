@@ -40,7 +40,7 @@ VOICE_NOTE = """
 
 # navigate is checked here too (the per-user screen list: employees and
 # business accounts), then the app opens what the server approved.
-SERVER_TOOLS = {'navigate', 'escalate_to_human', 'get_month_summary', 'get_transactions', 'analyze_finances',
+SERVER_TOOLS = {'navigate', 'get_month_summary', 'get_transactions', 'analyze_finances',
                 'get_portfolio', 'get_exchange_rate', 'get_topup_status', 'get_topup_limits'}
 
 
@@ -105,6 +105,9 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         raise VoiceUnavailable('La voz no está disponible ahora.')
 
 
+    from .guide import rejected_order_note
+    from .rails import colombia_pause_note
+
     belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0, paid_offers_allowed=False)
     local_now = timezone.now().astimezone(viewer.tz)
     instructions = build_system_prompt(
@@ -117,7 +120,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         conversation=conversation_home(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
         bo_withdraw=_bo_withdraw(viewer, country),
-    ) + VOICE_NOTE
+    ) + colombia_pause_note() + rejected_order_note(viewer) + VOICE_NOTE
     model = conf.get('CONFIO_ASSISTANT_REALTIME_MODEL')
     # The secret only has to live until the call connects.
     body = {

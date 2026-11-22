@@ -17,8 +17,8 @@ lists IA+ as a benefit (paid_offers.ia_plus_bundled), the Confío IA+ doors open
 Cuenta inteligente instead (`asked_ia_plus`; never `investing`, a mismatch). Older builds get no
 IA+ door at all, so their Cuenta inteligente numbers stay what they were.
 
-At most one paid chip per reply; never after an escalation (the reply then
-belongs to the team), never to employees or old builds (allowed_destinations).
+At most one paid chip per reply; never on a problem with their money, account
+or safety unless they name the offer, never to employees or old builds (allowed_destinations).
 Every chip shown is logged once as a `door_shown` funnel event, which is also
 what the cap counts.
 """
@@ -37,6 +37,17 @@ ASKED = {
     'ia_plus': re.compile(r'(\bia\s*\+|\bia\s+plus\b)', re.I),
     'cuenta_inteligente': re.compile(r'\bcuenta\s+inteligente\b', re.I),
 }
+# A person with a problem is helped, never pitched.
+PROBLEM = re.compile(
+    r"no (me |se )?(ha |han |he )?(lleg|aparec|funcion|reflej|deja|acredit|reconozco)|no puedo (retirar|sacar|entrar)"
+    r"|atascad|(est[áa]n?|sigue|qued[óo]) pendiente|pendiente (desde|hace)|rechaz"
+    r"|bloque(ad|aron|ó)|me bloque|congelad|congelaron|suspend(id|ieron)|estaf|fraude|\bgolpe\b|\brob(o|ó|aron|ado)\b|hacke"
+    r"|entr(ó|aron|ou) a mi cuenta|cobraron|me cobr[óo] (dos|doble|de m[áa]s)|me descont|desapareci|\bperd[íi]\b"
+    r"|no (he |me ha |hemos )?recib(í|ido|imos)\b|n[ãa]o recebi|(saldo|total).{0,15}baj(ó|o a)|se (me )?perdi[óo]"
+    r"|sigue en proceso|menos (dinero|plata)|me falta (dinero|plata|saldo)|reclam|reembols|devu[eé]lv|devoluci|(?<!sin )problema"
+    r"|(borra|elimina)r? mi cuenta|hablar con (una persona|un humano|alguien)|agente humano|persona real|un asesor"
+    r"|n[ãa]o (chegou|funciona|consigo)|not (working|received|converting)|can.?t withdraw|missing|restrict|blocked|scam",
+    re.I)
 INVESTING_TOOLS = {'get_portfolio', 'get_stock_quote'}
 CAP = timedelta(days=7)
 
@@ -57,13 +68,13 @@ def _action(key, trigger):
             'source': f'chip:{trigger}'}
 
 
-def choose(viewer, user_text, result, allowed):
+def choose(viewer, user_text, result, allowed, earlier=''):
     """Rewrite result.actions so it carries at most one allowed paid chip.
     Returns (key, trigger) of the chip kept, or None."""
     text = user_text or ''
     paid = [a for a in result.actions if a.get('target') in PAID_OFFERS]
     result.actions = [a for a in result.actions if a.get('target') not in PAID_OFFERS]
-    if result.handoff_reason or viewer.user is None:
+    if viewer.user is None:
         return None
     from users.paid_offers import ia_plus_bundled
 
@@ -80,6 +91,11 @@ def choose(viewer, user_text, result, allowed):
             chosen = (target, 'asked' if target == key else 'asked_ia_plus')
             break
     if chosen is None:
+        # `earlier`: their recent messages, as the follow-up to a problem
+        # ("ayer, Banco X") rarely repeats it. Looking up a top-up counts too.
+        if (PROBLEM.search(text) or PROBLEM.search(earlier or '')
+                or any(t.get('name') == 'get_topup_status' for t in result.tools if isinstance(t, dict))):
+            return None
         for action in paid:
             # Confío IA+ has no pain point of its own: the model opened it
             # for a reason the regex didn't name.

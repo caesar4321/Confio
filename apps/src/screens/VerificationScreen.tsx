@@ -25,6 +25,7 @@ import {
 } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { getDiditErrorMessage, getDiditResultSessionId, openDiditSessionUrl, startDiditVerification } from '../services/diditService';
+import { verificationReport } from '../services/verificationReport';
 import { countryName } from '../config/localRails';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
@@ -369,6 +370,8 @@ const VerificationScreen = () => {
   const handleStartDidit = React.useCallback(async () => {
     setIsLaunchingDidit(true);
     awaitingBrowserRef.current = false;
+    // Personal checks only: a business continues on Didit's page, not in the SDK.
+    const report = isBusinessAccount ? null : verificationReport();
     try {
       const { data } = await createDiditSession();
       const result = data?.createDiditVerificationSession;
@@ -382,8 +385,9 @@ const VerificationScreen = () => {
         await refreshStatuses();
         return;
       }
-      const sdkResult = await startDiditVerification(result.session.sessionToken);
+      const sdkResult = await startDiditVerification(result.session.sessionToken, report?.launched);
       if (sdkResult?.type === 'cancelled') {
+        report?.end('cancelled');
         setBanner({ variant: 'warning', message: 'Cancelaste la verificación antes de terminarla.' });
         return;
       }
@@ -394,8 +398,10 @@ const VerificationScreen = () => {
       if (!resolvedSessionId) {
         throw new Error('Didit no devolvió el identificador de sesión.');
       }
+      report?.end('completed');
       await syncSessionAndRefresh(resolvedSessionId);
     } catch (error: any) {
+      report?.end('failed');
       setBanner({ variant: 'error', message: error?.message || 'No se pudo completar la verificación con Didit.' });
     } finally {
       setIsLaunchingDidit(false);
@@ -597,6 +603,7 @@ const VerificationScreen = () => {
           verification starts the account's own session; later ones are added
           alongside it (the server keeps that distinction, the person never
           needs to). */}
+      <Text style={styles.hint}>Ten tu documento a mano: toma unos 2 minutos.</Text>
       <TouchableOpacity ref={guideAnchor} style={styles.optionCard} onPress={() => {
         reportGuideTap('verify_start');
         (hasCountryAttempt ? openOtherDocument : handleStartDidit)();

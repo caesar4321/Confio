@@ -720,7 +720,6 @@ class RunAssistantVoiceTool(graphene.Mutation):
     @classmethod
     @login_required
     def mutate(cls, root, info, session_id, name, arguments=None):
-        from django.db import transaction
 
         user, account, business, jwt_context = get_context_models(info)
         ended = '{"error": "La llamada terminó."}'
@@ -737,10 +736,7 @@ class RunAssistantVoiceTool(graphene.Mutation):
         # Analyses reserve their slot under the user's lock inside run_tool;
         # the slow work itself runs unlocked.
         output, result = voice.run_tool(session, viewer, name, arguments)
-        if result.handoff_reason:
-            with transaction.atomic():
-                service.handoff_from_voice(session.conversation, result.handoff_reason)
-        return cls(output=output, handed_off=bool(result.handoff_reason), keep_going=True)
+        return cls(output=output, handed_off=False, keep_going=True)
 
 
 class LogAssistantVoice(graphene.Mutation):

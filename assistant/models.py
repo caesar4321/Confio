@@ -44,9 +44,10 @@ class AssistantProfile(models.Model):
 
 
 class AssistantThreadState(models.Model):
-    """Who answers a support thread: Confio Assistant, or the human team after a handoff.
+    """Who answers a support thread. Since 2026-11-22 the assistant always does
+    (CONFIO_ASSISTANT_HUMAN_MODE_HOURS = 0) and nothing writes a new handoff.
 
-    Human mode is never permanent: it lapses on its own once the team has been
+    With hours set, human mode is never permanent: it lapses on its own once the team has been
     quiet for CONFIO_ASSISTANT_HUMAN_MODE_HOURS, so a user is never left waiting on a
     flag nobody clears.
     """

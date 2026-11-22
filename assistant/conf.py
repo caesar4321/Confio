@@ -6,7 +6,7 @@ from django.conf import settings
 DEFAULTS = {
     'CONFIO_ASSISTANT_ENABLED': True,
     'ASSISTANT_GUIDE_ENABLED': True,
-    # Off until Guardarian reopens: the guide and prompt say it arrives soon.
+    # Off until Guardarian reopens: the guide and prompt say no date.
     'ASSISTANT_INTERNATIONAL_TOPUP_ENABLED': False,
     'ASSISTANT_GUIDE_MODEL_TIMEOUT_SECONDS': 5,
     # Test accounts (BO, VE, GT): funded, so they need a way to see every step.
@@ -34,7 +34,9 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_DAILY_WEB_SEARCHES': 5,
     # USD per hosted web_search call (billed by the provider outside tokens).
     'CONFIO_ASSISTANT_WEB_SEARCH_PRICE': Decimal('0.01'),
-    'CONFIO_ASSISTANT_HUMAN_MODE_HOURS': 24,
+    # 0 = the assistant always answers: nothing (a past handoff, a staff reply)
+    # silences it (2026-11-22). The team reads the threads and writes into them.
+    'CONFIO_ASSISTANT_HUMAN_MODE_HOURS': 0,
     'CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS': 25,
     # USD per 1M tokens: (input, cached input, output); transcription per minute.
     'CONFIO_ASSISTANT_PRICES': {

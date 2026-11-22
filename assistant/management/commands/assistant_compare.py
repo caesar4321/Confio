@@ -109,10 +109,9 @@ def answer(case):
                           account_label='personal', country=case['country'], analyses_left=0)
     except AssistantUnavailable as exc:
         return {'reply': f'<sin respuesta: {exc}>', 'error': True, 'seconds': time.monotonic() - started,
-                'cost': 0.0, 'actions': [], 'handoff': ''}
+                'cost': 0.0, 'actions': []}
     return {'reply': result.reply, 'error': False, 'seconds': time.monotonic() - started,
-            'cost': float(result.cost_usd), 'actions': [a.get('destination') for a in result.actions],
-            'handoff': result.handoff_reason}
+            'cost': float(result.cost_usd), 'actions': [a.get('destination') for a in result.actions]}
 
 
 class Command(BaseCommand):
@@ -172,7 +171,6 @@ class Command(BaseCommand):
         for flag in ('error_factual', 'no_responde_lo_preguntado', 'relleno'):
             rows.append((flag, [sum(bool(r['flags'][i].get(flag)) for r in results) for i in (0, 1)]))
         rows.append(('no reply', [sum(r['replies'][i]['error'] for r in results) for i in (0, 1)]))
-        rows.append(('handoffs', [sum(bool(r['replies'][i]['handoff']) for r in results) for i in (0, 1)]))
         for label, values in rows:
             self.stdout.write(f'{label:<24}{values[0]:>24}{values[1]:>24}\n')
         for i, label in ((0, names[0]), (1, names[1])):

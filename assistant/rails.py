@@ -96,3 +96,20 @@ def topup_route(country):
     if not country or country in GUARDARIAN_UNSUPPORTED:
         return 'usdt'
     return 'international' if conf.get('ASSISTANT_INTERNATIONAL_TOPUP_ENABLED') else 'international_soon'
+
+
+def colombia_pause_note():
+    """What is paused in Colombia right now, from the switches themselves. Told
+    to everyone: people abroad hold Bre-B accounts too."""
+    try:
+        from payment_accounts.models import EligibilityRule
+        from ramps.koywe import on_ramp_paused
+
+        from .prompts import CO_BREB_PAUSED_NOTE, CO_PSE_PAUSED_NOTE
+        breb = EligibilityRule.objects.filter(is_active=True, policy__is_active=True, decision='block',
+                                              reason_code='infinia_co_partner_paused').exists()
+        return (CO_BREB_PAUSED_NOTE if breb else '') + (CO_PSE_PAUSED_NOTE if on_ramp_paused('CO') else '')
+    except Exception:  # noqa: BLE001 - unknown is no note, never a broken reply
+        import logging
+        logging.getLogger(__name__).warning('Confio Assistant: Colombia pause state unavailable', exc_info=True)
+        return ''

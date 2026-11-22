@@ -41,12 +41,8 @@ UNREADABLE = 'No pude leer esa foto. Prueba con otra.'
 TOO_BIG = 'Esa foto pesa demasiado. Prueba con otra.'
 TEAM_CANNOT_SEE = ('Ahora te está atendiendo el equipo de Confío y todavía no puede recibir fotos aquí. '
                    'Cuéntanos con palabras lo que ves.')
-ASK_WITHOUT_PHOTO = ('El equipo de Confío todavía no puede recibir fotos aquí. Para hablar con una persona, '
-                     'escríbelo sin la foto y cuéntanos lo que ves.')
 NO_TURNS = 'Llegaste al límite de mensajes con Confio Assistant por hoy. Mañana puedes enviar la foto.'
 ONE_AT_A_TIME = 'Todavía estoy leyendo tu foto anterior. Espera un momento e inténtalo de nuevo.'
-# For the team, when a conversation that carried a photo reaches them.
-HANDOFF_NOTE = ' (Envió una foto al asistente; no se guarda, el equipo no puede verla.)'
 # The assistant's tools that reach outside Confío: not offered on a turn that
 # carries a photo, so text inside an image can never steer a search.
 TOOLS_OFF_WITH_A_PHOTO = {'search_web', 'search_market_news'}

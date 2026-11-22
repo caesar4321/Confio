@@ -164,7 +164,7 @@ def _state(viewer, request_meta) -> _State:
               or now - timedelta(days=VERIFICATION_NUDGE_DAYS) <= latest.created_at <= now - timedelta(hours=24)) \
         if latest else False
     pending = bool(latest and latest.status in ('pending', 'expired') and stage != 'in_review' and recent
-                   and not personal_docs.filter(status='verified').exists())
+                   and not personal_docs.filter(status='verified').exists() and not waits_on_review(user))
     try:
         from cusd_plus.eligibility import ONDO_POLICY
         ondo = ONDO_POLICY.evaluate(user, request_meta or {}).allowed
@@ -203,6 +203,25 @@ def _didit_stage(verification):
     if raw in DIDIT_DOCUMENT_EXPIRED:
         return 'document_expired'
     return ''
+
+
+def waits_on_review(user):
+    """A document waits on the reviewers (or on our own retry) and none waits
+    on the person. Not just the newest row: "otro documento" creates an empty
+    one, and a replaced attempt asks nothing of anybody."""
+    from security.didit import _superseded
+    from security.identity_status import personal_documents
+
+    waiting = False
+    for doc in personal_documents(user).filter(status='pending'):
+        if doc.needs_person_action:
+            if not _superseded(doc):
+                return False
+            continue
+        raw = str(((doc.risk_factors or {}).get('didit') or {}).get('raw_status') or '').strip().lower()
+        # Approved by Didit and still pending: our same-face check is retrying.
+        waiting = waiting or raw == 'approved' or _didit_stage(doc) == 'in_review'
+    return waiting
 
 
 def probe_payload():

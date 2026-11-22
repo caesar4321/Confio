@@ -18,6 +18,7 @@ import {
   createAdditionalDocumentSession,
   syncAdditionalDocument,
 } from '../services/localMoney';
+import { verificationReport } from '../services/verificationReport';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'AdditionalDocument'>;
 type Route = RouteProp<MainStackParamList, 'AdditionalDocument'>;
@@ -58,18 +59,21 @@ export default function AdditionalDocumentScreen() {
   const verify = async () => {
     setBusy(true);
     setResult(null);
+    const report = verificationReport();
     try {
       const session = await createAdditionalDocumentSession(idCountry, documentTypes);
       // Left while the session was being created: never open Didit over another screen.
       if (!navigation.isFocused()) return;
-      const sdk = await startDiditVerification(session.sessionToken);
+      const sdk = await startDiditVerification(session.sessionToken, report.launched);
       if (sdk?.type === 'cancelled') {
+        report.end('cancelled');
         setResult({ variant: 'info', message: 'Cancelaste la verificación. Puedes retomarla cuando quieras.' });
         return;
       }
       if (sdk?.type === 'failed') {
         throw new Error(getDiditErrorMessage(sdk) || 'No se pudo completar la verificación.');
       }
+      report.end('completed');
       const outcome = await syncAdditionalDocument(getDiditResultSessionId(sdk, session.sessionId) || session.sessionId);
       if (outcome.status === 'verified') {
         setDone(true);
@@ -80,6 +84,7 @@ export default function AdditionalDocumentScreen() {
         setResult({ variant: 'info', message: 'Estamos revisando tu documento. Te avisaremos apenas termine.' });
       }
     } catch (error: any) {
+      report.end('failed');
       setResult({ variant: 'error', message: error?.message || 'No se pudo completar la verificación.' });
     } finally {
       setBusy(false);

@@ -101,36 +101,48 @@ class AskTests(TestCase):
         self.assertEqual(outcome.actions, [])
 
     @patch('assistant.engine._openai_post')
-    def test_asking_for_a_person_hands_off_without_a_model_call(self, post):
+    def test_asking_for_a_person_is_answered_and_nobody_is_paged(self, post):
+        post.side_effect = [text_response('Aquí te atiendo yo. ¿Qué pasó?'), text_response('Veamos tu retiro.')]
         with self.captureOnCommitCallbacks(execute=True):
-            outcome = self.ask('Quiero hablar con una persona')
+            first = self.ask('Quiero hablar con una persona')
+            second = self.ask('Mi retiro no llegó')
+        self.assertEqual((first.mode, second.mode), ('AI', 'AI'))
+        self.assertEqual(second.reply_message.body, 'Veamos tu retiro.')
+        self.assertFalse(second.user_message.metadata.get('to_team'))
+        self.staff_push.assert_not_called()
 
-        post.assert_not_called()
+    @override_settings(CONFIO_ASSISTANT_ENABLED=False)
+    @patch('assistant.engine._openai_post')
+    def test_the_kill_switch_still_routes_to_people(self, post):
+        with self.captureOnCommitCallbacks(execute=True):
+            outcome = self.ask('mi retiro no llegó')
         self.assertEqual(outcome.mode, 'HUMAN')
-        self.assertTrue(outcome.reply_message.metadata.get('handoff'))
-        self.staff_push.assert_called_once_with(outcome.user_message.id)
-
-        with self.captureOnCommitCallbacks(execute=True):
-            follow_up = self.ask('Mi retiro no llegó')
+        self.assertTrue(outcome.user_message.metadata.get('to_team'))
+        self.staff_push.assert_called_once()
         post.assert_not_called()
-        self.assertEqual(follow_up.mode, 'HUMAN')
-        self.assertIsNone(follow_up.reply_message)
-        self.assertEqual(self.staff_push.call_count, 2)
+
+    def test_static_replies_promise_nobody(self):
+        for text in (service.LIMIT_REPLY, service.UNAVAILABLE_REPLY):
+            self.assertNotIn('persona', text)
+            self.assertNotIn('equipo', text)
+            self.assertIn('no vuelvas a pagar', text)
 
     @patch('assistant.engine._openai_post')
-    def test_model_escalation_keeps_its_reply_and_pushes_staff(self, post):
-        post.side_effect = [
-            call_response('escalate_to_human', '{"reason": "Retiro pendiente 3 días"}'),
-            text_response('Te paso con el equipo, lo revisan hoy.'),
-        ]
-        with self.captureOnCommitCallbacks(execute=True):
-            outcome = self.ask('mi retiro lleva 3 días pendiente')
-        self.assertEqual(outcome.mode, 'HUMAN')
-        self.assertEqual(outcome.reply_message.body, 'Te paso con el equipo, lo revisan hoy.')
-        state = AssistantThreadState.objects.get()
-        self.assertEqual(state.handoff_reason, 'Retiro pendiente 3 días')
-        self.staff_push.assert_called_once()
+    def test_neither_an_old_handoff_nor_a_staff_reply_silences_the_assistant(self, post):
+        post.side_effect = [text_response('Hola'), text_response('Sigo contigo'), text_response('Aquí estoy')]
+        conversation = self.ask('hola').user_message.conversation
+        state = service.thread_state(conversation)
+        state.handoff_at = timezone.now()
+        state.save(update_fields=['handoff_at'])
+        self.assertEqual(self.ask('¿y mi recarga?').reply_message.body, 'Sigo contigo')
+        staff = User.objects.create_user(username='s9', email='s9@example.com', password='x', firebase_uid='fb-s9')
+        SupportMessage.objects.create(conversation=conversation, sender_type='AGENT', sender_user=staff,
+                                      body='Lo revisé', message_type='TEXT')
+        self.assertFalse(service.is_human_mode(conversation))
+        self.assertEqual(self.ask('gracias, ¿y ahora?').reply_message.body, 'Aquí estoy')
+        self.staff_push.assert_not_called()
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @patch('assistant.engine._openai_post')
     def test_staff_reply_puts_thread_in_human_mode_until_user_returns(self, post):
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
@@ -145,11 +157,11 @@ class AskTests(TestCase):
         post.side_effect = [text_response('¡De nada!')]
         self.assertEqual(self.ask('¿cómo pago con QR?').mode, 'AI')
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @patch('assistant.engine._openai_post')
     def test_coming_back_answers_what_was_asked_while_waiting(self, post):
         # Brahayan, 2026-11-11: two questions while handed off, then back to the AI, no reply.
-        with self.captureOnCommitCallbacks(execute=True):
-            self.ask('Quiero hablar con una persona')
+        self._with_the_team()
         with self.captureOnCommitCallbacks(execute=True):
             waiting = self.ask('se me perdió un envío de 20 dólares')
         self.assertIsNone(waiting.reply_message)
@@ -159,7 +171,7 @@ class AskTests(TestCase):
         self.assertEqual(replies[-1].body, 'Te explico lo del envío.')
         turn = AssistantTurn.objects.get(reply_message=replies[-1])
         self.assertEqual(turn.user_message_id, waiting.user_message.id)
-        self.assertEqual(conversation.messages.filter(sender_type='USER').count(), 2)  # nothing re-recorded
+        self.assertEqual(conversation.messages.filter(sender_type='USER').count(), 1)  # nothing re-recorded
         # A second tap answers nothing more.
         service.return_to_ai(self.user, self.account, None, {}, request_meta={})
         self.assertEqual(post.call_count, 1)
@@ -170,10 +182,10 @@ class AskTests(TestCase):
         self.assertIsNone(service.ask(self.user, self.account, None, {}, later.body, pending_message=later))
         self.assertEqual(post.call_count, 1)
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @patch('assistant.engine._openai_post')
     def test_general_questions_are_answered_while_the_team_owns_the_thread(self, post):
-        with self.captureOnCommitCallbacks(execute=True):
-            self.ask('Quiero hablar con una persona')
+        self._with_the_team()
         post.side_effect = [text_response('Abre Recibir y toca Recargar ahora.')]
         with self.captureOnCommitCallbacks(execute=True):
             outcome = self.ask('Cómo recargar a mi cuenta Confío.')
@@ -215,6 +227,7 @@ class AskTests(TestCase):
                      '¿Qué es un cobro doble en Confío?', '¿Cómo recargo si Binance dice completado y Confío no?'):
             self.assertFalse(general_while_waiting(text), text)
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     def test_human_mode_lapses_on_its_own(self):
         now = timezone.now()
         state = SimpleNamespace(handoff_at=now - timedelta(hours=25), returned_to_ai_at=None)
@@ -268,8 +281,9 @@ class AskTests(TestCase):
         recent = lambda: list(conversation.messages.order_by('-created_at'))  # noqa: E731
         self.assertFalse(service.awaiting_team(conversation, recent()))
 
-        # The handoff reply comes from the AI, yet the thread now waits on people.
-        self.ask('quiero hablar con una persona')
+        # A message routed to the team (older threads) waits on people.
+        SupportMessage.objects.create(conversation=conversation, sender_type='USER', sender_user=self.user,
+                                      body='¿y mi retiro?', metadata={'to_team': True})
         self.assertTrue(service.awaiting_team(conversation, recent()))
 
         # Even after human mode lapses, an unanswered message stays visible.
@@ -279,6 +293,13 @@ class AskTests(TestCase):
         staff = User.objects.create_user(username='s3', email='s3@example.com', password='x', firebase_uid='fb-s3')
         SupportMessage.objects.create(conversation=conversation, sender_type='AGENT', sender_user=staff, body='Listo')
         self.assertFalse(service.awaiting_team(conversation, recent()))
+
+    def _with_the_team(self):
+        conversation = service.get_or_create_support_conversation(self.user, self.account, None)
+        state = service.thread_state(conversation)
+        state.handoff_at = timezone.now()
+        state.save(update_fields=['handoff_at'])
+        return conversation
 
     def _escalated(self):
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
@@ -291,6 +312,7 @@ class AskTests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             return service.send_team_notice(conversation, body, tag, user_id=self.user.id, **kwargs)
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @patch('inbox.push_service.send_support_reply_push')
     def test_team_notice_hands_an_escalated_thread_back_to_the_ai(self, reply_push):
         # 2026-11-16: an ops-script answer left Johan's thread with the team; the AI went silent.
@@ -312,6 +334,7 @@ class AskTests(TestCase):
             handoff_at=timezone.now() + timedelta(seconds=1))
         self.assertTrue(service.is_human_mode(conversation))
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @patch('inbox.push_service.send_support_reply_push')
     def test_team_notice_can_keep_the_thread_with_the_team(self, reply_push):
         conversation = self._escalated()
@@ -370,7 +393,7 @@ class EmployeeScopeTests(TestCase):
         belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=5)
         names = {spec['name'] for spec in belt.specs()}
         # Public documents and the reference exchange rate are public: employees get them too.
-        self.assertEqual(names, {'navigate', 'escalate_to_human', 'read_public_document', 'get_exchange_rate'})
+        self.assertEqual(names, {'navigate', 'read_public_document', 'get_exchange_rate'})
         self.assertNotIn('withdraw', belt.destinations)
         self.assertFalse(belt.navigate('withdraw')['ok'])
         self.assertFalse(belt.get_month_summary(0)['disponible'])
@@ -640,6 +663,7 @@ class AuditFixTests(TestCase):
         post.assert_not_called()
         self.assertEqual(outcome.remaining_turns, 0)
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @override_settings(OPENAI_API_KEY='k')
     def test_human_mode_voice_notes_are_metered(self):
         conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
@@ -762,14 +786,12 @@ class SecondPassTests(TestCase):
         self.assertFalse(reserve())  # the second concurrent analysis sees the first
 
     @override_settings(OPENAI_API_KEY='k')
-    def test_an_escalation_survives_a_failed_follow_up(self):
+    def test_a_problem_with_a_failed_generation_stays_with_the_assistant(self):
         from .engine import AssistantUnavailable
-        calls = [call_response('escalate_to_human', '{"reason": "retiro atascado"}'), AssistantUnavailable('down')]
-        with patch('assistant.engine._openai_post', side_effect=calls), \
-                patch('assistant.service.send_support_staff_push'):
+        with patch('assistant.engine._openai_post', side_effect=AssistantUnavailable('down')):
             outcome = service.ask(self.user, self.account, None, self.jwt, 'mi retiro no llega')
-        self.assertEqual(outcome.mode, 'HUMAN')
-        self.assertTrue(AssistantThreadState.objects.get().handoff_at)
+        self.assertEqual(outcome.mode, 'AI')
+        self.assertEqual(outcome.reply_message.body, service.UNAVAILABLE_REPLY)
 
     @override_settings(OPENAI_API_KEY='k', CONFIO_ASSISTANT_PET_FREE_PER_WEEK=1)
     def test_failed_pet_creation_gives_the_slot_back(self):
@@ -994,7 +1016,12 @@ class ThirteenthPassTests(TestCase):
 
     def test_any_message_consumes_the_proposal_even_to_the_team(self):
         self._propose()
-        service.ask(self.user, self.account, None, self.jwt, 'quiero hablar con una persona')
+        with override_settings(CONFIO_ASSISTANT_ENABLED=False), patch('assistant.service.send_support_staff_push'), \
+                patch('assistant.engine._openai_post') as post:
+            outcome = service.ask(self.user, self.account, None, self.jwt, 'quiero hablar con una persona')
+        post.assert_not_called()
+        self.assertEqual(outcome.mode, 'HUMAN')
+        self.assertTrue(outcome.user_message.metadata.get('to_team'))
         self.assertIsNone(service.take_pending_categorization(
             SupportMessage.objects.filter(conversation__user=self.user).first().conversation))
 
@@ -1011,6 +1038,7 @@ class ThirteenthPassTests(TestCase):
 
 
 class SeventeenthPassTests(TestCase):
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @override_settings(OPENAI_API_KEY='k')
     def test_a_staff_takeover_during_generation_silences_the_ai(self):
         user = User.objects.create_user(username='h1', email='h1@example.com', password='x', firebase_uid='fb-h1')
@@ -1401,12 +1429,6 @@ class GeneralAssistantGuardTests(TestCase):
         self.assertEqual(_with_cut_note('Hola', False), 'Hola')
         self.assertTrue(_with_cut_note('Parte uno', True).endswith(CUT_NOTE))
         self.assertEqual(_with_cut_note('', True), CUT_EMPTY)
-
-    def test_only_a_short_message_asks_for_a_person(self):
-        self.assertTrue(service.asks_for_person('Quiero hablar con una persona, por favor'))
-        pasted = 'Traduce esto: ' + 'la carta dice que quiere hablar con una persona real sobre el contrato. ' * 4
-        self.assertFalse(service.asks_for_person(pasted))
-        self.assertFalse(service.asks_for_person('¿Cómo recargo?'))
 
 
 class MarketToolTests(TestCase):
@@ -2541,11 +2563,11 @@ class ConversationReviewFixTests(TestCase):
         self.assertIn('Es solo el mínimo de recarga', FAQ)
         # 2026-11-14: a near-miss Confío Face was handed to the team with no tips while a pay-in waited.
         self.assertIn('Si Confío Face no reconoce tu rostro', FAQ)
-        self.assertIn('pásalo al equipo solo si dice que ya lo intentó así varias veces', FAQ)
-        self.assertIn('se aplica igual la regla de escalar ese dinero', FAQ)
+        self.assertIn('Si ya lo intentó así varias veces y sigue fallando, dilo claro', FAQ)
+        self.assertIn('se aplica igual la regla de dinero que falta', FAQ)
         # 2026-11-15: a sender's CPF/CNPJ question about receiving Pix went to the team.
         self.assertIn('Para recibir un Pix no necesitas CPF ni CNPJ', FAQ)
-        self.assertIn('le enviaron un Pix que no aparece en su saldo, se aplica igual la regla de escalar', FAQ)
+        self.assertIn('le enviaron un Pix que no aparece en su saldo, se aplica igual la regla de dinero que falta', FAQ)
         # 2026-11-16: told a person their own QR charge had no fee; Cobrar deducts 0.9% from anyone charging.
         self.assertIn('0,9% que se descuenta a quien cobra, sea un negocio o una persona', FAQ)
         # 2026-11-16: told to share 'tu chave Pix'; the key inside the QR is the bank's shared one, so a Pix to it went unattributed.
@@ -2632,8 +2654,8 @@ class PaidChipTests(TestCase):
                              is_business_owner=False, tz=ZoneInfo('UTC'))
         self.allowed = {'home', 'ia_plus', 'cuenta_inteligente'}
 
-    def _result(self, actions=(), tools=(), handoff=''):
-        return TurnResult(reply='ok', actions=list(actions), tools=list(tools), handoff_reason=handoff)
+    def _result(self, actions=(), tools=()):
+        return TurnResult(reply='ok', actions=list(actions), tools=list(tools))
 
     def _shown(self, key):
         from users.models import FunnelEvent
@@ -2673,7 +2695,7 @@ class PaidChipTests(TestCase):
         self.assertIsNone(paid_chips.choose(self.viewer, 'Avísame cuando se pueda', bare, self.allowed))
         self.assertEqual(bare.actions, [])
 
-    def test_one_chip_never_after_escalation_never_when_not_allowed(self):
+    def test_one_chip_never_on_a_problem_never_when_not_allowed(self):
         from . import paid_chips
         both = self._result(actions=[{'type': 'navigate', 'destination': 'home', 'target': 'cuenta_inteligente'}],
                             tools=[{'name': 'get_portfolio', 'ok': True}])
@@ -2681,8 +2703,8 @@ class PaidChipTests(TestCase):
         self.assertEqual(paid_chips.choose(self.viewer, 'pago todo a mano', both, self.allowed),
                          ('cuenta_inteligente', 'pain_point'))
         self.assertEqual([a['target'] for a in both.actions], ['cuenta_inteligente'])
-        escalated = self._result(tools=[{'name': 'get_portfolio', 'ok': True}], handoff='dinero atascado')
-        self.assertIsNone(paid_chips.choose(self.viewer, 'mi plata no llega', escalated, self.allowed))
+        problem = self._result(tools=[{'name': 'get_portfolio', 'ok': True}])
+        self.assertIsNone(paid_chips.choose(self.viewer, 'mi plata no llega', problem, self.allowed))
         off = self._result(tools=[{'name': 'get_portfolio', 'ok': True}])
         self.assertIsNone(paid_chips.choose(self.viewer, 'acciones', off, {'home'}))
         failed_tool = self._result(tools=[{'name': 'get_portfolio', 'ok': False}])
@@ -2963,65 +2985,63 @@ class ExchangeRateToolTests(TestCase):
 
 
 class HandoffGuardAndTopupStatusTests(TestCase):
-    def test_informational_and_roadmap_questions_are_not_handed_off(self):
-        from .engine import handoff_not_needed
-        for text in ('¿Cuánto cuesta usar Confío?', '  ¿Es seguro?  ¿Quién controla mi dinero?',
-                     'Me puedes decir para que fecha más o menos se podría hacer recargas en ecuador',
-                     '¿Para cuándo habrá Pix en Argentina?'):
-            self.assertTrue(handoff_not_needed(text), text)
-        for text in ('Quiero hablar con una persona', 'Mi recarga no me llegó desde ayer',
-                     '¿Para cuándo llega mi dinero? Ya pagué', 'Creo que me estafaron', '',
-                     'Me cobraron dos veces el mismo pago', '¿Para cuándo me devuelven la plata?',
-                     '¿Para cuándo llegan mis dólares?', '¿Qué fecha llega el retiro que hice?',
-                     '¿Cuándo van a desbloquear mi cuenta?', '¿Cuándo van a verificar mis documentos?',
-                     '¿Para cuándo me responde alguien?', '¿Para cuándo se soluciona?',
-                     '¿Para cuándo habrá retiros? Quiero que me pasen con un asesor',
-                     '¿Para cuándo habrá retiros en Bolivia? Quiero hablar con un operador',
-                     '¿Para cuándo estará disponible la recarga? Ya transferí 500 soles',
-                     '¿Para cuándo habrá recargas en Ecuador? Me descontaron del banco',
-                     '¿Para cuándo estará disponible la recarga que pedí en Perú?',
-                     '¿para cuándo habrá retiro en Bolivia? lleva 5 días pendiente',
-                     '¿Para cuándo habrá reembolso en Bolivia?', '¿Para cuándo habilitan el retiro en Perú? quiero la devolución',
-                     '¿Para cuándo estará habilitado mí retiro en Bolivia?',
-                     '¿Para cuándo habrá retiro de nuestro saldo en Bolivia?',
-                     '¿Para cuándo habrá retiros en Bolivia? tengo saldo que no puedo sacar',
-                     '¿Para cuándo habrá retiro de la orden 12345 en Bolivia?',
-                     '¿Para cuándo habrá recargas en Bolivia? Tengo una recarga sin acreditar',
-                     '¿cuándo habrá retiros en venezuela? quiero un supervisor',
-                     '¿Cuándo habrá recargas en Ecuador? hackearon la cuenta',
-                     '¿Cuándo se acredita la recarga en Bolivia?', '¿Cuándo llega el retiro en Colombia?',
-                     '¿Cuándo se acredita la recarga en Perú, ya deposite?',
-                     '¿Cuándo vuelven los retiros en Colombia? están caídos',
-                     '¿Cuándo estará disponible la recarga en Perú?',
-                     '¿Para cuándo estará disponible el retiro en Colombia?',
-                     'cuando estara disponible recarga en peru'):
-            self.assertFalse(handoff_not_needed(text), text)
-        # A roadmap-looking follow-up after a money problem is that person's case.
-        self.assertFalse(handoff_not_needed('¿Para cuándo habrá recargas en Bolivia?',
-                                            'me descontaron 20 y no llegaron'))
-        self.assertFalse(handoff_not_needed('¿Es seguro? ¿Quién controla mi dinero?', 'me robaron 50 dólares'))
-        # A tapped probe answer is not a money problem (u12614, 2026-10-18).
-        from .engine import is_tapped_text
-        self.assertTrue(is_tapped_text('Que mi dinero no pierda valor'))
-        self.assertFalse(is_tapped_text('me descontaron 20 y no llegaron'))
-        for earlier in ('transferí 300 bs ayer y nada', 'hackearon la cuenta', 'quiero hablar con un ejecutivo',
-                        'congelaron la cuenta'):
-            self.assertFalse(handoff_not_needed('¿Cuándo habrá retiros en Bolivia?', earlier), earlier)
-        for text in ('¿Para cuándo habrá Pago Móvil en Venezuela?', '¿Cuándo habrá retiros por QR en Bolivia?',
-                     'Hola, ¿qué fecha habrá recargas en mi país?'):
-            self.assertTrue(handoff_not_needed(text), text)
-
-    def test_escalate_refuses_an_informational_question(self):
+    def test_there_is_no_way_to_hand_the_chat_over(self):
         viewer = Viewer(user=None, account=None, account_type='personal', business_id=None,
                         is_business_owner=False, tz=ZoneInfo('UTC'))
-        result = TurnResult(reply='')
-        belt = Toolbelt(viewer, result, analyses_left=0)
-        belt.last_user_message = '¿Cuánto cuesta usar Confío?'
-        self.assertTrue(belt.escalate_to_human('El usuario pregunta por las comisiones')['_denied'])
-        self.assertEqual(result.handoff_reason, '')
-        belt.last_user_message = 'Me cobraron dos veces'
-        self.assertTrue(belt.escalate_to_human('cobro doble')['ok'])
-        self.assertEqual(result.handoff_reason, 'cobro doble')
+        belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
+        self.assertNotIn('escalate_to_human', {spec.get('name') for spec in belt.specs()})
+        from . import prompts, voice
+        self.assertNotIn('escalate_to_human', voice.SERVER_TOOLS)
+        for text in (prompts.SYSTEM_PROMPT, prompts.faq_text()):
+            for gone in ('escalate_to_human', 'pásalo al equipo', 'ofrece pasar con el equipo', 'Escala a humano'):
+                self.assertNotIn(gone, text)
+        self.assertIn('no existe pasar, derivar ni escalar', prompts.SYSTEM_PROMPT)
+        self.assertIn('Dividendos de acciones y ETF', prompts.faq_text())
+        self.assertIn('Se reinvierten automáticamente', prompts.faq_text())
+
+    def test_a_verification_in_review_is_not_told_to_finish(self):
+        from .prompts import build_system_prompt
+        prompt = build_system_prompt(first_name='Ana', account_label='personal', country='BR', screen='Home',
+                                     local_now='now', destinations=[], identity='in_review')
+        self.assertIn('no le pidas completar pasos', prompt)
+        self.assertNotIn('si no la terminó, la complete', prompt)
+
+    def test_a_rejected_order_never_says_nobody_paid(self):
+        from .engine import _koywe_rejected, _rejected_order_step as step
+        def row(raw='REJECTED', **kw):
+            return SimpleNamespace(**{'provider': 'koywe', 'direction': 'on_ramp', 'status': 'FAILED',
+                                      'country_code': 'BO', 'metadata': {'koywe_status': raw}, **kw})
+        self.assertTrue(_koywe_rejected(row()))
+        for other in (row('REFUNDED'), row(''), row(status='PENDING'), row(direction='off_ramp')):
+            self.assertFalse(_koywe_rejected(other))
+        for paused, unpaid, expected in ((False, False, 'puede crear una orden nueva'),
+                                         (False, True, 'ya tiene otra recarga pendiente'),
+                                         (True, False, 'hoy no puede')):
+            with patch('ramps.koywe.on_ramp_paused', return_value=paused), \
+                    patch('ramps.koywe.on_ramp_rejection_locked', return_value=False), \
+                    patch('ramps.koywe.has_unpaid_koywe_order', return_value=unpaid):
+                said = step(row(), None)
+            self.assertIn('Eso no prueba que no pagó', said)
+            self.assertIn(expected, said)
+            self.assertLess(said.index('descontó'), said.index(expected))  # asked before any new order
+
+    def test_bitcoin_is_a_news_topic(self):
+        from . import market
+        for topic in ('Bitcoin', 'BTC', 'bitcoin'):
+            self.assertEqual(market.resolve_topic(topic), 'Bitcoin prices')
+
+    def test_no_offer_under_a_problem(self):
+        from .paid_chips import PROBLEM
+        for text in ('Mi retiro no llegó', 'me estafaron', 'quiero hablar con una persona',
+                     'my payments are not converting', 'o Pix não chegou'):
+            self.assertTrue(PROBLEM.search(text), text)
+        for text in ('no me ha llegado', 'no se refleja', 'desapareció mi saldo', 'me robó', 'perdí mi dinero',
+                     'no reconozco este cargo', 'eliminar mi cuenta', "I can't withdraw", 'mi saldo bajó a 45',
+                     'no recibí mi dinero', 'no he recibido mi retiro', 'não recebi', 'se perdió mi envío'):
+            self.assertTrue(PROBLEM.search(text), text)
+        for text in ('quiero pagar el alquiler cada mes', '¿cómo invierto en acciones?', 'sin problema',
+                     'facturas pendientes', 'me falta ahorrar', 'fondo para lo urgente', 'bloquear una parte para ahorrar'):
+            self.assertFalse(PROBLEM.search(text), text)
 
     def test_topup_status_reads_only_this_accounts_ramps(self):
         from decimal import Decimal
@@ -3083,7 +3103,7 @@ class HandoffGuardAndTopupStatusTests(TestCase):
             self.assertNotIn(secret, dumped)
         ramp.status_detail = 'verify_movement_not_found'  # a reference came back unmatched, reopened
         ramp.save(update_fields=['status_detail'])
-        self.assertIn('pásalo al equipo', latest()['ultimo_intento'])
+        self.assertIn('que no pague de nuevo', latest()['ultimo_intento'])
         for phase in ('preparing', 'submitting', 'submitted'):  # their part is done or not ready
             ramp.metadata = {'vexpay': {'phase': phase, 'method': 'pago_movil'}}
             ramp.save(update_fields=['metadata'])
@@ -3148,13 +3168,10 @@ class GuideStepTests(TestCase):
         self.assertEqual(self._key(), 'opening')
 
     def test_stage_follows_identity(self):
-        from . import guide
         self._answer()
         self.assertEqual(self._key(identity='unverified'), 'verify')
-        with patch.object(guide, '_didit_stage', return_value='in_review'):
-            self.assertEqual(self._key(identity='pending'), 'verifying')
-        with patch.object(guide, '_didit_stage', return_value='unfinished'):
-            self.assertEqual(self._key(identity='pending'), 'verify')
+        self.assertEqual(self._key(identity='in_review'), 'verifying')
+        self.assertEqual(self._key(identity='pending'), 'verify')
         self.assertEqual(self._key(identity='verified'), 'top_up')
 
     def test_guardarian_countries_wait_and_the_rest_get_usdt(self):
@@ -3559,7 +3576,7 @@ class GuideStepTests(TestCase):
     def test_the_app_cannot_inject_a_promise_for_the_wrong_country(self):
         from . import guide
         self.assertEqual(guide.steering_note('international_soon', 'PA'), '')
-        self.assertIn('dos semanas', guide.steering_note('international_soon', 'HN'))
+        self.assertIn('no tenemos fecha', guide.steering_note('international_soon', 'HN'))
         self.assertIn('Recargar ahora', guide.steering_note('top_up', 'BO'))
 
     def test_every_event_lands_in_the_funnel(self):
@@ -3724,9 +3741,9 @@ class GuideStepTests(TestCase):
 
     def test_the_prompt_says_two_weeks_only_where_guardarian_serves(self):
         common = dict(first_name='A', account_label='p', screen='', local_now='n', destinations=[])
-        self.assertIn('unas dos semanas', build_system_prompt(country='HN', **common))
-        self.assertNotIn('unas dos semanas', build_system_prompt(country='PA', **common))
-        self.assertNotIn('unas dos semanas', build_system_prompt(country='BO', **common))
+        self.assertIn('todavía no está disponible en su país y no hay fecha', build_system_prompt(country='HN', **common))
+        self.assertNotIn('todavía no está disponible en su país y no hay fecha', build_system_prompt(country='PA', **common))
+        self.assertNotIn('todavía no está disponible en su país y no hay fecha', build_system_prompt(country='BO', **common))
 
 
 def _photo(size=(40, 30), fmt='JPEG', mode='RGB', color=(200, 30, 30), **save):
@@ -3870,33 +3887,6 @@ class PhotoTests(TestCase):
         post.side_effect = [text_response('Listo.')]
         self.assertEqual(self.ask('mira', photo=(_photo(), 'image/jpeg')).reply_message.body, 'Listo.')
 
-    @patch('assistant.engine._openai_post')
-    def test_asking_for_a_person_with_a_photo_is_refused_in_words(self, post):
-        """The team would get words pointing at a photo it cannot open."""
-        from . import photos
-
-        with self.assertRaises(ValueError) as raised:
-            self.ask('Quiero hablar con una persona, miren esto', photo=(_photo(), 'image/jpeg'))
-        self.assertEqual(str(raised.exception), photos.ASK_WITHOUT_PHOTO)
-        post.assert_not_called()
-        self.assertFalse(SupportMessage.objects.exists())
-
-    @patch('assistant.engine._openai_post')
-    def test_when_the_assistant_hands_off_the_team_is_told_a_photo_came_that_it_cannot_see(self, post):
-        from . import photos
-
-        post.side_effect = [
-            call_response('escalate_to_human', json.dumps({'reason': 'Retiro que no llegó'})),
-            text_response('Te paso con el equipo.'),
-        ]
-        with patch('assistant.service.send_support_staff_push'), self.captureOnCommitCallbacks(execute=True):
-            outcome = self.ask('mi retiro no llegó, mira el comprobante', photo=(_photo(), 'image/jpeg'))
-        self.assertEqual(outcome.mode, 'HUMAN')
-        notes = [m.body for m in SupportMessage.objects.all() if (m.metadata or {}).get('handoff_note')]
-        state = AssistantThreadState.objects.get()
-        told = ' '.join(notes) + ' ' + ' '.join(str(v) for v in vars(state).values())
-        self.assertIn(photos.HANDOFF_NOTE.strip(), told)
-
     def test_a_caption_that_poses_as_the_team_is_cleaned_like_any_message(self):
         from . import photos
 
@@ -3943,6 +3933,7 @@ class PhotoTests(TestCase):
         self.assertFalse(SupportMessage.objects.filter(sender_type='USER').exists())
         self.assertFalse(AssistantTurn.objects.exists())
 
+    @override_settings(CONFIO_ASSISTANT_HUMAN_MODE_HOURS=24)
     @patch('assistant.engine._openai_post')
     def test_while_the_team_answers_a_photo_is_refused_in_words_and_nothing_is_recorded(self, post):
         from . import photos
@@ -4925,3 +4916,119 @@ class TopupLimitsTests(TestCase):
 
         self.assertEqual([_amount(v) for v in ('350', '1000', '8500000', '0.5', '1234.5')],
                          ['350', '1.000', '8.500.000', '0,50', '1.234,50'])
+
+
+class ReviewAndPauseRowsTests(TestCase):
+    """Against real rows: a wrong field here would be swallowed as "no pause"."""
+
+    def test_colombia_pause_follows_each_switch(self):
+        from payment_accounts.models import EligibilityPolicy, EligibilityRule
+
+        from . import rails
+        # One active policy per provider and scope: the seeded one, where there is one.
+        policy, _ = EligibilityPolicy.objects.get_or_create(
+            provider='infinia', scope='payout', is_active=True,
+            defaults={'version': 9107, 'default_decision': 'allow',
+                      'effective_from': timezone.now() - timedelta(days=1)})
+        rule = EligibilityRule.objects.create(policy=policy, priority=9107, decision='block',
+                                              reason_code='infinia_co_partner_paused', account_countries=['COL'])
+        with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=[]):
+            note = rails.colombia_pause_note()
+            self.assertIn('Bre-B en pausa', note)
+            self.assertNotIn('PSE', note)
+        rule.is_active = False
+        rule.save()
+        with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=['CO']):
+            note = rails.colombia_pause_note()
+            self.assertIn('PSE', note)
+            self.assertNotIn('Bre-B en pausa', note)
+        with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=[]):
+            self.assertEqual(rails.colombia_pause_note(), '')
+
+    def test_in_review_reads_every_pending_document(self):
+        from datetime import date
+
+        from security.models import IdentityVerification
+
+        from .engine import _identity_status
+        user = User.objects.create_user(username='rv1', email='rv1@example.com', password='x', firebase_uid='fb-rv1')
+        def document(raw, **risk):
+            return IdentityVerification.objects.create(
+                user=user, status='pending', verified_first_name='Ana', verified_last_name='Paz',
+                verified_date_of_birth=date(1990, 1, 1), verified_nationality='BOL', verified_address='-',
+                verified_city='-', verified_state='-', verified_country='BOL', document_type='national_id',
+                document_number=f'N{IdentityVerification.objects.count()}', document_issuing_country='BOL',
+                risk_factors={'didit': {'raw_status': raw}, **risk})
+        viewer = SimpleNamespace(user=user, is_employee=False)
+        document('Not Started')
+        self.assertEqual(_identity_status(viewer), 'pending')
+        document('In Review')
+        self.assertEqual(_identity_status(viewer), 'in_review')
+        document('Not Started')  # "otro documento", opened and left
+        self.assertEqual(_identity_status(viewer), 'in_review')
+        sent_back = document('Resubmitted', requires_review=True)  # waits on the person
+        self.assertEqual(_identity_status(viewer), 'pending')
+        document('In Review')  # they sent another one: the returned attempt is replaced
+        self.assertEqual(_identity_status(viewer), 'in_review')
+        self.assertTrue(sent_back.needs_person_action)
+        with patch('security.identity_status.identity_status', return_value='verified'), \
+                patch('security.identity_status.has_rail_identity', return_value=False):
+            self.assertEqual(_identity_status(viewer), 'other_country_in_review')
+
+    def test_a_second_document_in_review_still_tops_up_where_the_first_one_works(self):
+        from . import guide
+        viewer = SimpleNamespace(user=SimpleNamespace(pk=1), account_type='personal', is_employee=False)
+        for country, expected in (('VE', 'top_up'), ('BO', None)):
+            with patch.object(guide, 'country_of', return_value=country), \
+                    patch.object(guide, '_state', return_value=SimpleNamespace(country=country)), \
+                    patch.object(guide, 'local_account_topup', return_value=None), \
+                    patch.object(guide, 'topup_route', return_value='local'), \
+                    patch.object(guide, 'topup_entry', return_value=None), \
+                    patch.object(guide, '_for_country', side_effect=lambda step, entry: step), \
+                    patch('assistant.engine._ve_topup', return_value='live'), \
+                    patch('ramps.koywe.on_ramp_paused', return_value=False), \
+                    patch('ramps.koywe.on_ramp_rejection_locked', return_value=False), \
+                    patch('assistant.engine._identity_status', return_value='other_country_in_review'):
+                trail = guide.walk_trail(viewer, 'top_up', {})
+            self.assertEqual(trail, guide.STEPS['top_up'].chips[0].trail if expected else None, country)
+
+    def test_no_nudge_to_pay_again_right_after_a_rejected_order(self):
+        from ramps.models import RampTransaction
+
+        from . import guide
+        user = User.objects.create_user(username='rv2', email='rv2@example.com', password='x', firebase_uid='fb-rv2')
+        viewer = SimpleNamespace(user=user, account_type='personal', is_employee=False)
+        order = RampTransaction.objects.create(
+            provider='koywe', direction='on_ramp', status='FAILED', actor_user=user, actor_type='user',
+            country_code='BO', metadata={'koywe_status': 'REJECTED'})
+        self.assertTrue(guide._just_rejected(user))
+        self.assertEqual(guide.steering_note('top_up', 'BO', viewer=viewer), '')
+        self.assertEqual(guide.steering_note('awaiting_payment', 'BO', viewer=viewer), '')
+        self.assertIn('le descontó esa orden', guide.rejected_order_note(viewer))
+        with patch('ramps.koywe.on_ramp_rejection_locked', return_value=True):
+            self.assertIn('hoy no puede', guide.rejected_order_note(viewer))
+        RampTransaction.objects.filter(pk=order.pk).update(updated_at=timezone.now() - timedelta(days=2))
+        self.assertFalse(guide._just_rejected(user))
+        self.assertTrue(guide.steering_note('top_up', 'BO', viewer=viewer))
+        self.assertEqual(guide.rejected_order_note(viewer), '')
+
+    def test_a_top_up_that_worked_since_ends_the_question(self):
+        from ramps.models import RampTransaction
+
+        from . import guide
+        user = User.objects.create_user(username='rv3', email='rv3@example.com', password='x', firebase_uid='fb-rv3')
+        common = dict(provider='koywe', direction='on_ramp', actor_user=user, actor_type='user', country_code='BO')
+        RampTransaction.objects.create(status='FAILED', metadata={'koywe_status': 'REJECTED'}, **common)
+        self.assertTrue(guide._just_rejected(user))
+        RampTransaction.objects.create(status='COMPLETED', **common)
+        self.assertFalse(guide._just_rejected(user))
+
+    def test_verifying_is_not_sold_as_a_top_up_that_is_paused_or_absent(self):
+        from .prompts import _identity_note
+        with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=['CO']):
+            for country in ('CO', 'HN'):
+                self.assertEqual(_identity_note('unverified', country, None, ''), '', country)
+                waiting = _identity_note('in_review', country, None, '')
+                self.assertIn('en revisión', waiting)
+                self.assertNotIn('Podrá recargar', waiting)
+            self.assertIn('verifique su identidad', _identity_note('unverified', 'BO', None, ''))

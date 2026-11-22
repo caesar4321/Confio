@@ -24,7 +24,7 @@ from security.geo import country_of
 
 from . import conf
 from .rails import local_account_topup, topup_entry, topup_route
-from .suggestions import GUIDE_ANSWERS, GUIDE_ANSWERS_SHORT, PROBE_ID, _didit_stage, _state, record_probe_answer
+from .suggestions import GUIDE_ANSWERS, GUIDE_ANSWERS_SHORT, PROBE_ID, _state, record_probe_answer
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ PREVIEW_SECONDS = 7 * 24 * 3600
 PREVIEW_UNFUNDED = 'as_if_unfunded'
 WALK_PREFIX = 'walk:'
 OPEN_ORDER_DAYS = 3
+REJECTED_REST = timedelta(days=1)
 TEXT_CACHE_SECONDS = 24 * 3600
 FALLBACK_CACHE_SECONDS = 300
 MAX_TEXT_CHARS = 240
@@ -88,6 +89,8 @@ def _go(label, *stops):
     return (Chip(label, 'navigate', trail=_walk(*stops)), Chip(LATER, 'dismiss'))
 
 
+# Said before Didit opens: many left on its first screen (2026-11-22).
+VERIFY_START_TEXT = 'Ten tu documento a mano: toma unos 2 minutos. Toca aquí para empezar.'
 _TO_RECEIVE = TrailStop('Home', 'Toca Recibir.', 'home_receive')
 _TO_USDT = (_TO_RECEIVE, TrailStop('Receive', 'Toca aquí para ver tu dirección de USDT.', 'advanced_receive'))
 _TO_TOP_UP = (_TO_RECEIVE, TrailStop('Receive', 'Toca aquí para crear tu recarga.', 'recharge_now'))
@@ -130,7 +133,7 @@ STEPS = {
         chips=_go('Sí, empezar',
                   TrailStop('Home', 'Toca Perfil.', 'tab_profile'),
                   TrailStop('Profile', 'Toca Verificación.', 'profile_verification'),
-                  TrailStop('Verification', 'Toca aquí para verificar tu identidad.', 'verify_start'))),
+                  TrailStop('Verification', VERIFY_START_TEXT, 'verify_start'))),
     'verifying': Step('verifying', 'Tu verificación sigue en revisión.'),
     'top_up': Step(
         'top_up', 'Ya puedes recargar.',
@@ -143,7 +146,7 @@ STEPS = {
         brief='Dile que su orden de recarga sigue esperando el pago y pregúntale si le muestras dónde verla.',
         chips=_go('Sí, muéstrame', _TO_RECEIVE, TrailStop('Receive', 'Toca aquí para ver tu recarga.', 'recharge_now'))),
     'international_soon': Step(
-        'international_waitlist', 'La recarga internacional llegará a tu país en unas dos semanas. '
+        'international_waitlist', 'La recarga internacional todavía no está disponible en tu país y no tenemos fecha. '
         'Mientras tanto, puedes recibir USDT desde Binance u otra billetera.',
         chips=_go('Ver cómo recibir USDT', *_TO_USDT)),
     'international': Step(
@@ -251,11 +254,46 @@ def _resting(row, now, conversation=False):
         (row.shown_at, SHOWN_REST), (row.accepted_at, ACCEPTED_REST), (row.dismissed_at, DISMISSED_REST)))
 
 
+def _rejected_order(user):
+    """A Koywe order rejected in the last day, unless a top-up completed since:
+    the person may have paid it, so they are asked before being nudged again."""
+    from ramps.models import RampTransaction
+
+    top_ups = RampTransaction.objects.filter(actor_user=user, direction='on_ramp')
+    order = (top_ups.filter(provider='koywe', status='FAILED', metadata__koywe_status__iexact='REJECTED',
+                            updated_at__gte=timezone.now() - REJECTED_REST).order_by('-created_at').first())
+    if order is None or top_ups.filter(status='COMPLETED', created_at__gt=order.created_at).exists():
+        return None
+    return order
+
+
+def _just_rejected(user):
+    return _rejected_order(user) is not None
+
+
+def rejected_order_note(viewer):
+    """For the prompt: "quiero recargar" calls no status tool, so the model
+    would offer a second payment without asking about the first."""
+    from .engine import next_order_step
+    from .prompts import REJECTED_ORDER_NOTE
+
+    try:
+        if viewer.is_employee or not getattr(viewer.user, 'pk', None):
+            return ''
+        order = _rejected_order(viewer.user)
+        if order is None:
+            return ''
+        amount = f' de {order.fiat_amount.normalize():f} {order.fiat_currency}' if order.fiat_amount else ''
+        asked = f'{timezone.localtime(order.created_at, getattr(viewer, "tz", None)):%Y-%m-%d %H:%M}'
+        return REJECTED_ORDER_NOTE.format(amount=amount, asked=asked, then=next_order_step(order, viewer.user))
+    except Exception:  # noqa: BLE001 - unknown is no note, never a broken reply
+        logger.warning('Confio Assistant: rejected order state unavailable', exc_info=True)
+        return ''
+
+
 def _unfunded_key(viewer, state, answer):
     from ramps.koywe import on_ramp_paused, on_ramp_rejection_locked
     from ramps.models import RampTransaction
-    from security.identity_status import personal_documents
-
     from .engine import _identity_status, _ve_topup
 
     if answer == 'usdt':
@@ -280,6 +318,8 @@ def _unfunded_key(viewer, state, answer):
     orders = RampTransaction.objects.filter(actor_user=viewer.user, direction='on_ramp', created_at__gte=recent)
     # A Koywe order made before the pause cannot be paid now, and its row is
     # hidden on Recibir: with a local account the person is shown that instead.
+    if not local_account and _just_rejected(viewer.user):  # a local account is another rail
+        return None
     if not local_account and orders.filter(status='PENDING').exists():
         return 'awaiting_payment'
     if state.topup_in_progress:
@@ -287,10 +327,12 @@ def _unfunded_key(viewer, state, answer):
     identity = _identity_status(viewer)
     if identity is None:
         return None
+    if identity == 'other_country_in_review':
+        return 'top_up' if (state.country == 'VE' or local_account) else 'verifying'
+    if identity == 'in_review':
+        return 'verifying'
     if identity == 'pending':
-        # "pending" also covers a session never finished: that one still has a step.
-        latest = personal_documents(viewer.user).order_by('-created_at').first()
-        return 'verifying' if _didit_stage(latest) == 'in_review' else 'verify'
+        return 'verify'  # never finished, or sent back to the person: still has a step
     # Venezuela's top-up takes any verified document, not one from Venezuela;
     # so does a local account (its own rail already said this person may open it).
     if identity == 'other_country' and (state.country == 'VE' or local_account):
@@ -541,6 +583,10 @@ def steering_note(key, country=None, viewer=None, request_meta=None):
     step = STEPS.get(key)
     if step is None or (key in ('international_soon', 'international') and topup_route(country) != key):
         return ''
+    # The key comes from the app and may predate the rejection.
+    if (key in ('top_up', 'awaiting_payment') and viewer is not None and getattr(viewer.user, 'pk', None)
+            and _just_rejected(viewer.user)):
+        return ''
     # The entry this person's guide step itself names (Bre-B, Pago Móvil, QR
     # Bolivia), so the note never contradicts the rails note beside it.
     entry = 'Recargar ahora'
@@ -629,7 +675,11 @@ def walk_trail(viewer, key, request_meta):
         # to a top-up screen they could not use (2026-11-03). Verification first,
         # with the same rule as the guide's own ladder (_unfunded_key).
         identity = _identity_status(viewer)
+        if identity == 'other_country_in_review' and (country == 'VE' or local_account):
+            identity = 'other_country'  # this rail takes the document they have
         can_top_up = identity == 'verified' or (identity == 'other_country' and (country == 'VE' or local_account))
+        if identity in ('in_review', 'other_country_in_review'):
+            return None  # nothing to do but wait
         if identity is not None and not can_top_up:
             return STEPS['verify'].chips[0].trail
         step = _for_country(STEPS['top_up'], topup_entry(country, viewer.user, request_meta, viewer=viewer))
@@ -638,7 +688,7 @@ def walk_trail(viewer, key, request_meta):
         return STEPS['usdt'].chips[0].trail
     if key == 'verify':
         from .engine import _identity_status
-        return None if _identity_status(viewer) == 'verified' else STEPS['verify'].chips[0].trail
+        return None if _identity_status(viewer) in ('verified', 'in_review', 'other_country_in_review') else STEPS['verify'].chips[0].trail
     if key == 'send':
         return STEPS['send'].chips[0].trail
     if key == 'withdraw':

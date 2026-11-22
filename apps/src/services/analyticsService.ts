@@ -38,6 +38,8 @@ export type ClientFunnelEvent =
     | 'category_chip_answered'
     | 'category_chip_skipped'
     | 'category_chip_dismissed'
+    // Where a verification attempt ended inside Didit's SDK.
+    | 'verification_sdk_result'
     // Paid-offer probes (Confío IA+, Cuenta inteligente): one event, the step
     // in `stage` (door_shown, detail_opened, solo_miraba).
     | 'paid_offer_interest'

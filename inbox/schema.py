@@ -149,14 +149,13 @@ def get_visible_content_queryset(membership: ChannelMembership, meta=None):
     return queryset.order_by('pinned_rank', '-published_at', '-created_at')
 
 
-# The support thread is answered by Confio Assistant first; the team takes over on
-# handoff (assistant/service.py). Same thread, same history.
+# The support thread is answered by Confio Assistant; the team reads it and may
+# write into it (assistant/service.py). Same thread, same history.
 SUPPORT_CHANNEL_NAME = 'Confio Assistant'
 SUPPORT_CHANNEL_SUBTITLE = 'Tu asistente · Disponible 24/7'
 SUPPORT_CHANNEL_PREVIEW = '¿En qué te ayudo hoy?'
 SUPPORT_GREETING = (
-    'Hola, soy Confio Assistant. Pregúntame sobre tu dinero o sobre la app, por escrito o con un audio. '
-    'Si hace falta, te paso con el equipo de Confío.'
+    'Hola, soy Confio Assistant. Pregúntame sobre tu dinero o sobre la app, por escrito o con un audio.'
 )
 
 
