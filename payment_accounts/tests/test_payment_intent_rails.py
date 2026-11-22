@@ -1192,6 +1192,7 @@ class OwnerWordsTests(PaymentIntentBase):
         # A refusal always has words, even for a code with no stock message.
         self.assertTrue(str(payment_intents._refuse('rail')))
 
+    @mock.patch('assistant.engine.TYPED_AMOUNTS_PAUSED', False)  # what it does outside the pause
     def test_the_tool_passes_only_what_the_person_typed_and_words_every_level(self):
         from zoneinfo import ZoneInfo
         from assistant.engine import Toolbelt, TurnResult, Viewer
