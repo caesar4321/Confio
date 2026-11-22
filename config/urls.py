@@ -200,6 +200,10 @@ urlpatterns = [
     re_path(r'^terms/?$', terms_view, name='terms'),
     re_path(r'^privacy/?$', privacy_view, name='privacy'),
     re_path(r'^deletion/?$', deletion_view, name='deletion'),
+    # Old links to the hand-written static copies. Never add those files back to web/public:
+    # WhiteNoise would serve them ahead of this redirect.
+    re_path(r'^(?P<page>privacy|deletion|terms)\.html/?$',
+            RedirectView.as_view(url='/%(page)s', permanent=True), name='legal_html_redirect'),
 ]
 
 # Add media files before catch-all pattern in DEBUG mode
