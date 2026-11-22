@@ -556,6 +556,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         # No payment was prepared: a reply that points at a card or claims a
         # payment is replaced by the reason the server gave.
         result.reply = result.payment_refusal
+    if any(a.get('type') == 'trade' for a in result.actions):
+        from . import trades
+        if result.rule_proposal:
+            # One thing to approve per reply: the Cuenta inteligente proposal stays.
+            result.actions = [a for a in result.actions if a.get('type') != 'trade']
+        elif trades.DONE_CLAIM.search(result.reply or ''):
+            # Nothing is bought or sold until the person approves on the card.
+            result.reply = trades.PREPARED_REPLY
     if waiting or result.rule_proposal or result.payment_intent:
         # No offers while a person is handling their case, and none beside a
         # Cuenta inteligente proposal (its chip is the reply's one chip). The

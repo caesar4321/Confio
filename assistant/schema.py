@@ -86,6 +86,44 @@ class AssistantWakeWordType(graphene.ObjectType):
     access_key = graphene.String(required=True)
 
 
+class AssistantStockTradeType(graphene.ObjectType):
+    # none | pending | done | failed | expired | gone (assistant/trades.py)
+    status = graphene.String(required=True)
+    tx_hash = graphene.String()
+
+
+class ClaimAssistantStockTrade(graphene.Mutation):
+    """The one request a stock-trade card may sign now. Empty while another
+    is out, once a batch is on record, or after the card expired."""
+    class Arguments:
+        message_id = graphene.ID(required=True)
+
+    request_id = graphene.String()
+    status = graphene.String(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, message_id):
+        from . import trades
+        request_id, status = trades.claim(info.context.user, message_id)
+        return ClaimAssistantStockTrade(request_id=request_id or None, status=status)
+
+
+class ReleaseAssistantStockTrade(graphene.Mutation):
+    """The phone's word that the request it was given sent nothing."""
+    class Arguments:
+        message_id = graphene.ID(required=True)
+        request_id = graphene.String(required=True)
+
+    status = graphene.String(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, message_id, request_id):
+        from . import trades
+        return ReleaseAssistantStockTrade(status=trades.release(info.context.user, message_id, request_id))
+
+
 class AssistantThreadType(graphene.ObjectType):
     messages = graphene.List(graphene.NonNull(AssistantMessageType), required=True)
     has_more = graphene.Boolean(required=True)
@@ -406,6 +444,16 @@ class Query(graphene.ObjectType):
         if not key or not conf.get('CONFIO_ASSISTANT_ENABLED'):
             return None
         return AssistantWakeWordType(access_key=key)
+
+    assistant_stock_trade = graphene.Field(
+        AssistantStockTradeType, required=True, message_id=graphene.ID(required=True),
+        description="Whether the stock-trade card on one of the viewer's own assistant messages already traded.")
+
+    @login_required
+    def resolve_assistant_stock_trade(self, info, message_id):
+        from . import trades
+        status, tx_hash = trades.status(info.context.user, message_id)
+        return AssistantStockTradeType(status=status, tx_hash=tx_hash or None)
 
     assistant_thread = graphene.Field(
         AssistantThreadType,
@@ -824,3 +872,5 @@ class Mutation(graphene.ObjectType):
     ask_assistant = AskAssistant.Field()
     return_to_assistant = ReturnToAssistant.Field()
     update_assistant_profile = UpdateAssistantProfile.Field()
+    claim_assistant_stock_trade = ClaimAssistantStockTrade.Field()
+    release_assistant_stock_trade = ReleaseAssistantStockTrade.Field()

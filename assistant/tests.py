@@ -4009,9 +4009,9 @@ class HereTests(TestCase):
         self.assertFalse(here.TOOLS & self._names(self._belt(meta={})))
         self.assertEqual(self._belt(meta={}).call('act_here', {'action': 'invite_whatsapp'}),
                          {'error': 'herramienta desconocida: act_here'})
-        # A business has no invitations or @usuario of its own; its notifications are the person's.
+        # A business has no invitations or @usuario of its own; its notifications and the pet are the person's.
         business = self._names(self._belt(account_type='business', business_id=1, is_business_owner=True))
-        self.assertEqual(here.TOOLS & business, {'notification_settings'})
+        self.assertEqual(here.TOOLS & business, {'notification_settings', 'customize_pet'})
         # While the team owns the thread nothing is proposed.
         waiting = self._belt()
         waiting.waiting_for_team = True
@@ -4071,7 +4071,7 @@ class HereTests(TestCase):
         belt = self._belt()
         tool = next(spec for spec in belt.specs() if spec.get('name') == 'ask_details')
         # Outside Venezuela there is no Pago Móvil to fill in.
-        self.assertEqual(tool['parameters']['properties']['form']['enum'], ['profile_name'])
+        self.assertEqual(tool['parameters']['properties']['form']['enum'], ['profile_name', 'investor_bio'])
         self.assertIn('No le pidas que te dicte', tool['description'])
         out = belt.call('ask_details', {'form': 'profile_name'})
         self.assertTrue(out['ok'])
@@ -4084,7 +4084,8 @@ class HereTests(TestCase):
         self.user.save(update_fields=['phone_country'])
         venezuela = self._belt()
         with patch('security.geo.country_of', return_value='VE'):
-            self.assertEqual(here.forms_for(venezuela.viewer, venezuela)[:2], ['profile_name', 'agenda_pagomovil'])
+            self.assertEqual(here.forms_for(venezuela.viewer, venezuela),
+                             ['profile_name', 'investor_bio', 'agenda_pagomovil'])
             # The payment form only where prepared payments are on for this person.
             self.assertNotIn('pagomovil_payment', here.forms_for(venezuela.viewer, venezuela))
             venezuela.payments_ready = lambda: True
@@ -4100,6 +4101,75 @@ class HereTests(TestCase):
             self.assertNotIn('profile_name', here.forms_for(verified.viewer, verified))
             self.assertFalse(verified.call('ask_details', {'form': 'profile_name'}).get('ok'))
 
+    def test_the_pet_is_named_or_its_picker_opened_by_a_button(self):
+        from .models import AssistantProfile
+
+        belt = self._belt()
+        out = belt.call('customize_pet', {'name': None})
+        self.assertTrue(out['ok'])
+        self.assertFalse(belt.call('customize_pet', {'name': 'x' * 25})['ok'])
+        out = belt.call('customize_pet', {'name': '  Luna   Azul '})
+        self.assertIn('Todavía no cambió nada', out['nota'])
+        self.assertEqual(belt.result.actions, [
+            {'type': 'do', 'target': 'customize_pet', 'label': 'Elegir mi mascota'},
+            {'type': 'do', 'target': 'set_pet_name:Luna Azul', 'label': 'Llamarte Luna Azul'}])
+        self.assertEqual(AssistantProfile.objects.get(user=self.user).mascot_name, '')
+        AssistantProfile.objects.filter(user=self.user).update(mascot_name='Luna Azul')
+        self.assertIn('Ya te llamas', self._belt().call('customize_pet', {'name': 'Luna Azul'})['motivo'])
+
+    def test_comunidad_switches_are_read_and_proposed_never_flipped(self):
+        from django.utils import timezone
+
+        from inbox import community, direct_messages
+        from inbox.models import CommunityProfileSettings
+
+        belt = self._belt()
+        read = belt.call('privacy_settings', {'setting': None, 'enabled': None})
+        self.assertEqual(read, {'ahora': {'recibe mensajes de personas nuevas': True, 'perfil de inversor público': True}})
+        self.assertFalse(belt.call('privacy_settings', {'setting': 'messages', 'enabled': True})['ok'])
+        self.assertEqual(belt.result.actions, [])
+        self.assertTrue(belt.call('privacy_settings', {'setting': 'messages', 'enabled': False})['ok'])
+        self.assertTrue(belt.call('privacy_settings', {'setting': 'investor_profile', 'enabled': False})['ok'])
+        self.assertEqual(belt.result.actions, [
+            {'type': 'do', 'target': 'set_messages:off', 'label': 'No recibir mensajes nuevos'},
+            {'type': 'do', 'target': 'set_investor_profile:hidden', 'label': 'Ocultar mi perfil de inversor'}])
+        self.assertTrue(direct_messages.dms_enabled(self.user))
+        self.assertFalse(community.portfolio_hidden(self.user))
+
+        # Made public a moment ago: hiding again waits, and it is said before any button.
+        CommunityProfileSettings.objects.update_or_create(
+            user=self.user, defaults={'portfolio_hidden': False, 'portfolio_published_at': timezone.now()})
+        locked = self._belt()
+        out = locked.call('privacy_settings', {'setting': 'investor_profile', 'enabled': False})
+        self.assertEqual((out['ok'], out['motivo']), (False, community.REPUBLISH_LOCK_MESSAGE))
+        self.assertEqual(locked.result.actions, [])
+        # Showing it: the person hears about the 24 hours before tapping.
+        CommunityProfileSettings.objects.filter(user=self.user).update(portfolio_hidden=True)
+        show = self._belt()
+        out = show.call('privacy_settings', {'setting': 'investor_profile', 'enabled': True})
+        self.assertIn('24 horas', out['nota'])
+        self.assertEqual(show.result.actions, [
+            {'type': 'do', 'target': 'set_investor_profile:public', 'label': 'Hacer público mi perfil'}])
+
+    def test_who_invited_them_is_checked_and_registered_only_by_the_tap(self):
+        from achievements.models import UserReferral
+
+        User.objects.create_user(username='Carla_99', email='c@example.com', password='x', firebase_uid='fb-c')
+        belt = self._belt()
+        for bad, why in (('+59170000000', 'no es un @usuario'), ('nadie_asi', 'No hay nadie'),
+                         ('@ANA_HERE', 'sí misma')):
+            out = belt.call('propose_referrer', {'username': bad})
+            self.assertFalse(out['ok'], bad)
+            self.assertIn(why, out['motivo'])
+        self.assertEqual(belt.result.actions, [])
+        out = belt.call('propose_referrer', {'username': ' *@carla_99* '})
+        self.assertTrue(out['ok'])
+        self.assertIn('una sola vez', out['nota'])
+        # The stored spelling of the @usuario, never the model's.
+        self.assertEqual(belt.result.actions, [
+            {'type': 'do', 'target': 'set_referrer:Carla_99', 'label': 'Registrar a @Carla_99'}])
+        self.assertFalse(UserReferral.objects.filter(referred_user=self.user).exists())
+
     def test_the_chat_is_told_to_finish_these_here(self):
         from .prompts import build_system_prompt
 
@@ -4112,6 +4182,305 @@ class HereTests(TestCase):
 def here_keys():
     from . import here
     return set(here.NOTIFICATIONS)
+
+
+class StockTradeCardTests(TestCase):
+    """A stock bought or sold from a card in the chat (assistant/trades.py)."""
+
+    CONVERSATION = {'HTTP_X_CONFIO_HOME': 'conversation', 'HTTP_X_CONFIO_VERSION': '5.4.0'}
+    APPLE = ('AAPL', 'Apple Inc.')
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='ana_trade', email='trade@example.com', password='x',
+                                             firebase_uid='fb-trade', first_name='Ana')
+
+    def _belt(self, *said, account=None):
+        belt = Toolbelt(Viewer(user=self.user, account=account, account_type='personal', business_id=None,
+                               is_business_owner=False, tz=ZoneInfo('UTC'), request_meta=self.CONVERSATION),
+                        TurnResult(reply=''), analyses_left=0)
+        belt.payment_texts = list(said)
+        return belt
+
+    def _propose(self, belt, side='buy', asset='Apple', amount_usd=20, sell_all=False, found=APPLE, eligible=True):
+        with patch('assistant.trades.offered', return_value=True), \
+                patch('assistant.market.listed_asset', return_value=found), \
+                patch('cusd_plus.eligibility.check_stock_buy_eligibility', return_value=eligible):
+            return belt.call('propose_stock_trade', {'side': side, 'asset': asset, 'amount_usd': amount_usd,
+                                                     'sell_all': sell_all})
+
+    def test_offered_only_where_the_card_can_be_drawn_and_trading_is_open_to_the_person(self):
+        from . import trades
+
+        belt = self._belt()
+        belt.payments_ready = lambda: True
+        with patch('assistant.engine._ondo_allowed', return_value=True), \
+                patch('cusd_plus.schema._stock_execution_ready', return_value=True):
+            self.assertTrue(trades.offered(belt))
+            self.assertIn('propose_stock_trade', {spec.get('name') for spec in belt.specs()})
+            belt.payments_ready = lambda: False            # an older build, or not their personal account
+            self.assertFalse(trades.offered(belt))
+            belt.payments_ready = lambda: True
+            belt.viewer.request_meta = {'HTTP_X_CONFIO_VERSION': '5.4.0'}
+            self.assertFalse(trades.offered(belt))         # the five-tab app has no card
+        belt = self._belt()
+        belt.payments_ready = lambda: True
+        with patch('assistant.engine._ondo_allowed', return_value='desconocido'), \
+                patch('cusd_plus.schema._stock_execution_ready', return_value=True):
+            self.assertFalse(trades.offered(belt))
+        with patch('assistant.engine._ondo_allowed', return_value=True), \
+                patch('cusd_plus.schema._stock_execution_ready', return_value=False):
+            self.assertFalse(trades.offered(belt))
+        # Not offered: calling it by name does nothing.
+        with patch('assistant.trades.offered', return_value=False):
+            self.assertEqual(self._belt('compra 20 de apple').call(
+                'propose_stock_trade', {'side': 'buy', 'asset': 'Apple', 'amount_usd': 20, 'sell_all': False}),
+                {'error': 'herramienta desconocida: propose_stock_trade'})
+
+    def test_a_buy_card_carries_only_what_the_person_wrote(self):
+        belt = self._belt('compra 20 dólares de Apple')
+        out = self._propose(belt)
+        self.assertTrue(out['ok'])
+        self.assertIn('Todavía no se compró', out['nota'])
+        self.assertEqual(belt.result.actions, [
+            {'type': 'trade', 'ticker': 'AAPL', 'target': 'buy:20.00', 'label': 'Comprar US$20 de Apple Inc.'}])
+        # One card per answer.
+        self.assertFalse(self._propose(belt)['ok'])
+        # Cents, as people write them.
+        cents = self._belt('quiero comprar 20,50 de AAPL')
+        self._propose(cents, amount_usd=20.5)
+        self.assertEqual(cents.result.actions[0]['target'], 'buy:20.50')
+        self.assertEqual(cents.result.actions[0]['label'], 'Comprar US$20,50 de Apple Inc.')
+
+    def test_what_the_model_adds_on_its_own_never_reaches_a_card(self):
+        for said, kwargs, why in (
+                ((), {}, 'debe escribir'),                                               # a call, a tapped chip
+                (('compra 20 dólares de la que más subió',), {}, 'no nombró'),          # the model picked Apple
+                (('compra Apple',), {}, 'no está escrito'),                              # the model picked 20
+                (('compra 20 bolívares de Apple',), {}, 'no está escrito'),              # another unit
+                (('compra 5 acciones de Apple',), {'amount_usd': 5}, 'número de acciones'),
+                (('compra 1 dólar de Apple',), {'amount_usd': 1}, 'mínimo'),
+                (('compra 20 de Apple',), {'found': None}, 'No encontré'),
+                (('compra 20 de Apple',), {'eligible': False}, 'no puede comprar'),
+                (('vende todo',), {'side': 'sell', 'sell_all': True}, 'no nombró'),
+        ):
+            belt = self._belt(*said)
+            out = self._propose(belt, **kwargs)
+            self.assertFalse(out['ok'], said)
+            self.assertIn(why, out['motivo'], said)
+            self.assertEqual(belt.result.actions, [], said)
+        # Read from the web in this same message: nothing is prepared.
+        belt = self._belt('compra 20 de Apple')
+        belt.saw_web = True
+        self.assertFalse(self._propose(belt)['ok'])
+        # A payment or a rule already proposed in this answer.
+        belt = self._belt('compra 20 de Apple')
+        belt.result.payment_intent = {'id': 'x'}
+        self.assertFalse(self._propose(belt)['ok'])
+
+    def test_only_a_request_in_dollars_for_an_asset_named_where_assets_go(self):
+        refused = (
+            ('¿cuánto serían 100 dólares de Apple?', 100, self.APPLE),          # a question is not a request
+            ('compra Apple cuando llegue a 150', 150, self.APPLE),              # a price level
+            ('compra Apple si baja 5 %', 5, self.APPLE),
+            ('tengo 25 años, compra Apple', 25, self.APPLE),
+            ('compra 3 Apple', 3, self.APPLE),                                  # most likely shares
+            ('compra 1.000 acciones de Apple', 1000, self.APPLE),
+            ('compra 20 euros de Apple', 20, self.APPLE),
+            ('compra 500 bolos de Apple', 500, self.APPLE),
+            ('compra 20k de Apple', 20, self.APPLE),
+            ('compra no 20 sino algo de Apple', 20, self.APPLE),
+            ('compra 20 dólares de la mejor acción', 20, ('DE', 'Deere & Company')),   # "de" is not Deere
+            ('uso la app, compra 20 dólares', 20, ('APP', 'AppLovin')),
+            ('compra 20 dólares para mi meta', 20, ('META', 'Meta Platforms')),
+            ('mi meta es ahorrar, compra 20 dólares', 20, ('META', 'Meta Platforms')),
+            ('x' * 280 + ' compra 20 dólares de Apple', 20, self.APPLE),        # a long pasted text
+        )
+        for said, amount, found in refused:
+            belt = self._belt(said)
+            with patch('assistant.trades._probes', side_effect=lambda ticker, name: {ticker.lower(), name.split()[0].lower()}):
+                out = self._propose(belt, amount_usd=amount, found=found)
+            self.assertFalse(out['ok'], said)
+            self.assertEqual(belt.result.actions, [], said)
+        accepted = (
+            ('compra US$20 de Apple', 20, self.APPLE, 'buy:20.00'),
+            ('compra $20 de apple', 20, self.APPLE, 'buy:20.00'),
+            ('quiero invertir 50 en Apple', 50, self.APPLE, 'buy:50.00'),
+            ('compra 20 dólares en acciones de Apple', 20, self.APPLE, 'buy:20.00'),
+            ('compra 1.500,50 dólares de AAPL', 1500.5, self.APPLE, 'buy:1500.50'),
+            ('compra 20 de DE', 20, ('DE', 'Deere & Company'), 'buy:20.00'),     # in its own capitals
+            ('compra 20 de meta', 20, ('META', 'Meta Platforms'), 'buy:20.00'),  # right where an asset goes
+        )
+        for said, amount, found, target in accepted:
+            belt = self._belt(said)
+            with patch('assistant.trades._probes', side_effect=lambda ticker, name: {ticker.lower(), name.split()[0].lower()}):
+                out = self._propose(belt, amount_usd=amount, found=found)
+            self.assertTrue(out['ok'], (said, out))
+            self.assertEqual(belt.result.actions[0]['target'], target, said)
+        # The verb is theirs too: the model cannot turn a sale into a purchase, or the reverse.
+        self.assertIn('vender, no de comprar', self._propose(self._belt('vende 20 de Apple'))['motivo'])
+        self.assertIn('no escribió que quiere vender',
+                      self._propose(self._belt('compra 20 de Apple'), side='sell')['motivo'])
+        self.assertIn('no escribió que quiere comprar', self._propose(self._belt('20 dólares de Apple'))['motivo'])
+
+    def test_a_name_shared_by_several_assets_does_not_name_one(self):
+        from . import trades
+
+        listings = [{'s': 'IBITon', 't': 'IBIT', 'n': 'iShares Bitcoin Trust'}, {'s': 'ETHAon', 't': 'ETHA', 'n': 'iShares Ethereum Trust'},
+                    {'s': 'AAPLon', 't': 'AAPL', 'n': 'Apple Inc.'}]
+        with patch('cusd_plus.gm_api.all_market', return_value=listings), \
+                patch('cusd_plus.schema._gm_listing', side_effect=lambda item: (item['s'], item['t'], item['n'])):
+            self.assertEqual(trades._probes('AAPL', 'Apple Inc.'), {'aapl', 'apple'})
+            self.assertEqual(trades._probes('IBIT', 'iShares Bitcoin Trust'), {'ibit'})
+            self.assertEqual(trades._probes('GOOGL', 'Alphabet Inc.') & {'google', 'youtube'}, {'google', 'youtube'})
+
+    def test_yes_after_a_card_does_not_leave_a_second_card(self):
+        from .engine import payment_texts
+
+        now = timezone.now()
+
+        def message(sender, body, minutes, **metadata):
+            return SimpleNamespace(sender_type=sender, body=body, metadata=metadata,
+                                   created_at=now + timedelta(minutes=minutes))
+
+        asked = message('USER', 'compra 20 dólares de Apple', 0)
+        card = message('AGENT', 'Revisa la tarjeta.', 1,
+                       actions=[{'type': 'trade', 'ticker': 'AAPL', 'target': 'buy:20.00', 'label': 'x'}])
+        yes = message('USER', 'sí, dale', 2)
+        self.assertEqual(payment_texts([asked, card, yes]), ['sí, dale'])
+        # With no card in between, the two messages are one request.
+        plain = message('AGENT', '¿Cuánto quieres comprar?', 1, actions=[])
+        self.assertEqual(payment_texts([asked, plain, yes]), ['sí, dale', 'compra 20 dólares de Apple'])
+
+    def test_a_reply_beside_a_card_never_says_the_trade_happened(self):
+        from . import trades
+
+        for said in ('Listo, ya compré tus acciones.', 'La compra fue realizada.', 'Ya se vendió todo.', 'Ya está comprado.'):
+            self.assertTrue(trades.DONE_CLAIM.search(said), said)
+        for said in ('Revisa la tarjeta y toca Aprobar.', 'Puedes comprar desde la tarjeta.'):
+            self.assertFalse(trades.DONE_CLAIM.search(said), said)
+
+    def test_a_sale_needs_the_holding_and_all_of_it_only_when_they_said_so(self):
+        account = SimpleNamespace(bsc_address='0x' + 'a' * 40)
+        holding = [{'ticker': 'AAPL', 'nombre': 'Apple Inc.', 'valor_usd': '35.10'}]
+        with patch('assistant.engine._holdings', return_value=[]):
+            out = self._propose(self._belt('vende 10 de Apple', account=account), side='sell', amount_usd=10)
+            self.assertIn('no hay nada que vender', out['motivo'])
+        with patch('assistant.engine._holdings', return_value=holding):
+            belt = self._belt('vende 10 de Apple', account=account)
+            out = self._propose(belt, side='sell', amount_usd=10)
+            self.assertEqual((out['ok'], out['tiene']), (True, '35.10'))
+            self.assertEqual(belt.result.actions[0],
+                             {'type': 'trade', 'ticker': 'AAPL', 'target': 'sell:10.00', 'label': 'Vender US$10 de Apple Inc.'})
+            # "All of it" is theirs to say, tied to the verb, and never when denied or said in passing.
+            for said in ('vende mis Apple', 'vende Apple pero no todo', 'vende Apple, gracias por todo',
+                         'sobre todo vende Apple', 'vende 10 de Apple, eso es todo', 'vende todo Apple 10'):
+                belt = self._belt(said, account=account)
+                self.assertFalse(self._propose(belt, side='sell', amount_usd=None, sell_all=True)['ok'], said)
+                self.assertEqual(belt.result.actions, [], said)
+            # "todo bien" a moment ago is not "sell all" now.
+            belt = self._belt('vende mi Apple', 'todo bien', account=account)
+            self.assertFalse(self._propose(belt, side='sell', amount_usd=None, sell_all=True)['ok'])
+            belt = self._belt('vende todas mis acciones de Apple', account=account)
+            self.assertTrue(self._propose(belt, side='sell', amount_usd=None, sell_all=True)['ok'])
+            self.assertEqual(belt.result.actions[0]['target'], 'sell:all')
+        # The holdings were never read on this server: the phone checks the real balance.
+        with patch('assistant.engine._holdings', return_value='desconocido'):
+            self.assertTrue(self._propose(self._belt('vende 10 de Apple', account=account), side='sell', amount_usd=10)['ok'])
+        # A buy never sells all, whatever the model sent.
+        belt = self._belt('compra 20 de Apple todo')
+        self._propose(belt, sell_all=True)
+        self.assertEqual(belt.result.actions[0]['target'], 'buy:20.00')
+
+    def _card_message(self, user=None, actions=None, hours_ago=0):
+        from inbox.models import SupportConversation, SupportMessage
+
+        owner = user or self.user
+        account, _ = Account.objects.get_or_create(user=owner, account_type='personal', account_index=0)
+        conversation, _ = SupportConversation.objects.get_or_create(user=owner, account=account, defaults={'status': 'OPEN'})
+        message = SupportMessage.objects.create(
+            conversation=conversation, sender_type='AGENT', body='Revisa la tarjeta.',
+            metadata={'ai': True, 'actions': [{'type': 'trade', 'ticker': 'AAPL', 'target': 'buy:20.00', 'label': 'x'}]
+                      if actions is None else actions})
+        if hours_ago:
+            SupportMessage.objects.filter(pk=message.pk).update(created_at=timezone.now() - timedelta(hours=hours_ago))
+        return message
+
+    def _batch(self, request_id, status, tx, user=None, kind='stock_buy'):
+        from blockchain.models import SponsoredBatch
+
+        return SponsoredBatch.objects.create(
+            user=user or self.user, user_bsc_address='0x' + 'a' * 40, kind=kind, num_calls=1, calls_json='[]',
+            tx_hash=tx, status=status, gas_limit=1, max_fee_wei=1, client_request_id=request_id)
+
+    def test_a_card_knows_whether_it_already_traded(self):
+        from django.core.cache import cache
+
+        from . import trades
+
+        cache.clear()
+        message = self._card_message()
+        prefix = trades.request_prefix(message.pk)
+        self.assertEqual(prefix, f'chat-trade-{message.pk:010d}')
+        self.assertEqual(trades.status(self.user, str(message.pk)), ('none', ''))
+        self._batch(f'{prefix}-aaaa_a0', 'reverted', '0x' + '1' * 64)
+        self.assertEqual(trades.status(self.user, message.pk), ('failed', '0x' + '1' * 64))
+        self._batch(f'{prefix}-bbbb_a0', 'sent', '0x' + '2' * 64)
+        self.assertEqual(trades.status(self.user, message.pk)[0], 'pending')
+        self._batch(f'{prefix}-cccc_a0', 'confirmed', '0x' + '3' * 64)
+        self.assertEqual(trades.status(self.user, message.pk), ('done', '0x' + '3' * 64))
+
+        # Not a card of theirs: a made-up id, a line still being sent, another person's
+        # card, a message with no trade on it, their own words.
+        other = User.objects.create_user(username='otra_trade', email='o@example.com', password='x', firebase_uid='fb-o')
+        for mine, message_id in ((self.user, 999999999), (self.user, 'pending-1'), (other, message.pk),
+                                 (self.user, self._card_message(actions=[{'type': 'navigate'}]).pk)):
+            self.assertEqual(trades.status(mine, message_id), ('gone', ''))
+            self.assertEqual(trades.claim(mine, message_id), ('', 'gone'))
+        # Another kind of batch under the same words is not this card's trade.
+        second = self._card_message()
+        self._batch(f'{trades.request_prefix(second.pk)}-dddd_a0', 'confirmed', '0x' + '4' * 64, kind='send_usdt')
+        self.assertEqual(trades.status(self.user, second.pk), ('none', ''))
+        # A card lasts a day.
+        old = self._card_message(hours_ago=25)
+        self.assertEqual(trades.status(self.user, old.pk), ('expired', ''))
+        self.assertEqual(trades.claim(self.user, old.pk), ('', 'expired'))
+
+    def test_one_request_per_card_is_handed_out_at_a_time(self):
+        from django.core.cache import cache
+
+        from . import trades
+
+        cache.clear()
+        message = self._card_message()
+        first, state = trades.claim(self.user, message.pk)
+        self.assertEqual(state, 'none')
+        self.assertRegex(first, rf'^{trades.request_prefix(message.pk)}-[0-9a-f]{{12}}$')
+        self.assertRegex(first + '_a0', r'^[A-Za-z0-9_-]{16,80}$')         # the sponsor's own rule
+        # The other open copy of the chat, or another phone: nothing to sign, and it says in progress.
+        self.assertEqual(trades.claim(self.user, message.pk), ('', 'pending'))
+        self.assertEqual(trades.status(self.user, message.pk), ('pending', ''))
+        # Someone else's word, or the wrong request, releases nothing.
+        self.assertEqual(trades.release(self.user, message.pk, 'chat-trade-0000000000-ffffffffffff'), 'pending')
+        # The phone says it sent nothing: the card can be approved again, with a new request.
+        self.assertEqual(trades.release(self.user, message.pk, first), 'none')
+        second, state = trades.claim(self.user, message.pk)
+        self.assertEqual(state, 'none')
+        self.assertNotEqual(second, first)
+        # A batch of that request is on record: its outcome decides, not the phone's word.
+        self._batch(second + '_a0', 'sent', '0x' + '5' * 64)
+        self.assertEqual(trades.release(self.user, message.pk, second), 'pending')
+        self.assertEqual(trades.claim(self.user, message.pk), ('', 'pending'))
+        from blockchain.models import SponsoredBatch
+        SponsoredBatch.objects.filter(client_request_id=second + '_a0').update(status='confirmed')
+        self.assertEqual(trades.claim(self.user, message.pk), ('', 'done'))
+
+    def test_the_chat_is_told_when_to_leave_the_card(self):
+        from .prompts import build_system_prompt
+
+        chat = build_system_prompt(first_name='Ana', account_label='Personal', country='BO', screen='Home',
+                                   local_now='2026-11-22 10:00', destinations=['stock'], conversation=True)
+        self.assertIn('`propose_stock_trade`', chat)
+        self.assertIn('nunca elijas tú la acción ni el monto', chat)
 
 
 class TopupLimitsTests(TestCase):
@@ -4134,6 +4503,75 @@ class TopupLimitsTests(TestCase):
                    side_effect=KoyweError(error) if error else None, return_value=limits) as read:
             out = topup_limits.data(self._viewer(country, **kw))
         return out, read
+
+    CONVERSATION = {'HTTP_X_CONFIO_HOME': 'conversation'}
+    LIMITS = {'on_ramp_min_amount': Decimal('350'), 'on_ramp_max_amount': Decimal('56000')}
+
+    def _belt(self, country, *said, meta=None, **kw):
+        # A person of their own for each card (the shared helper names one per country).
+        self._made = getattr(self, '_made', 0) + 1
+        user = User.objects.create_user(username=f'card_{country}_{self._made}', password='x',
+                                        email=f'card{self._made}@example.com', firebase_uid=f'fb-card-{self._made}',
+                                        phone_country=country)
+        base = dict(user=user, account=None, account_type='personal', business_id=None, is_business_owner=False,
+                    tz=ZoneInfo('UTC'), request_meta=self.CONVERSATION if meta is None else meta)
+        viewer = Viewer(**{**base, **kw})
+        belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0)
+        belt.payment_texts = list(said)
+        return belt
+
+    def _propose(self, belt, amount, limits=None):
+        with patch('ramps.koywe_client.KoyweClient.get_public_ramp_limits', return_value=limits or self.LIMITS), \
+                patch('ramps.bolivia_qr.koywe_replaced', return_value={'top_up': False}):
+            return belt.call('propose_topup', {'amount': amount})
+
+    def test_a_topup_card_opens_recargar_with_the_amount_the_person_wrote(self):
+        belt = self._belt('BO', 'quiero recargar 500 bolivianos')
+        out = self._propose(belt, 500)
+        self.assertTrue(out['ok'])
+        self.assertIn('Todavía no se creó nada', out['nota'])
+        self.assertEqual(belt.result.actions, [
+            {'type': 'do', 'target': 'top_up:BOB=500', 'label': 'Recargar 500 bolivianos'}])
+        self.assertFalse(self._propose(belt, 500)['ok'])            # one card per answer
+        cents = self._belt('BO', 'recarga 1.500,50')
+        self.assertTrue(self._propose(cents, 1500.5)['ok'])
+        self.assertEqual(cents.result.actions[0], {'type': 'do', 'target': 'top_up:BOB=1500.50',
+                                                   'label': 'Recargar 1.500,50 bolivianos'})
+
+    def test_a_topup_card_never_carries_an_amount_the_person_did_not_write_in_their_currency(self):
+        for said, amount, why in (
+                ((), 500, 'debe escribir'),                                   # a call or a tapped chip
+                (('quiero recargar',), 500, 'no está en su mensaje'),          # the model picked it
+                (('quiero recargar 50 dólares',), 50, 'en dólares'),           # never converted by the model
+                (('recarga US$50',), 50, 'en dólares'),
+                (('mi teléfono es 70012345',), 500, 'no está en su mensaje'),
+                (('quiero recargar 100 bolivianos',), 100, 'mínimo por recarga es 350'),
+                (('quiero recargar 90000',), 90000, 'máximo por recarga es 56.000'),
+        ):
+            belt = self._belt('BO', *said)
+            out = self._propose(belt, amount)
+            self.assertFalse(out['ok'], said)
+            self.assertIn(why, out['motivo'], said)
+            self.assertEqual(belt.result.actions, [], said)
+
+    def test_the_topup_card_is_offered_only_where_recargar_ahora_is_the_persons_way(self):
+        from . import topup_limits
+
+        def offered(belt, replaced=False):
+            with patch('ramps.koywe_client.KoyweClient.get_public_ramp_limits', return_value=self.LIMITS), \
+                    patch('ramps.bolivia_qr.koywe_replaced', return_value={'top_up': replaced}):
+                return topup_limits.offered(belt), 'propose_topup' in {s.get('name') for s in belt.specs()}
+
+        self.assertEqual(offered(self._belt('BO')), (True, True))
+        self.assertEqual(offered(self._belt('BO', meta={})), (False, False))                 # no card to draw
+        self.assertEqual(offered(self._belt('BO'), replaced=True), (False, False))           # QR Bolivia took over
+        self.assertEqual(offered(self._belt('VE')), (False, False))                          # Pago Móvil, not Koywe
+        self.assertEqual(offered(self._belt('BO', account_type='business', business_id=1)), (False, False))
+        with self.settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=['CO']):
+            self.assertEqual(offered(self._belt('CO')), (False, False))                      # paused there
+        # Not offered: calling it by name does nothing.
+        belt = self._belt('VE', 'recarga 500')
+        self.assertEqual(self._propose(belt, 500), {'error': 'herramienta desconocida: propose_topup'})
 
     def test_the_providers_minimum_in_the_persons_own_currency(self):
         out, read = self._data('BO', {'on_ramp_min_amount': Decimal('350'), 'on_ramp_max_amount': Decimal('56000')})

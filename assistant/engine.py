@@ -153,7 +153,12 @@ def payment_texts(history):
         # What followed it already carried a prepared payment: that request
         # was served, and a later "gracias" must not prepare it a second time.
         later = history[history.index(message) + 1:] if message in history else []
-        return any((getattr(m, 'metadata', None) or {}).get('payment_intent') for m in later)
+        # (A stock-trade card the same: "sí" after it must not leave a second one.)
+        def carded(m):
+            metadata = getattr(m, 'metadata', None) or {}
+            return metadata.get('payment_intent') or any(
+                isinstance(a, dict) and a.get('type') == 'trade' for a in metadata.get('actions') or [])
+        return any(carded(m) for m in later)
 
     mine = [m for m in history if own(m)]
     if not mine or not typed(mine[-1]):
@@ -1502,10 +1507,15 @@ class Toolbelt:
             specs = [s for s in specs if s.get('name') in WAITING_TOOLS]
         else:
             # Things finished right in the chat (conversation home only).
-            from . import here, topup_limits
+            from . import here, topup_limits, trades
             specs += here.specs(self.viewer, self)
             if not self.viewer.is_employee:
                 specs.append(topup_limits.SPEC)
+            if topup_limits.offered(self):
+                specs.append(topup_limits.PROPOSE_SPEC)
+            # A stock bought or sold from a card in the chat.
+            if trades.offered(self):
+                specs.append(trades.SPEC)
         return specs
 
     def call(self, name, args):
@@ -1516,6 +1526,15 @@ class Toolbelt:
         if name in here.TOOLS:
             offered = not self.waiting_for_team and name in {s['name'] for s in here.specs(self.viewer, self)}
             return here.call(self, name, args) if offered else {'error': f'herramienta desconocida: {name}'}
+        if name == topup_limits.PROPOSE:
+            if self.waiting_for_team or not topup_limits.offered(self):
+                return {'error': f'herramienta desconocida: {name}'}
+            return topup_limits.propose(self, **args)
+        if name == 'propose_stock_trade':
+            from . import trades
+            if self.waiting_for_team or not trades.offered(self):
+                return {'error': f'herramienta desconocida: {name}'}
+            return trades.propose(self, **args)
         handler = {
             'navigate': self.navigate,
             'show_steps': self.show_steps,
