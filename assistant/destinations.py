@@ -38,6 +38,27 @@ DESTINATIONS = {
     # whether this person may sign) and, on older builds, the subscribe screen
     # for whoever can subscribe and the waitlist pitch otherwise. Chips are
     # capped by the server.
+    # Doors the menu and Perfil have, so that everything can be done from the
+    # chat (2026-11-22). Each has a FALLBACK for builds that predate it.
+    'charge': 'Cobrar: un QR de cobro de Confío con el monto que pongas, para que otro usuario de Confío te pague.',
+    'invite': 'Invitar y ganar: invitar por WhatsApp, tu código de invitación y cómo funciona el programa.',
+    'commissions': 'Mis comisiones: lo que has ganado por las personas que invitaste.',
+    'agenda': 'Agenda: tus cuentas bancarias guardadas y las de las personas a quienes envías.',
+    'ramp_history': 'Historial de tus recargas y retiros con el banco.',
+    'wallet_dollar': 'Tu dólar (Confío Dollar o Confío Dollar+): su saldo y su historial de movimientos.',
+    'wallet_confio': '$CONFIO: tu saldo y su historial.',
+    'stocks_activity': 'Mis operaciones: el historial de tus compras y ventas de acciones.',
+    'league': 'Liga: el ranking de inversores por ganancias, y los equipos.',
+    'community_post': 'Publicar en Comunidad: escribir una publicación tuya.',
+    'notification_settings': 'Ajustes de notificaciones: qué avisos recibes.',
+    'edit_profile': 'Editar tu perfil (o los datos de tu negocio).',
+    'username': 'Cambiar tu @usuario, que también es tu código de invitación.',
+    'share_username': 'Compartir mi usuario: tu @usuario con su QR, para que otra persona con Confío te envíe.',
+    'memberships': 'Mis instituciones: las instituciones (cooperativas, asociaciones) a las que estás vinculado.',
+    'create_business': 'Crear una cuenta de negocio.',
+    'payroll': 'Nómina: pagar a tu equipo desde la cuenta del negocio.',
+    'employees': 'Empleados: las personas de tu negocio y sus permisos.',
+    'terms': 'Términos y condiciones de Confío.',
     'ia_plus': 'Confío IA+: el asistente opera tu Cuenta inteligente por ti; tú confirmas cada cambio.',
     'cuenta_inteligente': ('Cuenta inteligente: cuenta de pago con pagos y transferencias automáticas, inversión '
                            'automática y beneficiario. Abre su pantalla con los planes y si la persona ya puede '
@@ -49,12 +70,36 @@ PAID_OFFERS = {'ia_plus': 'ia_plus', 'cuenta_inteligente': 'smart_account'}
 
 # Screens only the account owner sees (employees never get bank rails).
 OWNER_ONLY = {'receive', 'top_up', 'withdraw', 'pending_incoming', 'month_summary', 'emergency_exit',
-              'ia_plus', 'cuenta_inteligente'}
+              'ia_plus', 'cuenta_inteligente', 'ramp_history', 'wallet_dollar', 'wallet_confio', 'edit_profile',
+              'share_username'}
 # Screens that only exist for personal accounts.
-PERSONAL_ONLY = {'pending_incoming', 'my_store'}
+PERSONAL_ONLY = {'pending_incoming', 'my_store', 'invite', 'commissions', 'agenda', 'username', 'memberships',
+                 'create_business', 'community_post', 'league', 'stocks_activity'}
+# Screens only the owner of a business account has.
+BUSINESS_OWNER_ONLY = {'payroll', 'employees'}
 # Keys newer builds open directly. The action also carries this older key, so
 # a build that doesn't know the new one still lands on the closest screen.
 FALLBACKS = {
+    'charge': 'home',
+    'invite': 'profile',
+    'commissions': 'profile',
+    'agenda': 'profile',
+    'ramp_history': 'home',
+    'wallet_dollar': 'home',
+    'wallet_confio': 'home',
+    'stocks_activity': 'invest',
+    # (`discover`, not `community`: a fallback must be a key every build knows.)
+    'league': 'discover',
+    'community_post': 'discover',
+    'notification_settings': 'profile',
+    'edit_profile': 'profile',
+    'username': 'profile',
+    'share_username': 'profile',
+    'memberships': 'profile',
+    'create_business': 'profile',
+    'payroll': 'home',
+    'employees': 'profile',
+    'terms': 'profile',
     'stock': 'stocks',
     'month_summary': 'home',
     'emergency_exit': 'profile',
@@ -84,4 +129,5 @@ CONVERSATION_DESTINATIONS = {
     'discover': 'Comunidad: lo que comparten otros miembros sobre su dinero.',
     'community': 'Comunidad: lo que comparten otros miembros sobre recargas, retiros e inversiones.',
     'messages': 'Mensajes: Julian, Confío News y mensajes directos.',
+    'profile': 'Perfil y ajustes: tu identidad, seguridad (biometría, PIN, respaldo en la nube) y demás ajustes.',
 }

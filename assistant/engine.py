@@ -30,7 +30,8 @@ from django.utils import timezone
 from users.models_cashflow import CATEGORY_CHOICES
 
 from . import conf, market
-from .destinations import CONVERSATION_DESTINATIONS, DESTINATIONS, FALLBACKS, OWNER_ONLY, PAID_OFFERS, PERSONAL_ONLY
+from .destinations import (BUSINESS_OWNER_ONLY, CONVERSATION_DESTINATIONS, DESTINATIONS, FALLBACKS, OWNER_ONLY,
+                           PAID_OFFERS, PERSONAL_ONLY)
 from .prompts import ANALYSIS_PROMPT, build_system_prompt, conversation_home, dex_offered
 
 logger = logging.getLogger(__name__)
@@ -129,10 +130,12 @@ def allowed_destinations(viewer: Viewer, *, paid_offers_allowed=True):
     if viewer.account_type == 'business':
         # Business pay-ins are never held for Confío Face (payin_hold.needs_face).
         keys = [k for k in keys if k not in PERSONAL_ONLY]
+    if viewer.account_type != 'business' or viewer.is_employee:
+        keys = [k for k in keys if k not in BUSINESS_OWNER_ONLY]
     if not _phone_eligible(viewer):
         # A single stock's page only where stocks are offered. This is the
         # cheap phone check; navigate('stock') adds the request-aware one.
-        keys = [k for k in keys if k != 'stock']
+        keys = [k for k in keys if k not in ('stock', 'stocks_activity')]
     # Paid-offer pitches only while that probe is on and on builds that have
     # the screen (old builds would land on Home with nothing to tap).
     from users import paid_offers
@@ -1001,6 +1004,17 @@ class Toolbelt:
                 'strict': True,
             },
         ]
+        if specs and conversation_home(self.viewer.request_meta):
+            # The chat is Inicio there: a screen can be opened at once, or left
+            # as a card in the conversation for the person to tap.
+            tool = specs[0]
+            tool['description'] += (
+                ' `open_now`: true abre la pantalla ya (la persona pidió abrirla o hacer eso ahora); false deja '
+                'una tarjeta en la conversación para que la toque cuando quiera (preguntó cómo se hace, hay más '
+                'de una opción, o la pantalla acompaña una explicación). Puedes dejar hasta tres tarjetas en una '
+                'respuesta; abre ya solo una pantalla.')
+            tool['parameters']['properties']['open_now'] = {'type': 'boolean'}
+            tool['parameters']['required'] = ['destination', 'asset', 'label', 'open_now']
         if self.can_navigate and self._walks():
             specs.append({
                 'type': 'function',
@@ -1416,7 +1430,7 @@ class Toolbelt:
             self.result.actions.append(action)
         return {'ok': True, 'boton': 'Muéstrame'}
 
-    def navigate(self, destination, asset=None, label=None):
+    def navigate(self, destination, asset=None, label=None, open_now=True):
         if not self.can_navigate or destination not in self.destinations:
             return {'ok': False, 'error': 'pantalla no disponible'}
         if destination in PAID_OFFERS:
@@ -1426,6 +1440,11 @@ class Toolbelt:
                 # again either (if the person asks by name, the server adds it).
                 return {'ok': False, 'error': 'Ya se la ofreciste esta semana: no la vuelvas a ofrecer en esta '
                                               'respuesta, salvo que la persona pregunte por ella.'}
+        # A card stays in the conversation and opens on a tap; only builds
+        # whose Inicio is the chat know it (others get the screen opened).
+        as_card = open_now is False and conversation_home(self.viewer.request_meta)
+        if as_card and sum(1 for a in self.result.actions if a.get('type') == 'card') >= 3:
+            return {'ok': False, 'error': 'Ya dejaste tres tarjetas en esta respuesta: no agregues más.'}
         # `destination` stays a key every build knows; newer builds open
         # `target` (and `ticker`) instead.
         action = {'type': 'navigate', 'destination': FALLBACKS.get(destination, destination)}
@@ -1435,6 +1454,10 @@ class Toolbelt:
         opened = (CONVERSATION_DESTINATIONS.get(destination) if conversation_home(self.viewer.request_meta)
                   else None) or DESTINATIONS[destination]
         reply = {'ok': True, 'pantalla_abierta': opened}
+        if as_card:
+            action['type'] = 'card'
+            reply = {'ok': True, 'tarjeta_en_la_conversacion': opened,
+                     'nota': 'No se abrió nada: quedó una tarjeta bajo tu respuesta. Dile que la toque para abrirla.'}
         if destination in FALLBACKS:
             action['target'] = destination
         if destination == 'stock':

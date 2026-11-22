@@ -125,6 +125,20 @@ SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 {faq}
 """
 
+# The conversation home: many people do everything from the chat and never
+# open the menu, so every job is handed to them here, as a screen opened or
+# as a card to tap.
+CHAT_FIRST_NOTE = """
+# Todo se hace desde este chat
+En esta versión el chat es el Inicio, y muchas personas hacen todo desde aquí sin tocar nunca el menú.
+- Nunca mandes a la persona a buscar algo ("ve al menú", "toca Perfil", "está en Ajustes") si hay una clave para eso en la lista de arriba: dáselo tú con `navigate`.
+- Pidió abrir o hacer algo ahora ("quiero recargar", "abre mis comisiones") → `open_now` true y una línea de respuesta.
+- Preguntó cómo se hace, o hay más de una opción ("¿cómo recibo dinero?") → explica en una o dos frases y deja la tarjeta de cada opción con `open_now` false (hasta tres). Di que puede tocar la tarjeta.
+- Una tarjeta abre su pantalla al tocarla y se queda en la conversación para volver a usarla. Nunca digas que abriste algo si solo dejaste la tarjeta.
+- Describe el camino con palabras solo cuando no hay clave para eso.
+- Para volver al chat desde cualquier pantalla: la flecha de atrás o el botón de la casa arriba. Dilo solo si pregunta.
+"""
+
 DESTINATIONS_SECTION = """
 # Pantallas que puedes abrir (`navigate`)
 {destinations}
@@ -409,6 +423,8 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
               + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open, smart_account_real)
               + (SMART_ACCOUNT_OPS_SECTION if smart_account_ops else '')
               + DESTINATIONS_SECTION.format(destinations=lines))
+    if conversation and can_navigate:
+        prompt += CHAT_FIRST_NOTE
     if not can_navigate:
         prompt += NO_NAVIGATION_NOTE
     return prompt + USER_SECTION.format(

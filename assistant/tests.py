@@ -402,12 +402,17 @@ class DestinationContractTests(TestCase):
 
         from django.conf import settings as django_settings
 
-        from .destinations import CHIP_ONLY, DESTINATIONS
+        from .destinations import CHIP_ONLY, DESTINATIONS, FALLBACKS
 
         source = (Path(django_settings.BASE_DIR) / 'apps/src/assistant/destinations.ts').read_text()
         block = source[source.index('DESTINATION_TARGETS'):source.index('};', source.index('DESTINATION_TARGETS'))]
         app_keys = set(re.findall(r'^\s+(\w+): \{', block, re.MULTILINE))
-        self.assertEqual(app_keys, set(DESTINATIONS) | CHIP_ONLY)
+        server_keys = set(DESTINATIONS) | CHIP_ONLY
+        # The app opens nothing the server does not offer, and every key the
+        # server offers lands somewhere on this app: on its own screen, or on
+        # the older key its action also carries (the server ships first).
+        self.assertLessEqual(app_keys, server_keys)
+        self.assertLessEqual({key if key in app_keys else FALLBACKS.get(key) for key in server_keys}, app_keys)
 
 
 # --------------------------------------------------------------------------- #
@@ -1214,6 +1219,88 @@ class ConversationHomeNavigateTests(TestCase):
         self.assertTrue(out['pantalla_abierta'].startswith('Mi dinero:'))
         # The action itself is the same key every build knows.
         self.assertEqual(belt.result.actions, [{'type': 'navigate', 'destination': 'home'}])
+
+    CONVERSATION = {'HTTP_X_CONFIO_HOME': 'conversation'}
+
+    def _tool(self, belt):
+        return next(spec for spec in belt.specs() if spec.get('name') == 'navigate')
+
+    def test_a_screen_can_be_left_as_a_card_in_the_conversation(self):
+        """People who only use the chat: an answer hands them the screen as a
+        card to tap, without taking them away from what they were reading."""
+        belt = self._belt(self.CONVERSATION)
+        tool = self._tool(belt)
+        self.assertEqual(tool['parameters']['required'], ['destination', 'asset', 'label', 'open_now'])
+        self.assertIn('tarjeta en la conversación', tool['description'])
+        out = belt.navigate('receive', open_now=False)
+        self.assertIn('tarjeta_en_la_conversacion', out)
+        self.assertNotIn('pantalla_abierta', out)
+        belt.navigate('top_up', open_now=False)
+        # Asked to do it now: the screen opens, as always.
+        belt.navigate('send', open_now=True)
+        self.assertEqual([(a['type'], a['destination']) for a in belt.result.actions],
+                         [('card', 'receive'), ('card', 'top_up'), ('navigate', 'send')])
+        # Three cards at most under one answer.
+        belt.navigate('invest', open_now=False)
+        refused = belt.navigate('profile', open_now=False)
+        self.assertFalse(refused['ok'])
+        self.assertEqual(sum(1 for a in belt.result.actions if a['type'] == 'card'), 3)
+
+    def test_the_five_tab_app_is_never_sent_a_card(self):
+        belt = self._belt({})
+        self.assertNotIn('open_now', self._tool(belt)['parameters']['properties'])
+        belt.navigate('receive', open_now=False)
+        self.assertEqual(belt.result.actions, [{'type': 'navigate', 'destination': 'receive'}])
+
+    def test_every_job_has_a_door_from_the_chat_and_a_place_to_land_on_older_builds(self):
+        from .destinations import BUSINESS_OWNER_ONLY, DESTINATIONS, FALLBACKS
+
+        belt = self._belt(self.CONVERSATION)
+        for key in ('charge', 'invite', 'commissions', 'agenda', 'ramp_history', 'wallet_dollar', 'wallet_confio',
+                    'league', 'community_post', 'notification_settings', 'edit_profile', 'username',
+                    'share_username', 'memberships', 'create_business', 'terms'):
+            self.assertIn(key, belt.destinations, key)
+            action = belt.navigate(key, open_now=False)
+            # The action carries a key every released build knows, and the new one as its target.
+            self.assertEqual(action['target'], key)
+            self.assertNotIn(action['destination'], FALLBACKS, key)
+            self.assertIn(action['destination'], DESTINATIONS)
+            belt.result.actions.clear()
+        # A business's own screens are not offered to a personal account.
+        self.assertFalse(BUSINESS_OWNER_ONLY & set(belt.destinations))
+
+    def test_doors_follow_the_account(self):
+        from .destinations import BUSINESS_OWNER_ONLY
+
+        user, _ = User.objects.get_or_create(username='conv-biz', defaults={'phone_country': 'BO'})
+
+        def keys(**kw):
+            viewer = Viewer(user=user, account=None, tz=ZoneInfo('UTC'), request_meta=self.CONVERSATION, **kw)
+            return set(Toolbelt(viewer, TurnResult(reply=''), analyses_left=0).destinations)
+
+        owner = keys(account_type='business', business_id=1, is_business_owner=True)
+        self.assertTrue(BUSINESS_OWNER_ONLY <= owner)
+        self.assertIn('charge', owner)
+        # Inviting, the personal agenda and a second business are a person's, not a business's.
+        self.assertFalse({'invite', 'commissions', 'agenda', 'create_business', 'username'} & owner)
+        employee = keys(account_type='business', business_id=1, is_business_owner=False)
+        self.assertFalse(BUSINESS_OWNER_ONLY & employee)
+        self.assertFalse({'ramp_history', 'wallet_dollar', 'edit_profile', 'invite'} & employee)
+        self.assertIn('charge', employee)
+
+    def test_the_chat_first_rules_are_said_only_where_the_chat_is_inicio(self):
+        from .prompts import build_system_prompt
+
+        base = dict(first_name='Ana', account_label='Personal', country='BO', screen='Home',
+                    local_now='2026-11-22 10:00', destinations=['home', 'invite', 'send'])
+        chat = build_system_prompt(**base, conversation=True)
+        self.assertIn('# Todo se hace desde este chat', chat)
+        self.assertIn('- `invite`: Invitar y ganar', chat)
+        self.assertIn('- `profile`: Perfil y ajustes', build_system_prompt(
+            **{**base, 'destinations': ['profile']}, conversation=True))
+        self.assertNotIn('# Todo se hace desde este chat', build_system_prompt(**base))
+        # A build that cannot open screens is not told to open them.
+        self.assertNotIn('# Todo se hace desde este chat', build_system_prompt(**base, conversation=True, can_navigate=False))
 
     def test_keys_that_read_the_same_are_untouched(self):
         for meta in ({}, {'HTTP_X_CONFIO_HOME': 'conversation'}):
@@ -2741,10 +2828,15 @@ class FaqTextTests(TestCase):
         self.assertIn('la cifra "Ahorros" arriba de Comunidad', conversation)
         # Everything outside the app map is the same text.
         for shared in ('## Dónde está cada cosa en la app', '- Recibir: tu número Confío',
-                       '- Perfil: invitar amigos', 'Pagar lee los QR de cobro de Confío'):
+                       '- Perfil: verificación de identidad', 'Pagar lee los QR de cobro de Confío'):
             self.assertIn(shared, tabs)
             self.assertIn(shared, conversation)
         # Both maps combine with the iOS variant.
+        # Inviting has its own screen there; on five tabs it is still at the top of Perfil.
+        self.assertIn('Invitar y ganar (la última fila del menú', conversation)
+        self.assertNotIn('Invitar y ganar', tabs)
+        self.assertIn('están arriba en Perfil', tabs)
+        self.assertNotIn('están arriba en Perfil', conversation)
         self.assertNotIn('[[', faq_text(dex=False, conversation=True))
         self.assertIn('No hay pestañas abajo', faq_text(dex=False, conversation=True))
 
