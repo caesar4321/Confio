@@ -386,6 +386,63 @@ def _extract_instruction_fields(candidates: list[dict[str, Any]]) -> dict[str, A
     return fields
 
 
+# What the app needs to show how to pay. Only Koywe's create answer carries
+# it: GET /orders/{id} omits both on every rail (2026-11-22, checked on prod).
+_PAY_INSTRUCTION_KEYS = ('providedAction', 'providedAddress')
+
+
+def provider_response(payload) -> dict[str, Any]:
+    """Koywe's `response` on a WAITING order: JSON text naming the provider and
+    its code or link. The only instructions a webhook-recovered order has."""
+    value = payload.get('response') if isinstance(payload, dict) else None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def original_pay_instructions(ramp_tx, order_payload: dict[str, Any] | None) -> dict[str, Any]:
+    """How to pay a top-up that still waits for its payment, as Koywe answered
+    when it was created. Without it a reopened order had no bank QR, Pix code,
+    transfer details or link, and the app drew a QR of Koywe's internal id.
+
+    Never for a withdrawal (its address is vouched separately), a paid or
+    closed order, or a country whose top-up is paused now."""
+    from .koywe import on_ramp_paused
+
+    if getattr(ramp_tx, 'direction', None) != 'on_ramp' or getattr(ramp_tx, 'status', None) != 'PENDING':
+        return {}
+    payload = order_payload or {}
+    # Only Koywe's own word for "not paid yet". PENDING means paid, and an
+    # unknown status (which map_koywe_status folds into PENDING) invites nobody.
+    if str(payload.get('status') or '').strip().upper() not in _KOYWE_PENDING_STATUSES:
+        return {}
+    dates = payload.get('dates')
+    if isinstance(dates, dict) and dates.get('paymentDate'):
+        return {}
+    if on_ramp_paused(ramp_tx.country_code):
+        return {}
+    created = (ramp_tx.metadata or {}).get('provider_payload_created')
+    if not isinstance(created, dict):
+        created = {}
+    # The stored answer must be this same order's.
+    original_id, current_id = created.get('orderId'), payload.get('orderId')
+    if original_id and current_id and original_id != current_id:
+        return {}
+    found = {key: payload.get(key) or created.get(key) for key in _PAY_INSTRUCTION_KEYS}
+    if not found['providedAction']:
+        link = (provider_response(payload).get('providerLinkUrl')
+                or provider_response(created).get('providerLinkUrl'))
+        found['providedAction'] = link if isinstance(link, str) else None
+    code = str((ramp_tx.metadata or {}).get('payment_method_code') or '').upper()
+    if code.startswith(('QRI', 'SIP_QR', 'PIX_QR', 'PIX-QR')) and not found['providedAction']:
+        # The app would draw the address's text as the QR.
+        return {}
+    return {key: value for key, value in found.items() if value}
+
+
 def build_koywe_instruction_snapshot(
     *,
     order_payload: dict[str, Any] | None,
@@ -532,6 +589,11 @@ def upsert_koywe_ramp_transaction(
         auth_email=auth_email,
         order_payload=order_payload,
     )
+    # The create answer (this function's only caller) is the one that says how
+    # to pay. Koywe's payment_created webhook can land first and leave a GET
+    # body in this slot, which says nothing of it.
+    if order_payload and normalized_direction == 'on_ramp':
+        merged_metadata['provider_payload_created'] = order_payload
     if order_id:
         merged_metadata['wallet_address_reservation_state'] = 'provider_order_recorded'
 

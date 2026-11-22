@@ -18,7 +18,10 @@ from security.didit import ISO2_TO_ISO3
 from security.models import IdentityVerification, normalize_document_number
 from users.models import Account, BankInfo, Country
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
-from ramps.koywe_sync import build_koywe_instruction_snapshot, sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
+from ramps.koywe_sync import (
+    build_koywe_instruction_snapshot, original_pay_instructions, provider_response,
+    sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction,
+)
 from ramps.mexico_economic_activities import MEXICO_ECONOMIC_ACTIVITIES, normalize_mexico_economic_activity
 
 from ramps.koywe_client import (
@@ -1060,9 +1063,16 @@ def _unpaid_order_response(order):
         order_id=order.provider_order_id or None, direction='ON_RAMP',
         destination=order.destination, country_code=order.country_code,
         fiat_currency=order.fiat_currency,
-        payment_method_code=metadata.get('payment_method_code'),
+        payment_method_code=metadata.get('payment_method_code') or _recovered_method_code(metadata),
         payment_method_display=metadata.get('payment_method_display'),
     )
+
+
+def _recovered_method_code(metadata):
+    # A webhook-recovered order has no method, and without one the app's
+    # screen cannot draw a QR. Koywe names Pix in its response.
+    name = str(provider_response(metadata.get('provider_payload_created')).get('providerName') or '')
+    return name if name.upper() in ('PIX-QR', 'PIX_QR') else None
 
 
 def _release_proven_empty_koywe_reservation(reservation, *, account_id: int) -> None:
@@ -2311,10 +2321,11 @@ class Query(graphene.ObjectType):
             return RampOrderStatusType(success=False, error=str(exc))
         except KoyweError as exc:
             logger.warning("Koywe ramp order status lookup failed: %s", exc)
-            return RampOrderStatusType(success=False, error=str(exc))
+            return _not_payable_status(ramp_tx, order_id) or RampOrderStatusType(success=False, error=str(exc))
         except Exception:
             logger.exception("Unexpected Koywe ramp order status failure")
-            return RampOrderStatusType(success=False, error="Unexpected Koywe error while reading the order")
+            return (_not_payable_status(ramp_tx, order_id)
+                    or RampOrderStatusType(success=False, error="Unexpected Koywe error while reading the order"))
 
         payment_payload = dict(result.raw_response or {})
         is_off_ramp = (getattr(ramp_tx, 'direction', '') or '').lower() == 'off_ramp'
@@ -2342,16 +2353,17 @@ class Query(graphene.ObjectType):
             # Koywe delivered USDC to the bridge; the person's dollars are
             # still crossing to BSC.
             public_status, public_details = 'CRYPTO_TX_SENT', 'Enviando tus dólares a tu cuenta'
+        pay_with = original_pay_instructions(ramp_tx, result.raw_response)
         return RampOrderStatusType(
             success=True,
             error=None,
             order_id=result.order_id,
             status=public_status,
             status_details=public_details,
-            next_action_url=result.next_action_url,
+            next_action_url=_top_up_link(ramp_tx, pay_with, result.next_action_url),
             # A Polygon-routed off-ramp is funded through its Relay address
             # on BSC, never Koywe's Polygon address.
-            payment_details=(koywe_polygon.vouch_off_ramp_deposit if polygon_off_ramp
+            payment_details=_with_pay_instructions(ramp_tx, pay_with, (koywe_polygon.vouch_off_ramp_deposit if polygon_off_ramp
                              else _unchanged_payment_details)(annotate_koywe_deposit_address(
                 payment_payload,
                 savings_rail=(getattr(ramp_tx, 'destination', None) == 'cusd_plus'),
@@ -2372,7 +2384,7 @@ class Query(graphene.ObjectType):
                 ),
                 deposit_amount_wei=deposit_wei,
                 gross_debit_amount_wei=gross_wei,
-            ), ramp_tx, CONFIO_DEPOSIT_ADDRESS_KEY),
+            ), ramp_tx, CONFIO_DEPOSIT_ADDRESS_KEY)),
             instruction_snapshot=build_koywe_instruction_snapshot(
                 order_payload=result.raw_response,
                 next_action_url=result.next_action_url,
@@ -2718,6 +2730,56 @@ def _provider_amount_matches(provider_amount_in, requested, *,
         )
         return False
     return True
+
+
+def _with_pay_instructions(ramp_tx, pay_with, details):
+    """A top-up's payment details as the app may render them.
+
+    The app merges this over what it got when the order was created, and draws
+    a QR of any text it finds. So every other key goes out as an explicit null
+    (it replaces the old value; an omitted key would keep it), and only how to
+    pay, when it still can be paid, goes out as text. After the deposit-address
+    annotation, so nothing here feeds that decision."""
+    if getattr(ramp_tx, 'direction', None) != 'on_ramp':
+        return details
+    created = (ramp_tx.metadata or {}).get('provider_payload_created')
+    shown = dict.fromkeys((
+        *(created if isinstance(created, dict) else {}), *details,
+        'providedAction', 'providedAddress', 'providedAddressFromProviderDetails', 'paymentProvider',
+        'paymentMethodDisplay', 'documentNumber',
+    ))
+    try:
+        amount = float(details.get('amountOut') or 0)
+    except (TypeError, ValueError):
+        amount = 0
+    if amount:
+        shown['amountOut'] = amount
+    shown.update(pay_with)
+    return shown
+
+
+def _top_up_link(ramp_tx, pay_with, provider_url):
+    if getattr(ramp_tx, 'direction', None) != 'on_ramp':
+        return provider_url
+    if not pay_with:
+        # Not payable. Truthy and not a link: on a null the app falls back to
+        # the link it got when the order was created.
+        return ' '
+    link = str(provider_url or pay_with.get('providedAction') or '')
+    return link if link.startswith('https://') else None
+
+
+def _not_payable_status(ramp_tx, order_id):
+    """For a failed read of a top-up we already know is paid or closed: an
+    error would make the app show the QR it got at creation again."""
+    status = getattr(ramp_tx, 'status', None)
+    if getattr(ramp_tx, 'direction', None) != 'on_ramp' or status not in (
+            'COMPLETED', 'FAILED', 'PROCESSING', 'AML_REVIEW'):
+        return None
+    return RampOrderStatusType(
+        success=True, order_id=order_id,
+        status={'COMPLETED': 'DELIVERED', 'FAILED': 'REJECTED'}.get(status, 'PENDING'),
+        next_action_url=' ', payment_details=_with_pay_instructions(ramp_tx, {}, {}))
 
 
 def _unchanged_payment_details(details, *_):
