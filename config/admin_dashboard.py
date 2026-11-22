@@ -1408,6 +1408,15 @@ from payment_accounts.models import PolygonReturn
 from payment_accounts.admin import PolygonReturnAdmin
 confio_admin_site.register(PolygonReturn, PolygonReturnAdmin)
 
+from payment_accounts.models import PaymentIntent
+from payment_accounts.admin import PaymentIntentAdmin
+confio_admin_site.register(PaymentIntent, PaymentIntentAdmin)
+
+from payment_accounts.models import PixChargeHost, PixParticipant
+from payment_accounts.admin import PixChargeHostAdmin, PixParticipantAdmin
+confio_admin_site.register(PixParticipant, PixParticipantAdmin)
+confio_admin_site.register(PixChargeHost, PixChargeHostAdmin)
+
 from payment_accounts.models import CobreJourney
 from payment_accounts.admin import CobreJourneyAdmin
 confio_admin_site.register(CobreJourney, CobreJourneyAdmin)

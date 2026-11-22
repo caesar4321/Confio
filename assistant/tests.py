@@ -3981,3 +3981,201 @@ class PhotoTests(TestCase):
             {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': 'QUJD'}},
             {'type': 'text', 'text': '¿Qué es?'},
         ])
+
+
+class HereTests(TestCase):
+    """What a person finishes right in the chat (assistant/here.py)."""
+
+    CONVERSATION = {'HTTP_X_CONFIO_HOME': 'conversation'}
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='ana_here', email='here@example.com', password='x',
+                                             firebase_uid='fb-here', first_name='Ana')
+
+    def _belt(self, meta=None, **viewer):
+        base = dict(user=self.user, account=None, account_type='personal', business_id=None,
+                    is_business_owner=False, tz=ZoneInfo('UTC'),
+                    request_meta=self.CONVERSATION if meta is None else meta)
+        return Toolbelt(Viewer(**{**base, **viewer}), TurnResult(reply=''), analyses_left=0)
+
+    def _names(self, belt):
+        return {spec.get('name') for spec in belt.specs()}
+
+    def test_offered_only_where_the_chat_is_inicio_and_to_whom_it_fits(self):
+        from . import here
+
+        self.assertTrue(here.TOOLS <= self._names(self._belt()))
+        # The five-tab app has no card to draw them on.
+        self.assertFalse(here.TOOLS & self._names(self._belt(meta={})))
+        self.assertEqual(self._belt(meta={}).call('act_here', {'action': 'invite_whatsapp'}),
+                         {'error': 'herramienta desconocida: act_here'})
+        # A business has no invitations or @usuario of its own; its notifications are the person's.
+        business = self._names(self._belt(account_type='business', business_id=1, is_business_owner=True))
+        self.assertEqual(here.TOOLS & business, {'notification_settings'})
+        # While the team owns the thread nothing is proposed.
+        waiting = self._belt()
+        waiting.waiting_for_team = True
+        self.assertFalse(here.TOOLS & self._names(waiting))
+        self.assertIn('error', waiting.call('notification_settings', {'setting': None, 'enabled': None}))
+
+    def test_inviting_and_sharing_leave_a_button_and_send_nothing(self):
+        belt = self._belt()
+        out = belt.call('act_here', {'action': 'invite_whatsapp'})
+        self.assertTrue(out['ok'])
+        self.assertIn('No digas que ya se envió', out['nota'])
+        belt.call('act_here', {'action': 'share_username'})
+        belt.call('act_here', {'action': 'share_username'})  # asked twice: one button
+        self.assertEqual(belt.result.actions, [
+            {'type': 'do', 'target': 'invite_whatsapp', 'label': 'Invitar por WhatsApp'},
+            {'type': 'do', 'target': 'share_username', 'label': 'Compartir mi usuario'},
+        ])
+
+    def test_a_new_username_is_checked_before_it_is_offered_and_changes_nothing_by_itself(self):
+        User.objects.create_user(username='Tomada', email='t@example.com', password='x', firebase_uid='fb-t')
+        belt = self._belt()
+        for bad, why in (('ab', 'al menos 3'), ('con espacio', None), ('x' * 21, 'más de 20'),
+                         ('tomada', 'ya está en uso'), ('inversor_ana', 'reservado'), ('ANA_HERE', 'ya es @ana_here')):
+            out = belt.call('propose_username', {'username': bad})
+            self.assertFalse(out['ok'], bad)
+            if why:
+                self.assertIn(why, out['motivo'])
+        self.assertEqual(belt.result.actions, [])
+        out = belt.call('propose_username', {'username': '@ana_perez'})
+        self.assertTrue(out['ok'])
+        self.assertIn('Todavía no cambió nada', out['nota'])
+        self.assertEqual(belt.result.actions, [{'type': 'do', 'target': 'set_username:ana_perez', 'label': 'Usar @ana_perez'}])
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, 'ana_here')
+
+    def test_notifications_are_read_and_a_switch_is_proposed_never_flipped(self):
+        from notifications.models import NotificationPreference
+
+        belt = self._belt()
+        read = belt.call('notification_settings', {'setting': None, 'enabled': None})
+        self.assertEqual(set(read['activas'].values()), {True})
+        self.assertEqual(belt.result.actions, [])
+        # Already that way: said, not offered.
+        self.assertFalse(belt.call('notification_settings', {'setting': 'promotions', 'enabled': True})['ok'])
+        out = belt.call('notification_settings', {'setting': 'promotions', 'enabled': False})
+        self.assertTrue(out['ok'])
+        self.assertEqual(belt.result.actions, [
+            {'type': 'do', 'target': 'set_notifications:promotions=off', 'label': 'Apagar promociones'}])
+        self.assertTrue(NotificationPreference.objects.get(user=self.user).push_promotions)
+        # Security alerts are not switched from the chat.
+        self.assertNotIn('security', here_keys())
+        self.assertIn('seguridad', read)
+
+    def test_details_are_typed_by_the_person_into_a_form_never_dictated_to_the_assistant(self):
+        from . import here
+
+        belt = self._belt()
+        tool = next(spec for spec in belt.specs() if spec.get('name') == 'ask_details')
+        # Outside Venezuela there is no Pago Móvil to fill in.
+        self.assertEqual(tool['parameters']['properties']['form']['enum'], ['profile_name'])
+        self.assertIn('No le pidas que te dicte', tool['description'])
+        out = belt.call('ask_details', {'form': 'profile_name'})
+        self.assertTrue(out['ok'])
+        self.assertEqual(belt.result.actions, [{'type': 'form', 'target': 'profile_name', 'label': 'Cambiar mi nombre'}])
+        # One form per answer, and never one this person is not offered.
+        self.assertFalse(belt.call('ask_details', {'form': 'profile_name'})['ok'])
+        self.assertFalse(self._belt().call('ask_details', {'form': 'pagomovil_payment'})['ok'])
+
+        self.user.phone_country = 'VE'
+        self.user.save(update_fields=['phone_country'])
+        venezuela = self._belt()
+        with patch('security.geo.country_of', return_value='VE'):
+            self.assertEqual(here.forms_for(venezuela.viewer, venezuela)[:2], ['profile_name', 'agenda_pagomovil'])
+            # The payment form only where prepared payments are on for this person.
+            self.assertNotIn('pagomovil_payment', here.forms_for(venezuela.viewer, venezuela))
+            venezuela.payments_ready = lambda: True
+            with patch('ramps.ve_pagomovil.enabled', return_value=True), \
+                    patch('ramps.ve_pagomovil.client_supports', return_value=True):
+                self.assertIn('pagomovil_payment', here.forms_for(venezuela.viewer, venezuela))
+        # A business fills in nothing of a person's.
+        business = self._belt(account_type='business', business_id=1, is_business_owner=True)
+        self.assertNotIn('ask_details', self._names(business))
+        # A verified person's name is the one on their document: no form to change it.
+        verified = self._belt()
+        with patch.object(type(self.user), 'is_identity_verified', new=True):
+            self.assertNotIn('profile_name', here.forms_for(verified.viewer, verified))
+            self.assertFalse(verified.call('ask_details', {'form': 'profile_name'}).get('ok'))
+
+    def test_the_chat_is_told_to_finish_these_here(self):
+        from .prompts import build_system_prompt
+
+        chat = build_system_prompt(first_name='Ana', account_label='Personal', country='BO', screen='Home',
+                                   local_now='2026-11-22 10:00', destinations=['invite'], conversation=True)
+        self.assertIn('`act_here`', chat)
+        self.assertIn('`propose_username`', chat)
+
+
+def here_keys():
+    from . import here
+    return set(here.NOTIFICATIONS)
+
+
+class TopupLimitsTests(TestCase):
+    """"¿Cuál es el mínimo para recargar?" gets Koywe's own figure, in the
+    person's currency (assistant/topup_limits.py)."""
+
+    def _viewer(self, country, **kw):
+        user = User.objects.create_user(username=f'lim_{country}_{len(kw)}', email=f'{country}{len(kw)}@example.com',
+                                        password='x', firebase_uid=f'fb-lim-{country}-{len(kw)}', phone_country=country)
+        base = dict(user=user, account=None, account_type='personal', business_id=None, is_business_owner=False,
+                    tz=ZoneInfo('UTC'))
+        return Viewer(**{**base, **kw})
+
+    def _data(self, country, limits=None, error=None, **kw):
+        from ramps.koywe_client import KoyweError
+
+        from . import topup_limits
+
+        with patch('ramps.koywe_client.KoyweClient.get_public_ramp_limits',
+                   side_effect=KoyweError(error) if error else None, return_value=limits) as read:
+            out = topup_limits.data(self._viewer(country, **kw))
+        return out, read
+
+    def test_the_providers_minimum_in_the_persons_own_currency(self):
+        out, read = self._data('BO', {'on_ramp_min_amount': Decimal('350'), 'on_ramp_max_amount': Decimal('56000')})
+        read.assert_called_once_with(fiat_symbol='BOB')
+        self.assertEqual(out['minimo_por_recarga'], '350 bolivianos')
+        self.assertEqual(out['maximo_por_recarga'], '56.000 bolivianos')
+        self.assertEqual(out['dato'], 'leído del proveedor')
+        self.assertIn('no la pases a dólares', out['nota'])
+        mexico, _ = self._data('MX', {'on_ramp_min_amount': Decimal('500'), 'on_ramp_max_amount': Decimal('500000')})
+        self.assertEqual(mexico['minimo_por_recarga'], '500 pesos mexicanos')
+
+    def test_when_the_provider_cannot_be_read_the_last_known_minimum_is_said_as_such(self):
+        from ramps.koywe import COUNTRY_METHODS
+
+        out, _ = self._data('AR', error='timeout')
+        self.assertTrue(out['disponible'])
+        self.assertIn('último valor conocido', out['dato'])
+        # The fallback is Koywe's own minimum, never a lower stale one.
+        self.assertEqual(out['minimo_por_recarga'], '1.000 pesos argentinos')
+        self.assertEqual({c: str(COUNTRY_METHODS[c]['on_ramp_min_amount']) for c in ('AR', 'BO', 'BR', 'CL', 'MX', 'PE')},
+                         {'AR': '1000', 'BO': '350', 'BR': '250', 'CL': '1000', 'MX': '500', 'PE': '100'})
+
+    def test_no_figure_where_this_provider_is_not_the_way_to_top_up(self):
+        # Koywe's top-up is paused in Colombia; Venezuela and Guatemala never had it.
+        for country in ('CO', 'VE', 'GT'):
+            out, read = self._data(country, {'on_ramp_min_amount': Decimal('1')})
+            self.assertFalse(out['disponible'], country)
+            read.assert_not_called()
+        employee, read = self._data('BO', {'on_ramp_min_amount': Decimal('350')}, account_type='business')
+        self.assertFalse(employee['disponible'])
+        read.assert_not_called()
+
+    def test_the_tool_is_offered_and_answers_on_every_build(self):
+        belt = Toolbelt(self._viewer('BO'), TurnResult(reply=''), analyses_left=0)
+        self.assertIn('get_topup_limits', {spec.get('name') for spec in belt.specs()})
+        with patch('ramps.koywe_client.KoyweClient.get_public_ramp_limits',
+                   return_value={'on_ramp_min_amount': Decimal('350')}):
+            self.assertEqual(belt.call('get_topup_limits', {})['minimo_por_recarga'], '350 bolivianos')
+        self.assertIn('`get_topup_limits`', __import__('assistant.prompts', fromlist=['faq_text']).faq_text())
+
+    def test_amounts_read_as_people_write_them(self):
+        from .topup_limits import _amount
+
+        self.assertEqual([_amount(v) for v in ('350', '1000', '8500000', '0.5', '1234.5')],
+                         ['350', '1.000', '8.500.000', '0,50', '1.234,50'])

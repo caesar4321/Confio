@@ -13,13 +13,16 @@ RAMP_NETWORK_SYMBOL = "USDC Algorand"
 RAMP_NETWORK_DISPLAY = "Algorand"
 
 
+# on_ramp_min_amount / on_ramp_max_amount are the fallback when Koywe's live pair
+# limits cannot be read: keep the minimums at Koywe's own (last read 2026-11-22),
+# never below, or a person is told a top-up is possible that Koywe refuses.
 COUNTRY_METHODS = {
     "AR": {
         "fiat_currency": "ARS",
         "rate": Decimal("1508.95"),
         "fee_percent": Decimal("1.815"),
         "network_fee_fiat": Decimal("13.60"),
-        "on_ramp_min_amount": Decimal("100"),
+        "on_ramp_min_amount": Decimal("1000"),
         "on_ramp_max_amount": Decimal("8500000"),
         "off_ramp_min_amount": Decimal("0.10"),
         "off_ramp_max_amount": Decimal("5532.31"),
@@ -106,7 +109,7 @@ COUNTRY_METHODS = {
         "rate": Decimal("5.202914"),
         "fee_percent": Decimal("1.50"),
         "network_fee_fiat": Decimal("0.05"),
-        "on_ramp_min_amount": Decimal("1"),
+        "on_ramp_min_amount": Decimal("250"),
         "on_ramp_max_amount": Decimal("45000"),
         "off_ramp_min_amount": Decimal("0.10"),
         "off_ramp_max_amount": Decimal("8519.25"),
@@ -178,7 +181,7 @@ COUNTRY_METHODS = {
         "rate": Decimal("3816.228"),
         "fee_percent": Decimal("1.785"),
         "network_fee_fiat": Decimal("39.00"),
-        "on_ramp_min_amount": Decimal("1000"),
+        "on_ramp_min_amount": Decimal("50000"),
         "on_ramp_max_amount": Decimal("41000000"),
         "off_ramp_min_amount": Decimal("1"),
         "off_ramp_max_amount": Decimal("10550.96"),
@@ -250,7 +253,7 @@ COUNTRY_METHODS = {
         "rate": Decimal("17.3234205"),
         "fee_percent": Decimal("1.74"),
         "network_fee_fiat": Decimal("0.17"),
-        "on_ramp_min_amount": Decimal("100"),
+        "on_ramp_min_amount": Decimal("500"),
         "on_ramp_max_amount": Decimal("500000"),
         "off_ramp_min_amount": Decimal("1"),
         "off_ramp_max_amount": Decimal("28370.30"),
@@ -286,7 +289,7 @@ COUNTRY_METHODS = {
         "rate": Decimal("3.40025"),
         "fee_percent": Decimal("1.77"),
         "network_fee_fiat": Decimal("0.03"),
-        "on_ramp_min_amount": Decimal("1"),
+        "on_ramp_min_amount": Decimal("100"),
         "on_ramp_max_amount": Decimal("30000"),
         "off_ramp_min_amount": Decimal("0.10"),
         "off_ramp_max_amount": Decimal("8666.70"),

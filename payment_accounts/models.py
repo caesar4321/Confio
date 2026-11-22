@@ -984,3 +984,136 @@ class PolygonReturn(models.Model):
 
     def __str__(self):
         return f'PolygonReturn {self.internal_id} {self.status}'
+
+
+class PaymentIntent(models.Model):
+    """One prepared payment the owner may review and sign (payment_intents.py).
+
+    Preparing one moves no money: it is the server's record of what a payment
+    card and its signing sheet show. Every displayed fact is read from this
+    row, never from assistant text, and `display_hash` binds what was shown to
+    what is signed. Money moves only through the bridge the owner signs and
+    the journey that carries this row's `request_id`.
+    """
+    CREATED_BY = [('assistant', 'Assistant'), ('scan', 'Scan'), ('share', 'Share'), ('paste', 'Paste')]
+    SOURCES = [('pasted_code', 'Pasted code'), ('shared_qr', 'Shared QR'), ('scanned_qr', 'Scanned QR'),
+               ('owner_words', 'Details in the owner\'s own words'), ('form', 'Details typed in the app'),
+               ('saved_payee', 'A saved recipient')]
+    # How far the rail vouches for who is paid (payment_intents.LEVELS and the rails).
+    PAYEE_LEVELS = [('holder_verified', 'Registered holder, verified by the bank lookup'),
+                    ('confio_account', 'A Confío account'),
+                    ('provider_named', 'Holder named by the paying provider from the code'),
+                    ('institution_charge', 'Charge and receiver signed by a known payment institution'),
+                    ('institution_amount', 'Charge signed by a known payment institution, name from the code'),
+                    ('signed_charge', 'Charge and receiver signed by the site of the charge'),
+                    ('signed_amount', 'Charge signed by the site of the charge, name from the code'),
+                    ('saved_payee', 'A recipient in the owner\'s own agenda'),
+                    ('self_reported', 'Name from the code, unverified'),
+                    ('unverified', 'Identifier as given, no holder lookup')]
+    # What kind of payment it is, whoever carries it: an exact local amount
+    # (a charge), a dollar amount sent to a local key or account, a provider
+    # order, or a send to another Confío account. `provider` says who carries it.
+    FAMILIES = [('local_charge', 'Exact local charge'), ('local_transfer', 'Dollar transfer to a local account'),
+                ('ramp_order', 'Provider order'), ('confio_send', 'Confío send')]
+    STATES = [('quoted', 'Quoted'), ('awaiting_signature', 'Awaiting signature'), ('submitted', 'Submitted'),
+              ('cancelled', 'Cancelled'), ('expired', 'Expired')]
+    OUTCOMES = [('', 'Open'), ('paid', 'Paid'), ('refunded', 'Refunded'), ('failed', 'Failed')]
+
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    confio_account = models.ForeignKey('users.Account', on_delete=models.PROTECT, related_name='payment_intents')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    created_by = models.CharField(max_length=12, choices=CREATED_BY)
+    source = models.CharField(max_length=16, choices=SOURCES)
+    rail_method_id = models.CharField(max_length=32)
+    family = models.CharField(max_length=20, choices=FAMILIES, default='local_charge')
+    # The provider the card was priced with (intent_rails.provider_for): the
+    # rail is what the person pays with, the provider is who carries it, and
+    # the same rail can move to another provider by configuration.
+    provider = models.CharField(max_length=32, default='', blank=True)
+    # Infinia rails only: the recipient the journey pays.
+    destination = models.ForeignKey(PayoutDestination, on_delete=models.PROTECT, null=True, blank=True,
+                                    related_name='+')
+    # What the rail needs again at confirmation (never shown as such): the
+    # code, the recipient's details, the Confío recipient. Read only by the rail.
+    params = models.JSONField(default=dict, blank=True)
+    # The order or send this intent became, for rails without a journey
+    # (ramps.RampTransaction internal id, send.SendTransaction id).
+    order_ref = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    # The bridge quote and the journey of this payment carry this id.
+    request_id = models.UUIDField(default=uuid.uuid4, editable=False)
+    payee_name = models.CharField(max_length=140)
+    payee_level = models.CharField(max_length=24, choices=PAYEE_LEVELS)
+    # The identifier being paid, as shown (a key, a masked account, phone and bank).
+    payee_account = models.CharField(max_length=140, blank=True, default='')
+    payee_document = models.CharField(max_length=32, blank=True, default='')
+    institution = models.CharField(max_length=140, blank=True, default='')
+    # exact: the payee receives exactly amount_local (a charge). Otherwise the
+    # dollars are fixed, amount_local is what should arrive and minimum_local
+    # the least the owner authorizes.
+    amount_exact = models.BooleanField(default=True)
+    amount_local = models.DecimalField(max_digits=18, decimal_places=2)
+    minimum_local = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=8)
+    total_usd = models.DecimalField(max_digits=18, decimal_places=2)
+    fee_usd = models.DecimalField(max_digits=18, decimal_places=2)
+    estimated_return_usd = models.DecimalField(max_digits=18, decimal_places=2)
+    rate = models.DecimalField(max_digits=18, decimal_places=4)
+    charge_expires_at = models.DateTimeField(null=True, blank=True)
+    # Last moment these figures may be confirmed; a later confirmation needs a new quote.
+    expires_at = models.DateTimeField()
+    display_hash = models.CharField(max_length=64)
+    state = models.CharField(max_length=20, choices=STATES, default='quoted', db_index=True)
+    state_reason = models.CharField(max_length=40, blank=True, default='')
+    # Written once, when the journey is first seen finished (analytics; the card reads the journey).
+    outcome = models.CharField(max_length=10, choices=OUTCOMES, blank=True, default='')
+    bridge = models.OneToOneField(PaymentBridgeTransfer, on_delete=models.PROTECT, null=True, blank=True,
+                                  related_name='payment_intent')
+    # inbox.SupportMessage pk of the assistant message that shows the card.
+    message_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    supersedes = models.ForeignKey('self', on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['confio_account', 'request_id'],
+                                               name='payment_intent_request_uniq')]
+        indexes = [models.Index(fields=['confio_account', 'created_at'], name='payment_intent_owner_idx')]
+
+    def __str__(self):
+        return f'PaymentIntent {self.internal_id} {self.state}'
+
+
+class PixParticipant(models.Model):
+    """One institution on the Central Bank's public list of Pix participants
+    (pix_participants.refresh). Used to tell which institution hosts a charge."""
+    ispb = models.CharField(max_length=8, unique=True)
+    cnpj = models.CharField(max_length=14, db_index=True)
+    name = models.CharField(max_length=140)
+    kind = models.CharField(max_length=80, blank=True, default='')
+    participation = models.CharField(max_length=80, blank=True, default='')
+    listed_on = models.DateField()
+    active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField()
+
+    def __str__(self):
+        return f'{self.name} ({self.ispb})'
+
+
+class PixChargeHost(models.Model):
+    """A charge site reviewed by hand: one whose certificate cannot be tied to
+    a participant by itself (a foreign parent company, a sponsor that hosts
+    another institution's charges). Staff add it after checking the site."""
+    host = models.CharField(max_length=253, unique=True)
+    participant = models.ForeignKey(PixParticipant, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    institution_name = models.CharField(max_length=140, blank=True, default='')
+    note = models.CharField(max_length=255, blank=True, default='')
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.host = (self.host or '').lower().strip().strip('.')
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.host

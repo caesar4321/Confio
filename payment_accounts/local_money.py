@@ -905,6 +905,17 @@ def recheck_destination(destination, *, client=None):
     return _apply_validation(destination, method, value, _validate(method, value, client), check=check)
 
 
+def refresh_charge(destination, *, client=None):
+    """Read a Pix charge again now: it can be paid, cancelled or revised within
+    minutes, so a confirmation never rests on an earlier reading."""
+    if not _is_charge(destination):
+        return destination
+    method = METHODS['br_qr']
+    value = _destination_value(destination, method)
+    check = _start_check(destination)
+    return _apply_validation(destination, method, value, _validate(method, value, client), check=check)
+
+
 def require_current_destination(destination):
     """Server-side guard for a new send: a holder verified long ago is checked again first."""
     validation = (destination.provider_data or {}).get('validation')

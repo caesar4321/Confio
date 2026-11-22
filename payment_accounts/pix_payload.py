@@ -36,6 +36,7 @@ import functools
 import hashlib
 import ipaddress
 import json
+import logging
 import re
 import socket
 import ssl
@@ -47,6 +48,8 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 MAX_BYTES = 64 * 1024
 CONNECT_TIMEOUT, READ_TIMEOUT = 4.0, 5.0
@@ -193,6 +196,7 @@ def https_get(host, path_and_query, accept, deadline=None):
             tls = context.wrap_socket(raw, server_hostname=host, do_handshake_on_connect=False)
             register(tls)
             tls.do_handshake()  # checks the certificate and that it names host
+            outcome['peer'] = tls.getpeercert(binary_form=True)
             check()
             connection = http.client.HTTPSConnection(host, PORT, context=context, timeout=READ_TIMEOUT)
             connection.sock = tls
@@ -267,7 +271,19 @@ def https_get(host, path_and_query, accept, deadline=None):
     status, content_type, body = outcome['result']
     if len(body) > MAX_BYTES:
         raise PixPayloadError('response too large')
+    # The site's own certificate, for the caller that wants to know who the
+    # site belongs to (pix_participants): kept per calling thread.
+    _PEER.certificate = outcome.get('peer')
     return status, content_type, body
+
+
+_PEER = threading.local()
+
+
+def last_site_certificate():
+    """The TLS certificate (DER) of the site the last https_get on this
+    thread reached, or None."""
+    return getattr(_PEER, 'certificate', None)
 
 
 @functools.lru_cache(maxsize=4)
@@ -446,7 +462,9 @@ def resolve_dynamic(location):
         # Data de Pagamento Pretendida: today in Brazil (codMun is optional).
         query = '?DPP=' + timezone.now().astimezone(BRAZIL).date().isoformat()
     deadline = monotonic() + FETCH_DEADLINE  # one budget for the charge and its keys
+    _PEER.certificate = None
     status, content_type, body = https_get(host, path + query, 'application/jose', deadline)
+    site_certificate = last_site_certificate()
     if status in (404, 410):
         raise PixPayloadError(f'charge returned {status}', gone=True)
     if status != 200:
@@ -460,7 +478,9 @@ def resolve_dynamic(location):
         data = json.loads(payload)
     except ValueError as exc:
         raise PixPayloadError('payload is not JSON') from exc
-    return dict(_charge_from_payload(data, due_date=due_date), domain=host)
+    from . import pix_participants
+    return dict(_charge_from_payload(data, due_date=due_date), domain=host,
+                site=pix_participants.site_identity(site_certificate))
 
 
 def validation(code):
@@ -486,9 +506,17 @@ def validation(code):
     # The signed payload names the receiver only for due-date charges;
     # otherwise the QR's own (unsigned) merchant name, labelled as such.
     name = charge['receiver_name'] or merchant
+    # Which Pix participant hosts this charge, when public data can tell
+    # (never who the receiver is: that is the DICT name).
+    host_institution = None
+    try:
+        from . import pix_participants
+        host_institution = pix_participants.institution_for(charge['domain'], charge.get('site'))
+    except Exception:  # noqa: BLE001 - unknown host institution: the charge reads as unverified
+        logger.warning('Pix host institution lookup failed', exc_info=True)
     return dict(base, status='SUCCESSFUL', holder_name=name,
                 holder_source='charge' if charge['receiver_name'] else 'qr',
-                institution=charge['domain'],
+                institution=charge['domain'], host_institution=host_institution,
                 charge={'type': 'dynamic', 'amount': str(charge['amount']),
                         'expiration': charge['expires_at'].isoformat(), 'txid': charge['txid'],
                         'revision': charge['revision']})

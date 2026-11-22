@@ -891,7 +891,11 @@ class PolygonReturnMutation(graphene.ObjectType):
     submit_polygon_return = SubmitPolygonReturn.Field()
 
 
-class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, AgendaQuery, PolygonReturnQuery, graphene.ObjectType):
+from .payment_intent_schema import PaymentIntentMutation, PaymentIntentQuery
+
+
+class Query(JourneyQuery, CobreJourneyQuery, LocalMoneyQuery, AgendaQuery, PolygonReturnQuery, PaymentIntentQuery,
+            graphene.ObjectType):
     payment_bridge = graphene.Field(PaymentBridgeTransferType, internal_id=graphene.UUID(required=True))
 
     def resolve_payment_bridge(self, info, internal_id):
@@ -1011,7 +1015,7 @@ from .breb_location_schema import BrebLocationMutation
 
 
 class Mutation(JourneyMutation, CobreJourneyMutation, LocalMoneyMutation, BrebLocationMutation, AgendaMutation, PolygonReturnMutation,
-               graphene.ObjectType):
+               PaymentIntentMutation, graphene.ObjectType):
     prepare_payment_bridge = PreparePaymentBridge.Field()
     submit_payment_bridge = SubmitPaymentBridge.Field()
     quote_payment_bridge = QuotePaymentBridge.Field()

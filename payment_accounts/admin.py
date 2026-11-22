@@ -379,3 +379,48 @@ class PolygonReturnAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+
+class PaymentIntentAdmin(admin.ModelAdmin):
+    """Read-only: payments prepared for the owner to review and sign."""
+    list_display = ('internal_id', 'confio_account', 'created_by', 'source', 'state', 'state_reason', 'outcome',
+                    'payee_level', 'amount_local', 'currency', 'total_usd', 'created_at')
+    list_filter = ('state', 'outcome', 'created_by', 'payee_level', 'rail_method_id')
+    search_fields = ('internal_id', 'request_id', 'confio_account__user__username', 'confio_account__user__email')
+    ordering = ('-created_at',)
+
+    def get_readonly_fields(self, request, obj=None):
+        from .models import PaymentIntent
+        return tuple(f.name for f in PaymentIntent._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class PixParticipantAdmin(admin.ModelAdmin):
+    """Read-only: the Central Bank's public list of Pix participants."""
+    list_display = ('name', 'ispb', 'cnpj', 'kind', 'participation', 'active', 'listed_on')
+    list_filter = ('active', 'kind')
+    search_fields = ('name', 'ispb', 'cnpj')
+
+    def get_readonly_fields(self, request, obj=None):
+        from .models import PixParticipant
+        return tuple(f.name for f in PixParticipant._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class PixChargeHostAdmin(admin.ModelAdmin):
+    """Charge sites reviewed by hand (see pix_participants). Add one only
+    after checking that the site really is that institution's."""
+    list_display = ('host', 'participant', 'institution_name', 'active', 'updated_at')
+    list_filter = ('active',)
+    search_fields = ('host', 'institution_name', 'participant__name')
+    autocomplete_fields = ('participant',)

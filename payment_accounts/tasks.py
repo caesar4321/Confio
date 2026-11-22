@@ -223,3 +223,17 @@ def reconcile_edd():
         finally:
             LimitIncreaseRequest.objects.filter(pk=row.pk).update(updated_at=timezone.now())
     return forwarded
+
+
+@shared_task(name='payment_accounts.refresh_pix_participants')
+def refresh_pix_participants():
+    """The Central Bank's public list of Pix participants, once a day. A list
+    that cannot be read leaves the stored one as it is (it goes stale after
+    30 days, and then no charge site is called a known institution)."""
+    from . import pix_participants
+    try:
+        return pix_participants.refresh()
+    except Exception:  # noqa: BLE001 - tried again tomorrow
+        import logging
+        logging.getLogger(__name__).exception('Pix participants list was not refreshed')
+        return 0

@@ -41,7 +41,7 @@ VOICE_NOTE = """
 # navigate is checked here too (the per-user screen list: employees and
 # business accounts), then the app opens what the server approved.
 SERVER_TOOLS = {'navigate', 'escalate_to_human', 'get_month_summary', 'get_transactions', 'analyze_finances',
-                'get_portfolio', 'get_exchange_rate', 'get_topup_status'}
+                'get_portfolio', 'get_exchange_rate', 'get_topup_status', 'get_topup_limits'}
 
 
 class VoiceUnavailable(Exception):
@@ -69,7 +69,10 @@ def minutes_left(user):
 
 # Text-only tools: whole documents don't fit a voice call's tool output, and
 # categorizing needs a typed "sí" (service.confirm_pending_categorization).
-TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions'}
+# prepare_payment: a card is prepared only from a code the person typed or pasted.
+# The cards, buttons and forms of the chat (assistant/here.py) have nothing to be drawn on in a call.
+TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions', 'prepare_payment', 'act_here',
+                   'propose_username', 'notification_settings', 'ask_details'}
 
 
 def _realtime_tools(belt):

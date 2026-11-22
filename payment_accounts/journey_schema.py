@@ -167,6 +167,8 @@ class CreateInfiniaJourney(graphene.Mutation):
         destination_id = graphene.UUID()
     success = graphene.Boolean(required=True)
     errors = graphene.List(graphene.String, required=True)
+    # Set for a refusal that comes from a prepared payment (payment_intents).
+    error_code = graphene.String()
     journey = graphene.Field(InfiniaJourneyType)
 
     @classmethod
@@ -186,15 +188,37 @@ class CreateInfiniaJourney(graphene.Mutation):
             require_for_country(owner, local.country, info.context.META)
             is_new_send = kwargs.get('direction') == 'to_bank' and not InfiniaJourney.objects.filter(
                 confio_account=owner, request_id=kwargs.get('request_id')).exists()
-            if is_new_send and destination is not None:
-                from .local_money import require_current_destination
-                require_current_destination(destination)
-            # The monthly allowance is checked inside create_journey, under the owner lock.
-            row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
-                                 bridge=bridge, credit=credit, destination=destination, **kwargs)
+            # A request id that belongs to a prepared payment (payment_intents)
+            # may only become the payment its card showed.
+            # One transaction: the intent stays locked until its journey exists,
+            # and is marked submitted only if the journey was created.
+            from django.db import transaction
+            from . import payment_intents
+            with transaction.atomic():
+                intent = payment_intents.journey_guard(
+                    owner, kwargs.get('request_id'), direction=kwargs.get('direction'), bridge=bridge,
+                    destination=destination, minimum_fx_output=kwargs.get('minimum_fx_output'))
+                # After the guard: for a prepared payment the guard's own
+                # reading of the charge decides (and says so with a code).
+                if is_new_send and destination is not None:
+                    from .local_money import require_current_destination
+                    require_current_destination(destination)
+                # The monthly allowance is checked inside create_journey, under the owner lock.
+                row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
+                                     bridge=bridge, credit=credit, destination=destination, **kwargs)
+                payment_intents.journey_created(intent)
             return cls(success=True, errors=[], journey=row)
         except Exception as exc:
-            return cls(success=False, errors=[_public_error(exc)])
+            code = getattr(exc, 'code', '') or ''
+            if code in ('charge_changed', 'expired'):
+                # The charge no longer reads as the card showed it, or there is
+                # no time left to sign or settle it: that card is over.
+                try:
+                    from . import payment_intents
+                    payment_intents.journey_refused(owner, kwargs.get('request_id'), code)
+                except Exception:  # noqa: BLE001 - the refusal itself stands
+                    pass
+            return cls(success=False, errors=[_public_error(exc)], error_code=code)
 
 
 class AttachInfiniaReturnBridge(graphene.Mutation):

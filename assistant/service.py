@@ -44,6 +44,13 @@ HUMAN_KEYWORDS = ('hablar con una persona', 'hablar con un humano', 'agente huma
 HUMAN_REQUEST_MAX_CHARS = 200
 # Stored with the message, so the person sees it in their own bubble too.
 TRUNCATED_INPUT_NOTE = '… [mensaje recortado]'
+# Beside a prepared payment the reply may never say it was paid.
+PAID_CLAIM = re.compile(
+    r'\b(ya\s+(se\s+|lo\s+|la\s+|está\s+|quedó\s+|fue\s+)?(pag|envi|transfer)'
+    r'|(pago|transferencia|env[ií]o)\s+(fue\s+|está\s+|quedó\s+)?(realizad|hech|completad|exitos|enviad|confirmad|list)'
+    r'|qued[oó]\s+pagad|fue\s+pagad|se\s+pagó|he\s+pagado|pagué|pagad[oa]\b)', re.IGNORECASE)
+CARD_CLAIM = re.compile(r'\b(tarjeta|revisar\s+y\s+pagar)\b', re.IGNORECASE)
+from .engine import PAYMENT_PREPARED_REPLY  # noqa: E402
 
 
 def asks_for_person(text):
@@ -246,7 +253,7 @@ def send_team_notice(conversation, body, tag, *, user_id, hand_back=True):
     return message, True
 
 
-def post_system_note(user, body, tag, *, actions=None, rule_proposal=None):
+def post_system_note(user, body, tag, *, actions=None, rule_proposal=None, payment_intent=None):
     """A server-side notice in the user's PERSONAL assistant thread (the
     support thread Confio Assistant answers), e.g. a claim on their Cuenta
     inteligente. Shown as a system line, like the greeting: never as the
@@ -254,7 +261,8 @@ def post_system_note(user, body, tag, *, actions=None, rule_proposal=None):
     on ``tag`` per thread, so a retried caller does not post twice. No push:
     the caller's own notification carries one. ``actions`` are chips written
     by code; ``rule_proposal`` is a Cuenta inteligente rule proposal the app
-    opens through assistantRuleProposal. Returns (message, created),
+    opens through assistantRuleProposal; ``payment_intent`` ({'id': ...}) is a
+    prepared payment the app draws through assistantPaymentIntent. Returns (message, created),
     or (None, False) for a user without a personal account."""
     from users.models import Account
     if not isinstance(tag, str) or not tag.strip():
@@ -274,7 +282,8 @@ def post_system_note(user, body, tag, *, actions=None, rule_proposal=None):
         message = SupportMessage.objects.create(
             conversation=conversation, sender_type='SYSTEM', message_type='TEXT', body=body,
             metadata={'notice': tag, 'system_note': True, 'actions': list(actions or []),
-                      **({'rule_proposal': rule_proposal} if rule_proposal else {})})
+                      **({'rule_proposal': rule_proposal} if rule_proposal else {}),
+                      **({'payment_intent': payment_intent} if payment_intent else {})})
         conversation.last_message_at = message.created_at
         conversation.save(update_fields=['last_message_at', 'updated_at'])
     return message, True
@@ -534,7 +543,20 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
 
     # At most one paid-offer chip, chosen and capped by the server.
     paid_chip = None
-    if waiting or result.rule_proposal:
+    if result.payment_intent:
+        # The card is the reply's one action (see engine.PAYMENT_CHIP).
+        result.actions = [a for a in result.actions if a.get('target') == 'payment_intent']
+        # One thing to sign per reply: the card.
+        result.rule_proposal = None
+        if PAID_CLAIM.search(result.reply or ''):
+            # Nothing is paid until the owner signs: a reply that says
+            # otherwise is replaced by the plain fact.
+            result.reply = PAYMENT_PREPARED_REPLY
+    elif result.payment_refusal and (PAID_CLAIM.search(result.reply or '') or CARD_CLAIM.search(result.reply or '')):
+        # No payment was prepared: a reply that points at a card or claims a
+        # payment is replaced by the reason the server gave.
+        result.reply = result.payment_refusal
+    if waiting or result.rule_proposal or result.payment_intent:
         # No offers while a person is handling their case, and none beside a
         # Cuenta inteligente proposal (its chip is the reply's one chip). The
         # proposal chip targets 'smart_account_rule', so it stays.
@@ -542,7 +564,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     try:
         from . import paid_chips
         from .engine import allowed_destinations
-        if not waiting and not result.rule_proposal:
+        if not waiting and not result.rule_proposal and not result.payment_intent:
             paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)))
     except Exception:  # noqa: BLE001 - a probe must never break the answer
         logger.exception('Confio Assistant: paid chip selection failed')
@@ -557,7 +579,17 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     metadata = {'ai': True, 'actions': result.actions}
     if result.rule_proposal:
         metadata['rule_proposal'] = result.rule_proposal
+    if result.payment_intent:
+        # Only the id: the app draws the card from the server's row
+        # (assistantPaymentIntent), never from this reply's text.
+        metadata['payment_intent'] = {'id': result.payment_intent['id']}
     reply = _append(conversation, sender_type='AGENT', body=body, metadata=metadata)
+    if result.payment_intent:
+        try:
+            from payment_accounts import payment_intents
+            payment_intents.attach_message(result.payment_intent['id'], reply.pk, retire_earlier=True)
+        except Exception:  # noqa: BLE001 - the reply stands; the card stays unreachable (fails closed)
+            logger.exception('Confio Assistant: payment intent not attached to its message')
     if paid_chip is not None:
         try:
             paid_chips.log_shown(viewer, paid_chip)
