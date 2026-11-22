@@ -657,3 +657,18 @@ class CryptoPriceFreshnessTests(OpsBase):
         with self.settings(SMART_ACCOUNT_WATCH_CRYPTO_MAX_AGE_MINUTES=60), \
                 mock.patch('cusd_plus.crypto_prices.market_rows', return_value=self.rows(timedelta(minutes=45))):
             self.assertEqual(watches.asset_price('crypto:BTCB'), Decimal('90000'))
+
+
+class SaidDestinationAcrossMessagesTests(OpsBase):
+    """A tail written in one message and "1 dólar, cada 23 de mes" in the
+    next were joined into one longer number and the CLABE was refused."""
+
+    ROW = {'label': 'CLABE · 002180000000004321', 'holder_name': ''}
+
+    def test_the_tail_from_an_earlier_message_counts(self):
+        self.assertTrue(ops.said_destination('CLABE · 4321 · 1 dólar, cada 23 de mes', self.ROW))
+        self.assertTrue(ops.said_destination('4321 1 dólar', self.ROW))
+
+    def test_other_digits_never_count(self):
+        self.assertFalse(ops.said_destination('CLABE · 9999 · 1 dólar', self.ROW))
+        self.assertFalse(ops.said_destination('321 · 1 dólar', self.ROW))

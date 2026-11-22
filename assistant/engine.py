@@ -975,7 +975,9 @@ class Toolbelt:
     def _said(self):
         # The person's own words this turn and just before: amounts, assets,
         # percentages and alert levels must come from here, never the model.
-        return f'{self.earlier_user_messages} {self.last_user_message}'
+        # ' · ' keeps separate messages apart: an account tail in one message
+        # and "1 dólar" in the next must never read as one longer number.
+        return f'{self.earlier_user_messages} · {self.last_user_message}'
 
     def specs(self):
         from .guide import WALKS
@@ -1943,7 +1945,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     belt.last_user_message = said[-1] if said else ''
     # Tapped answers ("Que mi dinero no pierda valor") are not the person's
     # own words about a problem, so they never count as context.
-    belt.earlier_user_messages = ' '.join(m for m in said[-4:-1] if not is_tapped_text(m))
+    belt.earlier_user_messages = ' · '.join(m for m in said[-4:-1] if not is_tapped_text(m))
     try:
         done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)

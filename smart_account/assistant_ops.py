@@ -316,7 +316,10 @@ def said_destination(said: str, row: dict) -> bool:
     shown = _account_digits(row.get('label'))
     if len(shown) < MIN_ACCOUNT_TAIL:
         return False
-    for token in number_tokens(said):
+    # A written number, or any single digit group in it ("termina en 4321"):
+    # either must be a tail of the account number.
+    tokens = set(number_tokens(said)) | set(re.findall(r'\d+', said or ''))
+    for token in tokens:
         if len(token) >= MIN_ACCOUNT_TAIL and (shown.endswith(token) or token.endswith(shown)):
             return True
     return False
