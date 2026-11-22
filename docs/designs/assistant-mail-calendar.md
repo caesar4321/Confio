@@ -1,7 +1,7 @@
 # Design: mail and calendars for Confío IA
 
 Date: 2026-11-22
-Status: stage 1 (phone calendar) is built and switched off. The Gmail pilot was approved on 2026-11-22. Nothing is deployed or submitted to Google or Apple.
+Status: stage 1 (phone calendar) and the approved Gmail pilot are built and switched off. Nothing is deployed or submitted to Google or Apple.
 Fits the assistant-first redesign. Its rules for anything that moves money apply here: only the owner's signature moves money, the payee is the rail's answer, and third-party content is data.
 
 The repository is public. This document holds no user data, tokens or mail content, and none may be added.
@@ -224,8 +224,9 @@ Approved for the pilot on 2026-11-22.
 | Reminders | Phone | The OS schedule, with generic text |
 | Mail body and attachments (stages 2–3) | Server memory | Never |
 | Forwarding address (stage 2) | Server | The random address only, until replaced or revoked |
-| Derived need (stages 2–3) | Server | Encrypted: kind, due date, amount, currency, a biller id from our own list, an opaque source id, status. Deleted 30 days after the date or on revoke |
-| OAuth refresh token (stage 3) | Server | Encrypted under a separate KMS key, readable only by the sync worker |
+| Derived need (stages 2–3) | Server | Kind, due date, status and a keyed hash of the mail id. Encrypted: amount, currency, the mail id. Deleted 30 days after the date or on revoke |
+| Gmail address, unsent draft (pilot) | Server | Encrypted. The draft is deleted on send or after 24 hours (the sweep runs every 15 minutes) |
+| OAuth refresh token (stage 3) | Server | Encrypted under a key of its own (SSM SecureString), never the wallet master key |
 
 Logs carry counts, status and error types, never titles, senders, subjects or provider error bodies.
 
@@ -321,6 +322,52 @@ Three switches keep it off: `ASSISTANT_CALENDAR_ENABLED = false` in the app, Deb
 
 ---
 
+## 10b. Gmail pilot as built
+
+| Piece | Where |
+|---|---|
+| Server | `assistant/gmail/`, migration `assistant/0012_gmail_pilot`, sweep every 15 minutes |
+| App | `apps/src/assistant/mail/`, entry in `MascotPicker.tsx` |
+| Secret | `scripts/ops/gmail_pilot_secret.py` writes `/confio/secrets/prod/gmail-pilot` |
+
+- Off until `GMAIL_PILOT_USER_IDS` lists testers (at most 100, no wildcard), the secret exists, and a build has `ASSISTANT_MAIL_ENABLED = true`.
+- Connect uses the system browser. The callback page only hands the code to the app. The exchange needs the signed-in person and a verifier their phone holds, so a forwarded link cannot attach a victim's mailbox to an attacker.
+- Background reading fetches only mails matching Gmail's own keyword filter: the newest 100 in the window, 20 a run, at most 200 a day, 30 days back at first. A busy first month can therefore miss some. A keyed hash of each mail already read is kept in the cache for 2 days per connection, so none is sent to the model twice. Disconnecting erases the needs, so reconnecting reads them again, inside the per-person daily cap.
+- The sweep and the sync run on the analytics worker, never on the money queue: 30 seconds a sync, 20 syncs a sweep, and a task not started within 14 minutes is dropped. Past about 20 active testers each mailbox is read less often than every 15 minutes: give them a worker of their own then.
+- A send is built, read back and compared with what was confirmed before it leaves.
+- Secrets: codes are masked in every mail before a model sees it. Only a mail whose job is a code or a reset is dropped.
+- The "claims to be Confío" rule (section 8) looks at the sender, with look-alike letters folded. A body can still mention Confío.
+- The kill switch for the pilot is the tester list. `CONFIO_ASSISTANT_ENABLED` also hides the settings screen that holds Disconnect: while that is off, people disconnect at myaccount.google.com/permissions or through support.
+- It lives in its own sheet, outside the support thread. A nudge is one generic push a day.
+- When two Confío accounts connect the same Gmail, the grant is revoked at Google only when the last one leaves.
+- With the pilot off (an empty tester list), disconnecting and deletion keep working and still revoke at Google, as long as `GMAIL_PILOT_SECRET_NAME` stays set.
+- **The migration must run before the first restart on this code, pilot or no pilot:** deleting a user cascades into these tables and the sweep queries them.
+
+### Before the first tester
+
+1. Google Cloud, new project `confio-gmail-pilot`, signed in as the owner: enable the Gmail API. In Google Auth Platform set Branding (Confío, `confio.lat`, privacy URL), Audience External and Testing, add the testers' Gmail addresses, add the two scopes under Data Access, and create a Web client with redirect `https://confio.lat/gmail/connect/callback/`. Do not press Publish or submit for verification.
+2. Run the secret script.
+3. Publish the Privacy Policy's Google section (section 9) and update the store declarations for any build that ships the flag on.
+4. Deploy with the migration first, after the founder's go. `scripts/deployment/deploy_ec2_systemd.sh` continues when `migrate` fails (`|| true`): check that `showmigrations assistant` shows 0012 applied before the restart. Set `GMAIL_PILOT_SECRET_NAME=prod/gmail-pilot` and never unset it. Keep the one-time code out of nginx's error log, which records the full request line when the upstream is down (the root `nginx.conf` access log already drops queries):
+
+   ```
+   location = /gmail/connect/callback/ {
+       access_log off;
+       error_log /dev/null crit;
+       proxy_pass http://127.0.0.1:8000;
+       # All four, as in location /: without X-Real-IP a client could forge its own IP.
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+   ```
+
+   Put the block in the repo's root `nginx.conf`, above `location /`, and test it with `nginx -t`: the deploy script copies that file over the server's, so an edit made only on the server is lost at the next deploy. Confirm the application server's own log drops query strings there too.
+5. Set `GMAIL_PILOT_USER_IDS`, restart web, `celery`, `celery-analytics` (it runs the pilot's tasks) and `celery-beat`, and test with the owner's own account first.
+
+---
+
 ## 11. Rollout, cost and time
 
 Engineering times and run costs are estimates.
@@ -343,7 +390,7 @@ Decided on 2026-11-22: the Gmail pilot in section 0.
 
 Each of these still needs a yes before any work that depends on it.
 
-1. Deploy the pilot, and create the test Google project (needs the owner's Google Cloud sign-in).
+1. Deploy the pilot, and create the test Google project (needs the owner's Google Cloud sign-in, steps in 10b).
 2. After the pilot: OAuth verification and the yearly CASA budget.
 3. Release stage 1: the copy, the send to OpenAI, the privacy and store changes.
 4. Confirm that Confío will not ask for Apple or Google app passwords.

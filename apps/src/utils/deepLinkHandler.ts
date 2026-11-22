@@ -8,6 +8,7 @@ import { setPendingTeamInvite } from '../services/teamInviteLinks';
 import { teamTokenFromCode } from './teams';
 import { parseReviewLink, receiveReviewLink } from '../services/reviewLink';
 import { parseLinkUrl, receiveLink } from '../services/linkSend';
+import { receiveMailConnectLink } from '../assistant/mail/connectLink';
 
 const DEFERRED_LINK_KEY = 'confio_deferred_link';
 const AUTH_TOKEN_KEY = 'confio_auth_token';
@@ -302,6 +303,10 @@ export class DeepLinkHandler {
 
   private async handleDeepLink(url: string) {
     try {
+      // Gmail connect carries a one-time code: taken first, never logged or stored.
+      if (receiveMailConnectLink(url)) {
+        return;
+      }
       const parsedUrl = new URL(url);
       const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
 

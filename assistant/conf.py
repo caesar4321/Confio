@@ -49,6 +49,10 @@ DEFAULTS = {
     'ASSISTANT_CALENDAR_ALLOWED_USER_IDS': '',
     'ASSISTANT_CALENDAR_MODEL': 'gpt-6-luna',
 
+    # ---- Gmail pilot (assistant/gmail/) ----
+    # OpenAI only: the consent copy names it. Who gets it: GMAIL_PILOT_USER_IDS (settings).
+    'GMAIL_PILOT_MODEL': 'gpt-6-luna',
+
     # ---- Launch switches (2026-10-04: free launch) ----
     # Confio Assistant ships free: text, voice notes, analysis, pets. Realtime voice
     # (and the wake word, which opens a call) stay built but dark: realtime is

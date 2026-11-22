@@ -248,7 +248,9 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   const isMembershipClaim = ['ClaimInstitutionMembership', 'ApplyCobreBreb', 'BrebLocationChallenge', 'VerifyBrebLocation'].includes(operation.operationName);
   // Confio Assistant traffic carries message text, voice notes, pet photos,
   // and transcripts: never log its variables.
-  const redactVariables = isMembershipClaim || [
+  // Gmail pilot: questions, drafts, one-time codes.
+  const isAssistantMail = operation.operationName?.includes('AssistantMail');
+  const redactVariables = isMembershipClaim || isAssistantMail || [
     'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet',
     'StartAssistantVoice', 'ConnectAssistantVoice', 'RunAssistantVoiceTool', 'LogAssistantVoice',
     'UpdateAssistantProfile', 'UseAssistantPet', 'DeleteAssistantPet',
@@ -264,7 +266,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   // above just redacted. Extensions carry server-side detail for the same
   // reason, so they go with it.
   const redactErrorText = isMembershipClaim || shouldNeverMutateSession(operation.operationName)
-    || operation.operationName === 'AnalyzeAssistantCalendar'
+    || operation.operationName === 'AnalyzeAssistantCalendar' || isAssistantMail
     || VE_PAGOMOVIL_SENSITIVE_OPERATIONS.includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {

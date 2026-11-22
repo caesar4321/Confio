@@ -287,3 +287,7 @@ class AssistantNeed(models.Model):
 
     def __str__(self):
         return f'{self.category} ({self.phone_country})'
+
+
+# Gmail pilot (assistant/gmail/): off unless configured.
+from .gmail.models import GmailConnection, GmailOAuthState, MailDraft, MailNeed  # noqa: E402,F401
