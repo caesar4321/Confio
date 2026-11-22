@@ -1442,6 +1442,10 @@ from assistant import connections_admin as assistant_connections_admin
 assistant_connections_admin.register(confio_admin_site)
 confio_admin_site.register(AssistantThreadState, AssistantThreadStateAdmin)
 confio_admin_site.register(AssistantProfile, AssistantProfileAdmin)
+from assistant.models import AssistantMemory, AssistantMemoryFact
+from assistant.admin import AssistantMemoryAdmin, AssistantMemoryFactAdmin
+confio_admin_site.register(AssistantMemory, AssistantMemoryAdmin)
+confio_admin_site.register(AssistantMemoryFact, AssistantMemoryFactAdmin)
 from assistant.models import ProbeAnswer
 from assistant.admin import ProbeAnswerAdmin
 from assistant.models import AssistantGuideEvent, AssistantGuideStep

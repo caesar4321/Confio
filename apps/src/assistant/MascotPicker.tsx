@@ -18,6 +18,7 @@ import {
 import { useAssistant } from './AssistantContext';
 import CalendarEntry from './calendar/CalendarEntry';
 import MailEntry from './mail/MailEntry';
+import MemoryEntry from './memory/MemoryEntry';
 import AssistantMascot, { MASCOTS, MASCOT_COLORS, defaultMascotColor, type MascotKind } from './AssistantMascot';
 
 const EMERALD = '#047857';
@@ -304,6 +305,7 @@ export default function MascotPicker({ visible, profile, onClose, onSaved }: Pro
             ) : null}
             <CalendarEntry />
             <MailEntry />
+            <MemoryEntry />
             <Text style={styles.tip}>Arrastra la burbuja a cualquier lado si te tapa algo.</Text>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}

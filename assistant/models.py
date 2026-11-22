@@ -11,6 +11,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from users.models import SoftDeleteModel
+
 
 class Mascot(models.TextChoices):
     CONFI = 'CONFI', 'Confi'
@@ -268,6 +270,64 @@ class AssistantGuideEvent(models.Model):
 
     def __str__(self):
         return f'{self.user_id}: {self.step} {self.event}'
+
+
+class AssistantMemory(models.Model):
+    """What Confío IA keeps for one person in one account context (assistant/memory.py).
+
+    Never text a model wrote, and never a message's text: the summary is ids
+    of the person's own messages, resolved when read."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='assistant_memories')
+    # Exactly one, as inbox.SupportConversation is keyed.
+    account = models.ForeignKey('users.Account', on_delete=models.CASCADE, null=True, blank=True, related_name='+')
+    business = models.ForeignKey('users.Business', on_delete=models.CASCADE, null=True, blank=True, related_name='+')
+    # Null: never chose (CONFIO_ASSISTANT_MEMORY_DEFAULT_ON, CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON).
+    facts_enabled = models.BooleanField(null=True, blank=True)
+    recall_enabled = models.BooleanField(null=True, blank=True)
+    # Messages up to this id are never shown to the model again nor summarized.
+    forget_before_id = models.BigIntegerField(default=0)
+    summary_through_id = models.BigIntegerField(null=True, blank=True)
+    # The last message seen with the summary on: what was said while off is never summarized.
+    summary_seen_id = models.BigIntegerField(null=True, blank=True)
+    summary_ids = models.JSONField(default=list, blank=True)
+    excluded_ids = models.JSONField(default=list, blank=True)
+    version = models.PositiveIntegerField(default=0)
+    # The summary job's spend, kept out of AssistantTurn so it never uses up daily turns.
+    summary_runs = models.PositiveIntegerField(default=0)
+    summary_input_tokens = models.PositiveBigIntegerField(default=0)
+    summary_output_tokens = models.PositiveBigIntegerField(default=0)
+    summary_cost_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(models.Q(account__isnull=False, business__isnull=True)
+                           | models.Q(account__isnull=True, business__isnull=False)),
+                name='assistant_memory_one_context'),
+            models.UniqueConstraint(fields=['user', 'account'], condition=models.Q(business__isnull=True),
+                                    name='assistant_memory_account_uniq'),
+            models.UniqueConstraint(fields=['user', 'business'], condition=models.Q(account__isnull=True),
+                                    name='assistant_memory_business_uniq'),
+        ]
+
+    def __str__(self):
+        return f'{self.user_id}: memory {self.pk}'
+
+
+class AssistantMemoryFact(SoftDeleteModel):
+    """One preference from a closed list (assistant/memory_rules.py). Forgetting
+    blanks it and keeps the soft-deleted row: when, never what."""
+    memory = models.ForeignKey(AssistantMemory, on_delete=models.CASCADE, related_name='facts')
+    kind = models.CharField(max_length=24, blank=True, default='')
+    value = models.CharField(max_length=24, blank=True, default='')
+    # The message that asked. Deleting that message deletes the preference.
+    source_message = models.ForeignKey(
+        'inbox.SupportMessage', on_delete=models.CASCADE, null=True, blank=True, related_name='+')
+
+    def __str__(self):
+        return f'memory fact {self.pk}'
 
 
 class AssistantNeed(models.Model):

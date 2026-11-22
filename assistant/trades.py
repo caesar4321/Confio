@@ -328,6 +328,8 @@ def _confirmed(history, ticker, name, probes, side, amount, sell_all):
         return False
     if asked.sender_type != 'AGENT' or not (asked.metadata or {}).get('ai') or _carded(asked):
         return False
+    if (asked.metadata or {}).get('recalled'):
+        return False        # written with stored data (assistant/context.py): never a question a "sí" confirms
     if not timedelta(0) <= answer.created_at - asked.created_at <= PAYMENT_CODE_WINDOW:
         return False
 

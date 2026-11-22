@@ -38,6 +38,25 @@ DEFAULTS = {
     # silences it (2026-11-22). The team reads the threads and writes into them.
     'CONFIO_ASSISTANT_HUMAN_MODE_HOURS': 0,
     'CONFIO_ASSISTANT_REQUEST_TIMEOUT_SECONDS': 25,
+
+    # ---- Context and memory (docs/designs/assistant-memory.md): all off ----
+    # Each list: '' = nobody, '*' = everyone, or '12,34'.
+    # (a) wider window within a budget, bounded tool results, one smaller retry.
+    'CONFIO_ASSISTANT_CONTEXT_ALLOWED_USER_IDS': '',
+    # (b) rolling summary of the person's own older messages (ids only).
+    'CONFIO_ASSISTANT_SUMMARY_ALLOWED_USER_IDS': '',
+    # (c) typed preferences saved when the person asks.
+    'CONFIO_ASSISTANT_MEMORY_ALLOWED_USER_IDS': '',
+    # For someone who never chose. False = opt-in: the founder's decision.
+    'CONFIO_ASSISTANT_MEMORY_DEFAULT_ON': False,
+    'CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON': False,
+    'CONFIO_ASSISTANT_CONTEXT_MESSAGES': 40,
+    'CONFIO_ASSISTANT_CONTEXT_TOKENS': 6000,
+    'CONFIO_ASSISTANT_TOOL_RESULT_CHARS': 120_000,  # all of one turn's results
+    # OpenAI only, like the need tagger: the Privacy Policy names it.
+    'CONFIO_ASSISTANT_MEMORY_MODEL': 'gpt-6-luna',
+    'CONFIO_ASSISTANT_MEMORY_TIMEOUT_SECONDS': 8,
+
     # USD per 1M tokens: (input, cached input, output); transcription per minute.
     'CONFIO_ASSISTANT_PRICES': {
         'gpt-6-luna': ('0.10', '0.01', '0.50'),

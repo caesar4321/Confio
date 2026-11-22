@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AssistantProfile, AssistantThreadState, AssistantTurn
+from .models import AssistantMemory, AssistantMemoryFact, AssistantProfile, AssistantThreadState, AssistantTurn
 
 
 class AssistantTurnAdmin(admin.ModelAdmin):
@@ -19,6 +19,39 @@ class AssistantThreadStateAdmin(admin.ModelAdmin):
 class AssistantProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'mascot', 'mascot_name', 'bubble_hidden', 'updated_at')
     raw_id_fields = ('user',)
+
+
+class _MemoryAdmin(admin.ModelAdmin):
+    """When and how much, never what: a person's memory is theirs."""
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # Deleting a row here would undo a forget. Deleting the person still cascades.
+        match = getattr(request, 'resolver_match', None)
+        if 'assistantmemory' in (getattr(match, 'url_name', None) or ''):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def lookup_allowed(self, lookup, value, request=None):
+        # A filter in the URL would answer "does it hold X?" without showing X.
+        return lookup in ('id', 'id__exact', 'user__id__exact')
+
+
+class AssistantMemoryAdmin(_MemoryAdmin):
+    fields = ('user', 'account', 'business', 'facts_enabled', 'recall_enabled', 'summary_runs',
+              'summary_input_tokens', 'summary_output_tokens', 'summary_cost_usd', 'created_at', 'updated_at')
+    list_display = ('id', 'user', 'facts_enabled', 'recall_enabled', 'summary_runs', 'summary_cost_usd',
+                    'updated_at')
+    raw_id_fields = ('user', 'account', 'business')
+
+
+class AssistantMemoryFactAdmin(_MemoryAdmin):
+    fields = ('memory', 'created_at', 'deleted_at')
+    list_display = ('id', 'created_at', 'deleted_at')
 
 
 class AssistantGuideStepAdmin(admin.ModelAdmin):

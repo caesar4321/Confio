@@ -94,7 +94,9 @@ def choose(viewer, user_text, result, allowed, earlier=''):
         # `earlier`: their recent messages, as the follow-up to a problem
         # ("ayer, Banco X") rarely repeats it. Looking up a top-up counts too.
         if (PROBLEM.search(text) or PROBLEM.search(earlier or '')
-                or any(t.get('name') == 'get_topup_status' for t in result.tools if isinstance(t, dict))):
+                # (also in a pass dropped for its context: 'context:get_topup_status')
+                or any(str(t.get('name', '')).split(':')[-1] == 'get_topup_status'
+                       for t in result.tools if isinstance(t, dict))):
             return None
         for action in paid:
             # Confío IA+ has no pain point of its own: the model opened it

@@ -29,7 +29,7 @@ from django.utils import timezone
 
 from users.models_cashflow import CATEGORY_CHOICES
 
-from . import conf, market
+from . import conf, context as context_rules, market
 from .destinations import (BUSINESS_OWNER_ONLY, CONVERSATION_DESTINATIONS, DESTINATIONS, FALLBACKS, OWNER_ONLY,
                            PAID_OFFERS, PERSONAL_ONLY)
 from .prompts import ANALYSIS_PROMPT, build_system_prompt, conversation_home, dex_offered
@@ -1490,10 +1490,14 @@ class Toolbelt:
             from . import first_use
             if first_use.due(self.viewer):
                 specs.append(first_use.spec())
+            # What the person asked to be remembered, read only when it helps.
+            specs += context_rules.specs(self)
         return specs
 
     def call(self, name, args):
         from . import here, topup_limits
+        if name == context_rules.RECALL:
+            return context_rules.recall(self)
         if name == 'get_topup_limits':
             return ({'error': f'herramienta desconocida: {name}'} if self.waiting_for_team
                     else topup_limits.data(self.viewer))
@@ -1987,6 +1991,11 @@ def history_items(messages, photos=None):
             continue
         is_staff = (message.sender_type == 'AGENT' and not metadata.get('ai')
                     and getattr(message, 'sender_user_id', None) is not None)
+        if message.sender_type == 'AGENT' and metadata.get('recalled'):
+            # It used stored data: never replayed, so that data cannot be
+            # carried into a turn that acts (assistant/context.py).
+            items.append({'role': 'assistant', 'content': context_rules.RECALLED_REPLY})
+            continue
         is_photo = message.sender_type == 'USER' and photo_rules.is_photo(message)
         if not is_staff:
             # Only a real person on the team may speak as the team.
@@ -2193,9 +2202,12 @@ def _open_claimed_screen(belt, result):
 
 def run_turn(viewer: Viewer, history, *, first_name, account_label, country, analyses_left, can_navigate=True,
              reserve_analysis=None, reserve_news=None, reserve_web=None, waiting_for_team=False, guide_note='',
-             photos=None):
+             photos=None, context=None):
     """Answer the last user message in `history`. Raises AssistantUnavailable,
-    except after the turn already saved changes."""
+    except after the turn already saved changes.
+
+    `context` (assistant/context.py) changes only what the model is shown.
+    Every guard below reads `history`."""
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news, reserve_web=reserve_web)
@@ -2203,6 +2215,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     belt.waiting_for_team = waiting_for_team
     belt.guide_note = guide_note
     belt.photos = photos or {}
+    context_rules.begin(belt, None if waiting_for_team else context)
     said = [item['content'] for item in history_items(history) if item['role'] == 'user']
     belt.last_user_message = said[-1] if said else ''
     # Tapped answers ("Que mi dinero no pierda valor") are not the person's
@@ -2212,7 +2225,8 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     try:
         done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)
-        if _promised_unchecked_portfolio(belt, done):
+        # A smaller retry has no tools: there is nothing to make it look with.
+        if not belt.shrunk and _promised_unchecked_portfolio(belt, done):
             # "Necesito revisar tu portafolio" and no call: the person got no
             # answer (2026-10-18, 10-24). Run once more, made to look first.
             belt.force_tool = 'get_portfolio'
@@ -2237,7 +2251,37 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
         raise
 
 
-def _run_turn(belt, result, viewer, history, *, first_name, account_label, country):
+def _run_turn(belt, result, viewer, history, **who):
+    try:
+        return _run_turn_once(belt, result, viewer, history, **who)
+    except context_rules.RawPass:
+        # It wanted to act after seeing stored context: only a pass that saw
+        # nothing but the raw messages may.
+        context_rules.start_raw_pass(belt, result)
+    except AssistantUnavailable as exc:
+        if not context_rules.may_go_raw(belt, exc):
+            raise
+        context_rules.start_raw_pass(belt, result)
+    # Nothing is live in the raw pass, so it never asks to start over.
+    return _run_turn_once(belt, result, viewer, history, **who)
+
+
+def _post_fitting(belt, payload, input_items):
+    """One provider call; once per pass, a smaller one when it was too large."""
+    try:
+        return _openai_post(payload)
+    except AssistantUnavailable as exc:
+        if not context_rules.may_shrink(belt, exc):
+            context_rules.retry_raw(belt, exc)
+            raise
+        input_items[:] = context_rules.shrunk_input(belt, input_items)
+        # The smaller retry answers in words: it saw too little to act.
+        payload.update(input=input_items, tool_choice='none',
+                       instructions=payload['instructions'] + context_rules.SHRUNK_NOTE)
+        return _openai_post(payload)
+
+
+def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, country):
     from users import paid_offers
 
     local_now = timezone.now().astimezone(viewer.tz)
@@ -2272,6 +2316,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
     if seen_photos:
         from . import photos as photo_rules
         system += photo_rules.NOTE
+    system += context_rules.notes(belt)
     if belt.force_tool:
         system += RETRY_NOTE
     model = conf.get('CONFIO_ASSISTANT_MODEL')
@@ -2284,7 +2329,8 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
     payload = {
         'model': model,
         'instructions': system,
-        'input': history_items(history, photos=seen_photos),
+        'input': context_rules.closing(belt, context_rules.leading(
+            belt, history_items(context_rules.model_messages(belt, history), photos=seen_photos))),
         'tools': specs,
         # Kept at 2000: a longer reply can outrun the request timeout. A cut
         # reply says so (_with_cut_note) and the person asks to continue.
@@ -2301,13 +2347,14 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
 
     input_items = list(payload['input'])
     for _ in range(conf.get('CONFIO_ASSISTANT_MAX_TOOL_STEPS')):
-        data = _openai_post(payload)
+        data = _post_fitting(belt, payload, input_items)
         result.add_usage(model, data.get('usage'))
         output = data.get('output') or []
         calls = [item for item in output if item.get('type') == 'function_call']
         if not calls:
             result.reply = _with_cut_note(_output_text(data), _hit_output_limit(data))
             break
+        context_rules.before_tools(belt, [call.get('name') for call in calls])
         # store=False: carry the whole transcript forward instead of previous_response_id.
         input_items.extend(item for item in output if item.get('type') in {'function_call', 'reasoning'})
         for call in calls:
@@ -2327,7 +2374,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
             payload['tool_choice'] = 'none'
     else:
         payload = {**payload, 'input': input_items, 'tool_choice': 'none'}
-        data = _openai_post(payload)
+        data = _post_fitting(belt, payload, input_items)
         result.add_usage(model, data.get('usage'))
         result.reply = _with_cut_note(_output_text(data), _hit_output_limit(data))
 
@@ -2337,6 +2384,7 @@ def _run_turn(belt, result, viewer, history, *, first_name, account_label, count
 def _run_tool(belt, result, name, args):
     """Run one model tool call and return its output as the JSON text the model reads."""
     started = time.monotonic()
+    args = context_rules.tool_args(belt, name, args)
     try:
         tool_output = belt.call(name, args)
     except AssistantUnavailable:
@@ -2352,10 +2400,12 @@ def _run_tool(belt, result, name, args):
         'ok': 'error' not in tool_output,
         'ms': int((time.monotonic() - started) * 1000),
     })
+    context_rules.after_tool(belt, result)
     # Public documents are read whole; everything else stays small.
-    return json.dumps({k: v for k, v in tool_output.items() if not str(k).startswith('_')},
-                      ensure_ascii=False)[:(PUBLIC_DOCUMENT_MAX_CHARS + 2000
-                                           if name == 'read_public_document' else 12000)]
+    return context_rules.bounded(
+        belt, json.dumps({k: v for k, v in tool_output.items() if not str(k).startswith('_')},
+                         ensure_ascii=False)[:(PUBLIC_DOCUMENT_MAX_CHARS + 2000
+                                               if name == 'read_public_document' else 12000)])
 
 
 def _finish(result):
@@ -2432,10 +2482,12 @@ def _run_turn_claude(belt, result, history, system, model, effort, specs):
     import anthropic
 
     client = _claude_client()
-    messages = [{'role': item['role'], 'content': _claude_content(item['content'])}
-                for item in history_items(history, photos=getattr(belt, 'photos', None) or {})]
+    shown = context_rules.leading(belt, history_items(context_rules.model_messages(belt, history),
+                                                      photos=getattr(belt, 'photos', None) or {}))
+    messages = [{'role': item['role'], 'content': _claude_content(item['content'])} for item in shown]
     while messages and messages[0]['role'] != 'user':
         messages.pop(0)
+    history_count = len(messages)
     request = {
         'model': model,
         'max_tokens': 4000,
@@ -2446,12 +2498,26 @@ def _run_turn_claude(belt, result, history, system, model, effort, specs):
         request['output_config'] = {'effort': effort}
 
     def send(**extra):
+        nonlocal history_count
+        if belt.shrunk:
+            extra['tool_choice'] = {'type': 'none'}
         try:
             response = client.messages.create(**request, messages=messages, **extra)
         except anthropic.APIError as exc:
-            raise AssistantUnavailable(f'Claude request failed: {exc}') from exc
+            if not context_rules.may_shrink(belt, exc):
+                context_rules.retry_raw(belt, exc)
+                raise AssistantUnavailable(f'Claude request failed: {exc}') from exc
+            messages[:] = context_rules.shrunk_messages(belt, messages, history_count)
+            history_count = 1
+            extra['tool_choice'] = {'type': 'none'}
+            request['system'] = [*request['system'], {'type': 'text', 'text': context_rules.SHRUNK_NOTE}]
+            try:
+                response = client.messages.create(**request, messages=messages, **extra)
+            except anthropic.APIError as again:
+                raise AssistantUnavailable(f'Claude request failed: {again}') from again
         result.add_usage(model, _claude_usage(response.usage))
         if response.stop_reason == 'refusal':
+            context_rules.retry_raw(belt, 'refusal')
             raise AssistantUnavailable('Claude refused')
         return response
 
@@ -2464,6 +2530,7 @@ def _run_turn_claude(belt, result, history, system, model, effort, specs):
         if not calls:
             result.reply = _with_cut_note(text_of(response), response.stop_reason == 'max_tokens')
             break
+        context_rules.before_tools(belt, [call.name for call in calls])
         messages.append({'role': 'assistant', 'content': response.content})
         messages.append({'role': 'user', 'content': [
             {'type': 'tool_result', 'tool_use_id': call.id,

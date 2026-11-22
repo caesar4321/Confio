@@ -22,7 +22,7 @@ from inbox.push_service import send_support_staff_push
 from inbox.schema import get_or_create_support_conversation
 
 from . import photos
-from . import conf, guide
+from . import conf, context as context_rules, guide, memory
 from .engine import (AssistantUnavailable, Viewer, categorize_movements, general_while_waiting, human_mode_active,
                      run_turn, third_party_text)
 from .models import AssistantProfile, AssistantThreadState, AssistantTurn, TurnModality
@@ -410,6 +410,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
                                    metadata={'modality': photos.MODALITY if photo_url else modality,
                                              'screen': screen})
+            memory.saw(conversation, user_message)
             # A proposal lives for exactly one user message, whatever path it takes.
             proposal = take_pending_categorization(conversation)
             pending_watch = take_pending_watch(conversation)
@@ -419,6 +420,11 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         # The team owns the thread: the message always reaches them, and a plain
         # question about how the app works still gets an answer meanwhile.
         waiting = human and conf.get('CONFIO_ASSISTANT_ENABLED') and general_while_waiting(clean)
+        if memory.asks_to_forget(conversation, clean) and (
+                human or (turn is None and remaining_turns(user) <= 0)):
+            # "olvida todo" needs no model and no turn: it holds while the team
+            # has the thread and after the day's last turn too.
+            memory.forget_unanswered(conversation, user_message, clean)
         if human:
             _route_to_team(user_message)
             if not waiting:
@@ -446,6 +452,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     # 4. Answer (no lock; analyses reserve their own slot).
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name,
                      request_meta=request_meta)
+    if memory.asks_to_forget(conversation, clean):
+        proposal = pending_watch = None  # "ok olvida todo" is not the yes to a pending question
     confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
     confirmed_tool = 'categorize_transactions:confirmed'
     if confirmed is None:
@@ -467,9 +475,18 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     else:
         history = list(conversation.messages.order_by('-created_at')[:conf.get('CONFIO_ASSISTANT_HISTORY_MESSAGES')])
         history.reverse()
+    started = time.monotonic()
+    # "recuerda…" / "olvida…": the write and its confirmation are code's. Read
+    # after `history`, so nothing that arrives meanwhile becomes the message answered.
+    remembered = None if waiting else memory.handle_message(conversation, user_message, clean)
+    if remembered is not None and remembered.reply:
+        return _memory_reply(user, conversation, user_message, turn, remembered, remaining, transcript,
+                             audio_seconds, started)
+    # Only what the model is shown. Every guard goes on reading `history`.
+    turn_context = None if waiting else context_rules.load(
+        conversation, history, memory_note=remembered.note if remembered else '', answering=user_message)
     # The photo sent just now is seen even if the cache lost it.
     seen_photos = {**photos.for_history(history), **({user_message.id: photo_url} if photo_url else {})}
-    started = time.monotonic()
     try:
         result = run_turn(
             viewer, history,
@@ -483,6 +500,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             can_navigate=can_navigate,
             waiting_for_team=bool(waiting),
             photos=seen_photos,
+            **({'context': turn_context} if turn_context is not None else {}),
             guide_note='' if waiting else guide.steering_note(
                 guide_step, country_of(user), viewer=viewer, request_meta=viewer.request_meta),
         )
@@ -491,6 +509,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         if seen_photos:
             photos.forget([m for m in history if m.id in seen_photos])
         metered = _meter_partial(turn, getattr(exc, 'partial', None))
+        if remembered is not None:
+            metered = _meter_partial(turn, remembered.usage) or metered
         if waiting or _team_took_over(user, conversation, user_message):
             turn.error = (f'unavailable while waiting for the team ({str(exc)[:200]})' if waiting
                           else f'superseded by human handoff ({str(exc)[:200]})')
@@ -506,6 +526,9 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         turn.save()
         return AskOutcome(user_message=user_message, reply_message=reply, remaining_turns=remaining - 1,
                           transcript=transcript)
+
+    if remembered is not None:
+        _add_spend(result, remembered.usage)
 
     # The team may have taken the thread while the model was answering: then
     # the AI stays quiet (no reply, no screen actions) and the message waits
@@ -575,7 +598,11 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         # Only the id: the app draws the card from the server's row
         # (assistantPaymentIntent), never from this reply's text.
         metadata['payment_intent'] = {'id': result.payment_intent['id']}
+    if turn_context is not None and turn_context.used_data:
+        metadata['recalled'] = True
     reply = _append(conversation, sender_type='AGENT', body=body, metadata=metadata)
+    if turn_context is not None:
+        memory.after_reply(conversation, turn_context.forgot, reply)
     if result.payment_intent:
         try:
             from payment_accounts import payment_intents
@@ -602,6 +629,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     turn.error = ''
     turn.latency_ms = int((time.monotonic() - started) * 1000)
     turn.save()
+    if not waiting:
+        memory.schedule_summary(conversation)
 
     return AskOutcome(user_message=user_message, reply_message=reply, actions=result.actions,
                       mode='HUMAN' if waiting else 'AI',
@@ -740,6 +769,36 @@ def _meter_partial(turn, partial):
     turn.output_tokens += partial.output_tokens
     turn.cost_usd = (turn.cost_usd or 0) + partial.cost_usd
     return ['models_used', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'cost_usd']
+
+
+def _add_spend(result, extra):
+    """A second model call of the same turn (reading a memory request)."""
+    result.models_used = list(dict.fromkeys([*result.models_used, *extra.models_used]))
+    result.input_tokens += extra.input_tokens
+    result.cached_input_tokens += extra.cached_input_tokens
+    result.output_tokens += extra.output_tokens
+    result.cost_usd += extra.cost_usd
+
+
+def _memory_reply(user, conversation, user_message, turn, remembered, remaining, transcript, audio_seconds,
+                  started):
+    """The code-written answer to "recuerda…" / "olvida…"."""
+    usage = remembered.usage
+    turn.models_used = usage.models_used
+    turn.input_tokens = usage.input_tokens
+    turn.cached_input_tokens = usage.cached_input_tokens
+    turn.output_tokens = usage.output_tokens
+    turn.cost_usd = usage.cost_usd + transcription_cost(audio_seconds)
+    turn.tools = [{'name': 'memory', 'ok': True}]
+    turn.latency_ms = int((time.monotonic() - started) * 1000)
+    taken = _team_took_over(user, conversation, user_message)
+    reply = None if taken else _append(conversation, sender_type='AGENT', body=remembered.reply,
+                                       metadata={'ai': True, 'memory': True})
+    turn.reply_message = reply
+    turn.error = 'superseded by human handoff' if taken else ''
+    turn.save()
+    return AskOutcome(user_message=user_message, reply_message=reply, mode='HUMAN' if taken else 'AI',
+                      remaining_turns=remaining - 1, transcript=transcript)
 
 
 def _tool_reserver(user, turn, name, left):
