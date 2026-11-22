@@ -436,7 +436,6 @@ class InboundScanCursorTests(TestCase):
         with self._fail_once_for('_record_inbound_deposit', log, RuntimeError('db')):
             self._scan()
         Account.objects.filter(bsc_address=HOLDER).update(bsc_address='0x' + 'd4' * 20)
-        cache.delete('cusd_plus_bsc_registered_v1')
         self._later()
         self.assertEqual(self._rows(log), 1)
 
@@ -501,6 +500,10 @@ class InboundScanCursorTests(TestCase):
             self._scan()
             self.assertEqual(self.ranges, [])
         finally:
+            # Unlock, then close: a closed connection's locks go when its
+            # backend exits, which can be after close() returns.
+            with other.cursor() as db:
+                db.execute('SELECT pg_advisory_unlock(%s)', [tasks.SCAN_LOCK_ID])
             other.close()
         self._scan()
         self.assertTrue(self.ranges)
@@ -530,3 +533,74 @@ class InboundScanCursorTests(TestCase):
         self.chain = [_transfer(1, OLD)]
         self._scan()
         self.assertEqual(self._rows(self.chain[0]), 1)
+
+    # ── a wallet counts from the moment it is stored ────────────────────
+
+    def _new_wallet(self, name, address=None):
+        from users.models import Account, User
+        user = User.objects.create(username=f'scan-{name}', firebase_uid=f'scan-{name}')
+        return Account.objects.create(
+            user=user, account_type='personal', account_index=0, bsc_address=address)
+
+    def test_a_new_wallets_first_deposit_is_recorded_in_every_pass(self):
+        self._scan()  # a scan has run in the last ten minutes
+        wallet = '0x' + 'e7' * 20
+        self._new_wallet('new', wallet)
+        block = self.head + 10
+        logs = [_transfer(1, block, to=wallet), _transfer(2, block, to=wallet, token=VAULT),
+                _transfer(3, block, to=wallet, token=CUSD)]
+        self.chain = logs
+        self._later()
+        # One assertion, so a failure names every pass that missed.
+        self.assertEqual([(self._rows(log), self._notices(log)) for log in logs], [(1, 1)] * 3)
+
+    def test_a_wallet_stored_while_the_head_is_read_is_in_that_scan(self):
+        wallet = '0x' + 'eb' * 20
+        log = _transfer(1, OLD, to=wallet)  # past the rewind once this scan moves the cursor
+        self.chain = [log]
+
+        def rpc(method, params, timeout=15):
+            if method == 'eth_blockNumber':  # a slow head read: the wallet lands meanwhile
+                self._new_wallet('during', wallet)
+            return self._rpc(method, params, timeout)
+
+        with mock.patch('cusd_plus.tasks._rpc', side_effect=rpc):
+            self._scan()
+        self._later()
+        self.assertEqual(self._rows(log), 1)
+
+    def test_an_address_registered_by_update_counts_at_once(self):
+        from users.models import Account
+
+        account = self._new_wallet('late')
+        self._scan()
+        wallet = '0x' + 'e8' * 20
+        Account.objects.filter(pk=account.pk).update(bsc_address=wallet)  # no signal sees this write
+        log = _transfer(1, self.head + 10, to=wallet)
+        self.chain = [log]
+        self._later()
+        self.assertEqual(self._rows(log), 1)
+
+    def test_a_replaced_or_closed_wallet_stops_counting_at_once(self):
+        from users.models import Account
+
+        self.assertIn(HOLDER, tasks._registered_bsc_addresses())
+        replacement = '0x' + 'e9' * 20
+        Account.objects.filter(bsc_address=HOLDER).update(bsc_address=replacement)
+        Account.objects.filter(bsc_address=FRIEND).update(deleted_at=timezone.now())
+        self.assertEqual(set(tasks._registered_bsc_addresses()), {replacement})
+
+    def test_the_foreground_registration_sees_a_new_wallet(self):
+        from types import SimpleNamespace
+
+        from cusd_plus.schema import RegisterBscUsdtArrival
+
+        self._scan()
+        wallet = '0x' + 'ea' * 20
+        account = self._new_wallet('foreground', wallet)
+        log = _transfer(1, self.head + 10, to=wallet)
+        with mock.patch('cusd_plus.schema._bsc_rate_limited', return_value=False), \
+                mock.patch('cusd_plus.tasks._rpc', return_value={'status': '0x1', 'logs': [log]}):
+            result = RegisterBscUsdtArrival().mutate(
+                SimpleNamespace(context=SimpleNamespace(user=account.user)), log['transactionHash'])
+        self.assertEqual((result.recorded, self._rows(log)), (True, 1))

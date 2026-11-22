@@ -264,9 +264,6 @@ class CompleteWalletReconciliation(graphene.Mutation):
                     item.save(update_fields=['algorand_address', 'bsc_address',
                                              'is_keyless_migrated'])
                 # Neither pending transactions nor recorded amounts are rewritten.
-                # Drop the monitor's cached active-address map after commit.
-                from django.core.cache import cache
-                transaction.on_commit(lambda: cache.delete('cusd_plus_bsc_registered_v1'), robust=True)
             logger.info('Wallet reconciliation completed accounts=%s user=%s provider=%s',
                         len(accounts), user.pk, payload['provider'])
             return cls(success=True, bsc_address=address, accounts=account_results(accounts))

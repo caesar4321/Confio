@@ -510,8 +510,6 @@ def _scan_inbound() -> None:
                    if re.fullmatch(r'0x[0-9a-fA-F]{40}', c.user_bsc_address or '')]
     conv_watch = {c.user_bsc_address.lower(): c for c in conversions}
 
-    registered = _registered_bsc_addresses()  # addr -> account_id
-
     ramp_addrs: set[str] = set()
     try:
         from ramps.models import RampTransaction
@@ -523,10 +521,6 @@ def _scan_inbound() -> None:
         ).exclude(actor_address='').values_list('actor_address', flat=True)[:300]}
     except Exception:  # noqa: BLE001
         logger.exception('ramp watch-set union failed')
-
-    watch_all = set(conv_watch) | set(registered) | ramp_addrs
-    if not watch_all:
-        return  # idle: zero RPC calls
 
     # Backoff: after SCAN_FAILURE_ALERT_THRESHOLD consecutive dead scans,
     # attempt only every 10th beat instead of hammering dead endpoints
@@ -565,6 +559,12 @@ def _scan_inbound() -> None:
         # A node behind what was scanned: nothing new, and no cursor moves back.
         _scan_failed('blockNumber', RuntimeError(f'head {latest_block} is behind cursor {cursor}'))
         return
+    # Read after the head, never before: every wallet stored by the time a
+    # block existed is then in the map that moves the cursors past it.
+    registered = _registered_bsc_addresses()  # addr -> account_id
+    watch_all = set(conv_watch) | set(registered) | ramp_addrs
+    if not watch_all:
+        return  # nobody to watch: no log queries
     if cursor is None:
         cursor = max(latest_block - 1200, 0)
         # Saved now: a killed cold run must not restart from a later head.
@@ -1498,15 +1498,15 @@ def repair_payment_bridge_deposit(transfer, receipt):
 def _registered_bsc_addresses() -> dict:
     """addr(lower) -> account_id for every savings-activated account.
     Having a bsc_address IS the registration — the address only exists once
-    the user activates the savings rail. Cached briefly: the scanner runs
-    every minute, the set changes rarely."""
-    from django.core.cache import cache
+    the user activates the savings rail.
+
+    Never cached. A scan moves its cursor past every block it read with this
+    map, so a wallet missing from it loses that deposit for good; and the
+    address is written in several places, some by .update(), which no
+    invalidation would see. One small query per scan."""
     from users.models import Account
 
-    cached = cache.get('cusd_plus_bsc_registered_v1')
-    if cached is not None:
-        return cached
-    addr_map = {
+    return {
         row['bsc_address'].lower(): row['id']
         # A Cuenta inteligente row's address is a contract the owner funds
         # from their own wallet: its inflows are not deposits to credit, and
@@ -1515,8 +1515,6 @@ def _registered_bsc_addresses() -> dict:
         .exclude(bsc_address__isnull=True).exclude(bsc_address='')
         .values('id', 'bsc_address')
     }
-    cache.set('cusd_plus_bsc_registered_v1', addr_map, 600)
-    return addr_map
 
 
 def _record_inbound_deposit(account_id, to_addr, amount_usd, tx_ref, tx_hash, source, now,
