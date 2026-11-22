@@ -424,11 +424,17 @@ def _movable(asset) -> tuple[bool, str | None]:
     return True, None
 
 
-def move_preview(viewer, direction: str) -> dict:
+def move_preview(viewer, direction: str, *, require_account: bool = True) -> dict:
+    """What would move. `require_account=False` (read-only preview, 'in'
+    only) lists the personal wallet before the account exists: the first
+    deposit screen shows what the person can put in before subscribing."""
     if direction not in ('in', 'out'):
         raise PrepareError('bad_direction')
     _require_enabled() if direction == 'in' else _require_configured()
-    own = _own_active(viewer) if direction == 'in' else _own_any(viewer)
+    if direction == 'in' and not require_account:
+        own = context.own_account(viewer.user)
+    else:
+        own = _own_active(viewer) if direction == 'in' else _own_any(viewer)
     holder = viewer.signer_address if direction == 'in' else own.contract_address
     try:
         held = assets_mod.assets_of(holder)

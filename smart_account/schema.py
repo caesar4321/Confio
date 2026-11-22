@@ -675,7 +675,8 @@ class Query(graphene.ObjectType):
         if viewer is None:
             return None
         try:
-            preview = services.move_preview(viewer, direction)
+            # A first deposit is previewed before the account exists.
+            preview = services.move_preview(viewer, direction, require_account=False)
         except services.PrepareError:
             return None
         rows = [SmartAccountMoveAssetType(

@@ -137,6 +137,13 @@ it('offers a retry when the lists cannot be loaded', async () => {
   expect(text(tree)).toContain('No pudimos cargar esto');
 });
 
+it('an empty answer is a failed read, never "Hoy tienes US$0,00"', async () => {
+  api.fetchSmartAccountMovePreview.mockResolvedValue(ok(null));
+  await mount();
+  expect(text(tree)).toContain('No pudimos cargar esto');
+  expect(text(tree)).not.toContain('Hoy tienes');
+});
+
 it('lists the other dollar with the other assets only when it holds something', async () => {
   api.fetchSmartAccountMovePreview.mockResolvedValue(ok(movePreview({
     assets: [

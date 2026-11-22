@@ -120,7 +120,9 @@ export function SmartAccountFundScreen() {
   }
 
   const loading = (offer.loading && !offer.data) || (preview.loading && !preview.data);
-  const failed = (offer.failed && !offer.data) || (preview.failed && !preview.data);
+  // A read that came back empty is a failure, never an empty wallet: "Hoy
+  // tienes US$0,00" must only ever be a real zero.
+  const failed = (offer.failed && !offer.data) || (!preview.loading && !preview.data);
 
   const onReview = () => {
     setTouched(true);

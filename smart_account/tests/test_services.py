@@ -166,6 +166,18 @@ class SubscribeTests(SmartAccountTestCase):
             self.assertEqual(self._code(services.prepare_deposit, self.viewer(self.user),
                                         [{'asset_key': 'cusd_plus', 'units': '1'}]), 'disabled')
 
+    def test_first_deposit_preview_reads_the_wallet_before_the_account_exists(self):
+        # The subscribe (fund) screen asks before there is any account: it
+        # must see the personal wallet, never "no_account" shown as $0.
+        self.fund(CUSD, self.user.wallet, 3 * WAD)
+        self.assertEqual(self._code(services.move_preview, self.viewer(self.user), 'in'), 'no_account')
+        preview = services.move_preview(self.viewer(self.user), 'in', require_account=False)
+        self.assertIsNone(preview['own'])
+        self.assertIn('cusd', [a.key for a in preview['included']])
+        # Moving still needs the account.
+        self.assertEqual(self._code(services.prepare_move_everything, self.viewer(self.user), 'in', 0),
+                         'no_account')
+
     def test_move_everything_lists_and_splits(self):
         account = self.make_account(self.user)
         self.fund(CUSD, self.user.wallet, 3 * WAD)
