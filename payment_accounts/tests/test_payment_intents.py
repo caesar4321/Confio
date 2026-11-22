@@ -1108,3 +1108,17 @@ class AssistantGuardTests(PaymentIntentBase):
         self.assertEqual(kept.reply_message.body, service.PAYMENT_PREPARED_REPLY)
         self.assertEqual(kept.reply_message.metadata['payment_intent'],
                          {'id': str(PaymentIntent.objects.get().internal_id)})
+
+
+class AmountReadingTests(SimpleTestCase):
+    """One written number, one amount."""
+
+    def test_a_decimal_is_never_hundreds(self):
+        for said, meant in (('1.02', '1.02'), ('1,02', '1.02'), ('20,5', '20.5'), ('1.500,50', '1500.50'),
+                            ('1,500.50', '1500.50'), ('1.000', '1000'), ('1.000.000', '1000000'), ('0.500', '0.5'),
+                            ('500', '500')):
+            self.assertEqual(payment_intents._amount_values(said), {Decimal(meant)}, said)
+        for said in ('1.2.3', '22.11.2026', '1..5'):
+            self.assertEqual(payment_intents._amount_values(said), set(), said)
+        self.assertFalse(payment_intents._amount_written('envía 1.02 dólares a @ana', 102))
+        self.assertTrue(payment_intents._amount_written('envía 1.02 dólares a @ana', Decimal('1.02')))

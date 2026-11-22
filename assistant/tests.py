@@ -4433,6 +4433,97 @@ class StockTradeCardTests(TestCase):
                       self._propose(self._belt('compra 20 de Apple'), side='sell')['motivo'])
         self.assertIn('no escribió que quiere comprar', self._propose(self._belt('20 dólares de Apple'))['motivo'])
 
+    ANT = ('ANT', 'Anthropic, PBC')
+
+    def _thread(self, *lines):
+        start = timezone.now() - timedelta(minutes=len(lines))
+        return [SimpleNamespace(sender_type='USER' if who == 'u' else 'AGENT', body=body,
+                                metadata={'ai': True, 'actions': list(extra)} if who == 'a' else {},
+                                created_at=start + timedelta(minutes=n))
+                for n, (who, body, *extra) in enumerate(lines)]
+
+    def _in_thread(self, history, found=ANT, amount=1.02, side='buy', sell_all=False, other=False):
+        from .engine import payment_texts
+
+        belt = self._belt(*payment_texts(history), account=SimpleNamespace(bsc_address='0x' + 'a' * 40))
+        belt.turn_history = history
+        probes = {found[0].lower(), found[1].split()[0].lower().strip(',')}
+        with patch('assistant.trades._probes', return_value=probes), \
+                patch('assistant.trades._names_other', return_value=other), \
+                patch('assistant.engine._holdings', return_value='desconocido'):
+            out = self._propose(belt, side=side, asset=found[1], amount_usd=amount, sell_all=sell_all, found=found)
+        return out, belt.result.actions
+
+    ASKED = (('u', 'Cómo compro acciones de Anthropic'),
+             ('a', 'Encontré Anthropic, PBC (ANT). Toca la tarjeta para abrirla.'),
+             ('u', 'Quiero comprar por 1.02 dólares'))
+
+    def test_a_request_said_over_several_messages_leaves_the_card(self):
+        card = [{'type': 'trade', 'ticker': 'ANT', 'target': 'buy:1.02', 'label': 'Comprar US$1,02 de Anthropic, PBC'}]
+        for lines in (
+                self.ASKED,
+                (('u', '¿Cómo compro acciones de Anthropic?'), ('a', '¿Cuántos dólares?'), ('u', '1,02')),
+                (('u', 'compra Anthropic'), ('a', '¿Cuántos dólares?'), ('u', 'por 1.02')),
+                (('u', 'quiero invertir 1.02 dólares'), ('a', '¿En cuál?'), ('u', 'Anthropic')),
+                (('u', 'compra Anthropic por 1.02'),),
+                (('u', 'compra Anthropic por US$ 1,02'),),
+        ):
+            out, actions = self._in_thread(self._thread(*lines))
+            self.assertTrue(out['ok'], (lines, out))
+            self.assertEqual(actions, card, lines)
+
+    def test_yes_to_the_question_of_exactly_this_trade_leaves_the_card(self):
+        for question in ('No se pudo. ¿Quieres comprar US$1,02 de Anthropic?',
+                         '¿Quieres comprar US$1,02 de Anthropic, PBC?',
+                         'La acción es Anthropic. Confírmame si quieres comprar Anthropic por US$1,02.'):
+            out, _actions = self._in_thread(self._thread(*self.ASKED, ('a', '¿Seguimos?'), ('u', 'Sí'),
+                                                         ('a', question), ('u', 'Sí')))
+            self.assertTrue(out['ok'], (question, out))
+        out, actions = self._in_thread(self._thread(
+            ('u', 'vende todas mis acciones de Anthropic'), ('a', '¿Seguimos?'), ('u', 'sí'),
+            ('a', '¿Quieres vender todas tus acciones de Anthropic?'), ('u', 'Sí')),
+            side='sell', amount=None, sell_all=True)
+        self.assertTrue(out['ok'], out)
+        self.assertEqual(actions[0]['target'], 'sell:all')
+
+    def test_yes_never_adopts_what_the_person_did_not_write(self):
+        card = {'type': 'trade', 'ticker': 'ANT', 'target': 'buy:1.02', 'label': 'x'}
+        ask = ('a', '¿Quieres comprar US$1,02 de Anthropic?')
+        gap = (('a', '¿Seguimos?'), ('u', 'sí'))
+        for lines, kwargs in (
+                # the assistant chose the asset, or the amount
+                ((('u', 'qué me recomiendas con 1.02 dólares'), *gap, ask, ('u', 'sí')), {}),
+                ((('u', 'qué tal Anthropic'), *gap, ask, ('u', 'sí')), {}),
+                # a yes to another question: a choice, another amount, another verb
+                ((*self.ASKED, *gap, ('a', '¿Quieres comprar US$1,02 de Anthropic o de Apple?'), ('u', 'sí')), {}),
+                ((*self.ASKED, *gap, ('a', '¿Quieres comprar US$50 de Anthropic?'), ('u', 'sí')), {}),
+                ((*self.ASKED, *gap, ('a', '¿Quieres vender US$1,02 de Anthropic?'), ('u', 'sí')), {}),
+                ((*self.ASKED, *gap, ('a', '¿Cuál acción quieres comprar por US$1,02?'), ('u', 'sí')), {}),
+                # what was asked was served by a card already
+                ((*self.ASKED, ('a', 'Lista.', card), ('u', 'gracias'), ask, ('u', 'sí')), {}),
+                # they said no, changed the amount or the asset, or only thanked
+                ((*self.ASKED, ask, ('u', 'no, gracias')), {}),
+                ((*self.ASKED, ask, ('u', 'gracias')), {}),
+                ((('u', 'compra 1.02 dólares de Anthropic'), ('a', '¿Seguro?'), ('u', 'mejor 50')), {}),
+                ((('u', 'compra 1.02 dólares de Anthropic'), ('a', '¿Seguro?'), ('u', 'mejor compra Tesla')),
+                 {'other': True}),
+        ):
+            out, actions = self._in_thread(self._thread(*lines), **kwargs)
+            self.assertFalse(out['ok'], lines)
+            self.assertEqual(actions, [], lines)
+
+    def test_a_decimal_is_never_read_as_hundreds(self):
+        for said, wrong in (('compra 1.02 dólares de Anthropic', 102), ('compra 1,02 dólares de Anthropic', 102),
+                            ('compra 20,5 dólares de Anthropic', 205), ('compra 1.500,50 dólares de Anthropic', 150050),
+                            ('compra 2.000 dólares de Anthropic', 2)):
+            out, actions = self._in_thread(self._thread(('u', said)), amount=wrong)
+            self.assertFalse(out['ok'], said)
+            self.assertEqual(actions, [], said)
+
+    def test_a_refusal_never_tells_the_person_about_tools(self):
+        out = self._propose(self._belt('compra Apple'))
+        self.assertIn('No menciones herramientas', out['como_decirlo'])
+
     def test_a_name_shared_by_several_assets_does_not_name_one(self):
         from . import trades
 

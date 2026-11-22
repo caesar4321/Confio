@@ -2237,6 +2237,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     result = TurnResult(reply='')
     belt = Toolbelt(viewer, result, analyses_left=analyses_left, can_navigate=can_navigate,
                     reserve_analysis=reserve_analysis, reserve_news=reserve_news, reserve_web=reserve_web)
+    belt.turn_history = history  # a "sí" to the trade the assistant asked about (trades.py)
     belt.waiting_for_team = waiting_for_team
     belt.guide_note = guide_note
     belt.photos = photos or {}

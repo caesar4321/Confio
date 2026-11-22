@@ -841,12 +841,25 @@ _MONTHS = frozenset({'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'jul
 
 
 def _amount_values(number):
-    """What a written number can mean: "20,5" is twenty and a half, "1.000"
-    is a thousand or one. Both readings, so neither is guessed."""
-    values = {Decimal(re.sub(r'[.,]', '', number))}
-    if number.count('.') + number.count(',') == 1:
-        values.add(Decimal(number.replace(',', '.')))
-    return values
+    """What a written amount means. A mark before one or two last digits is
+    the decimal ("1.02" is never 102, "1.500,50" never 150050); marks between
+    groups of three are thousands ("1.000"). Anything else means nothing."""
+    number = number.rstrip('.,')
+    parts = re.split(r'[.,]', number)
+    if not all(parts):
+        return set()
+    if len(parts) == 1:
+        return {Decimal(number)}
+    head, tail = parts[:-1], parts[-1]
+    grouped = 0 < len(head[0]) <= 3 and not head[0].startswith('0') and all(len(part) == 3 for part in head[1:])
+    marks = re.findall(r'[.,]', number)
+    if len(tail) == 3 and grouped and len(set(marks)) == 1:
+        return {Decimal(''.join(parts))}
+    if len(head) == 1:
+        return {Decimal(f'{head[0]}.{tail}')}
+    if len(tail) <= 2 and grouped and len(set(marks[:-1])) == 1 and marks[-1] != marks[0]:
+        return {Decimal(f"{''.join(head)}.{tail}")}
+    return set()
 
 
 def _amount_written(message, amount):
@@ -897,7 +910,12 @@ def _other_unit(said, amount):
             continue
         number = match.group('number')
         try:
-            if Decimal(str(amount)) not in _amount_values(number):
+            # Only ever used to say why it was refused, so a misreading counts
+            # here too: "100.000 pesos" taken as 100 is still pesos.
+            readings = _amount_values(number) | {Decimal(re.sub(r'[.,]', '', number))}
+            if number.count('.') + number.count(',') == 1:
+                readings.add(Decimal(number.replace(',', '.')))
+            if Decimal(str(amount)) not in readings:
                 continue
         except ArithmeticError:
             continue
