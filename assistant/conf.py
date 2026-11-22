@@ -47,9 +47,9 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_SUMMARY_ALLOWED_USER_IDS': '',
     # (c) typed preferences saved when the person asks.
     'CONFIO_ASSISTANT_MEMORY_ALLOWED_USER_IDS': '',
-    # For someone who never chose. False = opt-in: the founder's decision.
-    'CONFIO_ASSISTANT_MEMORY_DEFAULT_ON': False,
-    'CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON': False,
+    # For someone who never chose: on (founder, 2026-11-22). The Memoria screen switches each off.
+    'CONFIO_ASSISTANT_MEMORY_DEFAULT_ON': True,
+    'CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON': True,
     'CONFIO_ASSISTANT_CONTEXT_MESSAGES': 40,
     'CONFIO_ASSISTANT_CONTEXT_TOKENS': 6000,
     'CONFIO_ASSISTANT_TOOL_RESULT_CHARS': 120_000,  # all of one turn's results

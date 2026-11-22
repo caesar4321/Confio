@@ -25,7 +25,7 @@ describe('Face release compatibility headers', () => {
   it('advertises the installed native version/build and capability', () => {
     expect(mobileClientHeaders()).toEqual({
       'X-Confio-Platform': 'android', 'X-Confio-Version': '5.1.5',
-      'X-Confio-Build': '157', 'X-Confio-Face-Capable': '1',
+      'X-Confio-Build': '157', 'X-Confio-Face-Capable': '1', 'X-Confio-Memory': '1',
     });
   });
 
@@ -34,7 +34,7 @@ describe('Face release compatibility headers', () => {
     (DeviceInfo.getBuildNumber as jest.Mock).mockReturnValue('1');
     expect(mobileClientHeaders()).toEqual({
       'X-Confio-Platform': 'ios', 'X-Confio-Version': '5.1.5',
-      'X-Confio-Build': '1', 'X-Confio-Face-Capable': '1',
+      'X-Confio-Build': '1', 'X-Confio-Face-Capable': '1', 'X-Confio-Memory': '1',
     });
   });
 });

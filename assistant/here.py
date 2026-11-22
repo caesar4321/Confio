@@ -352,6 +352,12 @@ def propose_referrer(belt, username):
     if not re.fullmatch(r'[A-Za-z0-9_]{3,20}', name):
         return {'ok': False, 'motivo': 'Eso no es un @usuario (letras, números o guion bajo, de 3 a 20). Pídele el '
                                        '@usuario de quien la invitó: está en el perfil de esa persona en Confío.'}
+    history = getattr(belt, 'turn_history', None)
+    if history is not None and not any(
+            re.search(rf'(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])', m.body or '', re.IGNORECASE)
+            for m in history if m.sender_type == 'USER'):
+        # Their own recent messages, never an older one or the assistant's question.
+        return {'ok': False, 'motivo': 'La persona no escribió ese @usuario: pídele que lo escriba.'}
     referrer = User.objects.filter(username__iexact=name).first()
     if referrer is None:
         return {'ok': False, 'motivo': f'No hay nadie con el usuario @{name}. Que lo revise con quien la invitó.'}

@@ -10,9 +10,8 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('react-native-vector-icons/Feather', () => () => null);
 jest.mock('../../../components/common/AppText', () => ({ Text: require('react-native').Text }));
-jest.mock('../../../contexts/AccountContext', () => ({
-  useAccount: () => { throw new Error('read with the flag off'); },
-}));
+let mockAccount: { id: string; type: string };
+jest.mock('../../../contexts/AccountContext', () => ({ useAccount: () => ({ activeAccount: mockAccount }) }));
 
 import { ASSISTANT_MEMORY_ENABLED } from '../flag';
 import MemoryEntry from '../MemoryEntry';
@@ -44,11 +43,15 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => { tree.unmount(); }); });
 
-it('ships off and then reads nothing', async () => {
-  expect(ASSISTANT_MEMORY_ENABLED).toBe(false);
-  let entry: renderer.ReactTestRenderer;
-  await act(async () => { entry = renderer.create(<MemoryEntry />); });
-  expect(entry!.toJSON()).toBeNull();
+it('ships on, for personal and business accounts only', async () => {
+  expect(ASSISTANT_MEMORY_ENABLED).toBe(true);
+  for (const [type, shown] of [['personal', true], ['business', true], ['smart', false]] as const) {
+    mockAccount = { id: 'a1', type };
+    let entry: renderer.ReactTestRenderer;
+    await act(async () => { entry = renderer.create(<MemoryEntry />); });
+    expect(entry!.toJSON() !== null).toBe(shown);
+    await act(async () => { entry!.unmount(); });
+  }
 });
 
 it('reads without caching', () => {

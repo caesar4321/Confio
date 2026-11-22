@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { getKeychainDiagnostic } from './keychainDiagnostic';
+import { ASSISTANT_MEMORY_ENABLED } from '../assistant/memory/flag';
 
 // Compatibility hints only: the backend independently requires and grades
 // Rekognition sessions. Never send a client-side "face passed" assertion.
@@ -11,6 +12,8 @@ export const mobileClientHeaders = (): Record<string, string> => {
     'X-Confio-Build': DeviceInfo.getBuildNumber(),
     'X-Confio-Face-Capable': '1',
   };
+  // This build has the Memoria screen: without it the server keeps no memory for the person.
+  if (ASSISTANT_MEMORY_ENABLED) headers['X-Confio-Memory'] = '1';
   // How long this phone's keystore took to hand over the session, so a
   // phone where it is slow shows up in the server log (timings only).
   const keychainDiagnostic = getKeychainDiagnostic();

@@ -643,11 +643,13 @@ def privacy_view(request):
 	return render(request, 'privacy.html', _legal_page_context(PRIVACY, _PRIVACY_GROUP_LABELS))
 
 def deletion_view(request):
-    """View for Data Deletion page."""
+    """Data Deletion page, rendered from the same binding document the app reads
+    (users/legal/documents.py), like the Privacy Policy."""
     redirect_response = _redirect_if_trailing_slash(request)
     if redirect_response:
         return redirect_response
-    return render(request, 'deletion.html')
+    from users.legal.documents import DELETION
+    return render(request, 'deletion.html', _legal_page_context(DELETION, {}))
 
 
 # Removed /health endpoint (not required for WS flow)

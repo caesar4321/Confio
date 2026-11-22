@@ -1,7 +1,9 @@
 # Design: conversation compaction and memory for Confío IA
 
 Date: 2026-11-22
-Status: built, every switch off by default. Not deployed, not migrated on prod, nothing backfilled.
+Status: the founder decided on 2026-11-22: deploy, all three switches on for everyone, both parts on by default,
+no backfill, free, Privacy Policy 1.14.0 without legal review. Summary and memory act only for builds that send
+`X-Confio-Memory` (the Memoria screen). No store build had it on that day.
 Reopens the "Memory" row of section 3 of `ai-assistant-server-architecture.md`, and keeps its reason: text a
 model writes and replays is a place to plant instructions. So nothing here stores text at all.
 
@@ -100,7 +102,7 @@ with their message.
 
 | Control | ChatGPT | Claude | Confío IA |
 |---|---|---|---|
-| Default | Varies by plan and region | On for individual plans | Founder's decision. Both parts built opt-in |
+| Default | Varies by plan and region | On for individual plans | On (founder, 2026-11-22), each with a switch |
 | See and delete items | Yes | Yes, and edit | Yes. To change one, say "recuerda que…" again |
 | Two controls | Saved memories, chat-history reference | Pause, reset | Preferences, older-message recall |
 | Switch off | Keeps chats | Pause keeps memories | Keeps preferences unused, drops the summary |
@@ -141,8 +143,8 @@ support.claude.com/en/articles/11817273.
 - A quote older than the team's last reply or notice is dropped: what someone told us never stands against what
   the team answered afterwards.
 - Idempotent: a compare-and-set on the row. A forget that lands during a run wins.
-- **No backfill:** it starts at the window the person had when it first reached them, skips what was said while
-  it was off, and reads at most 60 messages a run.
+- **No backfill:** it starts at the first message answered with it on, never reads what was said before, skips
+  what was said while it was off or from a build without the screen, and reads at most 60 messages a run.
 
 ### (c) Memory
 
@@ -219,6 +221,11 @@ The tombstone says when, never what. A deleted account's row is emptied and keep
 - The nightly need tagger (`assistant/needs.py`) is separate product evidence and does not follow a forget.
 - Voice calls and the first-steps guide get no memory. An employee who is removed keeps a row nobody can open.
 - The summary job is metered on the memory row, not in `AssistantTurn`, so it never uses up daily turns.
+- Memory is never advertising: a turn that read it opens and shows no paid offer.
+- A build without the screen is told plainly that it cannot save or delete memories.
+- If the memory tables cannot be read, the answer sees only the latest message and the team's, and an error is
+  logged. Confirm the migration before switching on.
+- A turn that restarts can in the worst case outlast the 60-second proxy timeout. Watch `latency_ms`.
 - A turn that restarts to act makes one more request: in threads over 16 messages that is every turn that acts.
 - A follow-up ("sí", "amplía el día 2") to an answer that used stored data has lost what it refers to unless the
   assistant reads it again, and such an answer can never be the question a trade "sí" confirms. Watch both with
@@ -287,16 +294,18 @@ Not run live: the Claude transport (no Anthropic key on this machine or on prod)
 
 ---
 
-## 9. Rollout, each step the founder's
+## 9. Rollout
 
-1. Migrate, then deploy. Switches stay empty. (Code before the migration breaks admin deletes of users and messages.)
-2. Publish the Privacy Policy change (draft: `docs/drafts/privacy-assistant-memory.md`). Required before (b) or (c).
-3. (a) for testers, then everyone. It fixes most of the measured forgetting by itself.
-4. Ship the app's Memoria screen (`ASSISTANT_MEMORY_ENABLED`), and only then (b) and (c): what is kept must be
-   visible first, and the chat's copy points at that screen.
+1. Migrate, then restart. (Code before the migration breaks admin deletes of users and messages.)
+2. The Privacy Policy is published with the same deploy.
+3. (a) is on for everyone at once, on any build.
+4. (b) and (c) are on for everyone and wait for the build: a request counts only with `X-Confio-Memory: 1`, which
+   a build sends when it has the screen. So the screen always comes first, with no version floor to maintain.
 
-The switches live in `assistant/conf.py` and are overridden in `config/settings.py`.
+To stop any of the three: empty its variable in prod's environment and restart. That is also the rollback:
+don't revert the code once 0014 has rows, because older code cannot delete what they point at.
 
-Open decisions: opt-in or on by default, separately for preferences (`CONFIO_ASSISTANT_MEMORY_DEFAULT_ON`) and
-for older-message recall (`CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON`), both built `False`; any backfill; free or paid
-(built free); the Privacy Policy text; and whether nicknames or free-text notes are ever wanted.
+The switches are environment variables read in `config/settings.py` (defaults in `assistant/conf.py`).
+
+Decided 2026-11-22: on by default (`CONFIO_ASSISTANT_MEMORY_DEFAULT_ON`, `CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON`),
+no backfill, free. Still open: whether nicknames or free-text notes are ever wanted.

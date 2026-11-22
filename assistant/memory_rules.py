@@ -130,7 +130,8 @@ SENSITIVE = _any(
     r'ateu', r'atea', r'mormon\w*', r'testigo\w*', r'budis\w*', r'biblia', r'biblic\w*', r'misa', r'missa', r'cultos?',
     r'oracion', r'oracao', r'rezo', r'rezar', r'predic\w*', r'pastor', r'congrega\w*', r'sinagoga', r'mezquita',
     r'mesquita', r'umbanda', r'candomble', r'santeria', r'church', r'ramadan', r'bautiz\w*', r'batiz\w*',
-    r'primera comunion', r'peregrin\w*', r'rabin\w*', r'terreiro', r'meca', r'seminario', r'sacerdote', r'monja',
+    r'primera comunion', r'peregrin\w*', r'senor', r'senhor', r'rehabilitaci\w*', r'reabilitac\w*', r'enamorad[oa]s?',
+    r'movimiento (?:por|de)', r'libertad', r'liberdade', r'salir del pais', r'sair do pais', r'rabin\w*', r'terreiro', r'meca', r'seminario', r'sacerdote', r'monja',
     # sexuality, gender
     r'gays?', r'lesbi\w*', r'lesbic\w*', r'homosex\w*', r'bisex\w*', r'transex\w*', r'transgen\w*', r'trans',
     r'lgbt\w*', r'queer', r'no binari[oa]', r'nao binari[oa]', r'orientacion sexual', r'drag', r'orgullo', r'orgulho',
@@ -305,7 +306,7 @@ _WHAT = (r'lo anterior|lo que (?:sabes|recuerdas|guardaste|hablamos|(?:te )?(?:d
 _WIPE = re.compile(_PLEASE + '(?:' + '|'.join((
     rf'{_FORGET_VERB}(?: de)? (?:todo|tudo|everything)(?: (?:{_WHAT}))?' + _ABOUT_ME,
     # "borra todo" could mean anything on the screen, also said politely: only with what it is.
-    rf'(?:{_ERASE_VERB} (?:todo|tudo|everything)|{_APAGA} tudo) (?:{_WHAT})' + _ABOUT_ME,
+    rf'(?:{_ERASE_VERB} (?:todo|tudo|everything)|{_APAGA} tudo) (?!lo anterior)(?:{_WHAT})' + _ABOUT_ME,
     rf'(?:{_ERASE_VERB} (?:todo|tudo|everything)|{_APAGA} tudo) (?:de|sobre) (?:mi|mim)',
     rf'{_APAGA} (?:toda )?(?:a|a sua|sua|a minha|minha) memoria(?: (?:de|sobre) mim)?',
     rf'{_APAGA} o que (?:voce )?sabe(?: (?:de|sobre) mim)?',
@@ -320,6 +321,8 @@ _FORGET = re.compile(_PLEASE + '(?:' + '|'.join((
     rf'{_ERASE_VERB} (?:eso |esto |isso )?(?:de (?:tu|la) memoria|da (?:sua )?memoria)',
     rf'{_ERASE_VERB} (?:lo que (?:te|le) (?:dije|conte)|o que eu (?:te )?(?:disse|falei|contei))',
     rf'{_APAGA} (?:isso )?(?:da (?:sua )?memoria|o que eu (?:te )?(?:disse|falei|contei))',
+    # A list or a draft, as likely as memory: the model reads which.
+    rf'{_ERASE_VERB} (?:todo|tudo) lo anterior',
 )) + r')')
 # An erase verb, or a forget, that belongs to something else: a password, a rule, an alert, the account.
 _NOT_MEMORY = _any(r'contrasena', r'clave', r'senha', r'password', r'pin', r'reglas?', r'regras?', r'alertas?',
@@ -329,7 +332,7 @@ _TOLD = _any(r'(?:que|lo que) (?:te|le) (?:dije|di|conte|pase|escribi|mande|envi
              r'que eu (?:te )?(?:disse|dei|contei|passei|falei|escrevi|mandei|enviei)',
              r'o que eu (?:te )?(?:disse|dei|contei|passei|falei|escrevi|mandei|enviei)',
              r'that i (?:told|gave|sent)')
-_NO_PAUSE = re.compile(r'^[¡!¿\s]*(?:no|nao)\s*[,.;:!]+\s*')
+_NO_PAUSE = re.compile(r'^[¡!¿\s]*(?:no|nao|si|sim|dale|claro|perfecto)\s*[,.;:!]+\s*')
 
 
 def command(text) -> str:
@@ -339,10 +342,13 @@ def command(text) -> str:
     raw = str(text or '').strip()
     if not raw or len(raw) > COMMAND_MAX_CHARS or '\n' in raw:
         return ''  # a paste is never a request about memory
-    # "no, olvida eso" is not "no olvides eso": a "no" counts as an exclamation only with a pause after it.
+    # "no, olvida eso" is not "no olvides eso", nor "si olvido…" "sí, olvida…": only with a pause after it.
+    paused = _NO_PAUSE.match(fold(raw))
     plain = words_of(_NO_PAUSE.sub('', fold(raw)))
+    # After a "no" it may be "never mind": never deleted unread.
+    refused = paused and paused.group().lstrip('¡!¿ ').startswith(('no', 'nao'))
     if '?' not in raw and _WIPE.match(plain):
-        return 'wipe'
+        return 'forget' if refused else 'wipe'
     if _FORGET.match(plain):
         theirs = _TOLD.search(plain) or SENSITIVE.search(plain)
         return 'forget' if theirs or not _NOT_MEMORY.search(plain) else ''

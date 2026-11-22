@@ -169,7 +169,10 @@ export const LegalDocumentView = ({ docType, renderHeader }: {
   // Parse the JSON strings in the content array
   const parsedSections = content.map((section: string) => JSON.parse(section) as LegalSection);
 
-  const updatedAt = new Date(lastUpdated).toLocaleDateString('es-ES', {
+  // A date has no time: noon keeps it the same day west of UTC.
+  const updatedAt = new Date(
+    String(lastUpdated).length === 10 ? `${lastUpdated}T12:00:00` : lastUpdated,
+  ).toLocaleDateString('es-ES', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',

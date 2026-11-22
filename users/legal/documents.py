@@ -216,8 +216,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.13.1',
-    'last_updated': '2026-11-09',
+    'version': '1.14.0',
+    'last_updated': '2026-11-22',
     'is_legally_binding': True,
     'sections': [
         {
@@ -267,6 +267,7 @@ PRIVACY = {
                 ],
                 'support_and_content': [
                     'Conversaciones y mensajes de soporte',
+                    'Memoria de Confío IA, separada por usuario y por cuenta, en las versiones de la app que incluyen «Memoria». Está activada por defecto y puede apagarla en cualquier momento. Incluye las preferencias que usted le pide recordar, elegidas de una lista cerrada (idioma, forma de las respuestas, trato, metas, ocupación, país donde tiene familia y gustos); qué mensajes suyos anteriores se usan como contexto, solo entre los que envíe desde que la memoria esté disponible para usted, de los que guardamos solo su identificador y no una copia ni un texto redactado; y sus ajustes de memoria, con registros técnicos de borrados y de uso que no contienen el texto de sus mensajes',
                     'Preferencias y estados de lectura de notificaciones o contenido dentro de la app',
                     'Reacciones, suscripciones a canales y otra interacción con contenido publicado en la plataforma',
                     'Publicaciones, comentarios, fotos y foto de perfil que usted comparte en Comunidad, y los movimientos que usted decide compartir con su monto y resultado, que son visibles para otros miembros con su nombre de usuario o un seudónimo; los miembros que sigue y que lo siguen; los bloqueos y reportes que realiza; y el resultado de la revisión automática de ese contenido',
@@ -298,6 +299,7 @@ PRIVACY = {
                 'Enviar actualizaciones importantes',
                 'Mejorar nuestros servicios',
                 'Personalizar y operar funciones de soporte, notificaciones y contenido dentro de la app',
+                'Si la memoria de Confío IA está disponible y activada, adaptar sus respuestas a sus preferencias y tener presentes mensajes suyos anteriores de la misma cuenta. La memoria no se usa para decidir montos, destinatarios ni autorizaciones de pagos, para evaluar su riesgo ni para publicidad',
                 'Análisis operativo y estadístico para mejorar la experiencia del usuario',
                 'Cumplir con obligaciones legales y regulatorias',
                 'Verificar su identidad y prevenir fraudes',
@@ -332,7 +334,7 @@ PRIVACY = {
                 'Al mostrar los mapas integrados de Comprar, Apple Maps en iOS o Google Maps en Android reciben las coordenadas necesarias para representar la zona y el punto de entrega, aunque no pulse «Abrir en mapas». El selector también puede mostrar la ubicación del dispositivo si ha concedido permiso',
                 'En Comprar, los miembros que consultan una tienda pueden ver su nombre, descripción, país, ciudad, productos, precios de envío, estado, calificación, número de calificaciones y pedidos completados, así como el nombre de pila del titular o, si no consta, su nombre de usuario',
                 'Las calificaciones de los pedidos, el producto comprado y la fecha de la calificación son visibles para otros miembros; el texto de la opinión se muestra después de aprobarse su revisión automática. La autoría se muestra con el nombre de usuario de Comunidad o un seudónimo de la persona que creó el pedido, incluso si otra persona autorizada de la cuenta compradora envió la opinión. No usamos el campo de nombre real para esa autoría, aunque un nombre de usuario elegido por la persona puede identificarla',
-                'Con OpenAI (Estados Unidos), que revisa automáticamente el texto y las fotos que usted publica en Comunidad, sus comentarios y su foto de perfil, junto con la publicación o el comentario al que responde, antes de mostrarlos a otros miembros y de nuevo si otros miembros los reportan; que recibe el título, la categoría, el precio, la descripción y las fotos de los productos enviados a revisión en Comprar, y el texto de las opiniones junto con su número de estrellas, el nombre de la tienda y el título del producto comprado, para revisar los productos y los textos de las opiniones antes de publicarlos; que recibe la foto de la licencia municipal de venta de bebidas alcohólicas que sube una tienda, junto con la fecha y el país, para leerla; el titular y el municipio que lee se comparan en nuestros servidores con el nombre de su documento verificado (o, en una cuenta de negocio, con el nombre verificado del negocio) y la ciudad de la tienda; y que procesa los mensajes, audios y fotos que usted envía a Confio Assistant para responderle'
+                'Con OpenAI (Estados Unidos), que revisa automáticamente el texto y las fotos que usted publica en Comunidad, sus comentarios y su foto de perfil, junto con la publicación o el comentario al que responde, antes de mostrarlos a otros miembros y de nuevo si otros miembros los reportan; que recibe el título, la categoría, el precio, la descripción y las fotos de los productos enviados a revisión en Comprar, y el texto de las opiniones junto con su número de estrellas, el nombre de la tienda y el título del producto comprado, para revisar los productos y los textos de las opiniones antes de publicarlos; que recibe la foto de la licencia municipal de venta de bebidas alcohólicas que sube una tienda, junto con la fecha y el país, para leerla; el titular y el municipio que lee se comparan en nuestros servidores con el nombre de su documento verificado (o, en una cuenta de negocio, con el nombre verificado del negocio) y la ciudad de la tienda; y que procesa los mensajes, audios y fotos que usted envía a Confio Assistant para responderle, junto con los mensajes recientes de esa conversación y, si está activada, su memoria, y para elegir qué mensajes suyos anteriores sirven de contexto'
             ]
         },
         {
@@ -356,6 +358,7 @@ PRIVACY = {
                 'Solicitar la eliminación de datos',
                 'Oponerse al procesamiento',
                 'Exportar sus datos',
+                'En las versiones de la app que incluyen «Memoria»: ver, borrar o apagar la memoria de Confío IA en «✨ Tu asistente» → «Memoria», o escribirle «olvida que…». Borrarla hace que Confío IA deje de usar esa información como memoria, aunque puede seguir en la conversación reciente y en los mensajes del equipo; no elimina los mensajes de su conversación de soporte, que se conservan según la sección 6',
                 'Solicitar información sobre el uso de sus datos KYC y de seguridad',
                 'Oponerse al uso de su rostro. Como la verificación con su rostro protege su dinero, sin ella no podremos habilitar las operaciones que la requieren'
             ]
@@ -371,6 +374,7 @@ PRIVACY = {
                 'Conservamos cada verificación de ubicación de Bre-B (resultado, dirección IP y su país, coordenadas, precisión y hora de la lectura) como registro de cumplimiento y auditoría. No rastreamos su ubicación en segundo plano',
                 'Conservamos como registro de cumplimiento, sin un plazo de eliminación definido, las fotos de licencia de venta de bebidas alcohólicas que sube una tienda (también las reemplazadas por una nueva), el resultado de la última revisión y el registro de cada licencia aprobada (ciudad, número, huella digital de la foto y vencimiento). Si Confío revoca una licencia, conservamos de forma permanente el registro de la revocación (la tienda, la ciudad, el número de la licencia y la huella digital de la foto) para que esa licencia no vuelva a usarse en Comprar',
                 'En Comprar, los datos de entrega de cada pedido (dirección, punto en el mapa, referencia y teléfono) se conservan con el pedido como registro de la transacción. Las direcciones de su libreta incluyen dirección, coordenadas cuando las indica, teléfono y referencia; al borrar una entrada, deja de aparecer y de estar disponible para seleccionarla, pero sus datos permanecen almacenados como una entrada marcada como eliminada, y borrarla no elimina ni modifica los datos de entrega conservados en pedidos anteriores. Conservamos cada lectura de ubicación con la que Comprar buscó su ciudad como registro, igual que las de Bre-B',
+                'En la memoria de Confío IA, una preferencia se conserva hasta que usted la borra, la reemplaza una más reciente (guardamos hasta tres de algunos tipos) o se elimina el mensaje con que la pidió; al borrarla eliminamos su contenido y conservamos solo fechas de registro. Las referencias a mensajes anteriores se reemplazan a medida que la conversación avanza y dejan de usarse si usted las borra o si se elimina el mensaje. Filtramos de forma automática claves, documentos, direcciones, montos y temas sensibles como salud, política o religión; ese filtro puede fallar. Las copias de seguridad automáticas de la base de datos se eliminan a los 7 días',
                 'En Comunidad, lo que usted elimina y el contenido de una cuenta eliminada dejan de mostrarse y se eliminan, incluidos sus textos y fotos. El contenido que retiramos por moderación se conserva de forma privada hasta 90 días para atender reportes y apelaciones, y luego se eliminan sus textos y fotos; conservamos solo el registro de la decisión de moderación. Las fotos que sube y no llegan a publicarse se eliminan a los 7 días'
             ]
         },
@@ -386,8 +390,8 @@ PRIVACY = {
 
 DELETION = {
     'title': 'Eliminación de Datos',
-    'version': '1.2.1',
-    'last_updated': '2026-10-06',
+    'version': '1.2.2',
+    'last_updated': '2026-11-22',
     'is_legally_binding': True,
     'sections': [
         {
@@ -404,6 +408,7 @@ DELETION = {
             'title': '2. Datos que se Eliminarán',
             'content': [
                 'Cuando la ley y nuestras obligaciones regulatorias lo permitan, eliminaremos o anonimizaremos datos de perfil, preferencias, información de contacto y otros datos no esenciales para cumplimiento',
+                'Su memoria de Confío IA (preferencias y referencias a mensajes anteriores) se vacía al eliminarse su cuenta, aunque deban conservarse otros registros; quedan solo fechas y marcas técnicas sin contenido',
                 'También podremos desactivar su acceso, cerrar la cuenta y eliminar o desvincular configuraciones operativas asociadas a la cuenta',
                 'Sus publicaciones, comentarios, fotos y foto de perfil en Comunidad dejan de mostrarse y se eliminan, incluidos sus textos y fotos; también puede eliminarlos usted mismo en cualquier momento desde la app',
                 'Cuando técnicamente o legalmente no sea posible una eliminación inmediata, restringiremos el uso de los datos y los conservaremos solo para fines permitidos'

@@ -1585,6 +1585,8 @@ class Toolbelt:
         if self.result.payment_intent is not None:
             return {'ok': False, 'error': 'Ya hay un pago preparado en esta respuesta: no abras otra pantalla.'}
         if destination in PAID_OFFERS:
+            if context_rules.offers_barred(self):
+                return {'ok': False, 'error': 'No ofrezcas planes a partir de lo que tienes guardado de la persona.'}
             from .paid_chips import capped
             if self.viewer.user is not None and capped(self.viewer.user, destination):
                 # Shown this week already: no chip, so the reply must not pitch it

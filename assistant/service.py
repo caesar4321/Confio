@@ -323,6 +323,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     Raises ValueError (bad input) / AssistantUnavailable (transcription down).
     """
     screen = (screen or '')[:64]
+    remembering = memory.screen_on(request_meta)
     photo = photo if photo and not audio else None
     # 1. Reserve (short lock).
     with transaction.atomic():
@@ -410,7 +411,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             user_message = _append(conversation, sender_type='USER', sender_user=user, body=clean,
                                    metadata={'modality': photos.MODALITY if photo_url else modality,
                                              'screen': screen})
-            memory.saw(conversation, user_message)
+            if remembering:
+                memory.saw(conversation, user_message)
             # A proposal lives for exactly one user message, whatever path it takes.
             proposal = take_pending_categorization(conversation)
             pending_watch = take_pending_watch(conversation)
@@ -420,7 +422,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         # The team owns the thread: the message always reaches them, and a plain
         # question about how the app works still gets an answer meanwhile.
         waiting = human and conf.get('CONFIO_ASSISTANT_ENABLED') and general_while_waiting(clean)
-        if memory.asks_to_forget(conversation, clean) and (
+        if remembering and memory.asks_to_forget(conversation, clean) and (
                 human or (turn is None and remaining_turns(user) <= 0)):
             # "olvida todo" needs no model and no turn: it holds while the team
             # has the thread and after the day's last turn too.
@@ -452,7 +454,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     # 4. Answer (no lock; analyses reserve their own slot).
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name,
                      request_meta=request_meta)
-    if memory.asks_to_forget(conversation, clean):
+    if remembering and memory.asks_to_forget(conversation, clean):
         proposal = pending_watch = None  # "ok olvida todo" is not the yes to a pending question
     confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
     confirmed_tool = 'categorize_transactions:confirmed'
@@ -478,13 +480,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     started = time.monotonic()
     # "recuerda…" / "olvida…": the write and its confirmation are code's. Read
     # after `history`, so nothing that arrives meanwhile becomes the message answered.
-    remembered = None if waiting else memory.handle_message(conversation, user_message, clean)
+    remembered = None if waiting or not remembering else memory.handle_message(conversation, user_message, clean)
     if remembered is not None and remembered.reply:
         return _memory_reply(user, conversation, user_message, turn, remembered, remaining, transcript,
                              audio_seconds, started)
     # Only what the model is shown. Every guard goes on reading `history`.
     turn_context = None if waiting else context_rules.load(
-        conversation, history, memory_note=remembered.note if remembered else '', answering=user_message)
+        conversation, history, memory_note=remembered.note if remembered else '', answering=user_message,
+        remembering=remembering)
     # The photo sent just now is seen even if the cache lost it.
     seen_photos = {**photos.for_history(history), **({user_message.id: photo_url} if photo_url else {})}
     try:
@@ -570,7 +573,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         elif trades.DONE_CLAIM.search(result.reply or ''):
             # Nothing is bought or sold until the person approves on the card.
             result.reply = trades.PREPARED_REPLY
-    if waiting or result.rule_proposal or result.payment_intent:
+    from_memory = bool(turn_context is not None and turn_context.used_data)
+    if waiting or from_memory or result.rule_proposal or result.payment_intent:
         # No offers while a person is handling their case, and none beside a
         # Cuenta inteligente proposal (its chip is the reply's one chip). The
         # proposal chip targets 'smart_account_rule', so it stays.
@@ -578,7 +582,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     try:
         from . import paid_chips
         from .engine import allowed_destinations
-        if not waiting and not result.rule_proposal and not result.payment_intent:
+        if not waiting and not from_memory and not result.rule_proposal and not result.payment_intent:
             earlier = ' · '.join(m.body or '' for m in [m for m in history if m.sender_type == 'USER'][-3:-1])
             paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)), earlier)
     except Exception:  # noqa: BLE001 - a probe must never break the answer
@@ -629,7 +633,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     turn.error = ''
     turn.latency_ms = int((time.monotonic() - started) * 1000)
     turn.save()
-    if not waiting:
+    if remembering and not waiting:
         memory.schedule_summary(conversation)
 
     return AskOutcome(user_message=user_message, reply_message=reply, actions=result.actions,

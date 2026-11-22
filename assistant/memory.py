@@ -46,6 +46,12 @@ def facts_allowed(user_id) -> bool:
     return listed('CONFIO_ASSISTANT_MEMORY_ALLOWED_USER_IDS', user_id)
 
 
+def screen_on(request_meta) -> bool:
+    """This request's build has the Memoria screen. Nothing is remembered,
+    summarized or recalled for a person who could not see and delete it."""
+    return str((request_meta or {}).get('HTTP_X_CONFIO_MEMORY', '') or '').strip() == '1'
+
+
 def switched_on(user_id) -> bool:
     return summary_allowed(user_id) or facts_allowed(user_id)
 
@@ -164,6 +170,12 @@ NOTE_OFF = (
     '\n# Memoria\n'
     'La memoria de esta persona está apagada. Tú no guardas ni borras nada: nunca digas que lo hiciste ni '
     'prometas recordar. Si lo pide, dile que se activa y se borra en ✨ Tu asistente → Memoria.\n')
+NOTE_NO_SCREEN = ('\n# Memoria\n'
+                  'En esta versión de la app no guardas ni borras recuerdos. Lo que está en esta conversación sí '
+                  'puedes usarlo: si te pregunta qué te dijo, respóndele con eso. Solo si te pide recordar u olvidar '
+                  'algo para otras conversaciones, dile que aquí no puedes, y nunca digas que lo guardaste, lo borraste '
+                  'o lo olvidaste. Esto no aplica a su cuenta, contactos, pagos, alertas, reglas ni clasificaciones: '
+                  'eso lo atiendes como siempre.\n')
 NOTE_NONE = ('\n# Memoria\n'
              'Tú no guardas ni borras recuerdos: nunca digas que guardaste, borraste u olvidaste algo.\n')
 
@@ -190,10 +202,11 @@ class TurnState:
 
 
 def _start(scope, row, history):
-    """No backfill: the summary starts where this window starts."""
+    """No backfill: the summary starts at the message being answered, the
+    first one with it on. Nothing said before is ever read into it."""
     row = row or scope.ensure()
     AssistantMemory.objects.filter(pk=row.pk, summary_through_id__isnull=True).update(
-        summary_through_id=max(min(m.id for m in history) - 1, 0), summary_seen_id=max(m.id for m in history))
+        summary_through_id=max(max(m.id for m in history) - 1, 0), summary_seen_id=max(m.id for m in history))
     row.refresh_from_db()
     return row
 
@@ -222,15 +235,16 @@ def saw(conversation, message):
         logger.warning('assistant memory: message not marked seen (%s)', type(exc).__name__)
 
 
-def state_for_turn(conversation, history) -> TurnState:
+def state_for_turn(conversation, history, *, remembering=False) -> TurnState:
+    """`remembering`: screen_on. Without it only the forget cut-off applies."""
     scope = Scope.of(conversation)
     if conversation.user.deleted_at is not None:
         return TurnState()
     row = scope.row()
-    summarizes = summary_allowed(scope.user_id) and recall_enabled(row)
+    summarizes = remembering and summary_allowed(scope.user_id) and recall_enabled(row)
     if summarizes and (row is None or row.summary_through_id is None):
         row = _start(scope, row, history)
-    remembers = facts_allowed(scope.user_id)
+    remembers = remembering and facts_allowed(scope.user_id)
     enabled = remembers and facts_enabled(row)
     topics, styles = [], []
     for fact in live_facts(row) if enabled else ():
@@ -241,8 +255,10 @@ def state_for_turn(conversation, history) -> TurnState:
     note = ''
     if remembers:
         note = NOTE_ON if enabled else NOTE_OFF
-    elif summary_allowed(scope.user_id):
+    elif remembering and summary_allowed(scope.user_id):
         note = NOTE_NONE
+    elif not remembering and switched_on(scope.user_id):
+        note = NOTE_NO_SCREEN
     style = ''
     if styles:
         style = '\n# Cómo pidió que le respondas\n' + ''.join(f'- {line}\n' for line in styles)
@@ -690,6 +706,9 @@ def summarize(conversation_id) -> str:
             return outcome
         boundary = (conversation.messages.order_by('-id').values_list('id', flat=True)
                     [KEEP_RECENT:KEEP_RECENT + 1]).first()
+        if boundary is not None:
+            # Never past what was seen with it on, however long this waited in the queue.
+            boundary = min(boundary, row.summary_seen_id or 0)
         if boundary is None or boundary <= row.summary_through_id:
             outcome = 'nothing'
             return outcome
@@ -741,9 +760,9 @@ def erase(rows) -> int:
             if row is None:
                 continue
             _blank(row.facts.filter(deleted_at__isnull=True))
-            row.summary_ids = []
+            row.summary_ids, row.excluded_ids = [], []  # references to messages, both
             row.version += 1  # even when empty: a run in flight must lose
-            row.save(update_fields=['summary_ids', 'version', 'updated_at'])
+            row.save(update_fields=['summary_ids', 'excluded_ids', 'version', 'updated_at'])
             erased += 1
     return erased
 
@@ -767,4 +786,4 @@ def sweep() -> int:
     gone = AssistantMemory.objects.filter(
         Q(user__deleted_at__isnull=False) | Q(account__deleted_at__isnull=False)
         | Q(business__deleted_at__isnull=False))
-    return erase([row for row in gone if row.summary_ids or live_facts(row)])
+    return erase([row for row in gone if row.summary_ids or row.excluded_ids or live_facts(row)])

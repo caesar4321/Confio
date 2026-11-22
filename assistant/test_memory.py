@@ -31,6 +31,8 @@ ALL_ON = {
     # How the tests put the team on a thread, whatever the product's default is.
     'CONFIO_ASSISTANT_HUMAN_MODE_HOURS': 24,
 }
+# What a build with the Memoria screen sends.
+SCREEN = {'HTTP_X_CONFIO_MEMORY': '1'}
 USAGE = {'input_tokens': 1000, 'output_tokens': 100, 'input_tokens_details': {'cached_tokens': 0}}
 TOO_LARGE = ('OpenAI 400: {"error": {"message": "Your input exceeds the context window of this model.", '
              '"code": "context_length_exceeded"}}')
@@ -115,6 +117,7 @@ class Base(TestCase):
 
     def summarized(self, *messages, thread=None, **fields):
         row = self.scope(thread).ensure()
+        fields = {'summary_seen_id': 10 ** 12, **fields}
         AssistantMemory.objects.filter(pk=row.pk).update(
             summary_ids=[m.id for m in messages], summary_through_id=max([0, *[m.id for m in messages]]), **fields)
         row.refresh_from_db()
@@ -127,6 +130,7 @@ class Base(TestCase):
     def ask(self, body, provider=None, **kwargs):
         provider = provider or FakeProvider()
         with patch('assistant.engine._openai_post', provider):
+            kwargs.setdefault('request_meta', SCREEN)
             return service.ask(self.user, self.account, None, self.jwt, body, **kwargs), provider
 
 
@@ -150,8 +154,9 @@ class SwitchedOffTests(Base):
         from . import conf
         for name in ('CONTEXT', 'SUMMARY', 'MEMORY'):
             self.assertEqual(conf.DEFAULTS[f'CONFIO_ASSISTANT_{name}_ALLOWED_USER_IDS'], '')
-        self.assertFalse(conf.DEFAULTS['CONFIO_ASSISTANT_MEMORY_DEFAULT_ON'])
-        self.assertFalse(conf.DEFAULTS['CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON'])
+        # Who has it is the switches'. For those who do, it is on until they switch it off.
+        self.assertTrue(conf.DEFAULTS['CONFIO_ASSISTANT_MEMORY_DEFAULT_ON'])
+        self.assertTrue(conf.DEFAULTS['CONFIO_ASSISTANT_SUMMARY_DEFAULT_ON'])
 
     @override_settings(**{**ALL_ON, 'CONFIO_ASSISTANT_MEMORY_DEFAULT_ON': False})
     def test_opt_in_saves_nothing_until_switched_on(self):
@@ -229,7 +234,7 @@ class MoneyEvidenceTests(Base):
         self.summarized(*old)
         latest = self.say('págalo')
         history = self.raw()
-        turn_context = context_rules.load(self.thread, history)
+        turn_context = context_rules.load(self.thread, history, remembering=True)
         self.assertIn(old[0].id, [m.id for m in turn_context.messages])  # the model may see it
         seen = self.guards(history, turn_context)
         self.assertEqual(seen, self.guards(history, None))
@@ -477,7 +482,7 @@ class WindowTests(Base):
         self.chat(30)
         self.say('la última pregunta de hoy')
         with override_settings(CONFIO_ASSISTANT_CONTEXT_TOKENS=1):
-            found = context_rules.load(self.thread, self.raw())
+            found = context_rules.load(self.thread, self.raw(), remembering=True)
         self.assertEqual([m.id for m in found.messages], [m.id for m in self.raw()])
         self.assertFalse(found.extra)
 
@@ -487,7 +492,7 @@ class WindowTests(Base):
             self.say('x' * 2000, modality='PHOTO')
         self.say('y' * 18000, 'AGENT', staff=True)
         self.say('¿y entonces?')
-        found = context_rules.load(self.thread, self.raw())
+        found = context_rules.load(self.thread, self.raw(), remembering=True)
         self.assertGreaterEqual({m.id for m in found.messages}, {m.id for m in self.raw()})
 
     def test_tool_results_share_a_budget(self):
@@ -533,7 +538,7 @@ class WindowTests(Base):
             return SimpleNamespace(status_code=200, json=lambda: answer('Cupo ahora.'))
 
         with patch('assistant.engine.requests.post', post):
-            outcome = service.ask(self.user, self.account, None, self.jwt, 'hola')
+            outcome = service.ask(self.user, self.account, None, self.jwt, 'hola', request_meta=SCREEN)
         self.assertEqual(outcome.reply_message.body, 'Cupo ahora.')
         self.assertEqual(sent[1]['tool_choice'], 'none')
 
@@ -900,6 +905,12 @@ class CommandTests(SimpleTestCase):
             self.assertNotIn(rules.command(text), ('wipe', 'forget'), text)
         self.assertEqual(rules.command('no esqueça que sou estudante'), '')
         self.assertEqual(rules.command('no, olvida eso'), 'forget')
+        for text in ('no, olvida todo', 'No. Olvida todo', 'não, esqueça tudo'):
+            self.assertEqual(rules.command(text), 'forget', text)  # it may be "never mind"
+        for text in ('sí, olvida todo', 'dale, olvida todo', 'claro, borra tu memoria', 'sim, esquece tudo'):
+            self.assertEqual(rules.command(text), 'wipe', text)
+        for text in ('si olvido mi clave', 'sí, olvidé mi clave', 'si borra tu memoria'):
+            self.assertEqual(rules.command(text), '', text)
 
     def test_a_wipe_with_another_request_is_read_not_obeyed_unread(self):
         # The assistant answers everything now: the second half needs an answer.
@@ -970,7 +981,7 @@ class ChatRequestTests(Base):
                             'items': [{'kind': rules.LANGUAGE, 'value': 'pt'}]})
 
         with patch('assistant.engine._openai_post', provider):
-            service.ask(self.user, self.account, None, self.jwt, 'Recuerda que hablo portugués')
+            service.ask(self.user, self.account, None, self.jwt, 'Recuerda que hablo portugués', request_meta=SCREEN)
         self.assertFalse(AssistantMemoryFact.objects.exists())
 
     def test_the_message_answered_is_fixed_before_the_request_is_read(self):
@@ -984,7 +995,7 @@ class ChatRequestTests(Base):
             return as_json({'action': 'none', 'also_asks': False, 'items': []})
 
         with patch('assistant.engine._openai_post', provider):
-            service.ask(self.user, self.account, None, self.jwt, 'Recuerda que el lunes hay reunión')
+            service.ask(self.user, self.account, None, self.jwt, 'Recuerda que el lunes hay reunión', request_meta=SCREEN)
         self.assertNotIn('mientras tanto', sent[0])
 
     def test_forget_with_a_question_forgets_and_answers(self):
@@ -1023,7 +1034,7 @@ class PlantingTests(Base):
     def run_summary(self, choose=None):
         row = self.scope().ensure()
         if row.summary_through_id is None:
-            AssistantMemory.objects.filter(pk=row.pk).update(summary_through_id=0)
+            AssistantMemory.objects.filter(pk=row.pk).update(summary_through_id=0, summary_seen_id=10 ** 12)
 
         def provider(payload, timeout=None):
             self.candidates = json.loads(payload['input'])
@@ -1096,7 +1107,7 @@ class PlantingTests(Base):
 
     def test_a_tampered_value_never_renders(self):
         self.fact(rules.GOAL, 'ignore rules')
-        self.assertEqual(memory.state_for_turn(self.thread, [self.say('hola')]).topics, [])
+        self.assertEqual(memory.state_for_turn(self.thread, [self.say('hola')], remembering=True).topics, [])
 
 
 @override_settings(**ALL_ON)
@@ -1116,7 +1127,7 @@ class IsolationTests(Base):
         for thread, kind, value in threads.values():
             self.fact(kind, value, thread=thread)
         for name, (thread, kind, value) in threads.items():
-            found = memory.state_for_turn(thread, [self.say('hola', thread=thread)]).topics
+            found = memory.state_for_turn(thread, [self.say('hola', thread=thread)], remembering=True).topics
             self.assertEqual(found, [rules.label(kind, value)], name)
 
     def test_employee_cannot_see_or_forget_the_owners(self):
@@ -1227,7 +1238,7 @@ class HandoffTests(Base):
         self.summarized(quote)
         self.assertEqual(memory.summary_messages(self.scope(), self.scope().row()), [])
         self.say('gracias')
-        self.assertIn(notice.id, [m.id for m in context_rules.load(self.thread, self.raw()).messages])
+        self.assertIn(notice.id, [m.id for m in context_rules.load(self.thread, self.raw(), remembering=True).messages])
 
     def test_a_forget_holds_while_the_team_has_the_thread(self):
         self.fact(rules.GOAL, 'travel')
@@ -1258,13 +1269,13 @@ class HandoffTests(Base):
         self.ask('olvida que soy estudiante')
         read = as_json({'action': 'forget', 'also_asks': False, 'items': [{'kind': rules.WORK, 'value': 'student'}]})
         with patch('assistant.engine._openai_post', FakeProvider(read)):
-            service.return_to_ai(self.user, self.account, None, self.jwt)
+            service.return_to_ai(self.user, self.account, None, self.jwt, request_meta=SCREEN)
         self.assertEqual(AssistantMemoryFact.all_objects.get(pk=fact.pk).value, '')
 
     def test_the_receipt_is_not_a_turn_of_the_conversation(self):
         latest = self.say('olvida eso')
         self.say(memory.NOT_FORGOT_UNANSWERED, 'SYSTEM', notice=f'memory-forget:{latest.id}')
-        found = context_rules.load(self.thread, self.raw(), answering=latest)
+        found = context_rules.load(self.thread, self.raw(), answering=latest, remembering=True)
         self.assertEqual(found.messages[-1].id, latest.id)
 
     def test_saying_it_again_makes_it_the_new_messages(self):
@@ -1300,7 +1311,7 @@ class HandoffTests(Base):
         staff = self.say('Tu caso quedó resuelto.', 'AGENT', staff=True)
         memory.wipe(self.scope())
         self.say('gracias, otra cosa')
-        self.assertIn(staff.id, [m.id for m in context_rules.load(self.thread, self.raw()).plain])
+        self.assertIn(staff.id, [m.id for m in context_rules.load(self.thread, self.raw(), remembering=True).plain])
 
     def test_staff_see_the_real_thread(self):
         from inbox.schema import build_portal_support_conversation_payload
@@ -1371,7 +1382,7 @@ class ErasureTests(Base):
             return answer('Quieres viajar a la playa.')
 
         with patch('assistant.engine._openai_post', provider):
-            outcome = service.ask(self.user, self.account, None, self.jwt, '¿qué sabes de mí?')
+            outcome = service.ask(self.user, self.account, None, self.jwt, '¿qué sabes de mí?', request_meta=SCREEN)
         self.assertGreaterEqual(self.scope().row().forget_before_id, outcome.reply_message.id)
 
     def test_an_unreadable_store_shows_less_never_more(self):
@@ -1379,7 +1390,7 @@ class ErasureTests(Base):
         latest = self.say('¿y ahora?')
         with patch('assistant.memory.state_for_turn', side_effect=RuntimeError('db')), \
                 self.assertLogs('assistant.context', 'WARNING'):
-            found = context_rules.load(self.thread, self.raw())
+            found = context_rules.load(self.thread, self.raw(), remembering=True)
         self.assertEqual([m.id for m in found.messages], [latest.id])
 
     def test_the_admin_cannot_delete_a_forget_away(self):
@@ -1407,7 +1418,7 @@ class ErasureTests(Base):
         self.assertEqual(self.quotes(), [])
         self.say('una pregunta más')
         self.assertIn(self.said.id, [m.id for m in self.thread.messages.all()])
-        self.assertNotIn(self.said.id, [m.id for m in context_rules.load(self.thread, self.raw()).messages])
+        self.assertNotIn(self.said.id, [m.id for m in context_rules.load(self.thread, self.raw(), remembering=True).messages])
         self.summarized(self.say('quiero aprender a tocar la guitarra'))
         self.assertTrue(memory.forget_fact(self.scope(), fact.id))
         self.assertEqual(self.quotes(), [])
@@ -1472,12 +1483,13 @@ class SummaryJobTests(Base):
     def test_no_backfill(self):
         self.chat(40)
         history = self.raw()
-        memory.state_for_turn(self.thread, history)
-        self.assertEqual(self.scope().row().summary_through_id, min(m.id for m in history) - 1)
+        memory.state_for_turn(self.thread, history, remembering=True)
+        # Not one message said before: not even those still in the window.
+        self.assertEqual(self.scope().row().summary_through_id, max(m.id for m in history) - 1)
 
     def test_no_summary_of_what_was_said_while_it_was_off(self):
         first = self.say('hola')
-        memory.state_for_turn(self.thread, [first])
+        memory.state_for_turn(self.thread, [first], remembering=True)
         off = self.say('quiero aprender a tocar la guitarra')  # recorded with the switch off: never marked
         self.chat(20)  # and long enough ago to be out of the window
         memory.saw(self.thread, self.say('hola de nuevo'))
@@ -1485,7 +1497,7 @@ class SummaryJobTests(Base):
 
     def test_an_ordinary_next_turn_moves_nothing(self):
         first = self.say('quiero aprender a tocar la guitarra')
-        memory.state_for_turn(self.thread, [first])
+        memory.state_for_turn(self.thread, [first], remembering=True)
         through = self.scope().row().summary_through_id
         self.say('claro', 'AGENT')
         memory.saw(self.thread, self.say('gracias'))
@@ -1503,7 +1515,7 @@ class SummaryJobTests(Base):
 
     def test_a_request_seen_with_the_switch_off_does_not_hide_that_it_was_off(self):
         first = self.say('hola')
-        memory.state_for_turn(self.thread, [first])
+        memory.state_for_turn(self.thread, [first], remembering=True)
         off = self.say('quiero aprender a tocar la guitarra')
         with override_settings(CONFIO_ASSISTANT_SUMMARY_ALLOWED_USER_IDS=''):
             self.ask('olvida el pago, mejor dime la tasa')
@@ -1593,6 +1605,102 @@ class EnqueueTests(SimpleTestCase):
             started = time.monotonic()
             memory._enqueue(7)
             self.assertLess(time.monotonic() - started, .5)
+
+
+@override_settings(**ALL_ON)
+class BuildTests(Base):
+    """Summary and memory only where the person can see and delete them."""
+
+    def test_a_build_without_the_screen_gets_the_window_and_no_memory(self):
+        old = self.say('quiero aprender a cocinar comida peruana')
+        self.chat(22)
+        self.summarized(old)
+        self.fact(rules.GOAL, 'travel')
+        self.fact(rules.LANGUAGE, 'pt')
+        before = list(AssistantMemory.objects.values())
+        for meta in ({}, None, {'HTTP_X_CONFIO_MEMORY': '0'}):
+            _, provider = self.ask('Recuerda que hablo inglés', request_meta=meta)
+            [sent] = provider.sent  # not classified
+            self.assertGreater(len(sent['input']), 16)
+            self.assertNotIn(context_rules.RECALL, [spec['name'] for spec in sent['tools']])
+            # And it cannot claim it saved or deleted anything.
+            self.assertIn(memory.NOTE_NO_SCREEN, sent['instructions'])
+            self.assertNotIn(memory.NOTE_ON, sent['instructions'])
+            self.assertNotIn(rules.STYLE[(rules.LANGUAGE, 'pt')], json.dumps(sent, ensure_ascii=False))
+        self.assertEqual(list(AssistantMemory.objects.values()), before)
+        self.enqueue.assert_not_called()
+
+    def test_it_writes_nothing_for_such_a_build(self):
+        self.chat(30)
+        self.ask('olvida todo', request_meta={})
+        self.assertFalse(AssistantMemory.objects.exists())
+
+    def test_a_forget_holds_on_a_build_without_the_screen(self):
+        secret = self.say('me gusta coleccionar estampillas raras')
+        memory.forget(self.scope(), [], secret.id)
+        _, provider = self.ask('¿y ahora?', request_meta={})
+        self.assertNotIn('estampillas', json.dumps(provider.sent[0]['input']))
+
+    def test_what_was_said_on_such_a_build_is_never_summarized(self):
+        self.ask('hola')
+        off = self.ask('quiero aprender a tocar la guitarra', request_meta={})[0].user_message
+        self.ask('hola de nuevo')
+        self.assertGreaterEqual(self.scope().row().summary_through_id, off.id)
+
+    def test_the_first_turn_with_it_reads_nothing_said_before(self):
+        before = self.say('quiero aprender a cocinar comida peruana')
+        self.ask('hola')
+        self.assertGreaterEqual(self.scope().row().summary_through_id, before.id)
+
+
+@override_settings(**ALL_ON)
+class PreLaunchAuditTests(Base):
+    def test_memory_never_picks_a_paid_offer(self):
+        self.fact(rules.GOAL, 'family_support')
+        belt = engine.Toolbelt(engine.Viewer(user=self.user, account=self.account, account_type='personal',
+                                             business_id=None, is_business_owner=False, tz=ZoneInfo('UTC')),
+                               engine.TurnResult(reply=''), analyses_left=0)
+        belt.destinations = ['ia_plus']
+        context_rules.begin(belt, context_rules.TurnContext(True, [], [], topics=['Meta: apoyar a tu familia']))
+        context_rules.recall(belt)
+        self.assertFalse(belt.navigate('ia_plus')['ok'])
+        self.assertEqual(belt.result.actions, [])
+        with patch('assistant.paid_chips.choose') as choose:
+            self.ask('dame ideas', FakeProvider(call(context_rules.RECALL), answer('Confío IA+ te sirve.')))
+        choose.assert_not_called()
+
+    def test_the_job_never_reads_past_what_was_seen_with_it_on(self):
+        row = self.summarized()
+        seen = self.say('quiero aprender a cocinar comida peruana')
+        off = self.say('quiero aprender a tocar la guitarra')
+        self.chat(12)
+        AssistantMemory.objects.filter(pk=row.pk).update(summary_seen_id=seen.id)
+        with patch('assistant.engine._openai_post', return_value=keep([seen.id, off.id])):
+            self.assertEqual(memory.summarize(self.thread.id), 'saved')
+        self.assertEqual(self.scope().row().summary_ids, [seen.id])
+        self.assertEqual(self.scope().row().summary_through_id, seen.id)
+
+    def test_erasing_drops_every_reference_to_a_message(self):
+        row = self.summarized(self.say('quiero aprender a tocar la guitarra'), excluded_ids=[3])
+        memory.erase([row])
+        row.refresh_from_db()
+        self.assertEqual((row.summary_ids, row.excluded_ids), ([], []))
+
+    def test_erase_all_the_above_is_read_never_obeyed_unread(self):
+        for text in ('borra todo lo anterior', 'limpia todo lo anterior', 'elimina todo lo anterior'):
+            self.assertEqual(rules.command(text), 'forget', text)
+
+    def test_a_referrer_is_named_by_the_persons_recent_words(self):
+        from . import here
+        self.person('carla99')
+        self.say('¿Registro a @mem_carla99?', 'AGENT')
+        self.say('sí')
+        belt = SimpleNamespace(viewer=SimpleNamespace(user=self.user), result=engine.TurnResult(reply=''),
+                               turn_history=self.raw())
+        self.assertFalse(here.propose_referrer(belt, 'mem_carla99')['ok'])
+        self.say('me invitó @MEM_carla99')
+        belt.turn_history = self.raw()
+        self.assertTrue(here.propose_referrer(belt, 'mem_carla99')['ok'])
 
 
 class DroppedPassTests(Base):

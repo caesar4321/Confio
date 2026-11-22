@@ -1,10 +1,9 @@
 # Política de Privacidad: borrador para revisión legal (memoria de Confío IA)
 
-**Estado:** borrador al 22 de noviembre de 2026. No publicado. Requiere la decisión del fundador y revisión legal.
-La versión vigente es 1.13.1. Si el borrador de Gmail (1.14.0) se publica antes, este toma el número siguiente.
-Diseño: `docs/designs/assistant-memory.md`.
-
-No activar el resumen ni la memoria antes de publicar este texto.
+**Estado:** aprobado por el fundador el 22 de noviembre de 2026, sin revisión legal, para publicarse como Política de
+Privacidad 1.14.0 y Eliminación de Datos 1.2.2. El texto vigente es el de `users/legal/documents.py`, no este
+borrador. Se ajustó al publicar por dos decisiones del mismo día: la memoria viene activada por defecto y solo
+existe en las versiones de la app que incluyen «Memoria». Otros borradores numerados 1.14.0 toman el número siguiente.
 
 ---
 
@@ -43,12 +42,3 @@ y que procesa los mensajes, audios y fotos que usted envía a Confio Assistant p
 <!-- deletion:start -->
 - Su memoria de Confío IA (preferencias y referencias a mensajes anteriores) se vacía al eliminarse su cuenta, aunque deban conservarse otros registros.
 <!-- deletion:end -->
-
----
-
-## Para decidir antes de publicar
-
-1. Activada por defecto o con su consentimiento. El código viene con consentimiento (apagada) para las dos partes, preferencias y mensajes anteriores, cada una con su interruptor.
-2. Ocupación, familia en otro país y gustos: ¿alguno es sensible en alguna jurisdicción?
-3. Confirmar que el uso de datos para entrenamiento sigue desactivado en la cuenta de OpenAI.
-4. El texto nombra solo a OpenAI. Si el asistente pasa a otro proveedor, hay que nombrarlo antes.
