@@ -2,6 +2,12 @@
 
 ## Cuenta inteligente — DEPLOYED 2026-11-21 (cUSD upgrade EXECUTED, Safe nonce 30)
 
+**Inheritance ENABLED 2026-11-22** at Safe nonce 31: `factory.enableInheritance()`
+(one-way), signers 1/3/5, tx `0x7583e5c70def03b00117a0b762110319ce714efc409eff5ce7664be6e2a91963`,
+block 134982365. Verified `inheritanceEnabled()` true, Safe nonce 32. Server launch
+switches on the same day: `SMART_ACCOUNT_ENABLED`, `ALLOWED_USER_IDS=*`,
+`MIN_APP_VERSION=5.3.9`, `BENEFICIARY_ENABLED`, `REQUIRE_CANCEL_CLAIM`.
+
 **cUSD upgrade EXECUTED 2026-11-21** at Safe nonce 30 (signers 1/3/5, tx
 `0x7f29e5a9650fc146c3e270cef8d48cf17c460e50b47ba5d8c490962af1f05816`, block
 134969843; the founder ran the signer in his terminal). Verified live: impl
