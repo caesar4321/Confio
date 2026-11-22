@@ -309,31 +309,11 @@ def demand(w):
     waitlists and assistant probes. Decides what gets built next."""
     from assistant.models import ProbeAnswer
     from users.models_analytics import FunnelEvent
-    from users.models_product_waitlist import ProductWaitlistEntry
     from users.models_rail_waitlist import LocalRailWaitlistEntry
     from users.rail_interest_metrics import build_rail_interest_metrics, merge_waitlist_counts
 
-    preview = {int(p) for p in str(getattr(settings, 'PAID_OFFER_PREVIEW_USER_IDS', '') or '').split(',')
-               if p.strip().isdigit()}
-    stages = ('door_shown', 'detail_opened', 'avisame_tapped')
-    reached = defaultdict(set)
-    for user, product, props in FunnelEvent.objects.filter(
-            event_name='paid_offer_interest', user__isnull=False,
-            created_at__gte=w.rolling_30_start).exclude(user_id__in=preview).values_list(
-                'user_id', 'source_type', 'properties'):
-        reached[(product, (props or {}).get('stage'))].add(user)
-    labels = dict(ProductWaitlistEntry._meta.get_field('product').choices or [])
-    waitlisted = {row['product']: row for row in ProductWaitlistEntry.objects.exclude(
-        user_id__in=preview).order_by().values('product').annotate(
-        n=Count('id'), funded_n=Count('id', filter=Q(funded=True)),
-        yes_n=Count('id', filter=Q(would_pay='yes')))}
-    offers = []
-    for product in sorted({key[0] for key in reached} | set(waitlisted)):
-        counts = [len(reached.get((product, stage), ())) for stage in stages]
-        row = waitlisted.get(product, {})
-        offers.append({'label': labels.get(product, product), 'stages': counts,
-                       'waitlist': row.get('n', 0), 'would_pay': row.get('yes_n', 0),
-                       'waitlist_funded': row.get('funded_n', 0)})
+    preview = preview_user_ids()
+    offers = paid_offer_doors(w, preview)
 
     rail_rows = FunnelEvent.objects.filter(
         event_name__in=['receive_rail_interest', 'local_rail_interest'],
@@ -352,9 +332,46 @@ def demand(w):
 
     probes = list(ProbeAnswer.objects.order_by().values('probe_id', 'answer').annotate(
         n=Count('id'), funded_n=Count('id', filter=Q(funded=True))).order_by('-n')[:12])
-    return {'demand_offers': offers, 'demand_stages': ('Saw it', 'Opened', 'Avísame'),
-            'demand_smart_funnel': smart_account_funnel(w, preview),
+    return {'demand_offers': offers, 'demand_stages': PAID_OFFER_STAGE_LABELS,
             'demand_probes': probes, 'rail_interest': rail_interest, 'rail_interest_totals': totals}
+
+
+PAID_OFFER_STAGES = ('door_shown', 'detail_opened', 'avisame_tapped')
+PAID_OFFER_STAGE_LABELS = ('Saw it', 'Opened', 'Avísame')
+
+
+def preview_user_ids():
+    """Staff ids that preview paid offers: left out of every demand count."""
+    return {int(p) for p in str(getattr(settings, 'PAID_OFFER_PREVIEW_USER_IDS', '') or '').split(',')
+            if p.strip().isdigit()}
+
+
+def paid_offer_doors(w, preview, product=None):
+    """Paid-offer fake doors: distinct people per stage in the last 30 days,
+    plus the all-time waitlist. One row per product (or only `product`)."""
+    from users.models_analytics import FunnelEvent
+    from users.models_product_waitlist import ProductWaitlistEntry
+
+    events = FunnelEvent.objects.filter(
+        event_name='paid_offer_interest', user__isnull=False, created_at__gte=w.rolling_30_start)
+    waitlist = ProductWaitlistEntry.objects.exclude(user_id__in=preview).order_by()
+    if product is not None:
+        events, waitlist = events.filter(source_type=product), waitlist.filter(product=product)
+    reached = defaultdict(set)
+    for user, key, props in events.exclude(user_id__in=preview).values_list('user_id', 'source_type', 'properties'):
+        reached[(key, (props or {}).get('stage'))].add(user)
+    labels = dict(ProductWaitlistEntry._meta.get_field('product').choices or [])
+    waitlisted = {row['product']: row for row in waitlist.values('product').annotate(
+        n=Count('id'), funded_n=Count('id', filter=Q(funded=True)),
+        yes_n=Count('id', filter=Q(would_pay='yes')))}
+    offers = []
+    for key in sorted({k[0] for k in reached} | set(waitlisted)):
+        counts = [len(reached.get((key, stage), ())) for stage in PAID_OFFER_STAGES]
+        row = waitlisted.get(key, {})
+        offers.append({'product': key, 'label': labels.get(key, key), 'stages': counts,
+                       'waitlist': row.get('n', 0), 'would_pay': row.get('yes_n', 0),
+                       'waitlist_funded': row.get('funded_n', 0)})
+    return offers
 
 
 # The paid Cuenta inteligente funnel (event smart_account_funnel, spec 7.9):

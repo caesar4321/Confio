@@ -73,12 +73,12 @@ export function BeneficiaryDesignationsScreen() {
             </Text>
           )}
           ListEmptyComponent={(
-            <Empty icon="inbox" title="No tienes designaciones" body="Cuando alguien te elija como beneficiario, aparecerá aquí." />
+            <Empty icon="heart" title="Aquí verás quién te eligió" body="Cuando alguien te elija como beneficiario de su Cuenta inteligente, aparecerá aquí." />
           )}
           renderItem={({ item }) => (
             <View style={styles.rowBox}>
               <Row
-                left={<IconDisc icon={item.state === 'pending_acceptance' ? 'mail' : 'shield'} />}
+                left={<IconDisc icon={item.state === 'pending_acceptance' ? 'mail' : 'heart'} />}
                 title={`Cuenta de ${item.ownerName}`}
                 subtitle={item.ownerHandle ? `@${item.ownerHandle}` : undefined}
                 note={designationStatus(item)}

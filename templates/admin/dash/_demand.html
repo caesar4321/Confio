@@ -15,20 +15,6 @@
 </div>
 <div class="data-table">
     <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-        Cuenta inteligente funnel (30d)
-        <span style="font-weight: 400; color: #6b7280;">· distinct people per stage; the first two stages come from the app, the rest from reconciled chain events</span>
-    </div>
-    <table>
-        <thead><tr><th>Stage</th><th class="num">People</th><th class="num">Annual</th><th class="num">Monthly</th></tr></thead>
-        <tbody>
-            {% for row in demand_smart_funnel %}
-            <tr><td>{{ row.label }}</td><td class="num">{{ row.people|intcomma }}</td><td class="num">{{ row.annual|intcomma }}</td><td class="num">{{ row.monthly|intcomma }}</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-<div class="data-table">
-    <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
         Rail Interest — demand probes (90d)
         <span style="font-weight: 400; color: #6b7280;">
             · {{ rail_interest_totals.rails|default:"0" }} rails

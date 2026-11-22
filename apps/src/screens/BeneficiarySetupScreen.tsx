@@ -17,6 +17,7 @@ import {
   SectionTitle, SmartScreen, kitStyles,
 } from '../components/smartAccount/kit';
 import { SignFlowSheet } from '../components/smartAccount/SignFlowSheet';
+import { HerenciaArt } from '../components/smartAccount/HerenciaArt';
 import { useSignFlow } from '../components/smartAccount/useSignFlow';
 import { useSmartRead } from '../components/smartAccount/useSmartRead';
 import { HELP_BENEFICIARY } from '../components/smartAccount/help';
@@ -112,8 +113,13 @@ export function BeneficiarySetupScreen() {
         <Empty icon="users" title="Todavía no está disponible" body="Te avisamos cuando puedas elegir a tu beneficiario." />
       ) : (
         <View style={kitStyles.pad}>
-          <Text style={kitStyles.lead}>
-            Elige a la persona que recibe esta cuenta si dejas de usarla. Solo cubre lo que está dentro de tu Cuenta inteligente.
+          <HerenciaArt width={168} variant="onLight" style={styles.art} />
+          <Text style={styles.headline} accessibilityRole="header">Lo tuyo, para los tuyos</Text>
+          <Text style={[kitStyles.lead, styles.centered]}>
+            Elige a quien recibirá esta cuenta si algún día dejas de usarla. Mientras la uses, sigue siendo solo tuya.
+          </Text>
+          <Text style={[kitStyles.small, styles.centered, styles.scope]}>
+            Cubre lo que está dentro de tu Cuenta inteligente.
           </Text>
 
           {current ? (
@@ -139,14 +145,14 @@ export function BeneficiarySetupScreen() {
           </Card>
           {touched && !person ? <Text style={styles.fieldError}>Elige a una persona.</Text> : null}
 
-          <SectionTitle>¿Cuánto plazo tienes para cancelar?</SectionTitle>
+          <SectionTitle>¿Qué plazo quieres?</SectionTitle>
           <View style={styles.chips} accessibilityRole="radiogroup">
             {options.map((d) => (
               <Chip key={d} label={daysLabel(d)} selected={d === days} onPress={() => setWindowDays(d)} />
             ))}
           </View>
           <Text style={kitStyles.small}>
-            Es el tiempo que pasa desde que esa persona pide la cuenta hasta que la recibe.
+            Si esa persona pide la cuenta, es el tiempo que tienes para cancelarlo con cualquier acción que firmes en tu Cuenta inteligente.
           </Text>
 
           <SectionTitle>Léelo con calma</SectionTitle>
@@ -191,6 +197,10 @@ export function BeneficiarySetupScreen() {
 
 const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
+  art: { alignSelf: 'center', marginTop: 4 },
+  headline: { fontSize: 22, lineHeight: 28, fontWeight: '700', color: SA.text, textAlign: 'center', marginTop: 8, marginBottom: 8 },
+  centered: { textAlign: 'center' },
+  scope: { marginTop: 6 },
   risk: { paddingVertical: 8 },
   fieldError: { fontSize: 13, color: SA.noticeText, marginTop: 8, marginLeft: 4 },
 });

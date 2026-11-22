@@ -18,6 +18,10 @@ UNAVAILABLE_BSC = metrics._cusd_bsc_unavailable(wired=True, address='0xcusd', so
 UNAVAILABLE_PLUS = metrics._unavailable(True, '0xplus', 'unavailable')
 
 
+SMART_SNAPSHOT = {'source': 'unconfigured', 'head_block': None, 'implementation': None,
+                  'account_implementation': None, 'sponsor_bnb': None, 'prices': None}
+
+
 def chain_reads(bsc=UNAVAILABLE_BSC, plus=UNAVAILABLE_PLUS):
     """No RPC in tests: every chain read the pages make, stubbed."""
     stack = ExitStack()
@@ -29,6 +33,7 @@ def chain_reads(bsc=UNAVAILABLE_BSC, plus=UNAVAILABLE_PLUS):
         ('ramps.metrics.public_fund_flow_snapshot', None),
         ('blockchain.cusd_metrics.get_cusd_platform_metrics', mock.Mock(
             circulating_cusd=None, tvl_cusd=None, source='unavailable', as_of=None)),
+        ('config.admin_dashboard_smart_account._chain_snapshot', dict(SMART_SNAPSHOT)),
     ):
         stack.enter_context(mock.patch(target, return_value=value))
     return stack
@@ -527,7 +532,7 @@ class ActivationTests(TestCase):
 
 
 class SmartAccountSectionTests(TestCase):
-    """Cuenta inteligente on the Community page: empty, populated, linked."""
+    """Cuenta inteligente on its own tab: empty, populated, linked."""
 
     def setUp(self):
         cache.clear()
@@ -535,16 +540,40 @@ class SmartAccountSectionTests(TestCase):
             username='smart-dash-admin', email='smart-dash@example.test', password=None)
         self.admin.is_verified = lambda: True
         self._addr = iter(range(1, 10_000))
+        from config import admin_dashboard_smart_account as section
+        self.real_snapshot = section._chain_snapshot
+        self.snapshot = dict(SMART_SNAPSHOT)
+        patcher = mock.patch('config.admin_dashboard_smart_account._chain_snapshot',
+                             side_effect=lambda use_cache=True: dict(self.snapshot))
+        self.chain_snapshot = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def address(self):
         return '0x' + format(next(self._addr), '040x')
 
-    def page(self):
-        request = RequestFactory().get(reverse('confio_admin:dash_community'))
+    def page(self, name='dash_cuenta'):
+        request = RequestFactory().get(reverse(f'confio_admin:{name}'))
         request.user = self.admin
         request.session = SessionStore()
-        view = next(u.callback for u in confio_admin_site.get_urls() if getattr(u, 'name', None) == 'dash_community')
-        return view(request).content.decode()
+        view = next(u.callback for u in confio_admin_site.get_urls() if getattr(u, 'name', None) == name)
+        response = view(request)
+        self.assertEqual(response.status_code, 200)
+        return response.content.decode()
+
+    def test_tab_follows_comprar_and_community_no_longer_shows_it(self):
+        keys = [key for key, *_ in confio_admin_site.DASH_PAGES]
+        self.assertEqual(keys.index('cuenta'), keys.index('comprar') + 1)
+        tabs = confio_admin_site._dash_tabs()
+        self.assertIn(('cuenta', 'Cuenta inteligente'), [(t['key'], t['label']) for t in tabs])
+        community = next(p for p in confio_admin_site.DASH_PAGES if p[0] == 'community')
+        self.assertFalse([p for p in community[3] if 'smart_account' in p or 'cuenta' in p])
+        self.assertFalse([t for t in community[4].get('tools', ()) if t[1].startswith('smart_account_')])
+        with chain_reads():
+            html = self.page('dash_community')
+        self.assertNotIn('Subscribe funnel', html)
+        self.assertNotIn('Relay transactions', html)
+        self.assertNotIn('smartaccount', html)
+        self.assertIn(reverse('confio_admin:dash_cuenta'), html)
 
     def open_link(self, url):
         """A changelist link resolves and its filters are valid (an invalid
@@ -598,13 +627,25 @@ class SmartAccountSectionTests(TestCase):
         self.assertFalse(data['feature']['enabled'])
         self.assertEqual(data['accounts']['subscribers'], 0)
         self.assertEqual(data['revenue']['window']['usd'], Decimal('0'))
+        self.assertEqual(data['revenue']['all']['usd'], Decimal('0'))
+        self.assertEqual(data['recurring']['mrr'], Decimal('0'))
+        self.assertEqual(data['money']['total'], Decimal('0'))
+        self.assertEqual(data['attention'], [])
         self.assertFalse(data['ops']['needs_action'])
         self.assertIsNone(data['ops']['oldest_unapplied'])
+        self.assertEqual(data['beneficiaries']['claims']['list'], [])
         self.assertIn('Cuenta inteligente', html)
         self.assertIn('Factory not set', html)
         self.assertIn('No payout rail offered', html)
         self.assertIn('never scanned', html)
-        self.assertIn('Cuenta inteligente funnel (30d)', html)
+        self.assertIn('Subscribe funnel', html)
+        self.assertIn('Nothing to act on', html)
+        self.assertIn('No claim is running', html)
+        self.assertIn('No payout yet', html)
+        # Every admin list the tab links to exists.
+        links = [link['url'] for group in data['tools'] for link in group['links']]
+        self.assertGreaterEqual(len(links), 15)
+        self.assertNotIn(None, links)
 
     def test_card_pulls_and_spenders_are_counted(self):
         from config.admin_dashboard_smart_account import smart_account
@@ -627,8 +668,9 @@ class SmartAccountSectionTests(TestCase):
         self.assertEqual((cards['pulls'], cards['pulls_usd'], cards['spenders_allowed'], cards['paused']),
                          (1, Decimal('10'), 1, True))
         self.assertIn('Card allowance', [r['label'] for r in data['automation']['rules']])
-        self.assertIn('Card pulls, window', html)
-        self.assertIn('cards paused', html)
+        self.assertEqual((cards['pulls_30'], cards['spenders_removed']), (1, 1))
+        self.assertIn('Pulls, 7 days', html)
+        self.assertIn('Cards paused', html)
 
     def test_a_failed_build_renders_as_unavailable(self):
         with mock.patch('config.admin_dashboard_smart_account._build', side_effect=RuntimeError('db')):
@@ -735,8 +777,24 @@ class SmartAccountSectionTests(TestCase):
         feature = data['feature']
         self.assertEqual((feature['enabled'], feature['canary'], feature['rails_offered']), (True, 2, []))
         self.assertEqual(feature['rails_configured'], ['bogus_rail'])
-        self.assertIn('not final after 15 min', html)
-        self.assertIn('Next executable'.lower(), html.lower())
+        self.assertIn('Not final after 15 min', html)
+        self.assertIn('Claims to watch', html)
+        self.assertIn('executable now', html)
+        self.assertEqual([c['executable'] for c in claims['list']], [True, False])
+        self.assertEqual(claims['pending'], 2)
+        self.assertEqual([i['title'] for i in data['attention'] if i['level'] == 'critical'],
+                         ['Relay transactions not final', 'Chain events not applied', 'Forced sales failed'])
+        self.assertEqual(revenue['all']['usd'], Decimal('164.98'))
+        self.assertEqual({r['label']: r['all']['n'] for r in revenue['plans']}, {'Annual': 1, 'Monthly': 1})
+        self.assertEqual((forced['all_n'], forced['all_failed']), (2, 1))
+        self.assertEqual({r['key']: r['all'] for r in ops['relay_rows']}['dropped'], 1)
+        self.assertGreaterEqual(ops['oldest_open_relay_minutes'], 39)
+        # Only the renewing (active) annual subscriber recurs, at the price
+        # the settings carry when the factory price is unread.
+        from smart_account.offer import settings_price
+        self.assertEqual(data['recurring']['mrr'], (Decimal(settings_price('annual')) / 12).quantize(Decimal('0.01')))
+        self.assertEqual(data['recurring']['price_source'], 'settings')
+        self.assertEqual(data['recurring']['renewing'], 1)
 
         urls = [r['url'] for group in (accounts['rows'], accounts['plans'], accounts['billing'],
                                        revenue['paid_with'], automation['rules'], automation['runs'],
@@ -767,10 +825,186 @@ class SmartAccountSectionTests(TestCase):
         old = FunnelEvent.objects.create(event_name='smart_account_funnel', user=real,
                                          properties={'stage': 'cancelled', 'plan': 'annual'})
         FunnelEvent.objects.filter(pk=old.pk).update(created_at=timezone.now() - timezone.timedelta(days=40))
+        from config.admin_dashboard_smart_account import smart_account
+
         with self.settings(PAID_OFFER_PREVIEW_USER_IDS=str(staff.pk)):
-            rows = {r['stage']: r for r in growth.demand(sections.Window.current())['demand_smart_funnel']}
+            rows = {r['stage']: r for r in smart_account(sections.Window.current())['smart_account']['funnel']}
         self.assertEqual([r for r in rows], [key for key, _label in growth.SMART_FUNNEL_STAGES])
         self.assertEqual(rows['subscribe_opened']['people'], 1)
         self.assertEqual((rows['subscribed']['people'], rows['subscribed']['annual'],
                           rows['subscribed']['monthly']), (1, 1, 0))
         self.assertEqual(rows['cancelled']['people'], 0)
+
+    def seed_everything(self):
+        """Every table the tab reads, with something in it."""
+        from blockchain.models import Balance, StockHoldings
+        from inbox.models import SupportConversation, SupportMessage
+        from smart_account.models import (
+            SmartAccountBeneficiary, SmartAccountCharge, SmartAccountClaim, SmartAccountForcedSale,
+            SmartAccountForcedSaleLeg, SmartAccountPagoMovilDestination, SmartAccountPayout,
+            SmartAccountPreparedAction, SmartAccountRelayTx, SmartAccountRule, SmartAccountRuleRun,
+            SmartAccountScanCursor, SmartAccountStandingAuthorization, SmartAccountWatch)
+        from users.models import Account
+
+        now = timezone.now()
+        ana, ben, cai, dan, eva = (self.member(n) for n in ('ana', 'ben', 'cai', 'dan', 'eva'))
+        annual = self.smart(ana, subscription_epoch=1)
+        monthly = self.smart(ben, plan='monthly', subscription_epoch=2, last_due_notice_at=now)
+        cancelling = self.smart(cai, status='cancel_pending', billing='sale_allowed', subscription_epoch=1)
+        self.smart(dan, status='inherited', inherited_from_user=eva, inherited_at=now)
+        self.smart(eva, subscription_epoch=1)
+        for account, plan, fee, days in ((annual, 'annual', '149.99', 1), (monthly, 'monthly', '14.99', 2),
+                                         (monthly, 'monthly', '14.99', 33)):
+            event = self.event(account, 'FeeCollected')
+            SmartAccountCharge.objects.create(
+                smart_account=account, event=event, plan=plan, period_start=now, period_end=now, fee_usd=Decimal(fee),
+                paid_with='cusd', tx_hash=event.tx_hash, charged_at=now - timezone.timedelta(days=days))
+        sale = SmartAccountForcedSale.objects.create(smart_account=cancelling, period_end=now, status='failed',
+                                                     attempts=2, last_error='quote expired\ntrace')
+        SmartAccountForcedSaleLeg.objects.create(forced_sale=sale, position=0, asset=self.address(), amount_in='1')
+        rule = SmartAccountRule.objects.create(smart_account=monthly, kind='payout', token_in=self.address(),
+                                               payout_rail='ve_pagomovil', amount=Decimal('20'), frequency='monthly',
+                                               active=True, state='onchain')
+        runs = [SmartAccountRuleRun.objects.create(rule=rule, scheduled_for=now - timezone.timedelta(hours=h),
+                                                   status=s) for h, s in ((1, 'ok'), (2, 'ok'), (3, 'skipped'))]
+        for run, status in zip(runs, ('paid', 'review')):
+            SmartAccountPayout.objects.create(rule_run=run, provider='pagoasap', rail='ve_pagomovil', status=status,
+                                              fiat_amount=Decimal('9000'), fiat_currency='VES')
+        destination = SmartAccountPagoMovilDestination.objects.create(
+            user=ben, phone='584121234567', bank_code='0102', id_number='V12345678', holder_name='Ben', label='Ben')
+        SmartAccountStandingAuthorization.objects.create(
+            kind='payout', user=ben, rail='ve_pagomovil', amount_usd=Decimal('20'), frequency='monthly',
+            binding_hash='0' * 64, pagomovil_destination=destination)
+        designation = SmartAccountBeneficiary.objects.create(
+            smart_account=annual, beneficiary_user=ben, beneficiary_address=self.address(),
+            challenge_window_seconds=86400 * 90, state='active')
+        SmartAccountClaim.objects.create(beneficiary_row=designation, initiated_at=now - timezone.timedelta(days=80),
+                                         executable_at=now + timezone.timedelta(days=10), initiated_tx='0x10',
+                                         owner_notices_sent=3)
+        for n, status in enumerate(('confirmed', 'confirmed', 'reverted', 'sent')):
+            SmartAccountRelayTx.objects.create(smart_account=annual, kind='collect', source_id=f's{n}', calldata='0x',
+                                               signed_tx_hash=f'0x{n:064x}', status=status)
+        SmartAccountScanCursor.objects.create(key='events', block_number=1_000)
+        SmartAccountWatch.objects.create(smart_account=annual, user=ana, kind='asset_price_drop_pct',
+                                         asset_key='stock:TSLAon', threshold=Decimal('5'), last_triggered_at=now,
+                                         action={'kind': 'buy', 'asset_key': 'stock:TSLAon', 'amount_usd': '50.00'})
+        personal = Account.objects.get(user=ana, account_type='personal')
+        conversation = SupportConversation.objects.create(user=ana, account=personal)
+        proposal = SupportMessage.objects.create(conversation=conversation, sender_type='SYSTEM', body='¿Compro?',
+                                                 metadata={'rule_proposal': {'steps': []}})
+        SupportMessage.objects.create(conversation=conversation, sender_type='SYSTEM', body='Tu mes',
+                                      metadata={'notice': f'smart_account_monthly_review:{annual.pk}:2026-10'})
+        SmartAccountPreparedAction.objects.create(
+            request_id='r1', user=ana, signer_address=self.address(), target_address=annual.contract_address,
+            smart_account=annual, kind='smart_rule', calls=[], calls_hash='h', consumed=True,
+            payload={'proposal': {'message_id': str(proposal.pk), 'step': 0}},
+            expires_at=now + timezone.timedelta(hours=1))
+        for account, token, amount in ((annual, 'CUSD_BSC', '100'), (monthly, 'USDT_BSC', '25.5'),
+                                       (monthly, 'CUSD_PLUS', '10')):
+            Balance.objects.create(account=account.account, token=token, amount=Decimal(amount),
+                                   address=account.contract_address)
+        StockHoldings.objects.create(bsc_address=annual.contract_address, account=annual.account,
+                                     held={'TSLAon': '1'}, scanned_at=now)
+        return {'annual': annual, 'monthly': monthly}
+
+    def test_every_block_counts_from_the_mirror(self):
+        from config.admin_dashboard_smart_account import smart_account
+
+        self.seed_everything()
+        self.snapshot.update(source='chain', head_block=1_250, implementation='0x' + 'ab' * 20,
+                             sponsor_bnb=Decimal('0.5'), prices={'monthly': Decimal('15'), 'annual': Decimal('120')})
+        plus = dataclasses.replace(UNAVAILABLE_PLUS, p_plus=Decimal('1.05'), source='chain')
+        with chain_reads(plus=plus), mock.patch('config.admin_dashboard_smart_account._chain_snapshot',
+                                                return_value=dict(self.snapshot)), self.settings(
+                SMART_ACCOUNT_ENABLED=True, SMART_ACCOUNT_FACTORY_ADDRESS='0x' + 'fa' * 20,
+                SMART_ACCOUNT_PAYOUT_RAILS='ve_pagomovil', SMART_ACCOUNT_CARD_RULES_ENABLED=True):
+            data = smart_account(sections.Window.current())['smart_account']
+            html = self.page()
+
+        # Three renewing subscribers at the factory price: 15 + 2 x 120 / 12.
+        self.assertEqual(data['recurring']['mrr'], Decimal('35.00'))
+        self.assertEqual(data['recurring']['arr'], Decimal('420.00'))
+        self.assertEqual(data['recurring']['price_source'], 'factory')
+        self.assertEqual(data['accounts']['subscribers'], 4)
+        self.assertEqual({r['label']: r['n'] for r in data['accounts']['epochs']},
+                         {'Never subscribed (epoch 0)': 1, 'First subscription (epoch 1)': 3,
+                          'Subscribed again (epoch 2+)': 1})
+        self.assertEqual(data['accounts']['later_generation'], 1)
+        revenue = data['revenue']
+        self.assertEqual((revenue['window']['usd'], revenue['all']['usd']), (Decimal('164.98'), Decimal('179.97')))
+        self.assertEqual((revenue['forced']['all_failed'], revenue['forced']['all_legs']), (1, 1))
+        self.assertEqual(revenue['forced']['fail_reasons'], [('quote expired', 1)])
+        self.assertEqual((revenue['notices']['due_reminders'], revenue['notices']['sale_allowed']), (1, 1))
+        money = data['money']
+        self.assertEqual(money['dollars'], Decimal('125.5'))
+        self.assertEqual(money['total'], Decimal('136.0'))
+        self.assertEqual(money['stock_accounts'], 1)
+        au = data['automation']
+        payout = au['payouts'][0]
+        self.assertEqual(payout['label'], 'Pago Móvil (Pago ASAP)')
+        self.assertEqual(payout['total'], 2)
+        self.assertEqual(au['payouts_review'], 1)
+        self.assertEqual({r['label']: r['n'] for r in au['authorizations']}['Bank payout'], 1)
+        self.assertEqual(au['pagomovil_destinations'], 1)
+        self.assertEqual({r['label']: r['cells'] for r in au['run_kinds']}['Bank payout'], [0, 0, 2, 1, 0])
+        claims = data['beneficiaries']['claims']
+        self.assertEqual((claims['waiting'], claims['list'][0]['owner_notices']), (1, 3))
+        self.assertIsNotNone(claims['list'][0]['url'])
+        ops = data['ops']
+        self.assertEqual((ops['lag_blocks'], ops['sponsor_bnb']), (250, Decimal('0.5')))
+        ia = data['ia']
+        self.assertEqual((ia['window']['made'], ia['window']['accepted'], ia['window']['people']), (1, 1, 1))
+        self.assertEqual((ia['notes_all'], ia['watches_active'], ia['watches_with_action'],
+                          ia['watches_triggered']), (1, 1, 1, 1))
+        titles = [i['title'] for i in data['attention']]
+        self.assertIn('Payouts in review', titles)
+        self.assertIn('Accounts where a forced sale is allowed', titles)
+        self.assertIn('Forced sales failed', titles)
+        contracts = {c['label']: c for c in data['contracts']}
+        self.assertTrue(contracts['Factory (proxy)']['url'].endswith('0x' + 'fa' * 20))
+        self.assertEqual(contracts['Factory implementation']['address'], '0x' + 'ab' * 20)
+        self.assertEqual({f['setting']: f['state'] for f in data['flags']}['SMART_ACCOUNT_CARD_RULES_ENABLED'], 'on')
+        for text in ('$35.00', 'Pago Móvil (Pago ASAP)', '0.5000 BNB', '250 blocks', 'quote expired', 'Claims to watch'):
+            self.assertIn(text, html)
+
+    def test_chain_snapshot_reads_once_and_marks_failures_unknown(self):
+        from config import admin_dashboard_smart_account as section
+
+        self.chain_snapshot.side_effect = None
+        self.chain_snapshot.return_value = {'source': 'chain', 'head_block': 7, 'prices': None}
+        w = sections.Window.current()
+        section.chain_snapshot(w)
+        section.chain_snapshot(sections.Window.current())
+        self.assertEqual(self.chain_snapshot.call_count, 1)
+        section.chain_snapshot(sections.Window.current(), refresh=True)
+        self.assertEqual(self.chain_snapshot.call_count, 2)
+
+    def test_snapshot_reads_each_fact_alone_and_never_without_a_factory(self):
+        factory = '0x' + 'fa' * 20
+        with mock.patch('smart_account.chain.rpc') as rpc, self.settings(SMART_ACCOUNT_FACTORY_ADDRESS=''):
+            self.assertEqual(self.real_snapshot()['source'], 'unconfigured')
+        rpc.assert_not_called()
+
+        def rpc_answer(method, params):
+            if method == 'eth_getStorageAt':
+                return '0x' + '0' * 24 + 'ab' * 20
+            if method == 'eth_getBalance':
+                return hex(5 * 10 ** 17)
+            raise RuntimeError('node down')
+
+        with mock.patch('smart_account.chain.rpc', side_effect=rpc_answer), \
+                mock.patch('smart_account.chain.eth_call', side_effect=RuntimeError('revert')), \
+                mock.patch('smart_account.offer.factory_prices', return_value=None), \
+                self.settings(SMART_ACCOUNT_FACTORY_ADDRESS=factory, BSC_SPONSOR_ADDRESS='0x' + '5b' * 20):
+            snap = self.real_snapshot()
+        self.assertEqual(snap['source'], 'chain')
+        self.assertIsNone(snap['head_block'])
+        self.assertIsNone(snap['account_implementation'])
+        self.assertEqual(snap['implementation'], '0x' + 'ab' * 20)
+        self.assertEqual(snap['sponsor_bnb'], Decimal('0.5'))
+
+        with mock.patch('smart_account.chain.rpc', side_effect=RuntimeError('node down')), \
+                mock.patch('smart_account.chain.eth_call', side_effect=RuntimeError('node down')), \
+                mock.patch('smart_account.offer.factory_prices', return_value=None), \
+                self.settings(SMART_ACCOUNT_FACTORY_ADDRESS=factory, BSC_SPONSOR_ADDRESS=''):
+            self.assertEqual(self.real_snapshot()['source'], 'unavailable')

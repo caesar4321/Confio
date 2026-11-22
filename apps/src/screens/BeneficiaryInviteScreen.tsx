@@ -9,7 +9,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { Text } from '../components/common/AppText';
-import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
+import { HerenciaArt } from '../components/smartAccount/HerenciaArt';
 import {
   ActionButton, Card, Empty, Fact, LoadError, Notice, NumberedList, ScreenSkeleton, SectionTitle, Sheet,
   SmartScreen, kitStyles,
@@ -119,9 +119,7 @@ export function BeneficiaryInviteScreen() {
         <Empty icon="user-x" title="Esta invitación ya no está" body="Puede que la hayan retirado." actionLabel="Volver" onAction={() => navigation.goBack()} />
       ) : pending ? (
         <View style={kitStyles.pad}>
-          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <CuentaInteligenteMark size={56} />
-          </View>
+          <HerenciaArt width={168} variant="onLight" style={styles.art} />
           <Text style={styles.title} accessibilityRole="header">
             {`${d.ownerName} te eligió como beneficiario de su Cuenta inteligente`}
           </Text>
@@ -202,7 +200,8 @@ export function BeneficiaryInviteScreen() {
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 24, lineHeight: 31, fontWeight: '700', color: SA.text, marginTop: 16 },
+  art: { alignSelf: 'center' },
+  title: { fontSize: 22, lineHeight: 29, fontWeight: '700', color: SA.text, marginTop: 8, textAlign: 'center' },
   list: { paddingVertical: 8 },
   address: { paddingVertical: 14 },
   addressLabel: { fontSize: 15, color: SA.muted },

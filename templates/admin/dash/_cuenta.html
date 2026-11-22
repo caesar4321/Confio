@@ -1,0 +1,544 @@
+{% load humanize %}
+<!-- Cuenta inteligente tab: config/admin_dashboard_smart_account.py -->
+<style>
+    .sa { --sa-gap: 16px; }
+    .sa-status { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 24px; }
+    .sa-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: 0.01em; background: var(--dash-sunken); color: var(--dash-muted); white-space: nowrap; }
+    .sa-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.85; }
+    .sa-badge.on { background: var(--dash-brand-soft); color: var(--dash-ok); }
+    .sa-badge.warn { background: var(--dash-warning-soft); color: var(--dash-warning); }
+    .sa-badge.crit { background: var(--dash-critical-soft); color: var(--dash-critical); }
+    .sa-badge.plain::before { display: none; }
+
+    .sa-section { margin: 40px 0 0; }
+    .sa-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--dash-line); }
+    .sa-head h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--dash-ink); margin: 0; padding: 0; background: none; text-transform: none; }
+    .sa-head p { margin: 0; color: var(--dash-muted); font-size: 13px; flex: 1 1 320px; }
+    .sa-head a { margin-left: auto; color: var(--dash-brand); font-size: 13px; text-decoration: none; font-weight: 500; white-space: nowrap; }
+
+    .sa-grid { display: grid; gap: var(--sa-gap); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+    .sa-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sa-grid.wide-left { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+    .sa .panel { padding: 16px 18px; }
+    .sa .panel h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; }
+    .sa .panel h3 .sa-note { margin-left: auto; font-weight: 400; }
+    .sa .panel h3 + .sa-sub { margin-top: -6px; }
+    .sa-sub { color: var(--dash-muted); font-size: 12.5px; margin: 0 0 10px; }
+    .sa-note { color: var(--dash-muted); font-size: 12px; }
+    .sa .panel + .panel { margin-top: 0; }
+    .sa-stack > * + * { margin-top: var(--sa-gap); }
+
+    .sa .mini-table th, .sa .mini-table td { padding: 8px 6px; }
+    .sa .mini-table td a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--dash-line); }
+    .sa .mini-table td a:hover { color: var(--dash-brand); border-bottom-color: var(--dash-brand); }
+    .sa .mini-table tr.total td { font-weight: 600; color: var(--dash-ink); border-top: 1px solid var(--dash-line); }
+    .sa .mini-table td.alarm, .sa .mini-table td.alarm a { color: var(--dash-critical); font-weight: 600; }
+    .sa .mini-table td .usd { display: block; color: var(--dash-muted); font-size: 12px; }
+    .sa .is-zero, .sa .is-zero a { color: var(--dash-muted); }
+    .sa-kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; margin: 0; }
+    .sa-kv dt, .sa-kv dd { padding: 7px 0; border-bottom: 1px solid var(--dash-line); margin: 0; }
+    .sa-kv dt { color: var(--dash-text); font-weight: 400; }
+    .sa-kv dt small { display: block; color: var(--dash-muted); font-size: 12px; }
+    .sa-kv dd { text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; color: var(--dash-ink); }
+    .sa-kv dd a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--dash-line); }
+    .sa-kv dd.alarm, .sa-kv dd.alarm a { color: var(--dash-critical); font-weight: 600; }
+    .sa-kv dd.zero { color: var(--dash-muted); font-weight: 400; }
+    .sa-kv > :nth-last-child(-n+2) { border-bottom: 0; }
+
+    .sa-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+    .sa-kpis .kpi { display: flex; flex-direction: column; min-height: 118px; }
+    .sa-kpis .kpi-value a { color: inherit; text-decoration: none; }
+    .sa-kpis .kpi-sub { margin-top: auto; padding-top: 8px; }
+    .sa-kpis .kpi.warn { border-color: var(--dash-warning); background: var(--dash-warning-soft); }
+    .sa-kpis .kpi.crit { border-color: var(--dash-critical); background: var(--dash-critical-soft); }
+
+    .sa-funnel { display: grid; gap: 6px; }
+    .sa-funnel-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 52px 88px; align-items: center; gap: 12px; font-size: 13px; }
+    .sa-funnel-row .bar { height: 10px; border-radius: 999px; background: var(--dash-sunken); overflow: hidden; }
+    .sa-funnel-row .bar span { display: block; height: 100%; background: var(--dash-field); border-radius: 999px; min-width: 2px; }
+    .sa-funnel-row.exit .bar span { background: var(--dash-flow-out); }
+    .sa-funnel-row .n { text-align: right; font-weight: 600; color: var(--dash-ink); font-variant-numeric: tabular-nums; }
+    .sa-funnel-row .split { display: block; margin: 0; color: var(--dash-muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+
+    .sa-addr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+    .sa-empty { padding: 18px 4px; color: var(--dash-muted); text-align: center; }
+    .sa-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    .sa-tools .panel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dash-muted); margin-bottom: 8px; }
+    .sa-tools ul { list-style: none; margin: 0; padding: 0; }
+    .sa-tools li { padding: 4px 0; }
+    .sa-tools a { color: var(--dash-brand); text-decoration: none; }
+    .sa-tools a:hover { text-decoration: underline; }
+
+    @media (max-width: 1100px) { .sa-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 767px) {
+        .sa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .sa-grid.two, .sa-grid.wide-left { grid-template-columns: 1fr; }
+        .sa-funnel-row { grid-template-columns: 100px minmax(0, 1fr) 40px; }
+        .sa-funnel-row .split { display: none; }
+        .sa .mini-table { display: block; overflow-x: auto; }
+    }
+</style>
+
+{% if smart_account is None %}
+<div class="alert-box critical">Cuenta inteligente figures are unavailable right now (the section failed to build; see the server log).</div>
+{% else %}
+{% with sa=smart_account f=smart_account.feature a=smart_account.accounts r=smart_account.revenue au=smart_account.automation b=smart_account.beneficiaries ops=smart_account.ops m=smart_account.money rec=smart_account.recurring ia=smart_account.ia %}
+<div class="sa">
+
+<div class="sa-status">
+    <span class="sa-badge {% if f.enabled %}on{% else %}crit{% endif %}">{% if f.enabled %}Enabled{% else %}Disabled{% endif %}</span>
+    <span class="sa-badge {% if f.canary %}on{% else %}warn{% endif %}">Canary: {% if f.canary == 'everyone' %}everyone{% else %}{{ f.canary }} user{{ f.canary|pluralize }}{% endif %}</span>
+    <span class="sa-badge {% if f.factory %}on{% else %}crit{% endif %}">{% if f.factory %}Factory {{ f.factory|slice:":8" }}…{{ f.factory|slice:"-4:" }}{% else %}Factory not set{% endif %}</span>
+    <span class="sa-badge {% if f.rails_offered %}on{% elif f.rails_offered is None %}warn{% endif %}">{% if f.rails_offered is None %}Payout rails unreadable{% elif f.rails_offered %}Payouts: {{ f.rails_offered|join:", " }}{% else %}No payout rail offered{% endif %}</span>
+    <span class="sa-badge {% if f.beneficiary_enabled %}on{% endif %}">Beneficiaries {% if f.beneficiary_enabled %}on{% else %}off · canary {{ f.beneficiary_canary }}{% endif %}</span>
+    {% if sa.chain_source == 'unavailable' %}<span class="sa-badge warn">Chain read unavailable</span>{% elif sa.chain_source == 'chain' %}<span class="sa-badge on">Chain read ok</span>{% endif %}
+    {% if f.min_app_version %}<span class="sa-badge plain">App ≥ {{ f.min_app_version }}</span>{% endif %}
+</div>
+
+{# ── Attention ─────────────────────────────────────────────────────── #}
+<section class="band">
+    <h2 class="band-title">Needs attention</h2>
+    <div class="attention">
+        {% for item in sa.attention %}
+        {% if item.url %}<a class="attention-row {{ item.level }}" href="{{ item.url }}">{% else %}<div class="attention-row {{ item.level }}">{% endif %}
+            <span class="attention-dot"></span>
+            <span><span class="attention-title">{{ item.title }}</span>{% if item.detail %}<br><span class="attention-detail">{{ item.detail }}</span>{% endif %}</span>
+            <span class="attention-count">{% if item.count is not None %}{{ item.count|intcomma }}{% endif %}</span>
+            <span class="attention-go">{% if item.url %}Open list →{% endif %}</span>
+        {% if item.url %}</a>{% else %}</div>{% endif %}
+        {% empty %}
+        <div class="attention-clear">✓ Nothing to act on: relay, event sync, forced sales, claims and payouts are clear.</div>
+        {% endfor %}
+    </div>
+</section>
+
+{# ── KPI strip ─────────────────────────────────────────────────────── #}
+<div class="sa-kpis">
+    <div class="kpi kpi-hero">
+        <div class="kpi-label">Subscribers</div>
+        <div class="kpi-value"><a href="{{ a.all_url }}">{{ a.subscribers|intcomma }}</a></div>
+        <div class="kpi-sub">{% for p in a.plans %}{{ p.label }} {{ p.n|intcomma }}{% if not forloop.last %} · {% endif %}{% endfor %}{% if a.cancel_pending %} · {{ a.cancel_pending|intcomma }} cancelling{% endif %}</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">MRR at current prices</div>
+        <div class="kpi-value">${{ rec.mrr|floatformat:2|intcomma }}</div>
+        <div class="kpi-sub">ARR ${{ rec.arr|floatformat:0|intcomma }} · {{ rec.renewing|intcomma }} renewing</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Fees collected, 7 days</div>
+        <div class="kpi-value"><a href="{{ r.window.url }}">${{ r.window.usd|floatformat:2|intcomma }}</a></div>
+        <div class="kpi-sub">30d ${{ r.rolling_30.usd|floatformat:2|intcomma }} · all time ${{ r.all.usd|floatformat:2|intcomma }}</div>
+    </div>
+    <div class="kpi">
+        <div class="kpi-label">Money in accounts</div>
+        <div class="kpi-value">{% if m.total is not None %}${{ m.total|floatformat:2|intcomma }}{% else %}${{ m.dollars|floatformat:2|intcomma }}<span class="unknown"> +</span>{% endif %}</div>
+        <div class="kpi-sub">{% if m.total is None %}{{ m.shares|floatformat:2|intcomma }} cUSD+ shares unpriced · {% endif %}{{ m.stock_accounts|intcomma }} with stocks · {{ m.crypto_accounts|intcomma }} with crypto</div>
+    </div>
+    {% with due=r.notices.payment_due|add:r.notices.in_notice|add:r.notices.sale_allowed %}
+    <div class="kpi{% if r.notices.sale_allowed %} crit{% elif due %} warn{% endif %}">
+        <div class="kpi-label">Payment due / forced sale</div>
+        <div class="kpi-value">{{ due|intcomma }}</div>
+        <div class="kpi-sub">{{ r.notices.payment_due|intcomma }} due · {{ r.notices.in_notice|intcomma }} in notice · {{ r.notices.sale_allowed|intcomma }} sale allowed</div>
+    </div>
+    {% endwith %}
+    <div class="kpi{% if b.claims.executable %} warn{% endif %}">
+        <div class="kpi-label">Inheritance claims pending</div>
+        <div class="kpi-value"><a href="{{ b.claims.pending_url }}">{{ b.claims.pending|intcomma }}</a></div>
+        <div class="kpi-sub">{% if b.claims.executable %}{{ b.claims.executable|intcomma }} executable now{% elif b.claims.soonest %}next {{ b.claims.soonest|date:"j M" }}{% else %}none running{% endif %}</div>
+    </div>
+</div>
+<p class="sa-note" style="margin:8px 2px 0;">MRR counts renewing (active) subscribers at the {{ rec.price_source }} price: monthly ${{ rec.prices.monthly|floatformat:2 }}, annual ${{ rec.prices.annual|floatformat:2 }} ÷ 12. Money in accounts is the mirrored balance cache{% if m.synced %} (oldest row synced {{ m.synced|naturaltime }}){% endif %}: cUSD ${{ m.cusd|floatformat:2|intcomma }} · USDT ${{ m.usdt|floatformat:2|intcomma }}{% if m.shares %} · cUSD+ {{ m.shares|floatformat:4|intcomma }} shares{% endif %}.</p>
+
+{# ── Funnel ────────────────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Funnel</h2>
+        <p>Distinct people per stage in the last 30 days (staff preview ids left out). The first two stages come from the app, the rest from reconciled chain events.</p>
+    </div>
+    <div class="sa-grid wide-left">
+        <div class="panel">
+            <h3>Subscribe funnel <span class="sa-note">people · annual / monthly</span></h3>
+            <div class="sa-funnel">
+                {% for row in sa.funnel %}
+                <div class="sa-funnel-row{% if row.stage == 'cancelled' %} exit{% endif %}">
+                    <span>{{ row.label }}</span>
+                    <span class="bar"><span style="width: {{ row.pct }}%;{% if not row.people %} min-width:0;{% endif %}"></span></span>
+                    <span class="n{% if not row.people %} is-zero{% endif %}">{{ row.people|intcomma }}</span>
+                    <span class="split">{{ row.annual|intcomma }} / {{ row.monthly|intcomma }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="panel">
+            <h3>Before subscribing: offer door</h3>
+            <p class="sa-sub">The paid-offer door for Cuenta inteligente (30 days) and its waitlist (all time).</p>
+            {% with d=sa.doors %}
+            <dl class="sa-kv">
+                {% for stage in d.stages %}<dt>{{ stage.label }}</dt><dd class="{% if not stage.n %}zero{% endif %}">{{ stage.n|intcomma }}</dd>{% endfor %}
+                <dt>On the waitlist</dt><dd class="{% if not d.waitlist %}zero{% endif %}">{{ d.waitlist|intcomma }}</dd>
+                <dt>Would pay</dt><dd class="{% if not d.would_pay %}zero{% endif %}">{{ d.would_pay|intcomma }}</dd>
+                <dt>Funded on it</dt><dd class="{% if not d.waitlist_funded %}zero{% endif %}">{{ d.waitlist_funded|intcomma }}</dd>
+            </dl>
+            {% endwith %}
+        </div>
+    </div>
+</section>
+
+{# ── Accounts ──────────────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Accounts</h2>
+        <p>{{ a.total|intcomma }} account{{ a.total|pluralize }} in the mirror · {{ a.own|intcomma }} owned (active, cancelling, expired). In the window: {{ a.new_subscriptions|intcomma }} subscribed ({{ a.new_subscribers|intcomma }} accounts), {{ a.cancellations|intcomma }} cancelled, {{ a.cancels_undone|intcomma }} undone.</p>
+        <a href="{{ a.events_url }}">Events →</a>
+    </div>
+    <div class="sa-grid">
+        <div class="panel">
+            <h3>By state</h3>
+            <table class="mini-table">
+                <thead><tr><th>State</th><th>Accounts</th></tr></thead>
+                <tbody>
+                {% for row in a.rows %}<tr><td>{{ row.label }}</td><td class="{% if not row.n %}is-zero{% endif %}"><a href="{{ row.url }}">{{ row.n|intcomma }}</a></td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="panel">
+            <h3>Subscribers by billing</h3>
+            <table class="mini-table">
+                <thead><tr><th>Billing</th><th>Accounts</th></tr></thead>
+                <tbody>
+                {% for row in a.billing %}<tr><td>{{ row.label }}</td><td class="{% if row.alarm and row.n %}alarm{% elif not row.n %}is-zero{% endif %}"><a href="{{ row.url }}">{{ row.n|intcomma }}</a></td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="panel">
+            <h3>By subscription epoch</h3>
+            <table class="mini-table">
+                <thead><tr><th>Epoch</th><th>Accounts</th></tr></thead>
+                <tbody>
+                {% for row in a.epochs %}<tr><td>{{ row.label }}</td><td class="{% if not row.n %}is-zero{% endif %}">{{ row.n|intcomma }}</td></tr>{% endfor %}
+                <tr><td>Owner on a later generation<span class="usd" style="display:block;color:var(--dash-muted);font-size:12px;">their earlier account was inherited</span></td><td class="{% if not a.later_generation %}is-zero{% endif %}">{{ a.later_generation|intcomma }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+{# ── Billing ───────────────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Billing</h2>
+        <p>Every collected fee (Subscribed or FeeCollected), how it was paid, and the forced sales that pay a fee nobody paid.</p>
+        <a href="{{ r.all.url }}">All charges →</a>
+    </div>
+    <div class="sa-grid two">
+        <div class="sa-stack">
+            <div class="panel">
+                <h3>Charges by plan</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Plan</th><th>7 days</th><th>30 days</th><th>All time</th></tr></thead>
+                    <tbody>
+                    {% for row in r.plans %}
+                    <tr><td><a href="{{ row.url }}">{{ row.label }}</a></td>
+                        <td class="{% if not row.window.n %}is-zero{% endif %}">{{ row.window.n|intcomma }}<span class="usd">${{ row.window.usd|floatformat:2|intcomma }}</span></td>
+                        <td class="{% if not row.rolling_30.n %}is-zero{% endif %}">{{ row.rolling_30.n|intcomma }}<span class="usd">${{ row.rolling_30.usd|floatformat:2|intcomma }}</span></td>
+                        <td class="{% if not row.all.n %}is-zero{% endif %}">{{ row.all.n|intcomma }}<span class="usd">${{ row.all.usd|floatformat:2|intcomma }}</span></td></tr>
+                    {% endfor %}
+                    <tr class="total"><td>Total</td><td>{{ r.window.n|intcomma }}<span class="usd">${{ r.window.usd|floatformat:2|intcomma }}</span></td><td>{{ r.rolling_30.n|intcomma }}<span class="usd">${{ r.rolling_30.usd|floatformat:2|intcomma }}</span></td><td>{{ r.all.n|intcomma }}<span class="usd">${{ r.all.usd|floatformat:2|intcomma }}</span></td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Fees by how they were paid</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Paid with</th><th>7 days</th><th>30 days</th><th>All time</th></tr></thead>
+                    <tbody>
+                    {% for row in r.paid_with %}
+                    <tr><td><a href="{{ row.url }}">{{ row.label }}</a></td>
+                        <td class="{% if not row.window.n %}is-zero{% endif %}">{{ row.window.n|intcomma }}<span class="usd">${{ row.window.usd|floatformat:2|intcomma }}</span></td>
+                        <td class="{% if not row.rolling_30.n %}is-zero{% endif %}">{{ row.rolling_30.n|intcomma }}<span class="usd">${{ row.rolling_30.usd|floatformat:2|intcomma }}</span></td>
+                        <td class="{% if not row.all.n %}is-zero{% endif %}">{{ row.all.n|intcomma }}<span class="usd">${{ row.all.usd|floatformat:2|intcomma }}</span></td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="sa-stack">
+            <div class="panel">
+                <h3>Forced sales <span class="sa-note"><a href="{{ r.forced.url }}">list →</a></span></h3>
+                <table class="mini-table">
+                    <thead><tr><th></th><th>7 days</th><th>All time</th></tr></thead>
+                    <tbody>
+                    <tr><td>Sales</td><td class="{% if not r.forced.n %}is-zero{% endif %}">{{ r.forced.n|intcomma }}</td><td class="{% if not r.forced.all_n %}is-zero{% endif %}">{{ r.forced.all_n|intcomma }}</td></tr>
+                    <tr><td>Succeeded</td><td class="{% if not r.forced.succeeded %}is-zero{% endif %}">{{ r.forced.succeeded|intcomma }}</td><td class="{% if not r.forced.all_succeeded %}is-zero{% endif %}">{{ r.forced.all_succeeded|intcomma }}</td></tr>
+                    <tr><td>Failed, will retry</td><td class="{% if r.forced.failed %}alarm{% else %}is-zero{% endif %}"><a href="{{ r.forced.failed_url }}">{{ r.forced.failed|intcomma }}</a></td><td class="{% if r.forced.all_failed %}alarm{% else %}is-zero{% endif %}"><a href="{{ r.forced.failed_url }}">{{ r.forced.all_failed|intcomma }}</a></td></tr>
+                    <tr><td>In flight</td><td class="{% if not r.forced.in_flight %}is-zero{% endif %}">{{ r.forced.in_flight|intcomma }}</td><td class="{% if not r.forced.all_in_flight %}is-zero{% endif %}">{{ r.forced.all_in_flight|intcomma }}</td></tr>
+                    <tr><td>Legs sold</td><td class="{% if not r.forced.legs %}is-zero{% endif %}">{{ r.forced.legs|intcomma }}</td><td class="{% if not r.forced.all_legs %}is-zero{% endif %}">{{ r.forced.all_legs|intcomma }}</td></tr>
+                    <tr class="total"><td>Proceeds</td><td>${{ r.forced.dollars|floatformat:2|intcomma }}</td><td>${{ r.forced.all_dollars|floatformat:2|intcomma }}</td></tr>
+                    </tbody>
+                </table>
+                {% if r.forced.fail_reasons %}
+                <p class="sa-sub" style="margin:12px 0 4px;">Last errors of failed sales ({{ r.forced.attempts|intcomma }} attempts in all)</p>
+                <dl class="sa-kv">{% for reason, n in r.forced.fail_reasons %}<dt>{{ reason }}</dt><dd class="alarm">{{ n|intcomma }}</dd>{% endfor %}</dl>
+                {% endif %}
+            </div>
+            <div class="panel">
+                <h3>Payment notices</h3>
+                <dl class="sa-kv">
+                    <dt>Due reminders sent<small>last 7 days, one per account per day</small></dt><dd class="{% if not r.notices.due_reminders %}zero{% endif %}">{{ r.notices.due_reminders|intcomma }}</dd>
+                    <dt>Sale-eve warnings on open notices</dt><dd class="{% if not r.notices.sale_eve %}zero{% endif %}">{{ r.notices.sale_eve|intcomma }}</dd>
+                    <dt>Price-change notices<small>subscribers told of a new renewal price</small></dt><dd class="{% if not r.notices.price_change %}zero{% endif %}">{{ r.notices.price_change|intcomma }}</dd>
+                    <dt>Assets-returned notices<small>last 7 days</small></dt><dd class="{% if not r.notices.returned %}zero{% endif %}">{{ r.notices.returned|intcomma }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# ── Rules and payouts ─────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Rules and payouts</h2>
+        <p>{{ au.rules_total|intcomma }} active rule{{ au.rules_total|pluralize }}{% if au.drafts %} · {{ au.drafts|intcomma }} draft{{ au.drafts|pluralize }} not on chain{% endif %}{% if au.cancelled %} · {{ au.cancelled|intcomma }} cancelled{% endif %}. Runs are the slots scheduled in the window.</p>
+    </div>
+    <div class="sa-grid two">
+        <div class="panel">
+            <h3>Active rules</h3>
+            <table class="mini-table">
+                <thead><tr><th>Kind</th>{% for label in au.frequencies %}<th>{{ label }}</th>{% endfor %}<th>Total</th></tr></thead>
+                <tbody>
+                {% for row in au.rules %}<tr><td>{{ row.label }}</td>{% for n in row.cells %}<td class="{% if not n %}is-zero{% endif %}">{{ n|intcomma }}</td>{% endfor %}<td class="{% if not row.total %}is-zero{% endif %}"><a href="{{ row.url }}">{{ row.total|intcomma }}</a></td></tr>{% endfor %}
+                </tbody>
+            </table>
+            <p class="sa-sub" style="margin:14px 0 6px;">Standing authorizations in force</p>
+            <dl class="sa-kv">
+                {% for row in au.authorizations %}<dt>{{ row.label }}</dt><dd class="{% if not row.n %}zero{% endif %}">{{ row.n|intcomma }}</dd>{% endfor %}
+                <dt>Saved Pago Móvil destinations</dt><dd class="{% if not au.pagomovil_destinations %}zero{% endif %}">{{ au.pagomovil_destinations|intcomma }}</dd>
+            </dl>
+        </div>
+        <div class="panel">
+            <h3>Rule runs, 7 days <span class="sa-note">{{ au.runs_total|intcomma }} slot{{ au.runs_total|pluralize }}</span></h3>
+            <table class="mini-table">
+                <thead><tr><th>Kind</th>{% for label in au.run_statuses %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+                <tbody>
+                {% for row in au.run_kinds %}<tr><td>{{ row.label }}</td>{% for n in row.cells %}<td class="{% if not n %}is-zero{% endif %}">{{ n|intcomma }}</td>{% endfor %}</tr>{% endfor %}
+                <tr class="total"><td>All</td>{% for row in au.runs %}<td class="{% if row.key == 'failed' and row.n %}alarm{% endif %}"><a href="{{ row.url }}">{{ row.n|intcomma }}</a></td>{% endfor %}</tr>
+                </tbody>
+            </table>
+            {% if au.skip_reasons or au.fail_reasons %}
+            <p class="sa-sub" style="margin:14px 0 4px;">Top reasons</p>
+            <dl class="sa-kv">
+                {% for reason, n in au.fail_reasons %}<dt>Failed: {{ reason }}</dt><dd class="alarm">{{ n|intcomma }}</dd>{% endfor %}
+                {% for reason, n in au.skip_reasons %}<dt>Skipped: {{ reason }}</dt><dd>{{ n|intcomma }}</dd>{% endfor %}
+            </dl>
+            {% else %}
+            <p class="sa-sub" style="margin:12px 0 0;">No failed or skipped runs in the window.</p>
+            {% endif %}
+        </div>
+    </div>
+    <div class="sa-grid wide-left" style="margin-top:16px;">
+        <div class="panel">
+            <h3>Bank payouts by rail <span class="sa-note">all time · {{ au.payouts_open|intcomma }} open · {{ au.payouts_window.n|intcomma }} new in 7 days</span></h3>
+            {% if au.payouts %}
+            <table class="mini-table">
+                <thead><tr><th>Rail</th>{% for label in au.payout_columns %}<th>{{ label }}</th>{% endfor %}<th>Total</th></tr></thead>
+                <tbody>
+                {% for row in au.payouts %}<tr><td><a href="{{ row.url }}">{{ row.label }}</a></td>{% for c in row.cells %}<td class="{% if c.alarm %}alarm{% elif not c.n %}is-zero{% endif %}">{{ c.n|intcomma }}</td>{% endfor %}<td>{{ row.total|intcomma }}</td></tr>{% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="sa-empty">No payout yet{% if not f.rails_offered %}: no rail is offered{% endif %}.</div>
+            {% endif %}
+        </div>
+        <div class="panel">
+            <h3>Card allowance {% if au.cards.paused %}<span class="sa-badge crit" style="margin-left:auto;">Cards paused</span>{% elif f.card_rules_enabled %}<span class="sa-badge on" style="margin-left:auto;">On</span>{% else %}<span class="sa-badge" style="margin-left:auto;">Off</span>{% endif %}</h3>
+            <dl class="sa-kv">
+                <dt>Pulls, 7 days<small>gross, exit fee included</small></dt><dd class="{% if not au.cards.pulls %}zero{% endif %}"><a href="{{ au.cards.pulls_url }}">{{ au.cards.pulls|intcomma }} · ${{ au.cards.pulls_usd|floatformat:2|intcomma }}</a></dd>
+                <dt>Pulls, 30 days</dt><dd class="{% if not au.cards.pulls_30 %}zero{% endif %}">{{ au.cards.pulls_30|intcomma }} · ${{ au.cards.pulls_30_usd|floatformat:2|intcomma }}</dd>
+                <dt>Active card rules</dt><dd class="{% if not au.cards.card_rules %}zero{% endif %}">{{ au.cards.card_rules|intcomma }}</dd>
+                <dt>Spenders allowed</dt><dd class="{% if not au.cards.spenders_allowed %}zero{% endif %}"><a href="{{ au.cards.spenders_url }}">{{ au.cards.spenders_allowed|intcomma }}</a>{% if au.cards.spenders_removed %} <span class="sa-note">({{ au.cards.spenders_removed }} removed)</span>{% endif %}</dd>
+                {% if au.cards.unmatched %}<dt>Pulls with no mirrored rule</dt><dd class="alarm">{{ au.cards.unmatched|intcomma }}</dd>{% endif %}
+            </dl>
+        </div>
+    </div>
+</section>
+
+{# ── Inheritance ───────────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Inheritance</h2>
+        <p>Designations, claims running their challenge window, and accounts already inherited ({{ b.inherited|intcomma }}, {{ b.inherited_window|intcomma }} in the window).</p>
+        <a href="{{ b.claims.pending_url }}">Pending claims →</a>
+    </div>
+    <div class="sa-grid wide-left">
+        <div class="panel">
+            <h3>Claims to watch <span class="sa-note">pending, soonest first</span></h3>
+            {% if b.claims.list %}
+            <table class="mini-table">
+                <thead><tr><th>Account</th><th>Owner → beneficiary</th><th>Started</th><th>Window ends</th><th>Owner notices</th></tr></thead>
+                <tbody>
+                {% for c in b.claims.list %}
+                <tr>
+                    <td><a class="sa-addr" href="{{ c.url|default:b.claims.pending_url }}">{{ c.account|slice:":8" }}…{{ c.account|slice:"-4:" }}</a></td>
+                    <td>{{ c.owner }} → {{ c.beneficiary }}</td>
+                    <td>{{ c.initiated_at|date:"j M Y" }}</td>
+                    <td class="{% if c.executable %}alarm{% endif %}">{{ c.executable_at|date:"j M Y, H:i" }}<span class="usd">{% if c.executable %}executable now{% else %}in {{ c.days_left }} day{{ c.days_left|pluralize }}{% endif %}</span></td>
+                    <td>{{ c.owner_notices|intcomma }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% if b.claims.list_more %}<p class="sa-sub" style="margin:10px 0 0;">and {{ b.claims.list_more|intcomma }} more in the <a href="{{ b.claims.pending_url }}">list</a>.</p>{% endif %}
+            {% else %}
+            <div class="sa-empty">No claim is running.</div>
+            {% endif %}
+        </div>
+        <div class="sa-stack">
+            <div class="panel">
+                <h3>Designations</h3>
+                <dl class="sa-kv">
+                    {% for row in b.rows %}<dt>{{ row.label }}</dt><dd class="{% if not row.n %}zero{% endif %}"><a href="{{ row.url }}">{{ row.n|intcomma }}</a></dd>{% endfor %}
+                </dl>
+            </div>
+            <div class="panel">
+                <h3>Claims</h3>
+                <table class="mini-table">
+                    <thead><tr><th></th><th>7 days</th><th>All time</th></tr></thead>
+                    <tbody>
+                    <tr><td>Pending, window running</td><td colspan="2" class="{% if not b.claims.waiting %}is-zero{% endif %}"><a href="{{ b.claims.pending_url }}">{{ b.claims.waiting|intcomma }}</a></td></tr>
+                    <tr><td>Executable now</td><td colspan="2" class="{% if b.claims.executable %}alarm{% else %}is-zero{% endif %}"><a href="{{ b.claims.pending_url }}">{{ b.claims.executable|intcomma }}</a></td></tr>
+                    <tr><td>Cancelled by the owner</td><td class="{% if not b.claims.cancelled %}is-zero{% endif %}">{{ b.claims.cancelled|intcomma }}</td><td class="{% if not b.claims.cancelled_all %}is-zero{% endif %}"><a href="{{ b.claims.cancelled_url }}">{{ b.claims.cancelled_all|intcomma }}</a></td></tr>
+                    <tr><td>Executed (inherited)</td><td class="{% if not b.claims.executed %}is-zero{% endif %}">{{ b.claims.executed|intcomma }}</td><td class="{% if not b.claims.executed_all %}is-zero{% endif %}"><a href="{{ b.claims.executed_url }}">{{ b.claims.executed_all|intcomma }}</a></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# ── Relayer and sync ──────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Relayer and sync health</h2>
+        <p>Relayer transactions are written before broadcast; the event scanner mirrors the chain into the tables above.</p>
+    </div>
+    <div class="sa-grid two">
+        <div class="panel">
+            <h3>Relay transactions <span class="sa-note">{{ ops.relay_window_total|intcomma }} created in 7 days</span></h3>
+            <table class="mini-table">
+                <thead><tr><th>Status</th><th>7 days</th><th>All time</th></tr></thead>
+                <tbody>
+                {% for row in ops.relay_rows %}
+                <tr><td>{{ row.label }}</td><td class="{% if row.alarm and row.window %}alarm{% elif not row.window %}is-zero{% endif %}">{{ row.window|intcomma }}</td><td class="{% if row.alarm and row.all %}alarm{% elif not row.all %}is-zero{% endif %}"><a href="{{ row.url }}">{{ row.all|intcomma }}</a></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% if ops.relay_kinds %}<p class="sa-sub" style="margin:12px 0 0;">By kind, 7 days: {% for k in ops.relay_kinds %}{{ k.kind }} {{ k.n|intcomma }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+        </div>
+        <div class="panel">
+            <h3>Health</h3>
+            <dl class="sa-kv">
+                <dt>Oldest unresolved relay tx<small>signed or sent, not final</small></dt>
+                <dd class="{% if ops.stuck_relay %}alarm{% elif ops.oldest_open_relay is None %}zero{% endif %}">{% if ops.oldest_open_relay %}<a href="{{ ops.stuck_relay_url }}">{{ ops.oldest_open_relay_minutes|intcomma }} min</a>{% else %}none{% endif %}</dd>
+                <dt>Not final after {{ ops.relay_stuck_minutes }} min</dt><dd class="{% if ops.stuck_relay %}alarm{% else %}zero{% endif %}"><a href="{{ ops.stuck_relay_url }}">{{ ops.stuck_relay|intcomma }}</a></dd>
+                <dt>Unapplied chain events{% if ops.oldest_unapplied %}<small>oldest {{ ops.oldest_unapplied_minutes|intcomma }} min</small>{% endif %}</dt><dd class="{% if ops.unapplied_old %}alarm{% elif not ops.unapplied %}zero{% endif %}"><a href="{{ ops.unapplied_url }}">{{ ops.unapplied|intcomma }}</a></dd>
+                <dt>Accounts held back<small>events unapplied over {{ ops.event_stuck_minutes }} min</small></dt><dd class="{% if ops.blocked_accounts %}alarm{% else %}zero{% endif %}">{{ ops.blocked_accounts|intcomma }}</dd>
+                <dt>Accounts waiting on a log backfill</dt><dd>{% if ops.backfilling is None %}<span class="unknown">unknown</span>{% else %}{{ ops.backfilling|intcomma }}{% endif %}</dd>
+                <dt>Event scan cursor{% if ops.cursor_at %}<small>written {{ ops.cursor_at|naturaltime }}</small>{% endif %}</dt>
+                <dd class="{% if ops.cursor_idle %}alarm{% endif %}">{% if ops.cursor_block is None %}<span class="unknown">never scanned</span>{% else %}block {{ ops.cursor_block }}{% endif %}</dd>
+                <dt>Chain head · scanner lag</dt>
+                <dd>{% if ops.head_block is None %}<span class="unknown">unknown</span>{% else %}{{ ops.head_block }}{% if ops.lag_blocks is not None %} · {{ ops.lag_blocks|intcomma }} blocks{% endif %}{% endif %}</dd>
+                <dt>Events mirrored<small>7 days · all time</small></dt><dd>{{ ops.events_window|intcomma }} · {{ ops.events_all|intcomma }}</dd>
+                <dt>Sponsor (KMS) BNB</dt><dd>{% if ops.sponsor_bnb is None %}<span class="unknown">unknown</span>{% else %}{{ ops.sponsor_bnb|floatformat:4 }} BNB{% endif %}</dd>
+            </dl>
+        </div>
+    </div>
+</section>
+
+{# ── IA+ ───────────────────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Confío IA+</h2>
+        <p>Rule proposals the assistant made (in replies and in alert notes), how many the owner went on to sign, monthly review notes and alerts.</p>
+        <a href="{{ ia.watches_url }}">Active alerts →</a>
+    </div>
+    <div class="sa-grid">
+        <div class="panel">
+            <h3>Rule proposals</h3>
+            <table class="mini-table">
+                <thead><tr><th></th><th>7 days</th><th>30 days</th></tr></thead>
+                <tbody>
+                <tr><td>Proposals made</td><td class="{% if not ia.window.made %}is-zero{% endif %}">{{ ia.window.made|intcomma }}</td><td class="{% if not ia.rolling_30.made %}is-zero{% endif %}">{{ ia.rolling_30.made|intcomma }}</td></tr>
+                <tr><td>…from an alert note</td><td class="{% if not ia.window.from_alerts %}is-zero{% endif %}">{{ ia.window.from_alerts|intcomma }}</td><td class="{% if not ia.rolling_30.from_alerts %}is-zero{% endif %}">{{ ia.rolling_30.from_alerts|intcomma }}</td></tr>
+                <tr><td>People proposed to</td><td class="{% if not ia.window.people %}is-zero{% endif %}">{{ ia.window.people|intcomma }}</td><td class="{% if not ia.rolling_30.people %}is-zero{% endif %}">{{ ia.rolling_30.people|intcomma }}</td></tr>
+                <tr class="total"><td>Signed by the owner</td><td>{{ ia.window.accepted|intcomma }}</td><td>{{ ia.rolling_30.accepted|intcomma }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="panel">
+            <h3>Monthly review notes</h3>
+            <dl class="sa-kv">
+                <dt>Posted, 30 days</dt><dd class="{% if not ia.notes_30 %}zero{% endif %}">{{ ia.notes_30|intcomma }}</dd>
+                <dt>Posted, all time</dt><dd class="{% if not ia.notes_all %}zero{% endif %}">{{ ia.notes_all|intcomma }}</dd>
+                <dt>Last note</dt><dd>{% if ia.last_note %}{{ ia.last_note|date:"j M Y" }}{% else %}<span class="unknown">none yet</span>{% endif %}</dd>
+                <dt>Target allocations set</dt><dd class="{% if not ia.allocations %}zero{% endif %}"><a href="{{ ia.allocations_url }}">{{ ia.allocations|intcomma }}</a></dd>
+            </dl>
+        </div>
+        <div class="panel">
+            <h3>Alerts (watches)</h3>
+            <dl class="sa-kv">
+                <dt>Active</dt><dd class="{% if not ia.watches_active %}zero{% endif %}"><a href="{{ ia.watches_url }}">{{ ia.watches_active|intcomma }}</a></dd>
+                <dt>…with a buy attached</dt><dd class="{% if not ia.watches_with_action %}zero{% endif %}">{{ ia.watches_with_action|intcomma }}</dd>
+                <dt>Triggered<small>7 days · 30 days</small></dt><dd>{{ ia.watches_triggered|intcomma }} · {{ ia.watches_triggered_30|intcomma }}</dd>
+                {% for k in ia.watches_by_kind %}<dt><small style="display:inline;">{{ k.label }}</small></dt><dd>{{ k.n|intcomma }}</dd>{% endfor %}
+            </dl>
+        </div>
+    </div>
+</section>
+
+{# ── Contracts and flags ───────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head">
+        <h2>Contracts and switches</h2>
+        <p>Addresses from settings; the implementations are read from the chain (cached ≤5 min, refresh above).</p>
+    </div>
+    <div class="sa-grid two">
+        <div class="panel">
+            <h3>Contracts</h3>
+            <table class="mini-table">
+                <thead><tr><th>Contract</th><th>Address</th></tr></thead>
+                <tbody>
+                {% for c in sa.contracts %}
+                <tr><td>{{ c.label }}<span class="usd" style="display:block;color:var(--dash-muted);font-size:12px;">{{ c.source }}</span></td>
+                    <td>{% if c.address %}<a class="sa-addr" href="{{ c.url }}" target="_blank" rel="noopener" title="{{ c.address }}">{{ c.address|slice:":10" }}…{{ c.address|slice:"-6:" }} ↗</a>{% elif c.unknown %}<span class="unknown">unreadable</span>{% else %}<span class="unknown">not set</span>{% endif %}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="panel">
+            <h3>Switches</h3>
+            <table class="mini-table">
+                <thead><tr><th>Switch</th><th>State</th></tr></thead>
+                <tbody>
+                {% for flag in sa.flags %}
+                <tr><td>{{ flag.label }}<span style="display:block;color:var(--dash-muted);font-size:12px;">{{ flag.setting }}{% if flag.detail %} · {{ flag.detail }}{% endif %}</span></td>
+                    <td><span class="sa-badge {% if flag.state == 'on' %}on{% elif flag.state == 'unknown' %}warn{% endif %}">{{ flag.state|upper }}</span></td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+{# ── Tools ─────────────────────────────────────────────────────────── #}
+<section class="sa-section">
+    <div class="sa-head"><h2>Admin lists</h2><p>Every Cuenta inteligente table, read-only mirrors of the chain.</p></div>
+    <div class="sa-tools">
+        {% for group in sa.tools %}
+        <div class="panel"><h3>{{ group.title }}</h3><ul>{% for link in group.links %}<li><a href="{{ link.url }}">{{ link.label }}</a></li>{% endfor %}</ul></div>
+        {% endfor %}
+    </div>
+</section>
+
+</div>
+{% endwith %}
+{% endif %}

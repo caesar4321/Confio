@@ -8,10 +8,11 @@
 //   - the account's deep emerald field: "Total en tu cuenta", the one big
 //     number, the plan line, and the two moves (in, out);
 //   - a billing or cancellation banner, only when there is something to say;
+//   - "Herencia": the beneficiary right under it, the account's key promise
+//     (founder 2026-11-21), with a clear way in when nobody is named yet;
 //   - "Tu dinero": the one Confío dollar, then each investment, a calm list
 //     (my money on the right, the asset's name small on the left, no deltas);
 //   - "Automatización": how many rules run and the next one;
-//   - "Beneficiario": its state in one card;
 //   - "Tu plan": the plan row and the account's assistant.
 // The asset list is the FlatList itself, so every holding is reachable and
 // virtualised; the sections above and below are its header and footer.
@@ -22,6 +23,7 @@ import { Text } from '../components/common/AppText';
 import CuentaInteligenteMark from '../components/svg/CuentaInteligenteMark';
 import { AccountSwitcherHost, useReturnToPersonal } from '../components/smartAccount/AccountSwitcherHost';
 import { AssetMark } from '../components/smartAccount/AssetMark';
+import { HerenciaInvite } from '../components/smartAccount/HerenciaInvite';
 import {
   ActionButton, Card, Empty, IconDisc, LoadError, Notice, Row, ScreenSkeleton, SectionTitle, SmartScreen,
 } from '../components/smartAccount/kit';
@@ -226,6 +228,7 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
   const beneficiaryEnabled = flagKnown ? beneficiaryFlag.data === true : !!offer.data?.beneficiaryEnabled;
   const beneficiaryVisible = beneficiaryEnabled || !!data?.beneficiary || !!data?.pendingBeneficiary;
   const invite = (designations.data ?? []).find((d) => d.state === 'pending_acceptance');
+  const claimOpen = !!data?.beneficiary?.claim && data.beneficiary.claim.state !== 'cancelled';
   const namedOn = (designations.data ?? []).filter((d) => d.state === 'active');
   // The list could not be read: the accounts this phone remembers being named
   // on still open their claim, where the direct path is offered plainly.
@@ -368,6 +371,40 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
           />
         ) : null}
 
+        {beneficiaryVisible ? (
+          <>
+            <SectionTitle>Herencia</SectionTitle>
+            {data.beneficiary ? (
+              <Card>
+                <Row
+                  left={<IconDisc icon="user-check" tone={claimOpen ? 'notice' : 'mint'} />}
+                  title={data.beneficiary.name}
+                  subtitle={claimOpen
+                    ? 'Pidió recibir tu cuenta'
+                    : `Activo · plazo de ${daysLabel(data.beneficiary.windowDays)}`}
+                  note={data.pendingBeneficiary ? `Cambio pendiente: ${data.pendingBeneficiary.name} aún no acepta.` : undefined}
+                  onPress={() => navigation.navigate('BeneficiaryStatus')}
+                  chevron
+                  testID="home-beneficiary"
+                />
+              </Card>
+            ) : data.pendingBeneficiary ? (
+              <Card>
+                <Row
+                  left={<IconDisc icon="clock" tone="neutral" />}
+                  title={data.pendingBeneficiary.name}
+                  subtitle="Esperando que acepte"
+                  onPress={() => navigation.navigate('BeneficiaryStatus')}
+                  chevron
+                  testID="home-beneficiary"
+                />
+              </Card>
+            ) : (
+              <HerenciaInvite onPress={() => navigation.navigate('BeneficiarySetup')} />
+            )}
+          </>
+        ) : null}
+
         <SectionTitle>Tu dinero</SectionTitle>
         <Card style={holdings.length > 0 ? styles.cardTop : undefined}>
           <Row
@@ -391,7 +428,7 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
         <Row
           left={<IconDisc icon="repeat" />}
           title={activeRules.length === 0
-            ? 'Aún no tienes reglas'
+            ? 'Crea tu primera regla'
             : activeRules.length === 1 ? '1 regla activa' : `${activeRules.length} reglas activas`}
           subtitle={nextRule
             ? `Próxima: ${ruleTitle(nextRule)} · ${shortDate(nextRule.nextRunAt)}`
@@ -412,45 +449,6 @@ export function SmartAccountHomeScreen({ asTab = false }: { asTab?: boolean }) {
           />
         ) : null}
       </Card>
-
-      {beneficiaryVisible ? (
-        <>
-          <SectionTitle>Beneficiario</SectionTitle>
-          <Card>
-            {data.beneficiary ? (
-              <Row
-                left={<IconDisc icon="user-check" />}
-                title={data.beneficiary.name}
-                subtitle={data.beneficiary.claim && data.beneficiary.claim.state !== 'cancelled'
-                  ? 'Pidió recibir tu cuenta'
-                  : `Activo · plazo de ${daysLabel(data.beneficiary.windowDays)}`}
-                note={data.pendingBeneficiary ? `Cambio pendiente: ${data.pendingBeneficiary.name} aún no acepta.` : undefined}
-                onPress={() => navigation.navigate('BeneficiaryStatus')}
-                chevron
-                testID="home-beneficiary"
-              />
-            ) : data.pendingBeneficiary ? (
-              <Row
-                left={<IconDisc icon="clock" tone="neutral" />}
-                title={data.pendingBeneficiary.name}
-                subtitle="Esperando que acepte"
-                onPress={() => navigation.navigate('BeneficiaryStatus')}
-                chevron
-                testID="home-beneficiary"
-              />
-            ) : (
-              <Row
-                left={<IconDisc icon="user-plus" />}
-                title="Elige a tu beneficiario"
-                subtitle="La persona que recibe esta cuenta si dejas de usarla."
-                onPress={() => navigation.navigate('BeneficiarySetup')}
-                chevron
-                testID="home-beneficiary"
-              />
-            )}
-          </Card>
-        </>
-      ) : null}
 
       {namedOn.length === 0 && offlineNamedOn.length > 0 ? (
         <>

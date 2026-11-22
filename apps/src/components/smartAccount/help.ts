@@ -9,6 +9,9 @@ export function helpAccount(beneficiary: boolean): HelpContent {
     title: '¿Cómo funciona tu Cuenta inteligente?',
     paragraphs: [
       'Es una cuenta aparte dentro de Confío. Tú decides qué mueves a ella desde tu billetera, y puedes devolverlo cuando quieras.',
+      ...(beneficiary
+        ? ['Eliges a una persona que la recibirá si algún día dejas de usarla. Mientras la uses, sigue siendo solo tuya: si esa persona la pide, cualquier acción que firmes en tu Cuenta inteligente lo cancela.']
+        : []),
       'Lo que está en la cuenta sigue las reglas que tú creas: enviarle a alguien, pagar a una cuenta bancaria guardada o invertir, con la frecuencia que elijas.',
       beneficiary
         ? 'Solo lo que está dentro de la cuenta se automatiza y pasa a tu beneficiario. Tu billetera personal no cambia.'

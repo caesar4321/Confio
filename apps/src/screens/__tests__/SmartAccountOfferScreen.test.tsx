@@ -6,7 +6,8 @@ import { logOfferStep } from '../../services/paidOffers';
 import {
   account, designation, failedRead, flush, hasTappable, offer, ok, tap, tappable, text,
 } from '../../components/smartAccount/testing/fixtures';
-import { SmartAccountOfferScreen, offerPitch, orderPlans } from '../SmartAccountOfferScreen';
+import { HERENCIA_STEPS, HERO_COPY, SmartAccountOfferScreen, offerPitch, orderPlans } from '../SmartAccountOfferScreen';
+import { annualSavings, defaultPlanKey, planSummary, savingsBadge } from '../../components/smartAccount/PlanPicker';
 import { DEX_TRADING_UI_ENABLED } from '../../config/features';
 
 const api = service as jest.Mocked<typeof service>;
@@ -31,7 +32,8 @@ it('shows the server benefits in the server order and both server prices', async
   expect(out.indexOf('Pagos y transferencias automáticos')).toBeLessThan(out.indexOf('Inversión automática'));
   expect(out).toContain('US$149.99');
   expect(out).toContain('US$14.99');
-  expect(out).toContain('Equivale a US$12.50 al mes');
+  expect(out).toContain('US$12.50 al mes');
+  expect(out).toContain('Ahorras US$29.89');
   expect(out).not.toContain('Próximamente');
   expect(logOfferStep).toHaveBeenCalledWith('smart_account', 'detail_opened', 'billeteras', '');
 });
@@ -140,32 +142,50 @@ describe('the pitch promises only what this app can do', () => {
     ],
   });
 
-  it('keeps the server headline and benefits when everything is on', () => {
-    const pitch = offerPitch(beneficiaryFirst(), true);
-    expect(pitch.headline).toBe('Tu dinero sigue tus reglas y llega a quien tú elijas.');
-    expect(pitch.benefits.map((b) => b.key)).toEqual(['beneficiary', 'payments', 'investing', 'assistant']);
-    expect(pitch.benefits[2].body).toContain('bitcoin y oro');
+  it('Herencia is always the hero, whatever order or flag the server sends', () => {
+    [beneficiaryFirst(), { ...beneficiaryFirst(), headline: 'automation_first' },
+      { ...beneficiaryFirst(), beneficiaryEnabled: false }].forEach((o) => {
+      const pitch = offerPitch(o, true);
+      expect(pitch.inheritance).toBe(true);
+      expect(pitch.eyebrow).toBe('Herencia Digital');
+      expect(pitch.headline).toBe('Lo tuyo, para los tuyos.');
+      // The beneficiary line moves into the hero; the rest keeps the server order.
+      expect(pitch.benefits.map((b) => b.key)).toEqual(['payments', 'investing', 'assistant']);
+    });
+    expect(offerPitch(beneficiaryFirst(), true).benefits[1].body).toContain('bitcoin y oro');
   });
 
-  it('without the beneficiary feature: no beneficiary benefit and the automation headline', () => {
-    const pitch = offerPitch({ ...beneficiaryFirst(), beneficiaryEnabled: false }, true);
-    expect(pitch.headline).toBe('Tu dinero se mueve según tus reglas.');
-    expect(pitch.benefits.map((b) => b.key)).toEqual(['payments', 'investing', 'assistant']);
+  it('never adds a benefit the server did not send', () => {
+    const pitch = offerPitch(beneficiaryFirst(), true);
+    expect(pitch.benefits.map((b) => b.title)).not.toContain('Siempre a tu nombre');
   });
 
   it('without crypto buys (server flag off, or a build without them): investing is stocks only', () => {
     const stocksOnly = 'Compra acciones automáticamente, cada día, semana, quincena o mes.';
-    expect(offerPitch({ ...beneficiaryFirst(), investingCryptoEnabled: false }, true).benefits[2].body).toBe(stocksOnly);
-    expect(offerPitch(beneficiaryFirst(), false).benefits[2].body).toBe(stocksOnly);
+    expect(offerPitch({ ...beneficiaryFirst(), investingCryptoEnabled: false }, true).benefits[1].body).toBe(stocksOnly);
+    expect(offerPitch(beneficiaryFirst(), false).benefits[1].body).toBe(stocksOnly);
   });
 
-  it('renders it: the beneficiary is not pitched when off, and the investing line follows the build', async () => {
+  it('renders the Herencia hero and its three steps when the feature is on', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(beneficiaryFirst()));
+    await mount();
+    const out = text(tree);
+    expect(out).toContain(HERO_COPY.inheritance.headline);
+    expect(out).toContain(HERO_COPY.inheritance.supporting);
+    HERENCIA_STEPS.forEach((s) => expect(out).toContain(s.title));
+    expect(out).toContain('También incluye');
+    expect(out.indexOf(HERO_COPY.inheritance.headline)).toBeLessThan(out.indexOf('Pagos y transferencias automáticos'));
+    expect(tree.root.findAll((n) => n.props.testID === 'herencia-art').length).toBeGreaterThan(0);
+  });
+
+  it('renders the Herencia hero even when the server flag is off, and the investing line follows the build', async () => {
     api.fetchSmartAccountOffer.mockResolvedValue(ok({ ...beneficiaryFirst(), beneficiaryEnabled: false }));
     await mount();
     const out = text(tree);
-    expect(out).toContain('Tu dinero se mueve según tus reglas.');
-    expect(out).not.toContain('Tu dinero sigue tus reglas y llega a quien tú elijas.');
-    expect(out).not.toContain('Una persona recibe tu cuenta si dejas de usarla.');
+    expect(out).toContain(HERO_COPY.inheritance.headline);
+    expect(out).not.toContain('Tu dinero trabaja con tus reglas.');
+    expect(out).not.toContain('Siempre a tu nombre');
+    expect(tree.root.findAll((n) => n.props.testID === 'herencia-steps').length).toBeGreaterThan(0);
     if (DEX_TRADING_UI_ENABLED) {
       expect(out).toContain('bitcoin y oro');
     } else {
@@ -188,4 +208,53 @@ it('an expired account may subscribe again: plans shown, no redirect', async () 
   expect(nav.replace).not.toHaveBeenCalled();
   expect(hasTappable(tree, 'plan-annual')).toBe(true);
   expect(hasTappable(tree, 'offer-continue')).toBe(true);
+});
+
+describe('Elige tu plan', () => {
+  const plans = offer().plans;
+  const priced = (annual: string, monthly: string) => plans.map((p) => ({
+    ...p, priceUsd: p.key === 'annual' ? annual : monthly,
+  }));
+
+  it('preselects annual when the server names no default', async () => {
+    const none = plans.map((p) => ({ ...p, isDefault: false }));
+    expect(defaultPlanKey(none)).toBe('annual');
+    expect(defaultPlanKey(orderPlans(none))).toBe('annual');
+    expect(defaultPlanKey([])).toBeNull();
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ plans: none })));
+    await mount();
+    expect(tappable(tree, 'plan-annual').props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it('computes the saving from the server prices against twelve months', () => {
+    expect(annualSavings(plans)).toEqual({ usd: '29.89', freeMonths: 1 });
+    expect(savingsBadge(plans)).toBe('Ahorras US$29.89');
+  });
+
+  it('says "meses gratis" only when the numbers give two whole months or more', () => {
+    expect(savingsBadge(priced('100.00', '10.00'))).toBe('2 meses gratis');
+    expect(savingsBadge(priced('100.01', '10.00'))).toBe('Ahorras US$19.99');
+  });
+
+  it('shows no saving when there is none or a price is missing', () => {
+    expect(annualSavings(priced('179.88', '14.99'))).toBeNull();
+    expect(annualSavings(priced('200.00', '14.99'))).toBeNull();
+    expect(savingsBadge(plans.filter((p) => p.key === 'annual'))).toBeNull();
+    expect(savingsBadge(priced('149.99', ''))).toBeNull();
+  });
+
+  it('summarises the selected plan in the action bar and follows the choice', async () => {
+    expect(planSummary(plans.find((p) => p.key === 'annual'))).toBe('US$149.99 por año · US$12.50 al mes');
+    expect(planSummary(plans.find((p) => p.key === 'monthly'))).toBe('US$14.99 por mes');
+    await mount();
+    expect(text(tree)).toContain('US$149.99 por año · US$12.50 al mes');
+    await tap(tree, 'plan-monthly');
+    expect(text(tree)).toContain('US$14.99 por mes');
+    expect(text(tree)).not.toContain('US$149.99 por año · US$12.50 al mes');
+  });
+
+  it('labels the main action plainly', async () => {
+    await mount();
+    expect(text(tree)).toContain('Abrir mi Cuenta inteligente');
+  });
 });

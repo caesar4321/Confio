@@ -126,7 +126,7 @@ export function BeneficiaryStatusScreen() {
         <Empty
           icon="user-plus"
           title="Aún no elegiste a nadie"
-          body="Elige a la persona que recibe esta cuenta si dejas de usarla."
+          body="Elige a quien recibirá esta cuenta si algún día dejas de usarla. Mientras la uses, sigue siendo solo tuya."
           actionLabel="Elegir beneficiario"
           onAction={() => navigation.navigate('BeneficiarySetup')}
         />
