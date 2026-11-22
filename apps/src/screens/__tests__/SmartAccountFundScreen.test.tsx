@@ -144,6 +144,26 @@ it('an empty answer is a failed read, never "Hoy tienes US$0,00"', async () => {
   expect(text(tree)).not.toContain('Hoy tienes');
 });
 
+it('one signature moves at most one extra asset: a second pick replaces the first', async () => {
+  api.fetchSmartAccountMovePreview.mockResolvedValue(ok(movePreview({
+    assets: [
+      { key: 'cusd_plus', symbol: 'cUSD+', name: 'cUSD+', units: '500000000000000000000', decimals: 18, valueUsd: '500.00', included: true, reason: null },
+      { key: 'stock:AAPLon', symbol: 'AAPLon', name: 'Apple', units: '1000000000000000000', decimals: 18, valueUsd: '230.00', included: true, reason: null },
+      { key: 'stock:TSLAon', symbol: 'TSLAon', name: 'Tesla', units: '1000000000000000000', decimals: 18, valueUsd: '400.00', included: true, reason: null },
+    ],
+  })));
+  await mount();
+  expect(text(tree)).toContain('puedes mover uno más');
+  await tap(tree, 'fund-extra-stock:AAPLon');
+  await tap(tree, 'fund-extra-stock:TSLAon');
+  await tap(tree, 'Todo, US$500.00');
+  await tap(tree, 'fund-review');
+  await flush();
+  expect(api.prepareSmartAccountSubscribe).toHaveBeenCalledWith(
+    'annual', [{ assetKey: 'cusd_plus', units: 'max' }, { assetKey: 'stock:TSLAon', units: 'max' }], true,
+  );
+});
+
 it('lists the other dollar with the other assets only when it holds something', async () => {
   api.fetchSmartAccountMovePreview.mockResolvedValue(ok(movePreview({
     assets: [

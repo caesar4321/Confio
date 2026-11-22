@@ -56,6 +56,14 @@ export function fundingDollarKey(
   return pick?.key ?? offerDollar ?? 'cusd';
 }
 
+/**
+ * One signature carries at most 4 calls (smart_account/services.py MAX_CALLS):
+ * creating the account, the dollar deposit and the subscribe use 3, so one
+ * more asset fits. The rest moves afterwards with "Agregar dinero" from
+ * the account.
+ */
+export const MAX_SUBSCRIBE_EXTRAS = 1;
+
 export function SmartAccountFundScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<MainStackParamList, 'SmartAccountFund'>>();
@@ -220,13 +228,24 @@ export function SmartAccountFundScreen() {
                         subtitle={a.symbol}
                         value={usd(a.valueUsd)}
                         selected={!!extras[a.key]}
-                        onPress={() => setExtras((prev) => ({ ...prev, [a.key]: !prev[a.key] }))}
+                        onPress={() => setExtras((prev) => {
+                          if (prev[a.key]) {
+                            return { ...prev, [a.key]: false };
+                          }
+                          const picked = Object.keys(prev).filter((k) => prev[k]);
+                          // At the limit, the new pick replaces the old one.
+                          const next: Record<string, boolean> = picked.length >= MAX_SUBSCRIBE_EXTRAS ? {} : { ...prev };
+                          next[a.key] = true;
+                          return next;
+                        })}
                         testID={`fund-extra-${a.key}`}
                       />
                     ))}
                   </Card>
                   <Text style={[kitStyles.small, styles.under]}>
-                    Lo que marques se mueve completo. Puedes devolverlo a tu billetera cuando quieras.
+                    {others.length > MAX_SUBSCRIBE_EXTRAS
+                      ? 'Al abrir tu cuenta puedes mover uno más, completo. El resto lo mueves después desde tu Cuenta inteligente, con «Agregar dinero».'
+                      : 'Lo que marques se mueve completo. Puedes devolverlo a tu billetera cuando quieras.'}
                   </Text>
                 </>
               ) : null}
