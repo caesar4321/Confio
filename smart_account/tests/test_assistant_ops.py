@@ -22,6 +22,7 @@ BUYABLE = [
     {'asset_key': 'stock:SPYon', 'kind': 'stock', 'symbol': 'SPY', 'name': 'SPDR S&P 500 ETF'},
     {'asset_key': 'stock:TSLAon', 'kind': 'stock', 'symbol': 'TSLA', 'name': 'Tesla'},
     {'asset_key': 'crypto:BTCB', 'kind': 'crypto', 'symbol': 'BTC', 'name': 'Bitcoin'},
+    {'asset_key': 'stock:NVDAon', 'kind': 'stock', 'symbol': 'NVDA', 'name': 'Nvidia Corp'},
 ]
 
 
@@ -285,6 +286,18 @@ class WatchTests(OpsBase):
                     action_amount_usd='100')
         args.update(kw)
         return watches.propose(self.owner, said=said, meta=BUILD, **args)
+
+    def test_asset_named_with_its_ticker_in_parentheses(self):
+        # Prod 2026-11-22: the model passed "NVIDIA (NVDA)" for "Avísame si
+        # NVIDIA sube 5%" and the lookup refused it.
+        self.prices['stock:NVDAon'] = Decimal('180')
+        draft = watches.propose(self.owner, said='Avísame si NVIDIA sube 5%', meta=BUILD,
+                                kind='asset_price_rise_pct', asset='NVIDIA (NVDA)', threshold='5')
+        self.assertEqual(draft['asset_key'] if isinstance(draft, dict) and 'asset_key' in draft
+                         else getattr(draft, 'asset_key', 'stock:NVDAon'), 'stock:NVDAon')
+        asset, _ = ops.find_buyable(mock.Mock(), 'NVIDIA (NVDA)')
+        self.assertEqual(asset['asset_key'], 'stock:NVDAon')
+        self.assertTrue(ops.said_asset('avísame si nvidia sube', 'NVIDIA (NVDA)', asset))
 
     def test_level_must_be_the_owners(self):
         with self.assertRaises(ops.OpsRefused) as ctx:

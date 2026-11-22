@@ -131,7 +131,11 @@ def said_asset(said: str, query: str, asset: dict) -> bool:
     """The asset is in the owner's own words: the query they used, its
     ticker or its name."""
     words = _norm(said)
-    probes = [query, asset.get('symbol'), asset.get('name')]
+    name = asset.get('name') or ''
+    # "Nvidia Corp" is said "Nvidia": the name without its company suffix.
+    short = re.sub(r'(?:[\s,]+(?:corp(?:oration)?|inc|incorporated|ltd|limited|plc|co|company|holdings?|group|s\.?a|ag|n\.?v)\.?)+\s*$',
+                   '', name, flags=re.IGNORECASE)
+    probes = [query, asset.get('symbol'), name, short] + _asset_queries(query or '')
     probes += [k for k, v in ASSET_ALIASES.items() if v in _norm(asset.get('name', '') + ' ' + asset.get('symbol', ''))]
     for probe in probes:
         probe = _norm(probe or '').strip()
@@ -499,20 +503,31 @@ def _find_rule(own, rule_id, kind=None):
     return rule
 
 
+def _asset_queries(query: str) -> list[str]:
+    """The model often names an asset as "NVIDIA (NVDA)": try the whole text,
+    then the ticker in parentheses, then the name before them."""
+    q = _norm(query).strip()
+    out = [q]
+    m = re.match(r'^(.*?)\s*\(([^()]+)\)\s*$', q)
+    if m:
+        out += [m.group(2).strip(), m.group(1).strip()]
+    return [ASSET_ALIASES.get(x, x) for x in out if x]
+
+
 def find_buyable(viewer, query: str):
     """(asset dict, None) for one match, (None, options) otherwise."""
     items = services.buyable_assets(viewer, '')
-    q = _norm(query).strip()
-    q = ASSET_ALIASES.get(q, q)
-    if not q:
-        return None, []
-    exact = [a for a in items if _norm(a['symbol']) == q or _norm(a['asset_key']) == q]
-    if len(exact) == 1:
-        return exact[0], None
-    loose = [a for a in items if q in _norm(a['symbol']) or q in _norm(a['name'])]
-    if len(loose) == 1:
-        return loose[0], None
-    return None, [f"{a['name']} ({a['symbol']})" for a in (exact or loose)[:5]]
+    options: list = []
+    for q in _asset_queries(query):
+        exact = [a for a in items if _norm(a['symbol']) == q or _norm(a['asset_key']) == q]
+        if len(exact) == 1:
+            return exact[0], None
+        loose = [a for a in items if q in _norm(a['symbol']) or q in _norm(a['name'])]
+        if len(loose) == 1:
+            return loose[0], None
+        if not options:
+            options = [f"{a['name']} ({a['symbol']})" for a in (exact or loose)[:5]]
+    return None, options
 
 
 def _resolve_asset(viewer, query, said, *, check_said=True):

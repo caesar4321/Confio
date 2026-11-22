@@ -7,10 +7,12 @@
 // Accessibility rules every piece follows: a tappable element is at least
 // 44pt tall and has a label; a row is ONE accessible button; text wraps
 // instead of truncating, and amounts shrink to fit rather than cut.
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -36,6 +38,26 @@ export interface HelpContent {
 }
 
 /** A bottom sheet. Closes on the backdrop, the hardware back and its button. */
+/**
+ * The keyboard's height while it is up, 0 otherwise. A sheet lives in a
+ * status-bar-translucent Modal, which Android's window resize does not reach,
+ * so the sheet lifts itself above the keyboard.
+ */
+export function useKeyboardHeight(): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvent, (e) => setHeight(e?.endCoordinates?.height ?? 0));
+    const hide = Keyboard.addListener(hideEvent, () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
+}
+
 export function Sheet({
   visible, onClose, title, children, dismissable = true, testID,
 }: {
@@ -48,6 +70,7 @@ export function Sheet({
   testID?: string;
 }) {
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardHeight();
   const close = () => {
     if (dismissable) {
       onClose();
@@ -63,7 +86,14 @@ export function Sheet({
           accessibilityLabel="Cerrar"
           disabled={!dismissable}
         />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+        <View
+          style={[
+            styles.sheet,
+            keyboard > 0
+              ? { marginBottom: keyboard, paddingBottom: 16 }
+              : { paddingBottom: Math.max(insets.bottom, 16) + 8 },
+          ]}
+        >
           <View style={styles.sheetHandle} />
           <ScrollView bounces={false} contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
             {title ? <Text style={styles.sheetTitle} accessibilityRole="header">{title}</Text> : null}
