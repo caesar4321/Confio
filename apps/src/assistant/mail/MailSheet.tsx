@@ -273,7 +273,8 @@ export default function MailSheet({ userId, onClose }: Props) {
       </Text>
       <Link label="Leer la Política de Privacidad" onPress={() => Linking.openURL(PRIVACY_URL).catch(() => undefined)} />
       <Text style={styles.paragraph}>
-        Es una prueba: Google mostrará un aviso de app en pruebas y tendrás que volver a conectar cada 7 días.
+        Es una prueba: Google mostrará un aviso de app en pruebas y tendrás que volver a conectar cada 7 días. Elige
+        el Gmail que agregamos a la prueba: Google rechaza los demás.
       </Text>
       <Action label="Aceptar y conectar Gmail" onPress={connect} disabled={busy} />
     </>

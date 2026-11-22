@@ -1438,6 +1438,8 @@ from assistant.admin import AssistantProfileAdmin, AssistantThreadStateAdmin, As
 confio_admin_site.register(AssistantTurn, AssistantTurnAdmin)
 from assistant.gmail import admin as assistant_gmail_admin
 assistant_gmail_admin.register(confio_admin_site)
+from assistant import connections_admin as assistant_connections_admin
+assistant_connections_admin.register(confio_admin_site)
 confio_admin_site.register(AssistantThreadState, AssistantThreadStateAdmin)
 confio_admin_site.register(AssistantProfile, AssistantProfileAdmin)
 from assistant.models import ProbeAnswer

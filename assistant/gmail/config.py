@@ -21,10 +21,25 @@ def configured() -> bool:
         'GMAIL_OAUTH_CLIENT_ID', 'GMAIL_OAUTH_CLIENT_SECRET', 'GMAIL_OAUTH_REDIRECT_URI', 'GMAIL_TOKEN_KEY'))
 
 
-def tester_ids() -> set:
+def configured_tester_ids() -> list:
+    """The owner's own accounts, and the switch: empty = the pilot is off."""
     # No '*': the pilot is a named list, capped like Google's.
     ids = [part.strip() for part in value('GMAIL_PILOT_USER_IDS').split(',') if part.strip().isdigit()]
-    return set(ids[:MAX_TESTERS])
+    return list(dict.fromkeys(ids))[:MAX_TESTERS]
+
+
+def tester_ids() -> set:
+    """The configured accounts plus whoever was given a place from the admin."""
+    listed = configured_tester_ids()
+    if not listed:
+        return set()
+    from assistant.connections_models import AssistantConnectionRequest as Request
+    given = Request.objects.filter(
+        feature=Request.Feature.GMAIL, answer=Request.Answer.YES, invited_at__isnull=False, ready_at__isnull=False,
+        removed_at__isnull=True, user__isnull=False,
+    ).values_list('user_id', flat=True)
+    # Not cut at 100: reserving is what keeps to it, and a new configured id must not drop someone who is in.
+    return set(listed) | {str(pk) for pk in given}
 
 
 def user_allowed(user) -> bool:

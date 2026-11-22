@@ -102,6 +102,9 @@ def _save(user, attempt, tokens, address):
     with transaction.atomic():
         # Serialises two connects of the same person; the row lock waits out a sync, draft or disconnect.
         type(user).objects.select_for_update().filter(pk=user.pk).first()
+        if not config.user_allowed(user):
+            # Access ended while they were on Google's screen. The caller revokes what Google just gave.
+            raise MailRefused('unavailable', 'Conectar Gmail ya no está disponible para esta cuenta.')
         row = GmailConnection.objects.select_for_update().filter(user=user).first()
         if row is not None and row.email_key != email_key:
             # Another mailbox: a new row, so nothing from the previous one stays (needs, drafts, what was read).

@@ -394,3 +394,48 @@ Each of these still needs a yes before any work that depends on it.
 2. After the pilot: OAuth verification and the yearly CASA budget.
 3. Release stage 1: the copy, the send to OpenAI, the privacy and store changes.
 4. Confirm that Confío will not ask for Apple or Google app passwords.
+
+## 10c. Discovery and a full pilot
+
+`assistant/connections.py`, `apps/src/assistant/connections/`. Switch: `ASSISTANT_CONNECTIONS_DISCOVERY_ENABLED` (default off).
+Personal accounts only. An older server, or the switch off, shows nothing. Needs an app build.
+
+**Where people see it:** a card among the chat's starters. After "Ahora no" (14 days on that phone) or an answer, a
+small "Correo y calendario" chip stays there. The chip, never the card, also appears when, in that opening of the
+chat, they ask to read or connect mail or calendar.
+
+| State | When | What they see |
+|---|---|---|
+| soon | pilot off | Próximamente: "Sí, avísame" / "Solo miraba". No address is asked. |
+| request | pilot on, places left | "Pedir un cupo", typing the Gmail to add in Google (also whoever said yes earlier). |
+| left | had access and declined | Saliste de la prueba, can ask to be told. |
+| waiting | answered yes, or a place reserved | En la lista, and "Salir de la lista". |
+| full / waiting_full | 100 given here, or `GMAIL_PILOT_FULL` | Cupos completos, told if it opens to more people. Never a price, never a place for sale. |
+| invited | a place given | Connect with that exact address, or decline. An older build says to update. |
+| connected / reconnect | connected / 7-day expiry | Open, or reconnect. |
+| paused | connected and the pilot is off | Not reading, can disconnect. |
+
+**When the 100 fill and public launch isn't paid for:** those inside keep it (reconnecting every 7 days), everyone
+else joins the list. A public launch is verification plus CASA, decided from that list.
+
+**Giving a place:** Django admin, Assistant connection requests. Filter Gmail + yes, oldest first.
+
+1. "Apartar cupo" spends the place and freezes the address, which the list then shows. No access yet.
+2. Add exactly that address under "Test users" in the Google project.
+3. "Ya lo agregué en Google" opens access and sends a generic notice.
+
+"Quitar acceso" erases the connection. Removing or declining never frees a place, because Google does not free it.
+Someone who had access comes back only with "Devolver acceso", so a bulk step never readmits who was removed. A reservation that never reached step 3 (a typo, they left) is
+asked for the address again, and goes through all three steps on the same place.
+The admin only counts places given here, so when Google's console is full set `GMAIL_PILOT_FULL=True` and restart.
+"Avisar a quienes esperan" is how "te avisamos" is kept: use it when places open or it opens to everyone.
+
+**Stopping:** empty `GMAIL_PILOT_USER_IDS` stops all Gmail, invited people included. The discovery switch only hides
+the card for those without a place.
+
+**Deploy:** migrate and confirm `assistant.0013_connection_requests` in showmigrations before any restart (the deploy
+script ignores a failed migrate, and deleting a user needs this table).
+
+**Before switching on:** discovery with the pilot off stores a yes/no only. With the pilot on it stores an address,
+which the privacy text has to cover first (Privacy 1.14.0 draft). Don't give places before a build with the mail
+flag on is in the stores: older builds can only say "Actualiza la app".

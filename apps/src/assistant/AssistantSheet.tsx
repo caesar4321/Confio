@@ -49,6 +49,8 @@ import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
 import { TAP_ONLY_KEYS, openDestination, resolveNavigate } from './destinations';
 import { requestGuideWalk } from './guidePointer';
+import ConnectionsHost from './connections/ConnectionsHost';
+import ConnectionsPrompt from './connections/ConnectionsPrompt';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
@@ -1088,6 +1090,7 @@ export default function AssistantSheet() {
               // and scroll with it, so they never cover the conversation.
               showStarters ? (
                 <View style={styles.starters}>
+                  <ConnectionsPrompt where="box" starters />
                   {profile?.mascot !== 'CUSTOM' ? (
                   <Pressable style={[styles.starter, styles.starterPet]} onPress={() => setPickerOpen(true)}>
                     <Text style={styles.starterPetText}>✨ Personaliza a tu asistente</Text>
@@ -1121,6 +1124,8 @@ export default function AssistantSheet() {
                     <TypingDots />
                   </View>
                 </View>
+              ) : aiEnabled && mode === 'AI' ? (
+                <ConnectionsPrompt where="box" starters={false} messages={sentThisOpen ? messages : undefined} />
               ) : null
             }
             ListFooterComponent={
@@ -1223,6 +1228,7 @@ export default function AssistantSheet() {
         onClose={() => setPickerOpen(false)}
         onSaved={(next) => setProfile(next)}
       />
+      <ConnectionsHost where="box" />
     </Modal>
   );
 }

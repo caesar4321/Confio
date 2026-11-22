@@ -291,3 +291,4 @@ class AssistantNeed(models.Model):
 
 # Gmail pilot (assistant/gmail/): off unless configured.
 from .gmail.models import GmailConnection, GmailOAuthState, MailDraft, MailNeed  # noqa: E402,F401
+from .connections_models import AssistantConnectionRequest  # noqa: E402,F401

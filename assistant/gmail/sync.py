@@ -238,3 +238,10 @@ def cleanup(now=None):
         Q(due_date__lt=cutoff.date()) | Q(due_date__isnull=True, created_at__lt=cutoff)).delete()
     MailDraft.objects.filter(expires_at__lte=now).delete()
     GmailOAuthState.objects.filter(expires_at__lte=now).delete()
+    from assistant import connections
+    try:
+        for connection in connections.removed_connections()[:10]:
+            oauth.disconnect(connection)
+        connections.forget_addresses()
+    except Exception as exc:  # noqa: BLE001 - the waitlist must not stop the rest of the sweep
+        logger.warning('Connections cleanup failed: %s', type(exc).__name__)
