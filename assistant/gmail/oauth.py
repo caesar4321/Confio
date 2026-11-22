@@ -15,6 +15,8 @@ from urllib.parse import urlencode
 from django.db import transaction
 from django.utils import timezone
 
+from assistant.connections_models import AssistantConnectionRequest
+
 from . import client, config, crypto, text
 from .errors import GmailError, MailRefused
 from .models import GmailConnection, GmailOAuthState
@@ -101,7 +103,8 @@ def _save(user, attempt, tokens, address):
     now, email_key, stale = timezone.now(), crypto.opaque(address.lower()), None
     with transaction.atomic():
         # Serialises two connects of the same person; the row lock waits out a sync, draft or disconnect.
-        type(user).objects.select_for_update().filter(pk=user.pk).first()
+        # no_key: a notice or log row pointing at this person (written under their request's lock) must not wait on it.
+        type(user).objects.select_for_update(no_key=True).filter(pk=user.pk).first()
         if not config.user_allowed(user):
             # Access ended while they were on Google's screen. The caller revokes what Google just gave.
             raise MailRefused('unavailable', 'Conectar Gmail ya no está disponible para esta cuenta.')
@@ -126,6 +129,9 @@ def _save(user, attempt, tokens, address):
         row.connected_at = row.next_sync_at = now
         row.failures = 0
         row.save()
+        # The typed address was only for getting them in. Not left for the sweep: they may disconnect before it.
+        AssistantConnectionRequest.objects.filter(
+            user=user, feature=AssistantConnectionRequest.Feature.GMAIL).exclude(google_email='').update(google_email='')
     return row, stale
 
 

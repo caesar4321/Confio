@@ -25,9 +25,8 @@ SEATS_LOCK = 77_100_100  # pg advisory lock for reserving places
 REMOVAL_SLACK = timedelta(minutes=1)
 INVITED = ('Tu asistente', 'Ya tienes tu cupo para conectar Gmail. Ábrelo en tu asistente: Correo y calendario.')
 NEWS = ('Tu asistente', 'Hay novedades de Correo y calendario. Ábrelo en tu asistente para verlas.')
-# Sign in with Apple and the big mailboxes that are no Google account.
-NOT_GOOGLE = ('@icloud.com', '@me.com', '@mac.com', '@privaterelay.appleid.com', '@outlook.com', '@hotmail.com',
-              '@live.com', '@yahoo.com')
+# A place is one of 100 for life, and only these surely are a Gmail mailbox (any address can be a Google account).
+GMAIL_DOMAINS = ('@gmail.com', '@googlemail.com')
 
 
 class ConnectionRefused(Exception):
@@ -63,7 +62,7 @@ def pilot_open() -> bool:
 def login_gmail(user) -> str:
     """Only to prefill the field. Never stored or used unless they send it."""
     login = (getattr(user, 'email', '') or '').strip()
-    return login if login.lower().endswith(('@gmail.com', '@googlemail.com')) else ''
+    return login if login.lower().endswith(GMAIL_DOMAINS) else ''
 
 
 def _gmail_state(user, request):
@@ -137,8 +136,8 @@ def answer(user, account, jwt_context, feature, wants, google_email=''):
             address = (google_email or '').strip()
             if len(address) > 254 or not text.ADDRESS.fullmatch(address):
                 raise ConnectionRefused('Escribe el Gmail que quieres conectar.')
-            if address.lower().endswith(NOT_GOOGLE):
-                raise ConnectionRefused('Tiene que ser una cuenta de Google, como tu Gmail.')
+            if not _is_gmail(address):
+                raise ConnectionRefused('Por ahora solo se puede con una dirección @gmail.com.')
         chosen = Request.Answer.YES if wants else Request.Answer.NO
         if row is None:
             row, created = Request.objects.select_for_update().get_or_create(
@@ -169,8 +168,46 @@ def _can_have_a_place(row) -> bool:
             and not gmail.banned(user))
 
 
-def reserve(request_ids) -> dict:
-    """Step 1: the place is taken and the address freezes. No access, no notice. Never past 100."""
+def can_reserve(row) -> bool:
+    return bool(_can_have_a_place(row) and not row.ready_at and _is_gmail(row.google_email)
+                and (not row.invited_at or row.removed_at))
+
+
+def can_give(row) -> bool:
+    return bool(_can_have_a_place(row) and row.invited_at and not row.ready_at and not row.removed_at
+                and _is_gmail(row.google_email))
+
+
+def can_return(row) -> bool:
+    return bool(_can_have_a_place(row) and row.ready_at and row.removed_at)
+
+
+def _is_gmail(address) -> bool:
+    return address.lower().endswith(GMAIL_DOMAINS)
+
+
+def can_undo(row) -> bool:
+    """Reserved and never given. Whether it reached Google's console only the operator knows."""
+    return bool(row.invited_at and not row.ready_at)
+
+
+def as_shown(row) -> str:
+    """What a confirmation page binds: the latest reservation or removal, and this address."""
+    moment = row.removed_at or row.invited_at
+    reservation = moment.strftime('%Y%m%d%H%M%S%f') if moment else '0'
+    return f'{reservation}:{row.google_email}'
+
+
+def _unchanged(row, seen) -> bool:
+    """seen = {pk: as_shown(row) on the page}. Changed since = not what was confirmed."""
+    return seen is None or seen.get(row.pk) == as_shown(row)
+
+
+def reserve(request_ids, seen=None, log=None) -> dict:
+    """Step 1: the place is taken and the address freezes. No access, no notice. Never past 100.
+
+    log(row) writes who did it, in the same transaction: no change without its record.
+    """
     counts = {'reserved': 0, 'skipped': 0, 'no_seat': 0}
     rows = Request.objects.filter(pk__in=list(request_ids), feature=Request.Feature.GMAIL)
     if not pilot_open():
@@ -183,8 +220,7 @@ def reserve(request_ids) -> dict:
         configured = gmail.configured_tester_ids()
         for row in rows.select_for_update(of=('self',)).order_by('asked_at', 'pk'):
             spent = bool(row.invited_at)
-            if (not _can_have_a_place(row) or row.ready_at or not row.google_email
-                    or (spent and not row.removed_at)):
+            if not can_reserve(row) or not _unchanged(row, seen):
                 counts['skipped'] += 1
                 continue
             costs = not spent and str(row.user_id) not in configured
@@ -194,25 +230,46 @@ def reserve(request_ids) -> dict:
             left -= costs
             row.invited_at, row.removed_at = row.invited_at or now, None
             row.save(update_fields=['invited_at', 'removed_at'])
+            if log:
+                log(row)
             counts['reserved'] += 1
     return counts
 
 
-def give(request_ids) -> dict:
+def undo_reserve(request_ids, seen=None, log=None) -> dict:
+    """A place reserved by mistake whose address NEVER went into Google's console: free again.
+
+    The one way invited_at is cleared. Never after give(): ready_at is the proof it is in Google.
+    """
+    counts = {'undone': 0, 'skipped': 0}
+    with transaction.atomic():
+        rows = Request.objects.filter(pk__in=list(request_ids), feature=Request.Feature.GMAIL)
+        for row in rows.select_for_update(of=('self',)):
+            if not can_undo(row) or not _unchanged(row, seen):
+                counts['skipped'] += 1
+                continue
+            row.invited_at = row.removed_at = None
+            row.save(update_fields=['invited_at', 'removed_at'])
+            if log:
+                log(row)
+            counts['undone'] += 1
+    return counts
+
+
+def give(request_ids, seen=None, log=None) -> dict:
     """Step 2, AFTER that address was added in Google's console: access, and the notice.
 
     Never for someone removed: selecting the whole queue must not let them back in.
     """
-    return _open_access(request_ids, lambda row: (
-        row.invited_at and not row.ready_at and not row.removed_at and row.google_email))
+    return _open_access(request_ids, lambda row: can_give(row) and _unchanged(row, seen), log)
 
 
-def give_back(request_ids) -> dict:
+def give_back(request_ids, seen=None, log=None) -> dict:
     """Someone who had access and was removed or left, and says yes: no new place, no console step."""
-    return _open_access(request_ids, lambda row: row.ready_at and row.removed_at)
+    return _open_access(request_ids, lambda row: can_return(row) and _unchanged(row, seen), log)
 
 
-def _open_access(request_ids, due) -> dict:
+def _open_access(request_ids, due, log=None) -> dict:
     counts = {'given': 0, 'skipped': 0}
     rows = Request.objects.filter(pk__in=list(request_ids), feature=Request.Feature.GMAIL)
     if not pilot_open():
@@ -227,6 +284,8 @@ def _open_access(request_ids, due) -> dict:
                 continue
             row.ready_at, row.removed_at, row.notified_at = row.ready_at or now, None, now
             row.save(update_fields=['ready_at', 'removed_at', 'notified_at'])
+            if log:
+                log(row)
             told.append(row.user)
             counts['given'] += 1
     for user in told:
@@ -248,7 +307,7 @@ def tell_waiting(request_ids) -> int:
     return len(people)
 
 
-def remove(request_ids) -> int:
+def remove(request_ids, log=None) -> int:
     """Takes access away and erases the connection. The place stays spent."""
     from .gmail import oauth
 
@@ -256,8 +315,14 @@ def remove(request_ids) -> int:
                                   invited_at__isnull=False, removed_at__isnull=True)
     # A configured account keeps access whatever is done here: not counted as removed.
     rows = rows.exclude(user_id__in=gmail.configured_tester_ids())
-    people = [pk for pk in rows.values_list('user_id', flat=True) if pk]
-    done = rows.update(removed_at=timezone.now(), google_email='')
+    with transaction.atomic():
+        changed = list(rows.select_for_update(of=('self',)))
+        done = Request.objects.filter(pk__in=[row.pk for row in changed]).update(
+            removed_at=timezone.now(), google_email='')
+        if log:
+            for row in changed:
+                log(row)
+    people = [row.user_id for row in changed if row.user_id]
     for row in GmailConnection.objects.filter(user_id__in=people):
         oauth.disconnect(row)
     return done
@@ -272,7 +337,10 @@ def removed_connections():
 
 
 def forget_addresses() -> int:
-    """An address is for giving a place. Gone once connected, with the account, or when none can be given."""
+    """An address is for giving a place: gone once connected, with the account, or when a running pilot is full.
+
+    With the pilot off it stays, for whoever is waiting. The Gmail privacy draft says so (a limit is a question for counsel).
+    """
     from security.models import UserBan
 
     banned = UserBan.objects.filter(deleted_at__isnull=True).exclude(

@@ -1,0 +1,23 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p><strong>{{ warning }}</strong></p>
+{% if spends is not None %}<p>Gasta {{ spends }} cupo(s). Quedan {{ left }}. Si no alcanzan, entran primero quienes pidieron antes.</p>{% endif %}
+{% if left_out %}<p>{{ left_out }} de las seleccionadas no aplican y no cambian.</p>{% endif %}
+{% if next_round %}<p>Se muestran las primeras {{ rows|length }}. Otras {{ next_round }} quedan para otra ronda.</p>{% endif %}
+<table>
+  <thead><tr><th>Persona</th><th>Gmail</th><th>Lo pidió</th></tr></thead>
+  <tbody>
+  {% for row in rows %}<tr><td>{{ row.user|default:"(cuenta eliminada)" }}</td><td>{{ row.google_email|default:"(sin dirección)" }}</td><td>{{ row.asked_at }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<form method="post">{% csrf_token %}
+  <input type="hidden" name="action" value="{{ action }}">
+  <input type="hidden" name="confirmed" value="{{ action }}">
+  {% for row, seen in shown %}<input type="hidden" name="{{ checkbox }}" value="{{ row.pk }}">
+  <input type="hidden" name="seen" value="{{ seen }}">
+  {% endfor %}
+  <button type="submit" class="button">{{ button }}</button>
+  <a href="{{ request.get_full_path }}">Cancelar</a>
+</form>
+{% endblock %}

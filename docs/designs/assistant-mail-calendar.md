@@ -420,12 +420,20 @@ else joins the list. A public launch is verification plus CASA, decided from tha
 
 **Giving a place:** Django admin, Assistant connection requests. Filter Gmail + yes, oldest first.
 
-1. "Apartar cupo" spends the place and freezes the address, which the list then shows. No access yet.
+1. "Apartar cupo" shows who and which address, and on confirming spends the place and freezes the address. No
+   access yet. Only @gmail.com / @googlemail.com are taken.
 2. Add exactly that address under "Test users" in the Google project.
-3. "Ya lo agregué en Google" opens access and sends a generic notice.
+3. "Ya lo agregué en Google" asks to confirm, then opens access and sends a generic notice.
+
+Reserved by mistake and never typed into Google: "Deshacer un cupo apartado" frees it, with a confirmation. It is
+the only thing that frees a place, and it refuses once step 3 was done. Every grant, removal and undo is in the
+row's History with who did it (never the address).
+
+The typed address is erased when they connect. With the pilot off, waiting addresses are kept (no fixed period
+until counsel answers question 7 of the privacy draft).
 
 "Quitar acceso" erases the connection. Removing or declining never frees a place, because Google does not free it.
-Someone who had access comes back only with "Devolver acceso", so a bulk step never readmits who was removed. A reservation that never reached step 3 (a typo, they left) is
+Someone who had access comes back only with "Devolver acceso", which asks to confirm, so a bulk step never readmits who was removed. A reservation that never reached step 3 (a typo, they left) is
 asked for the address again, and goes through all three steps on the same place.
 The admin only counts places given here, so when Google's console is full set `GMAIL_PILOT_FULL=True` and restart.
 "Avisar a quienes esperan" is how "te avisamos" is kept: use it when places open or it opens to everyone.
@@ -437,5 +445,5 @@ the card for those without a place.
 script ignores a failed migrate, and deleting a user needs this table).
 
 **Before switching on:** discovery with the pilot off stores a yes/no only. With the pilot on it stores an address,
-which the privacy text has to cover first (Privacy 1.14.0 draft). Don't give places before a build with the mail
+which the privacy text has to cover first (the Gmail privacy draft, 1.15.0). Don't give places before a build with the mail
 flag on is in the stores: older builds can only say "Actualiza la app".

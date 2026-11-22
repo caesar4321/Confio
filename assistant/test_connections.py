@@ -2,9 +2,12 @@
 from datetime import timedelta
 from unittest import mock
 
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+from django.contrib import messages
+from django.contrib.admin.models import LogEntry
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
 from assistant import connections, connections_admin
@@ -86,7 +89,9 @@ class ConnectionsTests(TestCase):
     @override_settings(**ON)
     def test_request_needs_a_valid_google_address(self):
         self.assertEqual(self.see()['gmail'], 'request')
-        for bad in ('', 'nope', 'a@b', 'x' * 260 + '@gmail.com', 'ana@icloud.com', 'x@privaterelay.appleid.com'):
+        for bad in ('', 'nope', 'a@b', 'x' * 260 + '@gmail.com', 'ana@icloud.com', 'x@privaterelay.appleid.com',
+                    'a@hotmail.es', 'a@yahoo.com.ar', 'a@live.com.mx', 'a@proton.me', 'a@empresa.com', 'a@gmail.com.ar',
+                    'a@notgmail.com'):
             with self.assertRaises(connections.ConnectionRefused):
                 self.say(email=bad)
         self.assertEqual(self.say(email='second@gmail.com').google_email, 'second@gmail.com')
@@ -256,7 +261,7 @@ class ConnectionsTests(TestCase):
 
     @override_settings(**ON)
     def test_a_typo_can_be_corrected_even_when_full(self):
-        row = self.say(email='ana@gmial.com')
+        row = self.say(email='anna@gmail.com')
         connections.reserve([row.pk])
         connections.remove([row.pk])
         with override_settings(GMAIL_PILOT_FULL=True):
@@ -385,3 +390,274 @@ class ConnectionsTests(TestCase):
         from assistant import connections_schema
         fields = [*connections_schema.Query._meta.fields, *connections_schema.Mutation._meta.fields]
         self.assertTrue(fields and all('assistant_mail' in name for name in fields))
+
+
+@override_settings(**ON)
+class PilotSafeguardTests(TestCase):
+    """What must hold before the first place is given."""
+
+    setUp = ConnectionsTests.setUp
+    person = ConnectionsTests.person
+    say = ConnectionsTests.say
+    see = ConnectionsTests.see
+    invite = ConnectionsTests.invite
+    connected = ConnectionsTests.connected
+
+    def staff(self):
+        if not hasattr(self, '_staff'):
+            self._staff = get_user_model().objects.create_superuser(
+                username='cx_admin', email='admin@example.com', password='x', firebase_uid='cx-admin')
+        return self._staff
+
+    def press(self, action, rows, extra=None):
+        request = RequestFactory().post('/admin/', {ACTION_CHECKBOX_NAME: [row.pk for row in rows],
+                                                    'action': action, **(extra or {})})
+        request.user = self.staff()
+        model_admin = connections_admin.ConnectionRequestAdmin(Request, AdminSite())
+        with mock.patch.object(model_admin, 'message_user'), mock.patch.object(
+                model_admin.admin_site, 'each_context', return_value={}):
+            return getattr(model_admin, action)(request, Request.objects.filter(pk__in=[row.pk for row in rows]))
+
+    def confirm(self, action, rows):
+        seen = [f'{row.pk}:{connections.as_shown(Request.objects.get(pk=row.pk))}' for row in rows]
+        return self.press(action, rows, {'confirmed': action, 'seen': seen})
+
+    def test_googlemail_and_capitals_are_gmail(self):
+        self.assertEqual(self.say(email='Ana@GoogleMail.com').google_email, 'Ana@GoogleMail.com')
+
+    def test_the_first_click_changes_nothing(self):
+        row = self.say(email='ana@gmail.com')
+        page = self.press('reserve_place', [row])
+        self.assertEqual(page.template_name, 'admin/assistant/connection_confirm.html')
+        self.assertEqual((page.context_data['rows'], page.context_data['spends']), ([row], 1))
+        self.assertIsNone(Request.objects.get().invited_at)
+
+    def test_a_confirmation_for_another_action_does_not_count(self):
+        row = self.say(email='ana@gmail.com')
+        self.press('reserve_place', [row], {'confirmed': 'give_place', 'seen': [f'{row.pk}:0:ana@gmail.com']})
+        self.assertIsNone(Request.objects.get().invited_at)
+
+    def test_only_what_was_shown_is_reserved(self):
+        shown, later = self.say(email='ana@gmail.com'), self.say(email='eva@gmail.com', user=self.person('eva'))
+        self.press('reserve_place', [shown, later],
+                   {'confirmed': 'reserve_place', 'seen': [f'{shown.pk}:0:ana@gmail.com']})
+        self.assertIsNotNone(Request.objects.get(pk=shown.pk).invited_at)
+        self.assertIsNone(Request.objects.get(pk=later.pk).invited_at)
+
+    def test_an_address_changed_after_the_page_is_not_reserved(self):
+        row = self.say(email='old@gmail.com')
+        shown = f'{row.pk}:{connections.as_shown(row)}'
+        self.say(email='new@gmail.com')
+        self.press('reserve_place', [row], {'confirmed': 'reserve_place', 'seen': [shown]})
+        self.assertIsNone(Request.objects.get().invited_at)
+
+    def test_access_needs_its_own_confirmation(self):
+        row = self.say(email='ana@gmail.com')
+        connections.reserve([row.pk])
+        self.press('give_place', [row])
+        self.assertIsNone(Request.objects.get().ready_at)
+        self.confirm('give_place', [row])
+        self.assertIsNotNone(Request.objects.get().ready_at)
+
+    def test_a_mistaken_reservation_is_undone(self):
+        row = self.say(email='ana@gmail.com')
+        before = connections.seats_used()
+        connections.reserve([row.pk])
+        self.press('undo_reservation', [row])
+        self.assertIsNotNone(Request.objects.get().invited_at)
+        self.confirm('undo_reservation', [row])
+        row.refresh_from_db()
+        self.assertEqual((row.invited_at, row.removed_at, row.google_email), (None, None, 'ana@gmail.com'))
+        self.assertEqual(connections.seats_used(), before)
+        self.assertEqual(self.see()['gmail'], 'waiting')
+        self.assertEqual(self.invite(row)['given'], 1)  # it can be given later
+
+    def test_undo_frees_the_place_of_who_left_or_was_deleted(self):
+        left, gone = self.say(email='ana@gmail.com'), self.say(email='eva@gmail.com', user=self.person('eva'))
+        before = connections.seats_used()
+        connections.reserve([left.pk, gone.pk])
+        self.say(wants=False)
+        Request.objects.filter(pk=gone.pk).update(user=None)
+        self.assertEqual(connections.undo_reserve([left.pk, gone.pk])['undone'], 2)
+        self.assertEqual(connections.seats_used(), before)
+
+    def test_never_undone_once_given_even_if_removed(self):
+        row = self.say(email='ana@gmail.com')
+        self.invite(row)
+        self.assertEqual(connections.undo_reserve([row.pk])['undone'], 0)
+        connections.remove([row.pk])
+        self.assertEqual(connections.undo_reserve([row.pk])['undone'], 0)
+        self.assertIsNotNone(Request.objects.get().invited_at)
+
+    def test_every_change_says_who_and_never_the_address(self):
+        row = self.say(email='ana@gmail.com')
+        self.confirm('reserve_place', [row])
+        self.confirm('undo_reservation', [row])
+        self.confirm('reserve_place', [row])
+        self.confirm('give_place', [row])
+        self.press('take_place', [row])
+        self.confirm('return_place', [row])
+        entries = list(LogEntry.objects.filter(object_id=str(row.pk)).order_by('pk'))
+        self.assertEqual([entry.user_id for entry in entries], [self.staff().pk] * 6)
+        self.assertEqual(len({entry.change_message for entry in entries}), 5)
+        self.assertNotIn('@', ''.join(entry.change_message + entry.object_repr for entry in entries))
+
+    def test_what_changed_nothing_is_not_recorded(self):
+        self.press('take_place', [self.say(email='ana@gmail.com')])
+        self.assertFalse(LogEntry.objects.exists())
+
+    def test_no_access_without_its_record(self):
+        row = self.say(email='ana@gmail.com')
+        connections.reserve([row.pk])
+        with self.assertRaises(RuntimeError):
+            connections.give([row.pk], log=mock.Mock(side_effect=RuntimeError))
+        self.assertIsNone(Request.objects.get().ready_at)
+        self.notify.assert_not_called()
+
+    def test_connecting_erases_the_address_before_any_sweep(self):
+        from assistant.gmail import crypto, oauth
+        self.invite(self.say(email='ana@gmail.com'))
+        with mock.patch.object(crypto, 'seal', return_value='sealed'), mock.patch.object(
+                crypto, 'opaque', return_value='key'):
+            connection, _ = oauth._save(self.user, mock.Mock(consent_version=1),
+                                        {'refresh_token': 'r', 'scope': ''}, 'ana@gmail.com')
+            self.assertEqual(Request.objects.get().google_email, '')
+            oauth.disconnect(GmailConnection.objects.get(pk=connection.pk))
+        self.assertEqual(Request.objects.get().google_email, '')
+        self.assertEqual(self.see()['gmail'], 'invited')
+
+    def told(self, action, rows, extra=None):
+        """What the operator is told, and how loud."""
+        request = RequestFactory().post('/admin/', {ACTION_CHECKBOX_NAME: [row.pk for row in rows],
+                                                    'action': action, **(extra or {})})
+        request.user = self.staff()
+        model_admin = connections_admin.ConnectionRequestAdmin(Request, AdminSite())
+        with mock.patch.object(model_admin, 'message_user') as said, mock.patch.object(
+                model_admin, 'response_post_save_change', return_value='back'):
+            getattr(model_admin, action)(request, Request.objects.filter(pk__in=[row.pk for row in rows]))
+        return said.call_args.args[1:]
+
+    def test_a_refused_reservation_never_says_to_add_it_in_google(self):
+        row = self.say(email='old@gmail.com')
+        shown = f'{row.pk}:{connections.as_shown(row)}'
+        self.say(email='new@gmail.com')
+        words, level = self.told('reserve_place', [row], {'confirmed': 'reserve_place', 'seen': [shown]})
+        self.assertIn('no agregues nada en Google', words)
+        self.assertEqual(level, messages.WARNING)
+
+    def test_no_page_and_no_console_step_while_the_pilot_is_off(self):
+        row = self.say(email='ana@gmail.com')
+        with override_settings(GMAIL_PILOT_USER_IDS=''):
+            self.assertIn('no agregues nada en Google', self.told('reserve_place', [row])[0])
+
+    def test_an_old_undo_page_cannot_free_a_newer_reservation(self):
+        row = self.say(email='ana@gmail.com')
+        connections.reserve([row.pk])
+        row.refresh_from_db()
+        old_page = f'{row.pk}:{connections.as_shown(row)}'
+        connections.undo_reserve([row.pk])
+        connections.reserve([row.pk])
+        self.press('undo_reservation', [row], {'confirmed': 'undo_reservation', 'seen': [old_page]})
+        self.assertIsNotNone(Request.objects.get().invited_at)
+
+    def test_an_old_reserve_page_cannot_spend_after_an_undo(self):
+        row = self.say(email='ana@gmail.com')
+        connections.reserve([row.pk])
+        Request.objects.filter(pk=row.pk).update(removed_at=timezone.now())  # asked again: the page says "Gasta 0"
+        row.refresh_from_db()
+        old_page = f'{row.pk}:{connections.as_shown(row)}'
+        connections.undo_reserve([row.pk])
+        self.press('reserve_place', [row], {'confirmed': 'reserve_place', 'seen': [old_page]})
+        self.assertIsNone(Request.objects.get().invited_at)
+
+    def test_a_stored_address_that_is_not_gmail_gets_no_place(self):
+        row = self.say(email='ana@gmail.com')
+        Request.objects.filter(pk=row.pk).update(google_email='ana@yahoo.com')
+        self.assertEqual(connections.reserve([row.pk])['reserved'], 0)
+        Request.objects.filter(pk=row.pk).update(invited_at=timezone.now())
+        self.assertEqual(connections.give([row.pk])['given'], 0)
+
+    def test_returning_access_needs_a_confirmation(self):
+        row = self.say(email='ana@gmail.com')
+        self.invite(row)
+        connections.remove([row.pk])
+        self.press('return_place', [row])
+        self.assertFalse(config.user_allowed(self.user))
+        self.confirm('return_place', [row])
+        self.assertTrue(config.user_allowed(self.user))
+
+    def test_the_page_never_posts_more_than_a_round(self):
+        rows = [self.say(email=f'q{n}@gmail.com', user=self.person(f'q{n}')) for n in range(3)]
+        with mock.patch.object(config, 'MAX_TESTERS', 2):
+            page = self.press('reserve_place', rows)
+        self.assertEqual((page.context_data['rows'], page.context_data['next_round']), (rows[:2], 1))
+
+    def test_an_old_undo_page_cannot_free_who_was_reserved_again(self):
+        row = self.say(email='ana@gmail.com')
+        connections.reserve([row.pk])
+        Request.objects.filter(pk=row.pk).update(removed_at=timezone.now())
+        row.refresh_from_db()
+        old_page = f'{row.pk}:{connections.as_shown(row)}'
+        connections.reserve([row.pk])  # the same address, the same place
+        self.press('undo_reservation', [row], {'confirmed': 'undo_reservation', 'seen': [old_page]})
+        self.assertIsNotNone(Request.objects.get().invited_at)
+
+    def test_an_old_return_page_cannot_undo_a_later_removal(self):
+        row = self.say(email='ana@gmail.com')
+        self.invite(row)
+        connections.remove([row.pk])
+        row.refresh_from_db()
+        old_page = f'{row.pk}:{connections.as_shown(row)}'
+        connections.give_back([row.pk])
+        connections.remove([row.pk])
+        self.press('return_place', [row], {'confirmed': 'return_place', 'seen': [old_page]})
+        self.assertFalse(config.user_allowed(self.user))
+
+    def test_a_forged_seen_is_ignored(self):
+        row = self.say(email='ana@gmail.com')
+        self.press('reserve_place', [row], {'confirmed': 'reserve_place', 'seen': [chr(0xb2) + ':x']})
+        self.assertIsNone(Request.objects.get().invited_at)
+
+
+class ConfirmPageTests(TestCase):
+    def test_the_page_posts_back_what_it_showed_and_escapes_it(self):
+        from django.template.loader import render_to_string
+        row = Request(pk=7, google_email='a"b@gmail.com', answer='yes', feature='gmail')
+        page = render_to_string('admin/assistant/connection_confirm.html', {
+            'rows': [row], 'shown': [(row, '7:0:a"b@gmail.com')], 'action': 'reserve_place', 'checkbox': ACTION_CHECKBOX_NAME, 'warning': 'w', 'button': 'b'})
+        self.assertIn('name="confirmed" value="reserve_place"', page)
+        self.assertIn('name="_selected_action" value="7"', page)
+        self.assertIn('value="7:0:a&quot;b@gmail.com"', page)
+
+
+@override_settings(**ON)
+class AdminFlowTests(TestCase):
+    """The real site, its changelist POST and the rendered page."""
+
+    def test_select_confirm_reserve(self):
+        from django.contrib.messages.storage.fallback import FallbackStorage
+        from config.admin_dashboard import confio_admin_site
+        users = get_user_model().objects
+        person = users.create_user(username='cx_flow', email='flow@example.com', password='x', firebase_uid='cx-flow')
+        staff = users.create_superuser(username='cx_boss', email='boss@example.com', password='x', firebase_uid='cx-boss')
+        staff.is_verified = lambda: True
+        row = Request.objects.create(user=person, feature='gmail', answer='yes', google_email='flow@gmail.com')
+        model_admin = confio_admin_site._registry[Request]
+
+        def post(data):
+            request = RequestFactory().post('/', {ACTION_CHECKBOX_NAME: [row.pk], 'index': '0', **data})
+            request.user, request.session = staff, {}
+            request._dont_enforce_csrf_checks = True
+            request._messages = FallbackStorage(request)
+            return model_admin.changelist_view(request)
+
+        with mock.patch('security.utils.check_user_banned', return_value=(False, None)):
+            page = post({'action': 'reserve_place'})
+            page.render()
+            self.assertIn('flow@gmail.com', page.content.decode())
+            self.assertIsNone(Request.objects.get().invited_at)
+            done = post({'action': 'reserve_place', 'confirmed': 'reserve_place', 'seen': f'{row.pk}:0:flow@gmail.com'})
+            self.assertEqual(done.status_code, 302)
+            self.assertIsNotNone(Request.objects.get().invited_at)
+            self.assertEqual(LogEntry.objects.get().user_id, staff.pk)
+            self.assertEqual(post({'action': 'reserve_place'}).status_code, 302)  # nothing left to confirm

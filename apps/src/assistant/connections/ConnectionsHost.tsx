@@ -142,8 +142,8 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
                       accessibilityLabel="El Gmail que quieres conectar"
                     />
                     <Text style={styles.detail}>
-                      Tiene que ser una cuenta de Google. La usamos solo para darte acceso: pedirlo no conecta ni lee
-                      tu correo.
+                      Tiene que ser una dirección @gmail.com. La usamos solo para darte acceso: pedirlo no conecta ni
+                      lee tu correo.
                     </Text>
                       </>
                     ) : null}
