@@ -6,7 +6,7 @@ import { logOfferStep } from '../../services/paidOffers';
 import {
   account, designation, failedRead, flush, hasTappable, offer, ok, tap, tappable, text,
 } from '../../components/smartAccount/testing/fixtures';
-import { HERENCIA_STEPS, HERO_COPY, SmartAccountOfferScreen, offerPitch, orderPlans } from '../SmartAccountOfferScreen';
+import { HERENCIA_CARD, HERENCIA_STEPS, HERO_COPY, SmartAccountOfferScreen, offerPitch, orderPlans } from '../SmartAccountOfferScreen';
 import { annualSavings, defaultPlanKey, planSummary, savingsBadge } from '../../components/smartAccount/PlanPicker';
 import { DEX_TRADING_UI_ENABLED } from '../../config/features';
 
@@ -142,14 +142,13 @@ describe('the pitch promises only what this app can do', () => {
     ],
   });
 
-  it('Herencia is always the hero, whatever order or flag the server sends', () => {
+  it('automation is always the hero and Herencia always has its card, whatever the server sends', () => {
     [beneficiaryFirst(), { ...beneficiaryFirst(), headline: 'automation_first' },
       { ...beneficiaryFirst(), beneficiaryEnabled: false }].forEach((o) => {
       const pitch = offerPitch(o, true);
       expect(pitch.inheritance).toBe(true);
-      expect(pitch.eyebrow).toBe('Herencia Digital');
-      expect(pitch.headline).toBe('Lo tuyo, para los tuyos.');
-      // The beneficiary line moves into the hero; the rest keeps the server order.
+      expect(pitch.headline).toBe('Confío lo hace por ti, cuando toca.');
+      // The beneficiary line moves into the Herencia card; the rest keeps the server order.
       expect(pitch.benefits.map((b) => b.key)).toEqual(['payments', 'investing', 'assistant']);
     });
     expect(offerPitch(beneficiaryFirst(), true).benefits[1].body).toContain('bitcoin y oro');
@@ -166,24 +165,31 @@ describe('the pitch promises only what this app can do', () => {
     expect(offerPitch(beneficiaryFirst(), false).benefits[1].body).toBe(stocksOnly);
   });
 
-  it('renders the Herencia hero and its three steps when the feature is on', async () => {
+  it('renders automation first, then the benefits, then the Herencia card with its steps, then the plans', async () => {
     api.fetchSmartAccountOffer.mockResolvedValue(ok(beneficiaryFirst()));
     await mount();
     const out = text(tree);
-    expect(out).toContain(HERO_COPY.inheritance.headline);
-    expect(out).toContain(HERO_COPY.inheritance.supporting);
+    expect(out).toContain(HERO_COPY.automation.headline);
+    expect(out).toContain(HERO_COPY.automation.supporting);
+    expect(out).toContain(HERENCIA_CARD.eyebrow);
+    expect(out).toContain(HERENCIA_CARD.title);
     HERENCIA_STEPS.forEach((s) => expect(out).toContain(s.title));
-    expect(out).toContain('También incluye');
-    expect(out.indexOf(HERO_COPY.inheritance.headline)).toBeLessThan(out.indexOf('Pagos y transferencias automáticos'));
+    const hero = out.indexOf(HERO_COPY.automation.headline);
+    const benefits = out.indexOf('Pagos y transferencias automáticos');
+    const herencia = out.indexOf(HERENCIA_CARD.title);
+    const plans = out.indexOf('Elige tu plan');
+    expect(hero).toBeLessThan(benefits);
+    expect(benefits).toBeLessThan(herencia);
+    if (plans >= 0) expect(herencia).toBeLessThan(plans);
     expect(tree.root.findAll((n) => n.props.testID === 'herencia-art').length).toBeGreaterThan(0);
   });
 
-  it('renders the Herencia hero even when the server flag is off, and the investing line follows the build', async () => {
+  it('keeps the Herencia card even when the server flag is off, and the investing line follows the build', async () => {
     api.fetchSmartAccountOffer.mockResolvedValue(ok({ ...beneficiaryFirst(), beneficiaryEnabled: false }));
     await mount();
     const out = text(tree);
-    expect(out).toContain(HERO_COPY.inheritance.headline);
-    expect(out).not.toContain('Tu dinero trabaja con tus reglas.');
+    expect(out).toContain(HERO_COPY.automation.headline);
+    expect(out).toContain(HERENCIA_CARD.title);
     expect(out).not.toContain('Siempre a tu nombre');
     expect(tree.root.findAll((n) => n.props.testID === 'herencia-steps').length).toBeGreaterThan(0);
     if (DEX_TRADING_UI_ENABLED) {

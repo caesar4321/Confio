@@ -54,18 +54,24 @@ const BENEFIT_ICONS: Record<string, string> = {
   ownership: 'shield',
 };
 
-/** The hero copy: Herencia when the beneficiary feature is on, else automation. */
+/**
+ * The hero is the paid promise: Confío does it for you, when it is due,
+ * inside limits you signed (assistant-first redesign 7.8; founder
+ * 2026-11-21: automation first, Herencia as the second card).
+ */
 export const HERO_COPY = {
-  inheritance: {
-    eyebrow: 'Herencia Digital',
-    headline: 'Lo tuyo, para los tuyos.',
-    supporting: 'Elige quién recibirá tu cuenta. Mientras la uses, todo sigue siendo tuyo.',
-  },
   automation: {
     eyebrow: '',
-    headline: 'Tu dinero trabaja con tus reglas.',
-    supporting: 'Pagos, envíos e inversiones que se hacen solos, como tú los programas.',
+    headline: 'Confío lo hace por ti, cuando toca.',
+    supporting: 'Pagos, envíos e inversiones que se hacen solos, dentro de los límites que tú firmas.',
   },
+} as const;
+
+/** The Herencia card, right after the benefits. */
+export const HERENCIA_CARD = {
+  eyebrow: 'Herencia Digital',
+  title: 'Y tu cuenta llega a quien elegiste.',
+  body: 'Elige quién la recibirá. Mientras la uses, todo sigue siendo tuyo.',
 } as const;
 
 /** "Así funciona": the inheritance promise in three facts (spec 6, decision 9). */
@@ -94,12 +100,11 @@ const STOCKS_ONLY_INVESTING = 'Compra acciones automáticamente, cada día, sema
 const CTA_LABEL = 'Abrir mi Cuenta inteligente';
 
 /**
- * The hero and the benefits this app can keep. The hero is always Herencia
- * (founder 2026-11-21: inheritance is the key feature and launches with the
- * account), and the beneficiary line moves out of the list into it. Where
- * crypto buys are not offered (an iOS build, or the server's flag off)
- * investing promises stocks only. The rest of the list keeps the server's
- * order.
+ * The hero and the benefits this app can keep. The hero is automation; the
+ * beneficiary line moves out of the list into its own Herencia card, shown
+ * right after the benefits. Where crypto buys are not offered (an iOS build,
+ * or the server's flag off) investing promises stocks only. The rest of the
+ * list keeps the server's order.
  */
 export function offerPitch(
   data: Pick<SmartAccountOffer, 'headline' | 'benefits' | 'beneficiaryEnabled' | 'investingCryptoEnabled'> | null | undefined,
@@ -112,7 +117,7 @@ export function offerPitch(
   const benefits = (data?.benefits ?? [])
     .filter((b) => b.key !== 'beneficiary')
     .map((b) => (b.key === 'investing' && !crypto ? { ...b, body: STOCKS_ONLY_INVESTING } : b));
-  const copy = inheritance ? HERO_COPY.inheritance : HERO_COPY.automation;
+  const copy = HERO_COPY.automation;
   return {
     inheritance,
     ...copy,
@@ -207,9 +212,6 @@ export function SmartAccountOfferScreen() {
               </View>
               <Text style={styles.brandName} accessibilityRole="header">Cuenta inteligente</Text>
             </View>
-            {pitch.inheritance ? (
-              <HerenciaArt width={artWidth} style={styles.art} />
-            ) : null}
             {pitch.eyebrow ? (
               <View style={styles.eyebrow}>
                 <Text style={styles.eyebrowText}>{pitch.eyebrow}</Text>
@@ -232,30 +234,8 @@ export function SmartAccountOfferScreen() {
           </View>
         ) : (
           <>
-            {pitch.inheritance ? (
-              <Rise index={1} style={[styles.side, styles.lift]} testID="herencia-steps">
-                <Card style={styles.steps}>
-                  <Text style={styles.cardTitle} accessibilityRole="header">Así funciona</Text>
-                  {HERENCIA_STEPS.map((s, i) => (
-                    <View
-                      key={s.title}
-                      style={[styles.step, i > 0 && styles.divider]}
-                      accessible
-                      accessibilityLabel={`${i + 1}. ${s.title}. ${s.body}`}
-                    >
-                      <IconDisc icon={s.icon} size={40} />
-                      <View style={styles.itemText}>
-                        <Text style={styles.itemTitle}>{s.title}</Text>
-                        <Text style={styles.itemBody}>{s.body}</Text>
-                      </View>
-                    </View>
-                  ))}
-                </Card>
-              </Rise>
-            ) : null}
-
             {pendingInvite ? (
-              <View style={[styles.side, pitch.inheritance ? styles.gap : styles.lift]}>
+              <View style={[styles.side, styles.lift]}>
                 <Notice
                   icon="user-check"
                   title={`${pendingInvite.ownerName} te eligió como beneficiario`}
@@ -269,13 +249,7 @@ export function SmartAccountOfferScreen() {
 
             {pitch.benefits.length > 0 ? (
               <>
-                {pitch.inheritance || pendingInvite ? (
-                  <Text style={styles.section} accessibilityRole="header">También incluye</Text>
-                ) : null}
-                <Rise
-                  index={2}
-                  style={[styles.side, !pitch.inheritance && !pendingInvite ? styles.lift : null]}
-                >
+                <Rise index={1} style={[styles.side, pendingInvite ? styles.gap : styles.lift]}>
                   <Card style={styles.benefits}>
                     {pitch.benefits.map((b, i) => (
                       <View
@@ -294,6 +268,35 @@ export function SmartAccountOfferScreen() {
                   </Card>
                 </Rise>
               </>
+            ) : null}
+
+            {pitch.inheritance ? (
+              <Rise index={2} style={[styles.side, styles.gap]} testID="herencia-steps">
+                <Card style={styles.steps}>
+                  <View style={styles.herenciaHead}>
+                    <HerenciaArt width={Math.min(artWidth, 200)} variant="onLight" />
+                    <View style={styles.herenciaBadge}>
+                      <Text style={styles.herenciaBadgeText}>{HERENCIA_CARD.eyebrow}</Text>
+                    </View>
+                    <Text style={styles.herenciaTitle} accessibilityRole="header">{HERENCIA_CARD.title}</Text>
+                    <Text style={styles.herenciaBody}>{HERENCIA_CARD.body}</Text>
+                  </View>
+                  {HERENCIA_STEPS.map((s, i) => (
+                    <View
+                      key={s.title}
+                      style={[styles.step, styles.divider]}
+                      accessible
+                      accessibilityLabel={`${i + 1}. ${s.title}. ${s.body}`}
+                    >
+                      <IconDisc icon={s.icon} size={40} />
+                      <View style={styles.itemText}>
+                        <Text style={styles.itemTitle}>{s.title}</Text>
+                        <Text style={styles.itemBody}>{s.body}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </Card>
+              </Rise>
             ) : null}
 
             {plans.length > 0 ? (
@@ -389,6 +392,13 @@ const styles = StyleSheet.create({
   padded: { paddingVertical: 20 },
   cardTitle: { fontSize: 18, fontWeight: '700', color: SA.text, paddingTop: 18, paddingBottom: 4 },
   steps: { paddingHorizontal: 18, paddingBottom: 4 },
+  herenciaHead: { alignItems: 'center', paddingTop: 20, paddingBottom: 18 },
+  herenciaBadge: {
+    marginTop: 4, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999, backgroundColor: SA.mint,
+  },
+  herenciaBadgeText: { fontSize: 12, fontWeight: '700', color: SA.mintText, letterSpacing: 0.3 },
+  herenciaTitle: { marginTop: 12, fontSize: 22, lineHeight: 28, fontWeight: '800', color: SA.text, textAlign: 'center' },
+  herenciaBody: { marginTop: 6, fontSize: 15, lineHeight: 22, color: SA.muted, textAlign: 'center' },
   step: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 14 },
   benefits: { paddingHorizontal: 18 },
   benefit: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 16 },
