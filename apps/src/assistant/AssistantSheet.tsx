@@ -54,6 +54,7 @@ import ConnectionsPrompt from './connections/ConnectionsPrompt';
 import MascotPicker from './MascotPicker';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
+import { TaskChips } from '../agentTasks/TaskChips';
 import { SmartContextAssistantNotice, isSmartContext } from './SmartContextNotice';
 import { clearCallError, startCall, useCall } from './callStore';
 import {
@@ -205,6 +206,15 @@ function Bubble({ message, onAction, onWalk, pet }: { message: AssistantMessage;
       </View>
       {!mine ? <ActionChips actions={message.actions} messageId={message.id} onPress={onAction} /> : null}
       {!mine ? <WalkChips actions={message.actions} onClose={onWalk} /> : null}
+      {/* A shopping task's note: its screen holds the store's live view. */}
+      {!mine ? <TaskChips actions={message.actions} onOpen={(taskId) => {
+        onWalk();
+        setTimeout(() => {
+          if (navigationRef.isReady()) {
+            (navigationRef as any).navigate('AgentTask', { taskId });
+          }
+        }, 250);
+      }} /> : null}
     </View>
     </View>
   );

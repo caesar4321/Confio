@@ -17,6 +17,7 @@ import {
 import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 import { extractFcmTransactionData } from '../utils/fcmData';
 import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
+import { agentTaskNotificationRoute } from '../agentTasks/helpers';
 import { androidChannelFor, createCommunityChannel } from './notificationChannels';
 import { isCalendarNudge } from '../assistant/calendar/nudge';
 
@@ -799,6 +800,16 @@ class MessagingService {
         console.error('[MessagingService] Error checking account context:', error);
         // Continue with navigation even if account check fails
       }
+    }
+
+    // A shopping task: its screen holds the store's live view (the account
+    // switch above already put the person on the task's personal account).
+    const agentTaskId = agentTaskNotificationRoute(data);
+    if (agentTaskId) {
+      if (navigationRef.current && navigationRef.current.isReady()) {
+        (navigationRef.current as any).navigate('Main', { screen: 'AgentTask', params: { taskId: agentTaskId } });
+      }
+      return;
     }
 
     // Cuenta inteligente: the server names the screen in the data.

@@ -80,6 +80,7 @@
     "react-native-view-shot": "^4.0.3",
     "react-native-vision-camera": "^4.7.1",
     "react-native-webrtc": "124.0.8",
+    "react-native-webview": "13.13.5",
     "react-native-worklets-core": "^1.6.2",
     "readable-stream": "^4.7.0",
     "rn-qr-generator": "1.4.6",

@@ -16,6 +16,9 @@ export const mobileClientHeaders = (): Record<string, string> => {
   if (ASSISTANT_MEMORY_ENABLED) headers['X-Confio-Memory'] = '1';
   // How long this phone's keystore took to hand over the session, so a
   // phone where it is slow shows up in the server log (timings only).
+  // This build has the shopping task screen and its live view (agentTasks/):
+  // without it the assistant never starts a store purchase.
+  headers['X-Confio-Browser-Tasks'] = '1';
   const keychainDiagnostic = getKeychainDiagnostic();
   if (keychainDiagnostic) headers['X-Confio-KC-Diag'] = keychainDiagnostic;
   return headers;

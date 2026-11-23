@@ -12,6 +12,7 @@ import {
 import { confirmedReceiptContext, extractFcmTransactionData } from '../utils/fcmData';
 import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
 import { isCalendarNudge } from '../assistant/calendar/nudge';
+import { agentTaskNotificationRoute } from '../agentTasks/helpers';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -266,6 +267,16 @@ export class PushNotificationService {
         extra_transactionType,
         notification_type
       });
+
+      // A shopping task: the person's turn, its payment, or a stop after the hand-over.
+      const agentTaskId = agentTaskNotificationRoute(remoteMessage.data);
+      if (agentTaskId) {
+        (RootNavigation.navigationRef as any).navigate('Main', {
+          screen: 'AgentTask',
+          params: { taskId: agentTaskId },
+        });
+        return;
+      }
 
       // Cuenta inteligente: the server names the screen in the data.
       const smartTarget = smartNotificationRoute(remoteMessage.data);

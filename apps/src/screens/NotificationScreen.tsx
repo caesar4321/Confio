@@ -25,6 +25,7 @@ import { IconChip } from '../components/icons/IconChip';
 import { notificationVisual } from '../components/icons/vocabulary';
 import { Header } from '../navigation/Header';
 import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
+import { agentTaskNotificationRoute } from '../agentTasks/helpers';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_TOP_UP: 'top_up',
@@ -331,6 +332,30 @@ export const NotificationScreen = () => {
         });
       } catch (error) {
       }
+    }
+
+    // A shopping task's turn, payment or stop: its own screen.
+    const agentTaskId = agentTaskNotificationRoute(notification.data);
+    if (agentTaskId) {
+      // Tasks live on a personal account: from a business or Cuenta
+      // inteligente context switch first, as a push does.
+      let current: { type?: string } | null = null;
+      try {
+        const { AuthService } = await import('../services/authService');
+        current = await AuthService.getInstance().getActiveAccountContext();
+      } catch {
+        current = null;
+      }
+      if (current && current.type !== 'personal') {
+        const { PushNotificationService } = await import('../services/pushNotificationService');
+        const RootNavigation = await import('../navigation/RootNavigation');
+        PushNotificationService.deferSwitchThenNavigate('personal_0', () => {
+          (RootNavigation.navigationRef as any).navigate('Main', { screen: 'AgentTask', params: { taskId: agentTaskId } });
+        });
+        return;
+      }
+      (navigation as any).navigate('AgentTask', { taskId: agentTaskId });
+      return;
     }
 
     // Cuenta inteligente notifications name their screen in the data. First:

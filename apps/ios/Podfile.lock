@@ -1621,6 +1621,30 @@ PODS:
   - react-native-webrtc (124.0.8):
     - JitsiWebRTC (~> 124.0.0)
     - React-Core
+  - react-native-webview (13.13.5):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - React-NativeModulesApple (0.79.7):
     - glog
     - hermes-engine
@@ -2301,6 +2325,7 @@ DEPENDENCIES:
   - react-native-view-shot (from `../node_modules/react-native-view-shot`)
   - "react-native-voice-processor (from `../node_modules/@picovoice/react-native-voice-processor`)"
   - react-native-webrtc (from `../node_modules/react-native-webrtc`)
+  - react-native-webview (from `../node_modules/react-native-webview`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
   - React-oscompat (from `../node_modules/react-native/ReactCommon/oscompat`)
   - React-perflogger (from `../node_modules/react-native/ReactCommon/reactperflogger`)
@@ -2491,6 +2516,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/@picovoice/react-native-voice-processor"
   react-native-webrtc:
     :path: "../node_modules/react-native-webrtc"
+  react-native-webview:
+    :path: "../node_modules/react-native-webview"
   React-NativeModulesApple:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-oscompat:
@@ -2677,6 +2704,7 @@ SPEC CHECKSUMS:
   react-native-view-shot: ba0ecb57bf0407e034cb39f4b6677743e2dcfa4a
   react-native-voice-processor: e4d40fbac0c1ac60f085160927de033346692ee0
   react-native-webrtc: da75ba1f85a36981cbcb3fdae7dfbab7ad63c040
+  react-native-webview: 5adf9651c678f00ee1b2c3f4f74565c9a9236cab
   React-NativeModulesApple: 889490414c604f57066540e84e7bd8f672dac9b0
   React-oscompat: 0047f0ce53a328ce225777a6c617970556602c7c
   React-perflogger: bf00d816c3c3ad91658b44f93ce9ee343b4c70df

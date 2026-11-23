@@ -26,7 +26,12 @@ describe('Face release compatibility headers', () => {
     expect(mobileClientHeaders()).toEqual({
       'X-Confio-Platform': 'android', 'X-Confio-Version': '5.1.5',
       'X-Confio-Build': '157', 'X-Confio-Face-Capable': '1', 'X-Confio-Memory': '1',
+      'X-Confio-Browser-Tasks': '1',
     });
+  });
+
+  it('says this build has the shopping task screen, so the assistant may start a store purchase', () => {
+    expect(mobileClientHeaders()['X-Confio-Browser-Tasks']).toBe('1');
   });
 
   it('reads iOS build independently of Android and never asserts a passed face', () => {
@@ -35,6 +40,7 @@ describe('Face release compatibility headers', () => {
     expect(mobileClientHeaders()).toEqual({
       'X-Confio-Platform': 'ios', 'X-Confio-Version': '5.1.5',
       'X-Confio-Build': '1', 'X-Confio-Face-Capable': '1', 'X-Confio-Memory': '1',
+      'X-Confio-Browser-Tasks': '1',
     });
   });
 });
