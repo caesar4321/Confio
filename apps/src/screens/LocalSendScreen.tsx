@@ -330,9 +330,9 @@ function InfiniaLocalSendScreen() {
   const sentExact = exactLocal || (brebCharge ? pixCharge!.amount : '');
   const destinationId = destination?.id;
   // Whether the recipient can be priced, not its exact state: a recheck that
-  // moves it from pending to verified must not reset a send under review.
-  const destinationQuotable = Boolean(destination) && destination!.verification !== 'not_found'
-    && destination!.verification !== 'pending';
+  // moves it from pending to verified must not reset a send under review. A
+  // pending check is priced, as in dollar mode (Continue still waits for it).
+  const destinationQuotable = Boolean(destination) && destination!.verification !== 'not_found';
   const available = limits?.known && limits.available != null ? Number(limits.available) : null;
   const perTransferMax = limits?.perTransferMax ? Number(limits.perTransferMax) : null;
   const spendable = savings.balanceUsd + cusdBalanceUsd;

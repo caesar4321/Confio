@@ -103,20 +103,23 @@ class ExactPayoutTests(TestCase):
                          ('payout_review', 'needs_review:exact_payout_short'))
         client.create_payout.assert_not_called()
 
-    def test_create_charges_the_fresh_price_and_stores_the_exact_bolivares(self):
+    def test_create_charges_what_was_seen_and_stores_the_exact_bolivares(self):
         quote = {'usd_amount': '19.50', 'usdt_amount': '19.30', 'confio_fee_usd': '0.20',
                  'processor_fee_usd': '0.40', 'estimated_ves': '18000.00', 'exact_ves': '18000.00', 'rate': '923.0769'}
         with mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
                 mock.patch.object(pagoasap_send, 'quote_exact_now', return_value=quote), \
                 mock.patch.object(ve_send, 'current_block', return_value=1000), \
                 mock.patch.object(ve_send, 'reserve') as reserve, mock.patch.object(ve_send, 'prepare') as prepare:
-            pagoasap_send.create(self.user, mock.Mock(), Decimal('25.00'), {'phone': '584141234567'},
+            pagoasap_send.create(self.user, mock.Mock(), Decimal('19.51'), {'phone': '584141234567'},
                                  exact_ves='18000.00')
+            # A stale screen that saw far more dollars is asked to look again, never charged them.
+            with self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'cambió'):
+                pagoasap_send.create(self.user, mock.Mock(), Decimal('25.00'), {}, exact_ves='18000.00')
         kwargs = reserve.call_args.kwargs
-        # A stale screen that approved $25 pays the fresh $19.50, never more.
-        self.assertEqual(kwargs['gross_usd'], Decimal('19.50'))
+        self.assertEqual(kwargs['gross_usd'], Decimal('19.51'))   # what was seen, within a cent of the fresh price
         self.assertEqual(kwargs['estimate']['exact_ves'], '18000.00')
-        self.assertEqual(kwargs['gross_wei'], ve_send.confio_amounts(Decimal('19.50'))[0])
+        self.assertEqual(kwargs['estimate']['usd_amount'], '19.51')
+        self.assertEqual(kwargs['gross_wei'], ve_send.confio_amounts(Decimal('19.51'))[0])
         prepare.assert_called_once()
 
     def test_create_never_charges_more_than_approved(self):
@@ -254,6 +257,7 @@ class ExactRound5Tests(TestCase):
         self.assertFalse(refused.success)
         adapter = mock.Mock()
         adapter.quote_exact.return_value = {'usd_amount': '16.40', 'estimated_ves': '15000.00', 'exact_ves': '15000.00'}
+        adapter.cached_exact.return_value = None   # every amount asks the providers
         with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock())), \
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
             from ramps.ve_pagomovil_schema import EXACT_QUOTES_PER_WINDOW
@@ -293,7 +297,7 @@ class ExactRound9Tests(TestCase):
     def test_exact_orders_share_the_quote_pace(self):
         from django.contrib.auth import get_user_model
         from django.core.cache import cache
-        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, EXACT_QUOTES_PER_WINDOW
+        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, EXACT_ORDERS_PER_WINDOW
         cache.clear()
         user = get_user_model().objects.create(username='ve-exact-9', firebase_uid='ve-exact-9')
         info = mock.Mock(context=mock.Mock(user=user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
@@ -304,8 +308,8 @@ class ExactRound9Tests(TestCase):
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
             answers = [CreateVePagoMovilSend().mutate(info, usd_amount='0.01', cedula='V12345678', phone='04141234567',
                                                       bank_code='0102', ves_amount='25000')
-                       for _ in range(EXACT_QUOTES_PER_WINDOW + 1)]
-        self.assertEqual(adapter.create.call_count, EXACT_QUOTES_PER_WINDOW)   # the last one never reaches Pago ASAP
+                       for _ in range(EXACT_ORDERS_PER_WINDOW + 1)]
+        self.assertEqual(adapter.create.call_count, EXACT_ORDERS_PER_WINDOW)   # the last one never reaches Pago ASAP
         self.assertIn('Espera', answers[-1].error)
 
 
@@ -326,3 +330,30 @@ class ExactRound10Tests(TestCase):
         self.assertIn('Actualiza la app', order.error)
         adapter.quote_exact.assert_not_called()
         adapter.create.assert_not_called()
+
+
+class ExactRound11Tests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        cache.clear()
+        self.user = get_user_model().objects.create(username='ve-exact-11', firebase_uid='ve-exact-11')
+        self.info = mock.Mock(context=mock.Mock(user=self.user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
+
+    def test_typing_amounts_never_uses_up_the_send_and_remembered_prices_are_free(self):
+        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, Query, EXACT_QUOTES_PER_WINDOW
+        adapter = mock.Mock()
+        adapter.quote_exact.return_value = {'usd_amount': '16.40', 'estimated_ves': '15000.00', 'exact_ves': '15000.00'}
+        adapter.cached_exact.side_effect = lambda ves: {'usd_amount': '16.40'} if str(ves) == '15000' else None
+        adapter.create.side_effect = ve_pagomovil.VePagoMovilError('El precio cambió. Revisa el envío de nuevo.')
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock())), \
+                mock.patch('security.face_step_up.missing_face_step_up', return_value=None), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
+            for n in range(EXACT_QUOTES_PER_WINDOW):          # every new amount asks the providers
+                Query().resolve_ve_pagomovil_send_exact_quote(self.info, str(16000 + n))
+            remembered = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
+            order = CreateVePagoMovilSend().mutate(self.info, usd_amount='16.40', cedula='V12345678',
+                                                   phone='04141234567', bank_code='0102', ves_amount='15000')
+        self.assertTrue(remembered.success, remembered.error)   # a remembered price costs no pace
+        self.assertNotIn('Espera', order.error or '')           # the send has its own count
+        adapter.create.assert_called_once()

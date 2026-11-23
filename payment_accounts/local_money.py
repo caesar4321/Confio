@@ -1518,15 +1518,21 @@ def qr_hold(destination):
 SAME_QR_LIMIT = 500
 
 
-def _same_qr_destinations(destination):
-    """Every recipient row (any account) that holds this very QR, at most
-    SAME_QR_LIMIT + 1 (held() counts more than the limit as held)."""
+def same_qr_rows(destination):
+    """The recipient rows (any account) that hold this very QR, or None."""
     method, payload = _qr_payload(destination)
     if method is None or not payload:
-        return []
+        return None
     rows = PayoutDestination.objects.filter(provider='infinia', country=method.country)
-    rows = (rows.filter(provider_data__breb_qr__payload=payload) if method.id == 'co_qr'
+    return (rows.filter(provider_data__breb_qr__payload=payload) if method.id == 'co_qr'
             else rows.filter(**{f'details__{method.field}': payload}))
+
+
+def _same_qr_destinations(destination):
+    """Their ids, at most SAME_QR_LIMIT + 1 (held() counts more as held)."""
+    rows = same_qr_rows(destination)
+    if rows is None:
+        return []
     return [str(value) for value in rows.order_by('pk').values_list('internal_id', flat=True)[:SAME_QR_LIMIT + 1]]
 
 
@@ -1685,8 +1691,7 @@ def exact_send_quote(owner, destination, exact, *, client=None):
     if (destination.provider_data or {}).get('store_order'):
         raise PaymentAccountError('Este pedido ya trae su monto.')
     exact = _exact_amount(exact)
-    pace_exact_quotes(owner)
-    price = _order_price(owner, destination, exact, client=client)
+    price = _order_price(owner, destination, exact, client=client)   # paced on a provider ask
     return {'amount': exact, 'asset': price['currency'], 'total_usd': price['total_usd'],
             'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),
             'merchant_name': '', 'merchant_document': '', 'merchant_source': 'typed',
@@ -1702,7 +1707,6 @@ def fixed_qr_charge_quote(owner, destination, *, client=None):
     peso account."""
     from .intent_rails import _order_price
     require_unpaid_qr(destination)
-    pace_exact_quotes(owner)
     order = store_order_snapshot(destination)
     exact = Decimal(order['amount'])
     price = _order_price(owner, destination, exact, client=client)

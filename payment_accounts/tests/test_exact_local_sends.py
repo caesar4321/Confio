@@ -64,7 +64,10 @@ class ExactLocalCardTests(intent_fixture.PaymentIntentBase):
         self.assertGreaterEqual(floor, Decimal('500.00'))
         self.assertLess(intent.total_usd, Decimal('95.00'))
         # Dollars typed alongside do not override the exact amount.
-        self.assertEqual(self.send(amount_usd='1').amount_local, Decimal('500.00'))
+        # Dollars and a local amount together: refused, never one silently dropped.
+        with self.assertRaises(IntentRefused) as both:
+            self.send(amount_usd='1')
+        self.assertEqual(both.exception.code, 'no_amount')
         self.assertEqual(payment_intents.journey_minimum(intent), Decimal('500.00'))
 
     def test_requote_keeps_the_exact_amount(self):
@@ -235,7 +238,7 @@ class ExactLocalApiTests(intent_fixture.PaymentIntentBase):
 
     def setUp(self):
         super().setUp()
-        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.0 build
+        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.1 build
         self.rate = Decimal('5.40')
 
         def quote(owner, destination, *, amount=None, **kw):
@@ -679,12 +682,15 @@ class ExactLocalRound6JourneyTests(ExactLocalRound4JourneyTests):
         from django.db import connection
         # The very querysets held() runs, not look-alikes.
         fixed = self.fixed(breb('1249'))
+        argentine = self.destination()
+        argentine.provider_data = {'method_id': 'ar_qr'}
+        argentine.details = {'type': 'QR_CODE', 'qrCode': qr(('01', '12'), ('53', '032'), ('54', '1500.00'), ('58', 'AR'))}
+        argentine.save()
         lookups = (local_money.holding_payments('co_qr:qr:k'),
                    local_money.legacy_payments(['a'])[0],
                    local_money.legacy_flows(['a']),
-                   PayoutDestination.objects.filter(provider_data__breb_qr__payload='p'),
-                   PayoutDestination.objects.filter(details__qrCode='p'))
-        self.assertTrue(fixed.pk)
+                   local_money.same_qr_rows(fixed),
+                   local_money.same_qr_rows(argentine))
         with connection.cursor() as cursor:
             cursor.execute('SET LOCAL enable_seqscan = off')
             for qs, index in zip(lookups, ('infinia_journey_order_key_idx', 'infinia_journey_destination_id_idx',
@@ -840,7 +846,7 @@ class ExactLocalApiRound10Tests(ExactLocalApiTests):
             payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request={
                 'method_id': 'co_qr', 'value': breb('80000'), 'amount_local': '50000'})
         self.assertEqual(refused.exception.code, 'no_amount')
-        self.assertIn('80000', str(refused.exception))
+        self.assertIn('ya trae su monto', str(refused.exception))
 
     def test_an_exact_card_confirmed_from_an_older_build_is_refused_before_a_bridge(self):
         from payment_accounts import intent_rails

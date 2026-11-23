@@ -286,6 +286,15 @@ PRICE_MOVED = 'El precio cambió. Revisa el envío de nuevo.'
 EXACT_QUOTE_CACHE_SECONDS = 15
 
 
+def cached_exact(ves):
+    """The remembered exact quote for `ves`, or None (no provider is asked)."""
+    from django.core.cache import cache
+    try:
+        return cache.get(_exact_cache_key(ves))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
 def _exact_cache_key(ves):
     return f'pagoasap:exact:{Decimal(str(ves)).quantize(ve_send.CENT):f}'
 
@@ -379,12 +388,14 @@ def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
         # never more than the fresh price either (a stale screen does not
         # overpay): the send is the fresh price, its lines as quoted.
         fresh = Decimal(estimate['usd_amount'])
-        if fresh > amount:
-            # The screen asks again: priced fresh, not from the few seconds' memory.
+        if fresh > amount or fresh < amount - ve_send.CENT:
+            # Either way the person would pay other dollars than they saw: the
+            # screen (or card) asks again, priced fresh, not from memory.
             from django.core.cache import cache
             cache.delete(_exact_cache_key(exact_ves))
             raise VePagoMovilError(PRICE_MOVED)
-        amount = fresh
+        # What they saw (at most a cent above the fresh price): what is charged.
+        estimate = {**estimate, 'usd_amount': format(amount, 'f')}
     else:
         estimate = quote(amount)
     gross_wei, deposit_wei = ve_send.confio_amounts(amount)

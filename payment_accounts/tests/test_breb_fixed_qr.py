@@ -131,7 +131,7 @@ class FixedBrebDestinationTests(journey_fixture.JourneyTests):
 class FixedBrebCardTests(intent_fixture.PaymentIntentBase):
     def setUp(self):
         super().setUp()
-        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.0 build
+        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.1 build
         self.rate = Decimal('4100.00')
 
         def quote(owner, destination, *, amount=None, **kw):
@@ -217,7 +217,7 @@ class FixedArgentineQrTests(intent_fixture.PaymentIntentBase):
 
     def setUp(self):
         super().setUp()
-        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.0 build
+        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.1 build
         self.rate = Decimal('1150.00')
 
         def quote(owner, destination, *, amount=None, **kw):

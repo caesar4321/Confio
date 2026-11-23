@@ -356,10 +356,10 @@ def _pace(owner):
 
 def _require_exact_card(owner, request):
     """An exact card (a typed local amount, exact bolívares) is drawn only by
-    a build that says where its spare goes, and is paced like Pagar's."""
+    a build that says where its spare goes. (Prices that ask the providers are
+    paced where they are asked: _order_price, and Pago Móvil below.)"""
     if not local_money.fixed_qr_build_supported(request.get('meta')):
         raise _refuse('rail', 'Actualiza la app para enviar un monto exacto.')
-    _pace(owner)
 
 
 def _require_unpaid(destination):
@@ -400,6 +400,7 @@ def _order_price(owner, destination, exact, *, client=None):
     cached = cache.get(key)
     if cached is not None:
         return dict(cached)
+    _pace(owner)   # only a price that asks the providers counts toward the pace
     price = _search_order_price(owner, destination, exact, client=client)
     cache.set(key, dict(price), ORDER_PRICE_CACHE_SECONDS)
     return price
@@ -475,19 +476,20 @@ def read_transfer(owner, user, method_id, request, *, client=None):
         except (InvalidOperation, TypeError, ValueError):
             differs = True
         if differs:
-            raise _refuse('no_amount', f'Este QR ya trae su monto ({exact}). Paga ese monto o pide otro QR.')
+            raise _refuse('no_amount', 'Este QR ya trae su monto. Paga ese monto o pide otro QR.')
     if exact and not local_money.fixed_qr_build_supported(request.get('meta')):
         # An older build would show this card without saying where the spare
         # goes, and pay it as its own: told to update, as on Pagar.
         raise _refuse('rail', local_money.UPDATE_FOR_FIXED_QR)
     typed = '' if exact else exact_local(request)
+    if typed and request.get('amount_usd') not in (None, ''):
+        # Dollars or the local amount, never both: one would silently lose.
+        raise _refuse('no_amount', 'Escribe el monto en dólares o en moneda local, no los dos.')
     amount = usd_amount(request.get('amount_usd'))
     if amount is None and not exact and not typed:
         raise _refuse('no_amount', 'Dime cuántos dólares quieres enviar.')
     if typed:
         _require_exact_card(owner, request)
-    elif exact:
-        _pace(owner)
     local_money.require_rail(owner, _identity(owner), method)
     _location(owner, method, request.get('meta'))
     destination = local_money.recheck_destination(local_money.resolve_destination(owner, method_id, value,
@@ -604,6 +606,9 @@ def read_pagomovil(owner, user, request, *, client=None):
             adapter = ve_pagomovil.send_adapter()
             if not callable(getattr(adapter, 'quote_exact', None)):
                 raise _refuse('rail', 'Por ahora solo puedes enviar un monto en dólares por Pago Móvil.')
+            cached = getattr(adapter, 'cached_exact', None)
+            if not (callable(cached) and cached(exact)):
+                _pace(owner)   # only a price that asks the providers counts
             quote = adapter.quote_exact(exact)
             amount = Decimal(str(quote['usd_amount']))
         else:

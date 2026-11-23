@@ -1097,8 +1097,10 @@ def _request_of(intent, meta=None):
             return {'method_id': method.id, 'value': local_money._destination_value(intent.destination, method),
                     'amount_local': order['amount'], 'reference': order['reference'], 'meta': meta}
         exact = (intent.params or {}).get('exact_local')
+        # An exact card is read again by its local amount alone (dollars and a
+        # local amount together are refused).
         return {'method_id': method.id, 'value': local_money._destination_value(intent.destination, method),
-                'amount_usd': None if intent.family == 'local_charge' else intent.total_usd,
+                'amount_usd': None if intent.family == 'local_charge' or exact else intent.total_usd,
                 'amount_local': exact, 'meta': meta}
     if intent.family == 'confio_send':
         return {'method_id': intent_rails.CONFIO_SEND, 'recipient': (intent.params or {}).get('username'),
