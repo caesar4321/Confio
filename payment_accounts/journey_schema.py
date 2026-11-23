@@ -236,11 +236,16 @@ class CreateInfiniaJourney(graphene.Mutation):
                     raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
                 if is_new_send and destination is not None:
                     # A dynamic QR someone already paid ends its card (charge_changed).
-                    from .local_money import require_unpaid_qr
+                    from .local_money import SIGNING, held_message, qr_hold
                     try:
-                        require_unpaid_qr(destination)
+                        state = qr_hold(destination)
                     except PaymentAccountError as exc:
                         raise payment_intents._refuse('charge_changed', str(exc)) from exc
+                    if state:
+                        # Waiting for someone's signature keeps the card (try
+                        # again shortly); a paid QR ends it.
+                        raise payment_intents._refuse('in_progress' if state == SIGNING else 'charge_changed',
+                                                      held_message(state))
                 # The monthly allowance is checked inside create_journey, under the owner lock.
                 row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
                                      bridge=bridge, credit=credit, destination=destination,

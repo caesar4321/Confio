@@ -462,8 +462,7 @@ class ExactLocalApiRound3Tests(ExactLocalApiTests):
     def test_a_paid_dynamic_qr_ends_its_card(self):
         from payment_accounts import intent_rails
         fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
-        with mock.patch.object(local_money, 'require_unpaid_qr',
-                               side_effect=PaymentAccountError('Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')), \
+        with mock.patch.object(local_money, 'qr_hold', return_value=local_money.PAID), \
                 self.assertRaises(IntentRefused) as refused:
             self.prepare(breb('25000'))
         self.assertEqual(refused.exception.code, 'charge_changed')
@@ -489,7 +488,7 @@ class ExactLocalApiRound3Tests(ExactLocalApiTests):
 
 
 class ExactLocalRound4JourneyTests(ExactLocalRound3Tests):
-    def mutate(self, destination, **kwargs):
+    def mutate(self, destination, bridge=None, **kwargs):
         from payment_accounts.journey_schema import CreateInfiniaJourney
         info = mock.Mock(context=mock.Mock(user=self.owner.user, META={}))
         with mock.patch('payment_accounts.schema._active_account', return_value=self.owner), \
@@ -498,7 +497,7 @@ class ExactLocalRound4JourneyTests(ExactLocalRound3Tests):
             return CreateInfiniaJourney.mutate(
                 None, info, local_account_id=self.local.internal_id, crypto_account_id=self.crypto.internal_id,
                 destination_id=destination.internal_id, direction='to_bank', request_id=uuid.uuid4(),
-                minimum_fx_output=Decimal('1249.00'), bridge_id=self.bridge().internal_id, **kwargs)
+                minimum_fx_output=Decimal('1249.00'), bridge_id=(bridge or self.bridge()).internal_id, **kwargs)
 
     def test_a_current_build_pays_a_fixed_qr_with_its_own_amount_only(self):
         fixed = self.fixed(breb('1249', dynamic=False))
@@ -736,6 +735,45 @@ class ExactLocalApiRound7Tests(ExactLocalApiTests):
         self.assertEqual(paced.exception.code, 'rate_limited')
 
 
+class ExactLocalRound8JourneyTests(ExactLocalRound7JourneyTests):
+    def test_waiting_for_a_signature_keeps_the_card(self):
+        fixed = self.fixed(breb('1249'))
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        second_bridge = self.bridge()   # made first: an unsigned bridge reserves the wallet
+        first.bridge.status = 'prepared'; first.bridge.save(update_fields=['status'])
+        from payment_accounts import intent_rails
+        with self.assertRaises(IntentRefused) as waiting:
+            intent_rails._require_unpaid(fixed)
+        self.assertEqual(waiting.exception.code, 'in_progress')     # not charge_changed: the card stays
+        with mock.patch.object(payment_intents, 'journey_refused') as refused:
+            result = self.mutate(fixed, bridge=second_bridge, exact_local_amount=Decimal('1249'))
+        self.assertEqual((result.success, result.error_code), (False, 'in_progress'))
+        refused.assert_not_called()
+        first.bridge.status = 'submitted'; first.bridge.save(update_fields=['status'])
+        with self.assertRaises(IntentRefused) as paid:
+            intent_rails._require_unpaid(fixed)
+        self.assertEqual(paid.exception.code, 'charge_changed')
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound8Tests(ExactLocalApiTests):
+    def test_pagars_typed_amount_has_the_same_build_floor(self):
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        local_money.fixed_qr_build_supported.return_value = False
+        with self.assertRaisesRegex(Exception, 'Actualiza la app'):
+            LocalMoneyQuery().resolve_local_exact_send(self.info, row.internal_id, Decimal('500'))
+
+    def test_the_held_quote_rate_is_what_each_dollar_buys(self):
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        quote = {'minimum_target': Decimal('540'), 'target_amount': Decimal('540'), 'expected_target': Decimal('540'),
+                 'rate': Decimal('5.4000'), 'source_amount': Decimal('100')}
+        held = local_money.exact_qr_quote(row, quote, '500')
+        self.assertEqual(held['rate'], Decimal('5.0000'))   # 500 for the same 100 dollars
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -760,3 +798,6 @@ only_own_tests(ExactLocalApiRound6Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalRound7JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
                ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests)
 only_own_tests(ExactLocalApiRound7Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound8JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests)
+only_own_tests(ExactLocalApiRound8Tests, ExactLocalApiTests)

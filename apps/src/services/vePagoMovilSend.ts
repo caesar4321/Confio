@@ -57,6 +57,12 @@ export function exactQuoteError(error: any): string {
     : 'No pudimos cotizar este monto. Intenta de nuevo.';
 }
 
+// Whether an order pays exact bolívares: its own operation, so a server that
+// predates it fails only this line (the order still shows, as "aprox.").
+export const VE_SEND_EXACT = gql`query VePagoMovilSendExact($orderId: String!) {
+  vePagomovilSendOrder(orderId: $orderId) { success exactVes }
+}`;
+
 export const START_VE_SEND_FUNDING = gql`mutation StartVePagoMovilSendFunding($orderId: String!) {
   startVePagomovilSendFunding(orderId: $orderId) {
     ${ORDER_FIELDS}

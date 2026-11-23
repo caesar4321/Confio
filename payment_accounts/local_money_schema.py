@@ -362,6 +362,9 @@ class LocalMoneyQuery(graphene.ObjectType):
 
     def resolve_local_exact_send(self, info, destination_id, amount_local):
         owner = _owner(info, 'send_funds', owner_only=True)
+        if not local_money.fixed_qr_build_supported(info.context.META):
+            # The same floor as every exact card (a build that says where the spare goes).
+            raise GraphQLError('Actualiza la app para enviar un monto exacto.')
         row = PayoutDestination.objects.filter(internal_id=destination_id, confio_account=owner,
                                                provider='infinia').first()
         if row is None:

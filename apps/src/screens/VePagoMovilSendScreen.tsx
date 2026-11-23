@@ -38,6 +38,7 @@ import {
   CANCEL_VE_SEND,
   CREATE_VE_EXACT_SEND,
   CREATE_VE_SEND,
+  VE_SEND_EXACT,
   exactQuoteError,
   VE_SEND_EXACT_QUOTE,
   REPORT_VE_SEND_FUNDING,
@@ -182,6 +183,19 @@ export default function VePagoMovilSendScreen() {
     const next: VeSendOrder | undefined = r.data?.vePagomovilSendOrder;
     if (next?.success && alive.current && issued === generation.current) setOrder(next);
   }, [client]);
+
+  // Exact bolívares of the order on screen (null: a dollar send, or not known).
+  const [orderExactVes, setOrderExactVes] = useState<string | null>(null);
+  useEffect(() => {
+    setOrderExactVes(null);
+    const orderId = order?.orderId;
+    if (!orderId) return;
+    let cancelled = false;
+    client.query({ query: VE_SEND_EXACT, variables: { orderId }, fetchPolicy: 'network-only' })
+      .then(r => { if (!cancelled && alive.current) setOrderExactVes(r.data?.vePagomovilSendOrder?.exactVes || null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [client, order?.orderId]);
 
   useEffect(() => {
     if (!focused || !isOpen(order) || !order?.orderId) return;
@@ -461,6 +475,10 @@ export default function VePagoMovilSendScreen() {
               />
               <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>{vesMode ? 'Bs' : 'USD'}</Text></View>
             </View>
+            {vesMode && toNumber(vesAmount) > 0 ? (
+              // The amount as read, in full: "25.000" typed as a decimal shows here as 25,00.
+              <Text style={styles.limitText}>{`Recibe exactamente ${formatBs(toNumber(vesAmount).toFixed(2))}`}</Text>
+            ) : null}
             {min && amountValue > 0 && amountValue < min ? (
               <Text style={styles.limitText}>El mínimo es {formatUsd(quote?.minUsd as string)}.</Text>
             ) : null}
@@ -570,8 +588,10 @@ export default function VePagoMovilSendScreen() {
             <Text style={styles.reviewValue}>{formatUsd(current.usdAmount)}</Text>
           </View>
           <View style={styles.reviewRow}>
-            <Text style={styles.reviewLabel}>{current.vesAmount ? 'Llegan' : 'Llegan aprox.'}</Text>
-            <Text style={styles.reviewValueHighlight}>{formatBs(current.vesAmount || current.estimatedVes)}</Text>
+            <Text style={styles.reviewLabel}>
+              {current.vesAmount ? 'Llegan' : orderExactVes ? 'Llegan exactamente' : 'Llegan aprox.'}
+            </Text>
+            <Text style={styles.reviewValueHighlight}>{formatBs(current.vesAmount || orderExactVes || current.estimatedVes)}</Text>
           </View>
           {current.bankReference ? (
             <View style={styles.reviewRow}>

@@ -1493,12 +1493,17 @@ def require_exact_for_fixed(destination, exact):
 def require_unpaid_qr(destination):
     """A dynamic fixed-amount QR is one charge: refused once a payment of it
     is running or has paid it, before any bridge is prepared."""
-    order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
-    if order is None or not order.get('once'):
-        return
-    state = held(order['key'], destination=destination)
+    state = qr_hold(destination)
     if state:
         raise PaymentAccountError(held_message(state))
+
+
+def qr_hold(destination):
+    """How a paid-once QR recipient is held now: PAID, SIGNING or ''."""
+    order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
+    if order is None or not order.get('once'):
+        return ''
+    return held(order['key'], destination=destination)
 
 
 SAME_QR_LIMIT = 500
@@ -1553,6 +1558,7 @@ def is_held(key, exclude_request_id=None, destination=None, owner=None):
 def held_message(state, what='QR'):
     if state == SIGNING:
         return f'Hay un pago de este {what} esperando firma. Espera unos minutos y vuelve a intentarlo.'
+    # PAID ends the card for good: say so plainly.
     return f'Este {what} ya tiene un pago en Confío y no se puede pagar otra vez.'
 
 
@@ -1624,7 +1630,13 @@ def exact_qr_quote(destination, quote, exact=None):
         from .intent_rails import forget_order_price
         forget_order_price(destination, exact)
         raise PaymentAccountError('El precio cambió. Revisa el envío de nuevo.')
-    return {**quote, 'target_amount': exact, 'minimum_target': exact, 'expected_target': exact}
+    # What each dollar sent buys, all in (the spare stays local, so it is a
+    # cost of this send). total_cost_percent stays the conversion's own cost.
+    rate = quote.get('rate')
+    target = Decimal(str(quote.get('target_amount') or 0))
+    if rate not in (None, '') and target > 0:
+        rate = (exact * Decimal(str(rate)) / target).quantize(Decimal('0.0001'))
+    return {**quote, 'target_amount': exact, 'minimum_target': exact, 'expected_target': exact, 'rate': rate}
 
 
 EXACT_QUOTES_PER_WINDOW = 30

@@ -97,6 +97,8 @@ class VePagoMovilSendOrderType(graphene.ObjectType):
     usd_amount = graphene.String()
     usdt_amount = graphene.String()
     estimated_ves = graphene.String()
+    # Set for an exact-bolívares send: what lands, not an estimate.
+    exact_ves = graphene.String()
     ves_amount = graphene.String()
     rate = graphene.String()
     beneficiary = graphene.Field(VePagoMovilBeneficiaryType)

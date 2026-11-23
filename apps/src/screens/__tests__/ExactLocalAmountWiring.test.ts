@@ -29,6 +29,10 @@ describe('exact bolívares on Pago Móvil', () => {
     expect(source).toContain("...(vesMode ? { vesAmount: toNumber(vesAmount).toFixed(2) } : {})");
     expect(source).toContain('&& (!vesMode || Number(quote.estimatedVes) === toNumber(vesAmount));');
   });
+  it('says an exact order lands exactly, from its own query', () => {
+    expect(source).toContain("orderExactVes ? 'Llegan exactamente' : 'Llegan aprox.'");
+    expect(source).toContain('query: VE_SEND_EXACT');
+  });
   it('prices again when the server says the price moved', () => {
     expect(source).toContain('setQuoteRetry(n => n + 1)');
     expect(source).toContain('[amount, vesAmount, vesMode, client, order, quoteRetry]');

@@ -1576,6 +1576,8 @@ def view(ramp: RampTransaction, *, with_funding: bool = False) -> dict:
         'usd_amount': section.get('gross_usd'),
         'usdt_amount': format(ramp.crypto_amount_estimated, 'f') if ramp.crypto_amount_estimated is not None else None,
         'estimated_ves': section.get('estimated_ves'),
+        # Exact bolívares (Pago ASAP quote_exact): the estimate is what lands.
+        'exact_ves': (section.get('estimate') or {}).get('exact_ves') or None,
         'ves_amount': section.get('delivered_ves') or section.get('payout_ves') or None,
         'rate': (section.get('estimate') or {}).get('rate'),
         'estimated_fiat': section.get('estimated_fiat') or section.get('estimated_ves'),

@@ -356,12 +356,16 @@ def _require_exact_card(owner, request):
 
 
 def _require_unpaid(destination):
-    """A dynamic fixed-amount QR someone already paid ends the card
-    (charge_changed), before any bridge is prepared for it."""
+    """Before any bridge for a dynamic fixed-amount QR: one someone already
+    paid ends the card (charge_changed); one with only an unsigned payment
+    waiting keeps it (in_progress: try again in a few minutes)."""
     try:
-        local_money.require_unpaid_qr(destination)
+        state = local_money.qr_hold(destination)
     except PaymentAccountError as exc:
         raise _refuse('charge_changed', str(exc)) from exc
+    if state:
+        raise _refuse('in_progress' if state == local_money.SIGNING else 'charge_changed',
+                      local_money.held_message(state))
 
 
 ORDER_PRICE_CACHE_SECONDS = 20

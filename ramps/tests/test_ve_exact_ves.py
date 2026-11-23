@@ -262,3 +262,14 @@ class ExactRound6Tests(TestCase):
                 mock.patch('django.core.cache.cache.incr', side_effect=ValueError('expired')):
             result = Query().resolve_ve_pagomovil_send_exact_quote(mock.Mock(context=mock.Mock(user=user, META={})), '15000')
         self.assertTrue(result.success, result.error)
+
+
+class ExactRound8Tests(TestCase):
+    setUp = send_fixture.SendCoreTests.setUp
+    _ramp = send_fixture.SendCoreTests._ramp
+
+    def test_an_exact_order_says_what_lands(self):
+        exact = self._ramp(estimate={'exact_ves': '15000.00'}, estimated_ves='15000.00')
+        plain = self._ramp(estimate={'rate': '1000'})
+        self.assertEqual(ve_send.view(exact)['exact_ves'], '15000.00')
+        self.assertIsNone(ve_send.view(plain)['exact_ves'])

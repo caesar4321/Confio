@@ -1195,7 +1195,9 @@ function InfiniaLocalSendScreen() {
                         <Text style={styles.errorText}>{pixChargeError}</Text>
                         {destination && !locked ? (
                           <TouchableOpacity accessibilityRole="button" onPress={() => {
+                            // A QR read again; a saved fixed-amount recipient priced again.
                             if (scannedQr) void resolve(scannedQr.payload, scannedQr.methodId);
+                            else void loadPixCharge(destination);
                           }}>
                             <Text style={styles.addButtonText}>Revisar el cobro de nuevo</Text>
                           </TouchableOpacity>
@@ -1256,6 +1258,10 @@ function InfiniaLocalSendScreen() {
                       <Text style={styles.currencyBadgeText}>{localMode ? method?.asset : 'USD'}</Text>
                     </View>
                   </View>
+                  {localMode && exactLocal ? (
+                    // The amount as read, in full: "25.000" typed as a decimal shows here as 25,00.
+                    <Text style={styles.inputLabel}>{`Recibe exactamente ${formatRampMoney(exactLocal, method?.asset || '')}`}</Text>
+                  ) : null}
                   {!localMode ? (
                     <Text style={styles.helperText}>Verás cuánto recibe y el tipo de cambio antes de confirmar.</Text>
                   ) : exactLoading ? (
