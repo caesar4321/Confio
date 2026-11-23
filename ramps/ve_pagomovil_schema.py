@@ -154,6 +154,17 @@ def _parse_usd(value) -> Decimal | None:
     return amount if amount.is_finite() and amount > 0 else None
 
 
+EXACT_UNAVAILABLE = 'Por ahora solo puedes enviar un monto en dólares.'
+
+
+def _exact_adapter():
+    """The send provider, when it can pay an exact bolívar amount."""
+    adapter = ve_pagomovil.send_adapter()
+    if not callable(getattr(adapter, 'quote_exact', None)):
+        raise VePagoMovilError(EXACT_UNAVAILABLE)
+    return adapter
+
+
 def _user(info):
     user = getattr(info.context, 'user', None)
     return user if user and getattr(user, 'is_authenticated', False) else None
@@ -204,12 +215,17 @@ def _preflight(info, direction: str):
     return user, account
 
 
-def _beneficiary(cedula, phone, bank_code) -> dict:
-    return {
+def _beneficiary(cedula, phone, bank_code, name=None) -> dict:
+    beneficiary = {
         'cedula': ve_pagomovil.normalize_cedula(cedula),
         'phone': ve_pagomovil.normalize_phone(phone),
         'bank_code': ve_pagomovil.normalize_bank(bank_code),
     }
+    # Some send providers (Dinaria) need the recipient's full name.
+    cleaned = ' '.join(str(name or '').split())[:120]
+    if cleaned:
+        beneficiary['name'] = cleaned
+    return beneficiary
 
 
 def _guard(error_type, fn):
@@ -329,10 +345,14 @@ class CreateVePagoMovilSend(graphene.Mutation):
         cedula = graphene.String(required=True)
         phone = graphene.String(required=True)
         bank_code = graphene.String(required=True)
+        beneficiary_name = graphene.String(required=False)
+        # Exact bolívares (usd_amount is then the dollars the person approved
+        # for them). Sent only in that mode: an older server fails only it.
+        ves_amount = graphene.String(required=False)
 
     Output = VePagoMovilSendOrderType
 
-    def mutate(self, info, usd_amount, cedula, phone, bank_code):
+    def mutate(self, info, usd_amount, cedula, phone, bank_code, beneficiary_name=None, ves_amount=None):
         def run():
             user, account = _preflight(info, SEND)
             amount = _parse_usd(usd_amount)
@@ -344,8 +364,11 @@ class CreateVePagoMovilSend(graphene.Mutation):
             step_up = missing_face_step_up(user, 'withdrawal', amount_usd=amount, cash_out=True)
             if step_up:
                 raise VePagoMovilError(step_up, FACE_STEP_UP_NEXT_STEP)
-            beneficiary = _beneficiary(cedula, phone, bank_code)
-            ramp = ve_pagomovil.send_adapter().create(user, account, amount, beneficiary)
+            beneficiary = _beneficiary(cedula, phone, bank_code, beneficiary_name)
+            if ves_amount not in (None, ''):
+                ramp = _exact_adapter().create(user, account, amount, beneficiary, exact_ves=ves_amount)
+            else:
+                ramp = ve_pagomovil.send_adapter().create(user, account, amount, beneficiary)
             return _send_payload(ramp)
         return _guard(VePagoMovilSendOrderType, run)
 
@@ -433,6 +456,8 @@ class Query(graphene.ObjectType):
     ve_pagomovil_top_up_order = graphene.Field(VePagoMovilTopUpOrderType, order_id=graphene.String(required=True))
     ve_pagomovil_active_top_up = graphene.Field(VePagoMovilTopUpOrderType)
     ve_pagomovil_send_quote = graphene.Field(VePagoMovilSendQuoteType, usd_amount=graphene.String(required=True))
+    # Exact bolívares, priced in dollars: its own field (older servers fail only that mode).
+    ve_pagomovil_send_exact_quote = graphene.Field(VePagoMovilSendQuoteType, ves_amount=graphene.String(required=True))
     ve_pagomovil_send_order = graphene.Field(VePagoMovilSendOrderType, order_id=graphene.String(required=True))
     ve_pagomovil_active_send = graphene.Field(VePagoMovilSendOrderType)
 
@@ -472,6 +497,20 @@ class Query(graphene.ObjectType):
         user = _user(info)
         ramp = ve_pagomovil.active_order(user, TOPUP) if user else None
         return _topup_payload(ramp) if ramp else None
+
+    def resolve_ve_pagomovil_send_exact_quote(self, info, ves_amount):
+        def run():
+            if not _user(info):
+                raise VePagoMovilError('Authentication required')
+            if not ve_pagomovil.enabled(SEND):
+                raise VePagoMovilError(SEND_UNAVAILABLE)
+            quote = _exact_adapter().quote_exact(ves_amount)
+            quote.pop('exact_ves', None)
+            for key, name in (('min_usd', 'VE_PAGOMOVIL_SEND_MIN_USD'), ('max_usd', 'VE_PAGOMOVIL_SEND_MAX_USD')):
+                cap = ve_pagomovil.optional_limit(name)
+                quote.setdefault(key, format(cap, 'f') if cap is not None else None)
+            return VePagoMovilSendQuoteType(success=True, **quote)
+        return _guard(VePagoMovilSendQuoteType, run)
 
     def resolve_ve_pagomovil_send_quote(self, info, usd_amount):
         def run():

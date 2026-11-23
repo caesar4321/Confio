@@ -82,7 +82,7 @@ def validate_accounts(owner, local, crypto, destination_country):
 @transaction.atomic
 def create_journey(*, owner, local_account, crypto_account, request_id, minimum_fx_output,
                    direction, bridge=None, credit=None, destination=None, minimum_wallet_output=None,
-                   funding=None):
+                   funding=None, exact_payout=None):
     """`funding` is a contract_funding.ContractFunding, built server-side from
     a rule run; no GraphQL argument reaches it. With it the bridge is funded
     by the account contract and the standing authorization replaces this
@@ -112,6 +112,16 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
             snapshot['pix_charge'] = charge
         from .local_money import store_order_snapshot
         order = store_order_snapshot(destination)
+        if exact_payout is not None:
+            # The person asked for an exact local amount (a key or an account):
+            # the payout is that amount and what the conversion lands above it
+            # stays in their own local account, as for a store order. Carried by
+            # this payment, not by the recipient, so it is never "paid once".
+            exact = positive(exact_payout)
+            if exact != exact.quantize(Decimal('0.01')) or charge is not None or (
+                    order is not None and Decimal(order['amount']) != exact):
+                raise PaymentAccountError('El monto exacto no coincide con este destino. Revisa el envío.')
+            order = order or {'amount': str(exact), 'reference': '', 'key': f'exact:{request_id}', 'once': False}
         if order is not None:
             snapshot['store_order'] = order
         if (not bridge or bridge.quote.confio_account_id != owner.pk

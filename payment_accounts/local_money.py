@@ -172,6 +172,43 @@ def decode_breb_qr(value):
             'merchant_name': fields.get('59', ''), 'merchant_city': fields.get('60', '')}
 
 
+FIXED_QR_METHODS = ('co_qr', 'ar_qr')   # Bre-B and Argentina's interoperable QR
+
+
+def qr_amount(method, value):
+    """The local amount a Bre-B or Argentine QR asks for (EMV tag 54), or ''."""
+    if method.id == 'co_qr':
+        return decode_breb_qr(value)['amount']
+    if method.id == 'ar_qr':
+        return (emv_fields(value) or {}).get('54', '')
+    return ''
+
+
+def _qr_payload(destination):
+    data = (destination.provider_data or {}) if destination is not None else {}
+    method = METHODS.get(data.get('method_id'))
+    if method is None or method.id not in FIXED_QR_METHODS:
+        return None, ''
+    return method, _destination_value(destination, method)
+
+
+def fixed_qr_amount(destination):
+    """What a fixed-amount QR recipient must receive, exactly, or ''."""
+    method, payload = _qr_payload(destination)
+    if method is None or not payload:
+        return ''
+    try:
+        return qr_amount(method, payload)
+    except PaymentAccountError:
+        return ''
+
+
+def is_fixed_amount_qr(destination):
+    """A QR recipient that asks for an exact local amount: paid exactly
+    (store_order_snapshot), never offered again as a saved recipient."""
+    return bool(fixed_qr_amount(destination))
+
+
 def _pix_key(value):
     if _EVP.fullmatch(value):
         return value.lower()
@@ -193,6 +230,8 @@ def normalize_value(method, raw):
     if not value:
         raise PaymentAccountError('Ingresa los datos de quien recibe.')
     if method.id == 'co_qr':
+        # A fixed amount is paid exactly: the dollars are priced to cover it
+        # and the payout is the QR's pesos (store_order_snapshot).
         decode_breb_qr(value)
     elif method.id == 'mx_clabe':
         value = _digits(value)
@@ -221,10 +260,12 @@ def normalize_value(method, raw):
         if method.id == 'br_qr':
             pix_code(value)
             return value
-        # The journey is dollar-driven, so an exact peso amount cannot be
-        # guaranteed; a fixed-amount QR would be underpaid or rejected.
-        if '54' in fields:
-            raise PaymentAccountError('Este QR tiene un monto fijo. Por ahora solo puedes pagar QR sin monto.')
+        # A fixed amount is paid exactly (store_order_snapshot): the dollars
+        # are priced to cover it and the payout is the QR's own amount.
+        amount = fields.get('54')
+        if amount is not None and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount)
+                                   or Decimal(amount) <= 0):
+            raise PaymentAccountError('El monto del QR no es válido.')
     return value
 
 
@@ -975,7 +1016,7 @@ def saved_destinations(owner, method_id):
     # lookup is NULL there and NOT NULL would drop every normal recipient).
     ).exclude(provider_data__contains={'fixed_charge': True}).order_by('-created_at')[:10]
     return [row for row in rows if verification_state((row.provider_data or {}).get('validation')) != NOT_FOUND
-            and not _is_charge(row)]
+            and not _is_charge(row) and not is_fixed_amount_qr(row)]
 
 
 # ---------------------------------------------------------------- Pix charges
@@ -1057,6 +1098,16 @@ def store_order_snapshot(destination):
     """The terms a journey pays one store order on (SPEI: exact pesos with the
     order's reference); None for any other recipient. The key is the order:
     paid once, from any account."""
+    amount = fixed_qr_amount(destination)
+    if amount:
+        # A QR with a fixed amount (Bre-B, Argentina): the payout is the QR's
+        # exact local amount and what the conversion lands above it stays in
+        # the person's own local account. A dynamic QR (01=12) is one charge,
+        # paid once; a static one with an amount may be paid again.
+        method, payload = _qr_payload(destination)
+        return {'amount': str(Decimal(amount).quantize(FIAT_CENT)), 'reference': '',
+                'key': f'{method.id}:qr:' + _sha(payload),
+                'once': (emv_fields(payload) or {}).get('01') == '12'}
     order = (destination.provider_data or {}).get('store_order') if destination is not None else None
     if not order:
         return None
@@ -1355,6 +1406,58 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
             'total_cost_percent': cost,
             'rate': (target / spend).quantize(Decimal('0.0001')),
             'asset': local.asset, 'expires_at': expires}
+
+
+def exact_qr_quote(destination, quote, exact=None):
+    """The Pagar screen's quote for a fixed-amount QR, or for an exact local
+    amount the person typed (`exact`): the recipient receives exactly that, so
+    it is what is shown and authorized as the journey's minimum. Refused when
+    the dollars no longer cover it (the screen prices it again)."""
+    order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
+    if order is not None:
+        exact = Decimal(order['amount'])
+    if exact is None:
+        return quote
+    exact = Decimal(str(exact))
+    if Decimal(quote['minimum_target']) < exact:
+        raise PaymentAccountError('El precio del QR cambió. Revisa el pago de nuevo.')
+    return {**quote, 'target_amount': exact, 'minimum_target': exact, 'expected_target': exact}
+
+
+def exact_send_quote(owner, destination, exact, *, client=None):
+    """What sending an exact local amount the person typed costs, all in
+    (the Pagar screen's charge view): the dollars whose guaranteed minimum
+    covers it; the rest stays in the person's own local account."""
+    from .intent_rails import _order_price
+    if charge_snapshot(destination) is not None or is_fixed_amount_qr(destination):
+        raise PaymentAccountError('Este QR ya trae su monto.')
+    exact = Decimal(str(exact))
+    if not exact.is_finite() or exact <= 0 or exact != exact.quantize(FIAT_CENT) or exact >= Decimal('1e9'):
+        raise PaymentAccountError('Escribe el monto en moneda local con hasta dos decimales.')
+    price = _order_price(owner, destination, exact, client=client)
+    return {'amount': exact, 'asset': price['currency'], 'total_usd': price['total_usd'],
+            'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),
+            'merchant_name': '', 'merchant_document': '', 'merchant_source': 'typed',
+            'institution': '', 'expires_at': '', 'dynamic': False,
+            'rate': (exact / price['total_usd']).quantize(Decimal('0.0001'))}
+
+
+def fixed_qr_charge_quote(owner, destination, *, client=None):
+    """What paying a fixed-amount QR (Bre-B, Argentina) costs, all in (the Pagar screen's
+    charge view, same shape as pix_charge_quote). Priced like the assistant's
+    card: the dollars whose guaranteed minimum covers the QR's pesos; the
+    payout is exactly those pesos and the rest stays in the person's own
+    peso account."""
+    from .intent_rails import _order_price
+    order = store_order_snapshot(destination)
+    exact = Decimal(order['amount'])
+    price = _order_price(owner, destination, exact, client=client)
+    _, payload = _qr_payload(destination)
+    return {'amount': exact, 'asset': price['currency'], 'total_usd': price['total_usd'],
+            'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),
+            'merchant_name': (emv_fields(payload) or {}).get('59', ''), 'merchant_document': '', 'merchant_source': 'qr',
+            'institution': '', 'expires_at': '', 'dynamic': order['once'],
+            'rate': (exact / price['total_usd']).quantize(Decimal('0.0001'))}
 
 
 def deposit_quote(owner, credit, *, client=None):

@@ -82,10 +82,11 @@ class PixCodeTests(SimpleTestCase):
         with self.assertRaises(PaymentAccountError):
             local_money.normalize_value(self.method, DYNAMIC[:-1] + '0')
 
-    def test_argentine_fixed_amount_codes_stay_refused(self):
+    def test_argentine_fixed_amount_codes_are_not_pix_charges(self):
+        # Paid exactly by the fixed-QR path (test_breb_fixed_qr), not as a Pix charge.
         payload = qr(('01', '12'), ('53', '032'), ('54', '1500.00'), ('58', 'AR'))
-        with self.assertRaisesRegex(PaymentAccountError, 'monto fijo'):
-            local_money.normalize_value(local_money.METHODS['ar_qr'], payload)
+        self.assertEqual(local_money.normalize_value(local_money.METHODS['ar_qr'], payload), payload)
+        self.assertFalse(local_money.fixed_pix_charge(local_money.METHODS['ar_qr'], payload))
 
     def test_summary_keeps_the_networks_answer_for_a_charge(self):
         summary = local_money.summarize_validation({'id': 'v1', 'status': 'SUCCESSFUL', 'countryData': {

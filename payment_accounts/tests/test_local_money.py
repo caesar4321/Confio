@@ -100,10 +100,15 @@ class IdentifierTests(SimpleTestCase):
         payload = qr(('01', '11'), ('43', 'com.mercadolibre'), ('53', '032'), ('58', 'AR'), ('59', 'Kiosco'))
         self.assertEqual(local_money.normalize_value(local_money.METHODS['ar_qr'], payload), payload)
 
-    def test_fixed_amount_qr_is_rejected(self):
+    def test_fixed_amount_qr_is_accepted_and_paid_exactly(self):
+        # Paid exactly (test_breb_fixed_qr); only a malformed amount is refused.
+        method = local_money.METHODS['ar_qr']
         payload = qr(('01', '12'), ('53', '032'), ('54', '1500.00'), ('58', 'AR'))
-        with self.assertRaisesRegex(PaymentAccountError, 'monto fijo'):
-            local_money.normalize_value(local_money.METHODS['ar_qr'], payload)
+        self.assertEqual(local_money.normalize_value(method, payload), payload)
+        self.assertEqual(local_money.qr_amount(method, payload), '1500.00')
+        for bad in ('0', '-1', '1e3', '1.001', 'NaN'):
+            with self.subTest(amount=bad), self.assertRaisesRegex(PaymentAccountError, 'monto'):
+                local_money.normalize_value(method, qr(('01', '12'), ('53', '032'), ('54', bad), ('58', 'AR')))
 
     def test_brazil_static_qr_and_pix_key_validation(self):
         method = local_money.METHODS['br_qr']
@@ -214,20 +219,20 @@ class LocalMoneyTests(TestCase):
 
     @override_settings(INFINIA_ACCOUNT_VALIDATION_ENABLED=False, INFINIA_PAYMENT_ACCOUNTS_ENABLED=True)
     def test_breb_qr_uses_key_payout_and_keeps_each_qr_intent_separate(self):
-        def payload(amount):
+        def payload(name):
             return qr(('01', '11'), ('26', tlv('00', 'CO.COM.CRB.LLA') + tlv('04', '@tienda')),
-                      ('53', '170'), ('54', amount), ('58', 'CO'), ('59', 'Tienda'))
-        first = local_money.resolve_destination(self.owner, 'co_qr', payload('1000'))
-        second = local_money.resolve_destination(self.owner, 'co_qr', payload('2000'))
+                      ('53', '170'), ('58', 'CO'), ('59', name))
+        first = local_money.resolve_destination(self.owner, 'co_qr', payload('Tienda'))
+        second = local_money.resolve_destination(self.owner, 'co_qr', payload('Tienda 2'))
         plain = local_money.resolve_destination(self.owner, 'co_breb', '@tienda')
         self.assertEqual(len({first.pk, second.pk, plain.pk}), 3)
         self.assertEqual(first.details, {'type': 'BREB_KEY', 'brebKey': '@tienda'})
         self.assertEqual(first.kind, 'breb_key')
         view = local_money.destination_view(first)
-        self.assertEqual(view['qr_amount'], '1000')
+        self.assertEqual(view['qr_amount'], '')
         self.assertEqual(view['qr_merchant_name'], 'Tienda')
         self.assertEqual(view['holder_name'], '')
-        self.assertEqual(local_money.recheck_destination(first).provider_data['breb_qr']['payload'], payload('1000'))
+        self.assertEqual(local_money.recheck_destination(first).provider_data['breb_qr']['payload'], payload('Tienda'))
 
     def test_breb_receive_keeps_key_and_only_matches_its_provider_qr(self):
         from payment_accounts.models import FundingInstruction

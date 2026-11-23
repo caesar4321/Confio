@@ -298,6 +298,23 @@ SPEI_REFERENCE_MAX = 40
 _PRICE_TRIES = 5
 
 
+def exact_local(request):
+    """The exact local amount a person typed for a key, an account or an open
+    QR ('' when none). A store's order reference never rides along: that is
+    only read off a checkout (store_order_terms)."""
+    raw = request.get('amount_local')
+    if raw in (None, '') or request.get('reference') not in (None, ''):
+        return ''
+    try:
+        amount = Decimal(str(raw))
+    except (InvalidOperation, TypeError, ValueError):
+        amount = None
+    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(CENT) \
+            or amount >= Decimal('1e9'):
+        raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
+    return str(amount.quantize(CENT))
+
+
 def store_order_terms(request):
     """{'amount', 'reference'} when this request pays one store order, else None."""
     if request.get('_source') != STORE_ORDER_SOURCE or request.get('reference') in (None, ''):
@@ -377,15 +394,34 @@ def read_transfer(owner, user, method_id, request, *, client=None):
         value = local_money.normalize_value(method, raw)
     except PaymentAccountError as exc:
         raise _refuse('no_code', str(exc)) from exc
+    exact = local_money.qr_amount(method, value)
+    typed = '' if exact else exact_local(request)
     amount = usd_amount(request.get('amount_usd'))
-    if amount is None:
+    if amount is None and not exact and not typed:
         raise _refuse('no_amount', 'Dime cuántos dólares quieres enviar.')
     local_money.require_rail(owner, _identity(owner), method)
     _location(owner, method, request.get('meta'))
     destination = local_money.recheck_destination(local_money.resolve_destination(owner, method_id, value,
                                                                                   client=client), client=client)
     facts = transfer_payee(destination)
-    facts.update(_transfer_price(owner, destination, amount, client=client))
+    if exact:
+        # A QR with a fixed amount (Bre-B, Argentina): priced in dollars so the
+        # guaranteed minimum covers it; the journey pays exactly its amount and the
+        # rest stays in the person's own peso account (store_order_snapshot).
+        exact = Decimal(exact).quantize(CENT)
+        facts.update(_order_price(owner, destination, exact, client=client))
+        facts.update(amount_exact=True, amount_local=exact, minimum_local=exact)
+    elif typed:
+        # The person named an exact local amount for a key or an account: the
+        # same pricing, and the payment (not the recipient) carries the amount.
+        exact = Decimal(typed)
+        facts.update(_order_price(owner, destination, exact, client=client))
+        facts.update(amount_exact=True, amount_local=exact, minimum_local=exact)
+        facts.update(family='local_transfer', provider=JOURNEY_PROVIDER, destination=destination,
+                     params={'exact_local': typed})
+        return facts
+    else:
+        facts.update(_transfer_price(owner, destination, amount, client=client))
     facts.update(family='local_transfer', provider=JOURNEY_PROVIDER, destination=destination, params={})
     return facts
 
@@ -449,14 +485,24 @@ def read_pagomovil(owner, user, request, *, client=None):
     meta = request.get('meta') or {}
     if not (ve_pagomovil.enabled(ve_pagomovil.SEND) and ve_pagomovil.client_supports(ve_pagomovil.SEND, meta)):
         raise _refuse('rail', 'Pago Móvil no está disponible ahora.')
+    exact = exact_local(request)
     amount = usd_amount(request.get('amount_usd'))
-    if amount is None:
+    if amount is None and not exact:
         raise _refuse('no_amount', 'Dime cuántos dólares quieres enviar.')
     try:
         beneficiary = {'cedula': ve_pagomovil.normalize_cedula(request.get('cedula')),
                        'phone': ve_pagomovil.normalize_phone(request.get('phone')),
                        'bank_code': ve_pagomovil.normalize_bank(request.get('bank_code'))}
-        quote = ve_pagomovil.send_adapter().quote(amount)
+        if exact:
+            # Exact bolívares: the provider prices them in dollars and pays
+            # exactly them; one that cannot is refused, never guessed.
+            adapter = ve_pagomovil.send_adapter()
+            if not callable(getattr(adapter, 'quote_exact', None)):
+                raise _refuse('rail', 'Por ahora solo puedes enviar un monto en dólares por Pago Móvil.')
+            quote = adapter.quote_exact(exact)
+            amount = Decimal(str(quote['usd_amount']))
+        else:
+            quote = ve_pagomovil.send_adapter().quote(amount)
     except VePagoMovilError as exc:
         raise _order_refusal(exc) from exc
     saved = _saved_pagomovil(owner, beneficiary)
@@ -474,15 +520,16 @@ def read_pagomovil(owner, user, request, *, client=None):
         'payee_name': name or 'Pago Móvil', 'payee_level': level, 'payee_document': '',
         'institution': _clean(bank, 140),
         'payee_account': _clean(f"{beneficiary['phone']} · {beneficiary['cedula']}", 140),
-        # The dollars are fixed; bolívares are priced when the payout runs.
-        'amount_exact': False, 'currency': 'VES',
+        # The dollars are fixed; bolívares are priced when the payout runs
+        # (exactly the amount asked for, when one was).
+        'amount_exact': bool(exact), 'currency': 'VES',
         'amount_local': Decimal(str(quote['estimated_ves'])).quantize(CENT, rounding=ROUND_DOWN),
-        'minimum_local': None, 'total_usd': amount, 'fee_usd': fees.quantize(CENT, rounding=ROUND_UP),
+        'minimum_local': Decimal(exact) if exact else None, 'total_usd': amount, 'fee_usd': fees.quantize(CENT, rounding=ROUND_UP),
         'estimated_return_usd': Decimal('0.00'),
         'rate': Decimal(str(quote.get('rate') or 0)).quantize(Decimal('0.0001'), rounding=ROUND_DOWN),
         'charge_expires_at': None,
         # What the order is created with is what the card shows.
-        'params': {**beneficiary, 'holder_name': name},
+        'params': {**beneficiary, 'holder_name': name, **({'exact_ves': exact} if exact else {})},
     }
 
 
@@ -577,6 +624,7 @@ class PagoMovilRail(OrderRail):
     def request_of(self, intent, meta=None):
         params = intent.params or {}
         return {'method_id': VE_PAGOMOVIL, 'amount_usd': intent.total_usd, 'meta': meta,
+                'amount_local': params.get('exact_ves'),
                 **{key: params.get(key) for key in ('cedula', 'phone', 'bank_code', 'holder_name')}}
 
     def create(self, info, intent):
@@ -584,7 +632,8 @@ class PagoMovilRail(OrderRail):
         params = intent.params or {}
         return CreateVePagoMovilSend().mutate(
             info, usd_amount=format(intent.total_usd, 'f'), cedula=params.get('cedula'), phone=params.get('phone'),
-            bank_code=params.get('bank_code'), beneficiary_name=params.get('holder_name') or None)
+            bank_code=params.get('bank_code'), beneficiary_name=params.get('holder_name') or None,
+            **({'ves_amount': params['exact_ves']} if params.get('exact_ves') else {}))
 
 
 class BoliviaQrRail(OrderRail):

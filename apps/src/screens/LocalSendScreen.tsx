@@ -48,6 +48,7 @@ import {
   fetchLocalDestination,
   fetchPayoutFee,
   fetchPixCharge,
+  fetchExactSend,
   fetchPayoutQuote,
   LOCAL_MONEY_ACCOUNTS,
   LOCAL_MONEY_LIMITS,
@@ -62,7 +63,7 @@ import {
   resolveLocalDestination,
 } from '../services/localMoney';
 import { sanitizeAmountInput } from '../utils/numberLocale';
-import { pixChargeHint } from '../utils/localPaymentQr';
+import { fixedQrAmountHint, pixChargeHint } from '../utils/localPaymentQr';
 import {
   heavyFeeNote,
   LocalTransferFee,
@@ -264,7 +265,23 @@ function InfiniaLocalSendScreen() {
   const [pixCharge, setPixCharge] = useState<LocalPixCharge | null>(null);
   const [pixChargeLoading, setPixChargeLoading] = useState(false);
   const [pixChargeError, setPixChargeError] = useState('');
-  const chargeExpected = scannedQr?.methodId === 'br_qr' && pixChargeHint(scannedQr.payload);
+  // A Bre-B or Argentine QR with its own amount is paid the same way: the
+  // exact local amount, computed dollars.
+  const chargeExpected = (scannedQr?.methodId === 'br_qr' && pixChargeHint(scannedQr.payload))
+    || ((scannedQr?.methodId === 'co_qr' || scannedQr?.methodId === 'ar_qr') && fixedQrAmountHint(scannedQr.payload))
+    || (destination?.methodId === 'co_qr' && Boolean(destination.qrAmount));
+  // What a fixed-amount Bre-B or Argentine QR's conversion lands above it stays
+  // in the person's peso account (Infinia payout); a Pix charge returns it to the wallet.
+  const brebCharge = Boolean(pixCharge) && pixCharge!.asset !== 'BRL';
+  // Pagar in local currency: the person types the exact amount the recipient
+  // receives; the dollars are computed (like a charge) and what the conversion
+  // lands above it stays in their own local account.
+  const [localMode, setLocalMode] = useState(false);
+  const [localAmount, setLocalAmount] = useState('');
+  const [exactSend, setExactSend] = useState<LocalPixCharge | null>(null);
+  const [exactLoading, setExactLoading] = useState(false);
+  const [exactError, setExactError] = useState('');
+  const [exactRetry, setExactRetry] = useState(0);
   const [quote, setQuote] = useState<LocalPayoutQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState('');
@@ -281,7 +298,7 @@ function InfiniaLocalSendScreen() {
   const submittingRef = useRef(false); // readable after an await, unlike state
   // The review is bound to the exact amount and recipient it was prepared for.
   const prepareRun = useRef(0);
-  const [reviewedFor, setReviewedFor] = useState<{ amount: string; destinationId: string } | null>(null);
+  const [reviewedFor, setReviewedFor] = useState<{ amount: string; destinationId: string; exactLocal: string } | null>(null);
   // A send whose outcome is unknown (the server may have taken it): the form
   // stays locked and only "Ver estado" remains, so it never becomes a second send.
   const [unsettled, setUnsettled] = useState<{ journeyId: string | null } | null>(null);
@@ -303,6 +320,10 @@ function InfiniaLocalSendScreen() {
 
   const normalizedAmount = amount.replace(',', '.');
   const amountNumber = AMOUNT_PATTERN.test(amount) ? Number(normalizedAmount) : 0;
+  const normalizedLocal = localAmount.replace(',', '.');
+  const exactLocal = localMode && !chargeExpected && AMOUNT_PATTERN.test(localAmount) && Number(normalizedLocal) > 0
+    ? normalizedLocal : '';
+  const exactShown = Boolean(pixCharge) || (Boolean(exactLocal) && Boolean(exactSend));
   const available = limits?.known && limits.available != null ? Number(limits.available) : null;
   const perTransferMax = limits?.perTransferMax ? Number(limits.perTransferMax) : null;
   const spendable = savings.balanceUsd + cusdBalanceUsd;
@@ -338,7 +359,7 @@ function InfiniaLocalSendScreen() {
   const startNewRecipient = () => {
     setScannedQr(null);
     // A charge's dollars were computed, not typed: never carry them over.
-    if (pixCharge || chargeExpected) setAmount('');
+    if (pixCharge || chargeExpected || localMode) setAmount('');
     setPixCharge(null);
     setPixChargeError('');
     setRetryRecipient(null);
@@ -513,6 +534,38 @@ function InfiniaLocalSendScreen() {
     void loadPixCharge(destination);
   }, [chargeExpected, destination, pairReady, loadPixCharge]);
 
+  // Local-currency mode: the dollars for the exact amount, once there is a
+  // checked recipient. The amount field then holds those dollars.
+  useEffect(() => {
+    setExactSend(null);
+    setExactError('');
+    setExactLoading(false);
+    if (!localMode || chargeExpected) return;
+    setAmount('');
+    if (!exactLocal || !destination || !pairReady || destination.verification === 'not_found'
+      || destination.verification === 'pending') return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setExactLoading(true);
+      try {
+        const next = await fetchExactSend(destination.id, exactLocal);
+        if (cancelled) return;
+        if (!next) {
+          setExactError('No pudimos cotizar este monto.');
+          return;
+        }
+        resetReview();
+        setExactSend(next);
+        setAmount(next.totalUsd);
+      } catch (error: any) {
+        if (!cancelled) setExactError(error?.message || 'No pudimos cotizar este monto.');
+      } finally {
+        if (!cancelled) setExactLoading(false);
+      }
+    }, 600);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [localMode, chargeExpected, exactLocal, destination, pairReady, resetReview, exactRetry]);
+
   // Live estimate while typing; the authoritative quote is priced again on
   // the prepared bridge at review.
   useEffect(() => {
@@ -530,7 +583,7 @@ function InfiniaLocalSendScreen() {
         // The fee is read with every estimate, not once per recipient: account
         // costs riding on it change as other sends reserve or release them.
         const [next, nextFee] = await Promise.all([
-          fetchPayoutQuote(destination.id, { amount: normalizedAmount }),
+          fetchPayoutQuote(destination.id, { amount: normalizedAmount, ...(exactLocal ? { exactLocal } : {}) }),
           fetchPayoutFee(destination.id),
         ]);
         if (!cancelled) { setQuote(next); setFee(nextFee); }
@@ -541,7 +594,7 @@ function InfiniaLocalSendScreen() {
       }
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [destination, pairReady, amountNumber, amountError, normalizedAmount]);
+  }, [destination, pairReady, amountNumber, amountError, normalizedAmount, exactLocal]);
 
   const feeView = processorFeeView(fee, amountNumber);
   const finalFeeView = processorFeeView(finalFee, amountNumber);
@@ -554,7 +607,9 @@ function InfiniaLocalSendScreen() {
   const draftReady = !destination && Boolean(scannedQr || (value.trim()
     && (!inputCheck || inputCheck.valid(value.replace(/[\s.\-/]/g, '')))));
   const canContinue = (recipientReady || draftReady) && !resolving && pairReady && amountNumber > 0 && !amountError
-    && (!chargeExpected || (Boolean(pixCharge) && amount === pixCharge!.totalUsd));
+    && (!chargeExpected || (Boolean(pixCharge) && amount === pixCharge!.totalUsd))
+    && (!localMode || chargeExpected || (Boolean(destination) && Boolean(exactSend) && amount === exactSend!.totalUsd
+      && Number(exactSend!.amount) === Number(exactLocal)));
   // Typing has no button of its own: leaving the field (or Done) prepares the
   // recipient, so its card and the estimate appear without waiting for Continue.
   // Never per keystroke: each preparation saves a recipient on the server.
@@ -576,7 +631,7 @@ function InfiniaLocalSendScreen() {
     }
     // A response for an older form (edited meanwhile) is dropped, never shown or signed.
     const run = ++prepareRun.current;
-    const snapshot = { amount: normalizedAmount, destinationId: recipient.id };
+    const snapshot = { amount: normalizedAmount, destinationId: recipient.id, exactLocal };
     let bridgePrepared = false;
     setStep('preparing');
     setFlowError('');
@@ -588,7 +643,9 @@ function InfiniaLocalSendScreen() {
       bridgePrepared = true;
       if (run !== prepareRun.current) return;
       const [priced, pricedFee] = await Promise.all([
-        fetchPayoutQuote(snapshot.destinationId, { bridgeId: prepared.internalId }),
+        fetchPayoutQuote(snapshot.destinationId, {
+          bridgeId: prepared.internalId, ...(snapshot.exactLocal ? { exactLocal: snapshot.exactLocal } : {}),
+        }),
         fetchPayoutFee(snapshot.destinationId, { bridgeId: prepared.internalId }),
       ]);
       if (run !== prepareRun.current) return;
@@ -606,6 +663,11 @@ function InfiniaLocalSendScreen() {
       if (pixCharge && recipient) {
         requestId.current = null;
         void loadPixCharge(recipient);
+      }
+      // An exact amount whose dollars no longer cover it is priced again too.
+      if (snapshot.exactLocal) {
+        requestId.current = null;
+        setExactRetry((n) => n + 1);
       }
     }
   };
@@ -626,7 +688,8 @@ function InfiniaLocalSendScreen() {
       return;
     }
     // Sign only what was reviewed: same amount, same recipient.
-    if (!reviewedFor || reviewedFor.amount !== normalizedAmount || reviewedFor.destinationId !== destination.id) {
+    if (!reviewedFor || reviewedFor.amount !== normalizedAmount || reviewedFor.destinationId !== destination.id
+      || reviewedFor.exactLocal !== exactLocal) {
       resetReview();
       setFlowError('El envío cambió. Revísalo de nuevo.');
       return;
@@ -663,6 +726,7 @@ function InfiniaLocalSendScreen() {
         minimumFxOutput: finalQuote.minimumTarget,
         bridgeId: bridge.internalId,
         destinationId: destination.id,
+        ...(reviewedFor.exactLocal ? { exactLocalAmount: reviewedFor.exactLocal } : {}),
       });
       journeyId = journey.internalId;
       // Signing moves the money: never for a review that changed or a screen
@@ -1052,8 +1116,7 @@ function InfiniaLocalSendScreen() {
                         {destination.qrMerchantCity ? ` · ${destination.qrMerchantCity}` : ''}
                       </Text> : null}
                       {destination.qrAmount ? <Text style={styles.helperText}>
-                        Monto indicado en el QR: {formatRampMoney(destination.qrAmount, 'COP')}.
-                        {' '}El envío se calcula desde dólares; compara este monto con la estimación en pesos.
+                        Monto indicado en el QR: {formatRampMoney(destination.qrAmount, 'COP')}. Lo pagamos exacto.
                       </Text> : null}
                     </View>
                   ) : null}
@@ -1079,7 +1142,9 @@ function InfiniaLocalSendScreen() {
                         <Text style={styles.quoteFinalValue}>{formatRampMoney(pixCharge.totalUsd, USD_UNIT)}</Text>
                         <Text style={styles.helperText}>
                           {`El comercio recibe exactamente ${formatRampMoney(pixCharge.amount, pixCharge.asset)}. `}
-                          Incluye las comisiones y un margen por si el tipo de cambio se mueve: lo que sobre vuelve a tu billetera.
+                          {brebCharge
+                            ? 'Incluye las comisiones y un margen por si el tipo de cambio se mueve: lo que sobre queda en tu cuenta en pesos.'
+                            : 'Incluye las comisiones y un margen por si el tipo de cambio se mueve: lo que sobre vuelve a tu billetera.'}
                         </Text>
                       </>
                     ) : pixChargeError ? (
@@ -1101,13 +1166,43 @@ function InfiniaLocalSendScreen() {
                   </View>
                 ) : (
                 <View style={styles.inputCard}>
-                  <Text style={styles.inputLabel}>Envías desde tu Confío Dollar</Text>
+                  {method?.asset ? (
+                    <View style={modeStyles.row}>
+                      {[false, true].map((local) => (
+                        <TouchableOpacity
+                          key={local ? 'local' : 'usd'}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: localMode === local }}
+                          disabled={locked}
+                          style={[modeStyles.chip, localMode === local && modeStyles.chipActive]}
+                          onPress={() => {
+                            if (localMode === local) return;
+                            setLocalMode(local);
+                            setAmount('');
+                            setLocalAmount('');
+                            resetReview();
+                          }}
+                        >
+                          <Text style={[modeStyles.chipText, localMode === local && modeStyles.chipTextActive]}>
+                            {local ? `En ${method.asset}` : 'En USD'}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
+                  <Text style={styles.inputLabel}>
+                    {localMode ? `Recibe exactamente (${method?.asset || ''})` : 'Envías desde tu Confío Dollar'}
+                  </Text>
                   <View style={[styles.amountInputRow, amountFocused && styles.amountInputRowFocused]}>
                     <TextInput
                       style={styles.amountInput}
-                      value={amount}
+                      value={localMode ? localAmount : amount}
                       editable={!locked}
-                      onChangeText={next => { setAmount((prev) => sanitizeAmountInput(next, 2, undefined, prev)); resetReview(); }}
+                      onChangeText={next => {
+                        if (localMode) setLocalAmount((prev) => sanitizeAmountInput(next, 2, undefined, prev));
+                        else setAmount((prev) => sanitizeAmountInput(next, 2, undefined, prev));
+                        resetReview();
+                      }}
                       onFocus={() => setAmountFocused(true)}
                       onBlur={() => setAmountFocused(false)}
                       keyboardType="decimal-pad"
@@ -1115,10 +1210,26 @@ function InfiniaLocalSendScreen() {
                       placeholderTextColor={colors.textSecondary}
                     />
                     <View style={styles.currencyBadge}>
-                      <Text style={styles.currencyBadgeText}>USD</Text>
+                      <Text style={styles.currencyBadgeText}>{localMode ? method?.asset : 'USD'}</Text>
                     </View>
                   </View>
-                  <Text style={styles.helperText}>Verás cuánto recibe y el tipo de cambio antes de confirmar.</Text>
+                  {!localMode ? (
+                    <Text style={styles.helperText}>Verás cuánto recibe y el tipo de cambio antes de confirmar.</Text>
+                  ) : exactLoading ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : exactSend && exactLocal ? (
+                    <Text style={styles.helperText}>
+                      {`Pagas ${formatRampMoney(exactSend.totalUsd, USD_UNIT)} desde tu Confío Dollar. `}
+                      {`Incluye las comisiones y un margen por si el tipo de cambio se mueve: lo que sobre queda en tu cuenta en ${currency}.`}
+                    </Text>
+                  ) : exactError ? (
+                    <Text style={styles.errorText}>{exactError}</Text>
+                  ) : (
+                    <Text style={styles.helperText}>
+                      {destination ? 'Escribe cuánto debe recibir; te mostramos cuántos dólares cuesta.'
+                        : 'Elige a quién envías para ver cuántos dólares cuesta.'}
+                    </Text>
+                  )}
                   <Text style={styles.limitText}>Saldo disponible: {formatRampMoney(spendable, USD_UNIT)}</Text>
                   {limits?.known && available != null ? (
                     <Text style={styles.limitText}>
@@ -1175,7 +1286,7 @@ function InfiniaLocalSendScreen() {
                     </View>
                   ) : quote ? (
                     <>
-                      <Text style={styles.quoteEyebrow}>{pixCharge ? 'El comercio recibe exactamente' : 'Estimado que recibe'}</Text>
+                      <Text style={styles.quoteEyebrow}>{pixCharge ? 'El comercio recibe exactamente' : exactShown ? 'Recibe exactamente' : 'Estimado que recibe'}</Text>
                       <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
                       <Text style={styles.quoteRate}>{`1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · estimado neto de conversión`}</Text>
                       <View style={styles.quoteDivider} />
@@ -1234,7 +1345,7 @@ function InfiniaLocalSendScreen() {
                       ) : null}
                       <View style={styles.quoteFinalDivider} />
                       <View style={styles.quoteFinalRow}>
-                        <Text style={styles.quoteFinalLabel}>{pixCharge ? 'Recibe exactamente' : 'Recibe al menos'}</Text>
+                        <Text style={styles.quoteFinalLabel}>{exactShown ? 'Recibe exactamente' : 'Recibe al menos'}</Text>
                         <Text style={styles.quoteFinalValue}>{formatRampMoney(quote.minimumTarget, quote.asset)}</Text>
                       </View>
                       {feeView && heavyFeeNote(feeView) ? (
@@ -1245,7 +1356,7 @@ function InfiniaLocalSendScreen() {
                       ) : null}
                       <View style={styles.disclaimerPill}>
                         <Icon name="info" size={12} color={colors.primaryDark} />
-                        <Text style={styles.quoteNote}>{pixCharge
+                        <Text style={styles.quoteNote}>{pixCharge && !brebCharge
                           ? 'Si el cobro ya no se puede pagar o vence antes, no pagamos y te devolvemos los dólares.'
                           : 'Si la conversión diera menos, no enviamos el pago y te avisamos.'}</Text>
                       </View>
@@ -1315,7 +1426,7 @@ function InfiniaLocalSendScreen() {
                   ) : null}
                   <View style={styles.reviewRow}>
                     <Icon name="check-circle" size={16} color={colors.textSecondary} />
-                    <Text style={styles.reviewLabel}>{pixCharge ? 'Recibe exactamente' : 'Recibe al menos'}</Text>
+                    <Text style={styles.reviewLabel}>{exactShown ? 'Recibe exactamente' : 'Recibe al menos'}</Text>
                     <Text style={styles.reviewValueHighlight}>{formatRampMoney(finalQuote.minimumTarget, finalQuote.asset)}</Text>
                   </View>
                   <View style={styles.settlementNotice}>
@@ -1385,6 +1496,17 @@ const agendaStyles = StyleSheet.create({
     marginTop: 4, marginBottom: 8, marginLeft: 2,
   },
   icon: { marginRight: 10 },
+});
+
+const modeStyles = StyleSheet.create({
+  row: { flexDirection: 'row', marginBottom: 10 },
+  chip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, marginRight: 8,
+    backgroundColor: colors.neutral, borderWidth: 1, borderColor: colors.border,
+  },
+  chipActive: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+  chipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  chipTextActive: { color: colors.primaryDark },
 });
 
 const flagStyles = StyleSheet.create({

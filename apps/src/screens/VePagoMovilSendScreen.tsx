@@ -36,7 +36,9 @@ import {
 import { AgendaEntry, sameCedula } from '../services/agenda';
 import {
   CANCEL_VE_SEND,
+  CREATE_VE_EXACT_SEND,
   CREATE_VE_SEND,
+  VE_SEND_EXACT_QUOTE,
   REPORT_VE_SEND_FUNDING,
   START_VE_SEND_FUNDING,
   VE_ACTIVE_SEND,
@@ -103,6 +105,11 @@ export default function VePagoMovilSendScreen() {
   const [order, setOrder] = useState<VeSendOrder | null>(null);
   const [amount, setAmount] = useState('');
   const [amountFocused, setAmountFocused] = useState(false);
+  // Exact bolívares: the person types what the recipient receives; the
+  // server prices the dollars (an older server or a provider that cannot
+  // answers with an error, and the dollar mode stays).
+  const [vesMode, setVesMode] = useState(false);
+  const [vesAmount, setVesAmount] = useState('');
   const [quote, setQuote] = useState<VeSendQuote | null>(null);
   const [cedula, setCedula] = useState('');
   const [phone, setPhone] = useState('');
@@ -147,20 +154,24 @@ export default function VePagoMovilSendScreen() {
   useEffect(() => {
     // A quote belongs to one amount: drop it the moment the amount changes.
     setQuote(null);
-    if (order || !amount || !(toNumber(amount) > 0)) return;
+    const typed = vesMode ? vesAmount : amount;
+    if (order || !typed || !(toNumber(typed) > 0)) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const r = await client.query({
-          query: VE_SEND_QUOTE, variables: { usdAmount: String(toNumber(amount)) }, fetchPolicy: 'network-only',
-        });
-        if (!cancelled && alive.current) setQuote(r.data?.vePagomovilSendQuote || null);
+        const r = await client.query(vesMode
+          ? { query: VE_SEND_EXACT_QUOTE, variables: { vesAmount: toNumber(typed).toFixed(2) }, fetchPolicy: 'network-only' }
+          : { query: VE_SEND_QUOTE, variables: { usdAmount: String(toNumber(typed)) }, fetchPolicy: 'network-only' });
+        const next = vesMode ? r.data?.vePagomovilSendExactQuote : r.data?.vePagomovilSendQuote;
+        if (!cancelled && alive.current) setQuote(next || null);
       } catch {
-        if (!cancelled && alive.current) setQuote(null);
+        if (!cancelled && alive.current) {
+          setQuote(vesMode ? { success: false, error: 'Por ahora solo puedes enviar un monto en dólares.' } as VeSendQuote : null);
+        }
       }
     }, 450);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [amount, client, order]);
+  }, [amount, vesAmount, vesMode, client, order]);
 
   const refreshOrder = useCallback(async (orderId: string) => {
     const issued = generation.current;
@@ -177,10 +188,12 @@ export default function VePagoMovilSendScreen() {
 
   const min = Number(quote?.minUsd || 0);
   const max = Number(quote?.maxUsd || 0);
-  const amountValue = toNumber(amount);
+  // In bolívar mode the dollars are the server's price for the exact amount.
+  const amountValue = vesMode ? (quote?.success ? Number(quote.usdAmount) : 0) : toNumber(amount);
   const amountOk = amountValue > 0 && (!min || amountValue >= min) && (!max || amountValue <= max)
     && amountValue <= available + 1e-9;
-  const quoteMatches = !!quote?.success && Number(quote.usdAmount) === amountValue;
+  const quoteMatches = !!quote?.success && Number(quote.usdAmount) === amountValue
+    && (!vesMode || Number(quote.estimatedVes) === toNumber(vesAmount));
   const recipientOk = cedula.trim().length >= 6 && phone.replace(/\D/g, '').length >= 10 && !!bank
     && veAgendaSaveReady(agendaSave, agendaIsOwn);
 
@@ -276,10 +289,12 @@ export default function VePagoMovilSendScreen() {
     setError('');
     let created: string | null = null;
     try {
+      const variables: Record<string, string> = {
+        usdAmount: String(amountValue), cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code,
+        ...(vesMode ? { vesAmount: toNumber(vesAmount).toFixed(2) } : {}),
+      };
       const place = () => client.mutate({
-        mutation: CREATE_VE_SEND,
-        variables: { usdAmount: String(amountValue), cedula: cedula.trim(), phone: phone.trim(), bankCode: bank.code },
-        fetchPolicy: 'no-cache',
+        mutation: vesMode ? CREATE_VE_EXACT_SEND : CREATE_VE_SEND, variables, fetchPolicy: 'no-cache',
       });
       let response;
       try {
@@ -358,7 +373,7 @@ export default function VePagoMovilSendScreen() {
   };
 
   const startOver = () => {
-    setOrder(null); setAmount(''); setQuote(null); setChecked(false); setError('');
+    setOrder(null); setAmount(''); setVesAmount(''); setQuote(null); setChecked(false); setError('');
   };
   const goBack = () => navigation.goBack();
 
@@ -401,13 +416,37 @@ export default function VePagoMovilSendScreen() {
         <View style={styles.section}>
           <RampStepHeader number={2} title="Monto" meta={`Disponible ${formatUsd(available)}`} />
           <View style={styles.inputCard}>
-            <Text style={styles.inputLabel}>¿Cuántos dólares quieres enviar?</Text>
+            <View style={local.modeRow}>
+              {[false, true].map(bs => (
+                <TouchableOpacity
+                  key={bs ? 'ves' : 'usd'}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: vesMode === bs }}
+                  disabled={loading}
+                  style={[local.modeChip, vesMode === bs && local.modeChipActive]}
+                  onPress={() => {
+                    if (vesMode === bs) return;
+                    setVesMode(bs);
+                    setAmount('');
+                    setVesAmount('');
+                    setQuote(null);
+                  }}
+                >
+                  <Text style={[local.modeChipText, vesMode === bs && local.modeChipTextActive]}>
+                    {bs ? 'En bolívares' : 'En dólares'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.inputLabel}>
+              {vesMode ? '¿Cuántos bolívares debe recibir?' : '¿Cuántos dólares quieres enviar?'}
+            </Text>
             <View style={[styles.amountInputRow, amountFocused && styles.amountInputRowFocused]}>
               <TextInput
-                accessibilityLabel="Monto en dólares"
-                value={amount}
+                accessibilityLabel={vesMode ? 'Monto en bolívares' : 'Monto en dólares'}
+                value={vesMode ? vesAmount : amount}
                 keyboardType="decimal-pad"
-                onChangeText={text => setAmount(prev => sanitizeAmountInput(text, 2, undefined, prev))}
+                onChangeText={text => (vesMode ? setVesAmount : setAmount)(prev => sanitizeAmountInput(text, 2, undefined, prev))}
                 onFocus={() => setAmountFocused(true)}
                 onBlur={() => setAmountFocused(false)}
                 placeholder={`0${getSeparators().decimal}00`}
@@ -415,7 +454,7 @@ export default function VePagoMovilSendScreen() {
                 style={styles.amountInput}
                 editable={!loading}
               />
-              <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>USD</Text></View>
+              <View style={styles.currencyBadge}><Text style={styles.currencyBadgeText}>{vesMode ? 'Bs' : 'USD'}</Text></View>
             </View>
             {min && amountValue > 0 && amountValue < min ? (
               <Text style={styles.limitText}>El mínimo es {formatUsd(quote?.minUsd as string)}.</Text>
@@ -425,7 +464,7 @@ export default function VePagoMovilSendScreen() {
           </View>
           {quote?.success ? (
             <View style={[styles.quoteCard, local.quoteGap]}>
-              <Text style={styles.quoteEyebrow}>Llega aprox.</Text>
+              <Text style={styles.quoteEyebrow}>{vesMode ? 'Recibe exactamente' : 'Llega aprox.'}</Text>
               <Text style={styles.quoteHeadline} adjustsFontSizeToFit numberOfLines={1}>{formatBs(quote.estimatedVes)}</Text>
               {quote.rate ? <Text style={styles.quoteRate}>Tasa {formatBs(quote.rate)} por dólar</Text> : null}
               <View style={styles.quoteDivider} />
@@ -445,7 +484,9 @@ export default function VePagoMovilSendScreen() {
               </View>
               <View style={styles.disclaimerPill}>
                 <Icon name="info" size={14} color={colors.primaryDark} />
-                <Text style={styles.quoteNote}>Estimado: los bolívares finales se fijan al convertir tu envío.</Text>
+                <Text style={styles.quoteNote}>{vesMode
+                  ? 'El precio incluye las comisiones y un margen por si la tasa se mueve. Si al pagar no alcanzara, no enviamos el pago y lo revisamos contigo.'
+                  : 'Estimado: los bolívares finales se fijan al convertir tu envío.'}</Text>
               </View>
             </View>
           ) : null}
@@ -631,6 +672,14 @@ const BANK_ROW = 60;
 
 const local = StyleSheet.create({
   flex: { flex: 1 },
+  modeRow: { flexDirection: 'row', marginBottom: 10 },
+  modeChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, marginRight: 8,
+    backgroundColor: colors.neutral, borderWidth: 1, borderColor: colors.border,
+  },
+  modeChipActive: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+  modeChipText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  modeChipTextActive: { color: colors.primaryDark },
   edge: { marginHorizontal: 22, marginTop: 0, marginBottom: 16 },
   spaced: { marginTop: 14 },
   field: {

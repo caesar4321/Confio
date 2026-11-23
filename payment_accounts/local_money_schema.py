@@ -200,12 +200,17 @@ class LocalMoneyQuery(graphene.ObjectType):
                                              method_id=graphene.String(required=True))
     local_destination = graphene.Field(LocalDestinationType, id=graphene.UUID(required=True))
     local_payout_quote = graphene.Field(LocalPayoutQuoteType, destination_id=graphene.UUID(required=True),
-                                        amount=graphene.Decimal(), bridge_id=graphene.UUID())
+                                        amount=graphene.Decimal(), bridge_id=graphene.UUID(),
+                                        exact_local=graphene.Decimal())
     local_deposit_quote = graphene.Field(LocalDepositQuoteType, credit_id=graphene.UUID(required=True))
     local_payout_fee = graphene.Field(LocalTransferFeeType, destination_id=graphene.UUID(required=True),
                                       bridge_id=graphene.UUID())
     local_transfer_fee = graphene.Field(LocalTransferFeeType, journey_id=graphene.UUID(required=True))
     local_pix_charge = graphene.Field(LocalPixChargeType, destination_id=graphene.UUID(required=True))
+    # An exact local amount typed on Pagar: its own query, so an older server
+    # fails only that mode.
+    local_exact_send = graphene.Field(LocalPixChargeType, destination_id=graphene.UUID(required=True),
+                                      amount_local=graphene.Decimal(required=True))
     limit_increase_request = graphene.Field(LimitIncreaseRequestType)
     limit_increase_requirements = graphene.List(graphene.NonNull(EddRequirementType), required=True,
                                                 income_type=graphene.String(required=True))
@@ -355,13 +360,32 @@ class LocalMoneyQuery(graphene.ObjectType):
             raise _query_error(exc)
         return _destination(local_money.refresh_destination(row))
 
-    def resolve_local_payout_quote(self, info, destination_id, amount=None, bridge_id=None):
+    def resolve_local_exact_send(self, info, destination_id, amount_local):
+        owner = _owner(info, 'send_funds', owner_only=True)
+        row = PayoutDestination.objects.filter(internal_id=destination_id, confio_account=owner,
+                                               provider='infinia').first()
+        if row is None:
+            raise GraphQLError('Destino no encontrado')
+        from . import breb_location
+        try:
+            method = local_money.METHODS[(row.provider_data or {}).get('method_id')]
+            local_money.require_rail(owner, _identity(owner, required=False), method)
+            breb_location.require_for_country(owner, row.country, info.context.META)
+            quote = local_money.exact_send_quote(owner, row, amount_local)
+        except Exception as exc:
+            raise _query_error(exc)
+        return LocalPixChargeType(**{key: value if isinstance(value, bool) else str(value)
+                                     for key, value in quote.items()})
+
+    def resolve_local_payout_quote(self, info, destination_id, amount=None, bridge_id=None, exact_local=None):
         owner = _owner(info, 'send_funds')
         try:
             destination = PayoutDestination.objects.get(internal_id=destination_id, confio_account=owner)
             bridge = (PaymentBridgeTransfer.objects.select_related('quote__funding_instruction').get(
                 internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None)
-            quote = local_money.payout_quote(owner, destination, amount=amount, bridge=bridge)
+            quote = local_money.exact_qr_quote(
+                destination, local_money.payout_quote(owner, destination, amount=amount, bridge=bridge),
+                exact_local)
         except (PayoutDestination.DoesNotExist, PaymentBridgeTransfer.DoesNotExist):
             raise GraphQLError('Destino no encontrado')
         except Exception as exc:
@@ -388,6 +412,19 @@ class LocalMoneyQuery(graphene.ObjectType):
                                                provider='infinia').first()
         if row is None:
             raise GraphQLError('Destino no encontrado')
+        if local_money.is_fixed_amount_qr(row):
+            # A Bre-B or Argentine QR with its own amount is answered here too: the
+            # screen shows the computed dollars and the exact amount, as for a Pix charge.
+            from . import breb_location
+            try:
+                method = local_money.METHODS[row.provider_data['method_id']]
+                local_money.require_rail(owner, _identity(owner, required=False), method)
+                breb_location.require_for_country(owner, row.country, info.context.META)
+                quote = local_money.fixed_qr_charge_quote(owner, row)
+            except Exception as exc:
+                raise _query_error(exc)
+            return LocalPixChargeType(**{key: value if isinstance(value, bool) else str(value)
+                                         for key, value in quote.items()})
         if local_money.charge_snapshot(row) is None:
             return None
         try:

@@ -1,4 +1,4 @@
-import {localPaymentQrRoute, pixChargeHint} from '../localPaymentQr';
+import {fixedQrAmountHint, localPaymentQrRoute, pixChargeHint} from '../localPaymentQr';
 
 it.each([['BR','br_qr'],['AR','ar_qr'],['CO','co_qr'],['BO','bo_qr'],['PE','pe_qr']])('routes %s as a hint requiring server approval', (country,methodId) => {
   expect(localPaymentQrRoute(`0002015802${country}63040000`)).toEqual({country,methodId});
@@ -11,6 +11,20 @@ it('recognizes the documented Bolivia encrypted envelope as a routing hint', () 
   expect(localPaymentQrRoute('K6AEx9BgdJHPb3CfWLKYU9XhoSIRJvRX9Hw|1c8618ba4382fb49')).toEqual({country:'BO',methodId:'bo_qr'});
   expect(localPaymentQrRoute('https://confio.lat/pay/123|1c8618ba4382fb49')).toBeNull();
   expect(localPaymentQrRoute('a'.repeat(33000)+'|1c8618ba4382fb49')).toBeNull();
+});
+
+describe('fixedQrAmountHint', () => {
+  const breb = (extra: string) => `0002010102122629` + '0014CO.COM.RBM.LLA0407@tienda' + `5303170${extra}5802CO5906TIENDA63040000`;
+  it('marks Bre-B and Argentine peso QRs that name their own amount', () => {
+    expect(fixedQrAmountHint(breb('540525000'))).toBe(true);
+    expect(fixedQrAmountHint('0002015303032540550.005802AR63040000')).toBe(true);
+  });
+  it('leaves open QRs and other countries to the typed amount', () => {
+    expect(fixedQrAmountHint(breb(''))).toBe(false);
+    expect(fixedQrAmountHint('0002015303032' + '5802AR63040000')).toBe(false);
+    expect(fixedQrAmountHint('0002015303986540550.005802BR63040000')).toBe(false);
+    expect(fixedQrAmountHint('not a qr')).toBe(false);
+  });
 });
 
 describe('pixChargeHint', () => {

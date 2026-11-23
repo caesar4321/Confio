@@ -31,6 +31,23 @@ export const CREATE_VE_SEND = gql`mutation CreateVePagoMovilSend(
   }
 }`;
 
+// Exact bolívares (the recipient receives exactly vesAmount; the dollars are
+// priced by the server). Their own operations: an older server fails only this mode.
+export const VE_SEND_EXACT_QUOTE = gql`query VePagoMovilSendExactQuote($vesAmount: String!) {
+  vePagomovilSendExactQuote(vesAmount: $vesAmount) {
+    success error usdAmount usdtAmount confioFeeUsd processorFeeUsd estimatedVes rate minUsd maxUsd
+  }
+}`;
+
+export const CREATE_VE_EXACT_SEND = gql`mutation CreateVePagoMovilExactSend(
+  $usdAmount: String!, $cedula: String!, $phone: String!, $bankCode: String!, $vesAmount: String!
+) {
+  createVePagomovilSend(usdAmount: $usdAmount, cedula: $cedula, phone: $phone, bankCode: $bankCode,
+    vesAmount: $vesAmount) {
+    ${ORDER_FIELDS}
+  }
+}`;
+
 export const START_VE_SEND_FUNDING = gql`mutation StartVePagoMovilSendFunding($orderId: String!) {
   startVePagomovilSendFunding(orderId: $orderId) {
     ${ORDER_FIELDS}

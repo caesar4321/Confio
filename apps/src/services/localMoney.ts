@@ -304,6 +304,30 @@ const LOCAL_PIX_CHARGE = gql`
   }
 `;
 
+// An exact local amount typed on Pagar, priced in dollars (same shape as a
+// charge). Its own queries: an older server fails only that mode.
+const LOCAL_EXACT_SEND = gql`
+  query LocalExactSend($destinationId: UUID!, $amountLocal: Decimal!) {
+    localExactSend(destinationId: $destinationId, amountLocal: $amountLocal) {
+      amount asset totalUsd feeUsd estimatedReturnUsd merchantName merchantDocument
+      merchantSource institution expiresAt dynamic rate
+    }
+  }
+`;
+
+const LOCAL_EXACT_PAYOUT_QUOTE = gql`
+  query LocalExactPayoutQuote($destinationId: UUID!, $amount: Decimal, $bridgeId: UUID, $exactLocal: Decimal!) {
+    localPayoutQuote(destinationId: $destinationId, amount: $amount, bridgeId: $bridgeId, exactLocal: $exactLocal) {
+      sourceAmount
+      targetAmount
+      minimumTarget
+      rate
+      asset
+      expiresAt
+    }
+  }
+`;
+
 // The processor's fee, in its own queries: against a server that predates
 // them the app loses only the fee line, never the quote or the receipt.
 const LOCAL_TRANSFER_FEE_FIELDS = `
@@ -728,9 +752,15 @@ export function fetchLocalDestination(id: string): Promise<LocalDestination> {
   return runQuery(LOCAL_DESTINATION, {id}, 'localDestination', 'Destino no encontrado');
 }
 
-export function fetchPayoutQuote(destinationId: string, options: {amount?: string; bridgeId?: string}): Promise<LocalPayoutQuote> {
-  return runQuery(LOCAL_PAYOUT_QUOTE, {destinationId, ...options}, 'localPayoutQuote',
-    'No pudimos cotizar este envío.');
+export function fetchPayoutQuote(destinationId: string,
+  options: {amount?: string; bridgeId?: string; exactLocal?: string}): Promise<LocalPayoutQuote> {
+  return runQuery(options.exactLocal ? LOCAL_EXACT_PAYOUT_QUOTE : LOCAL_PAYOUT_QUOTE, {destinationId, ...options},
+    'localPayoutQuote', 'No pudimos cotizar este envío.');
+}
+
+/** The dollars an exact local amount costs, all in; the recipient receives exactly `amountLocal`. */
+export function fetchExactSend(destinationId: string, amountLocal: string): Promise<LocalPixCharge | null> {
+  return runQuery(LOCAL_EXACT_SEND, {destinationId, amountLocal}, 'localExactSend', 'No pudimos cotizar este monto.');
 }
 
 /**

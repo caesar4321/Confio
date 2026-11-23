@@ -224,7 +224,12 @@ def route_cost_bps(deposit_wei, amount_out) -> int:
 
 
 def quote(amount: Decimal) -> dict:
-    client = _client()
+    return _priced(amount)[0]
+
+
+def _priced(amount: Decimal, client=None) -> tuple[dict, Decimal]:
+    """(the quote for `amount` gross dollars, the dollars Relay delivers)."""
+    client = client or _client()
     _, deposit_wei = ve_send.confio_amounts(amount)
     usdt = Decimal(deposit_wei) / Decimal(10 ** 18)
     recipient = _polygon_address()
@@ -265,13 +270,70 @@ def quote(amount: Decimal) -> dict:
         'processor_fee_usd': format(processor_fee.quantize(ve_send.CENT), 'f'),
         'estimated_ves': format(ves, 'f'),
         'rate': format(rate, 'f'),
-    }
+    }, delivered
 
 
-def create(user, account, amount: Decimal, beneficiary: dict):
+EXACT_PRICE_TRIES = 6
+PRICE_MOVED = 'El precio cambió. Revisa el envío de nuevo.'
+
+
+def quote_exact(ves) -> dict:
+    """The dollars that pay exactly `ves` bolívares by Pago Móvil, all in.
+
+    Priced from Pago ASAP's own cost for that payout plus a margin
+    (VE_PAGOMOVIL_EXACT_MARGIN_BPS) against the rate moving before it runs;
+    the payout is exactly `ves` and what the deposit buys above it stays in
+    Confío's Pago ASAP balance (payout_terms). Same keys as quote()."""
+    try:
+        ves = Decimal(str(ves))
+    except (InvalidOperation, TypeError, ValueError):
+        raise VePagoMovilError('Monto no válido.')
+    if not ves.is_finite() or ves != ves.quantize(ve_send.CENT) or ves < MIN_PAYOUT_VES or ves >= Decimal('1e10'):
+        raise VePagoMovilError(f'Escribe un monto desde {MIN_PAYOUT_VES} bolívares, con hasta dos decimales.')
+    client = _client()
+    try:
+        cost = _cost(client, ves)
+    except PagoAsapError as exc:
+        logger.exception('Pago ASAP exact preview failed')
+        raise VePagoMovilError(GENERIC_ERROR) from exc
+    if cost <= 0:
+        raise VePagoMovilError(GENERIC_ERROR)
+    margin = ve_pagomovil.setting_decimal('VE_PAGOMOVIL_EXACT_MARGIN_BPS', '100') / 10_000
+    needed = (cost * (1 + margin)).quantize(ve_send.CENT, rounding=ROUND_UP)
+    amount = needed
+    for _ in range(EXACT_PRICE_TRIES):
+        priced, delivered = _priced(amount, client)
+        have = _fee_free_usd(delivered)
+        if have <= 0:
+            raise VePagoMovilError(GENERIC_ERROR)
+        # Scaled both ways: never charged far above what the payout needs.
+        target = (amount * needed / have).quantize(ve_send.CENT, rounding=ROUND_UP) + ve_send.CENT
+        if have >= needed and amount <= target:
+            return {**priced, 'estimated_ves': format(ves, 'f'), 'exact_ves': format(ves, 'f')}
+        amount = target
+    raise VePagoMovilError(GENERIC_ERROR)
+
+
+def exact_ves_of(ramp):
+    """The exact bolívares a send pays, or None for a dollar send."""
+    value = ((ve_send._section(ramp).get('estimate') or {}).get('exact_ves'))
+    try:
+        return Decimal(str(value)) if value not in (None, '') else None
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
     if not _polygon_address():
         raise VePagoMovilError(UNAVAILABLE)
-    estimate = quote(amount)
+    if exact_ves is not None:
+        estimate = quote_exact(exact_ves)
+        # Priced again now: never more dollars than the person approved.
+        if Decimal(estimate['usd_amount']) > amount:
+            raise VePagoMovilError(PRICE_MOVED)
+        estimate = {**estimate, 'usd_amount': format(amount, 'f')}
+    else:
+        estimate = quote(amount)
     gross_wei, deposit_wei = ve_send.confio_amounts(amount)
     # Where the chain scan starts: without it a lost funding hash could never
     # be found, so no order is made.
@@ -347,6 +409,17 @@ def payout_terms(ramp, inflight) -> dict | None:
     rate = client.rate('USD', 'VES')
     if rate <= 0 or usd <= 0:
         return None
+    exact = exact_ves_of(ramp)
+    if exact is not None:
+        # An exact bolívar send pays exactly that; what the deposit bought
+        # above it stays in Confío's Pago ASAP balance. Dollars that no longer
+        # cover it go to review, never a smaller payout.
+        total = _cost(client, exact)
+        if total <= 0:
+            return None
+        if total > usd:
+            return {'review': 'exact_payout_short'}
+        return _terms(client, section, exact, total, inflight)
     floor = None
     if section.get('funding_sender'):
         from smart_account.payouts import ramp_fx_floor
@@ -363,6 +436,10 @@ def payout_terms(ramp, inflight) -> dict | None:
     if floor is not None and ves < _ves_for(usd, floor):
         # The rate alone is not it: the provider's own cost counts.
         return {'wait': ve_send.RATE_OUTSIDE}
+    return _terms(client, section, ves, total, inflight)
+
+
+def _terms(client, section, ves, total, inflight):
     symbol = str(getattr(settings, 'PAGOASAP_BALANCE_SYMBOL', 'USD')).upper()
     symbol = 'USD' if symbol == 'USDT' else symbol  # balances() names dollars "USD"
     balance = client.balances().get(symbol, Decimal('0'))

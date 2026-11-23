@@ -88,6 +88,39 @@ const CREATE_JOURNEY = gql`
     }
   }
 `;
+// An exact local amount (Pagar's local-currency mode) in its own document:
+// against an older server only that send fails, never every journey.
+const CREATE_EXACT_JOURNEY = gql`
+  mutation StartExactInfiniaJourney(
+    $direction: String!
+    $requestId: UUID!
+    $localAccountId: UUID!
+    $cryptoAccountId: UUID!
+    $minimumFxOutput: Decimal!
+    $bridgeId: UUID
+    $destinationId: UUID
+    $exactLocalAmount: Decimal!
+  ) {
+    createInfiniaJourney(
+      direction: $direction
+      requestId: $requestId
+      localAccountId: $localAccountId
+      cryptoAccountId: $cryptoAccountId
+      minimumFxOutput: $minimumFxOutput
+      bridgeId: $bridgeId
+      destinationId: $destinationId
+      exactLocalAmount: $exactLocalAmount
+    ) {
+      success
+      errors
+      journey {
+        internalId
+        bridgeId
+        stage
+      }
+    }
+  }
+`;
 const ATTACH_BRIDGE = gql`
   mutation AttachInfiniaBridge($journeyId: UUID!, $bridgeId: UUID!) {
     attachInfiniaReturnBridge(journeyId: $journeyId, bridgeId: $bridgeId) {
@@ -110,7 +143,8 @@ export async function createInfiniaJourney(variables: Record<string, unknown>) {
   const result = await withFaceStepUp(
     variables.direction === 'to_wallet' ? 'payin_release' : 'withdrawal',
     () => withBrebLocationRetry(async () => {
-      const response = await apolloClient.mutate({mutation: CREATE_JOURNEY, variables});
+      const mutation = variables.exactLocalAmount ? CREATE_EXACT_JOURNEY : CREATE_JOURNEY;
+      const response = await apolloClient.mutate({mutation, variables});
       return response.data?.createInfiniaJourney;
     }),
     (r: any) => !r?.success && isFaceStepUpRequired(r?.errors?.[0]),

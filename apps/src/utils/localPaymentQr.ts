@@ -13,6 +13,15 @@ export function pixChargeHint(raw: string): boolean {
   });
 }
 
+/** Display hint only: a Colombian Bre-B QR (pesos) or an Argentine QR
+ *  (pesos) with its own amount (field 54) is paid at exactly that amount.
+ *  The server decides. */
+export function fixedQrAmountHint(raw: string): boolean {
+  const fields = emvFields(raw.trim());
+  if (!fields || !fields['54']) return false;
+  return (fields['58'] === 'CO' && fields['53'] === '170') || (fields['58'] === 'AR' && fields['53'] === '032');
+}
+
 function emvFields(value: string): Record<string, string> | null {
   if (value.length > 4096) return null;
   const fields: Record<string, string> = {};

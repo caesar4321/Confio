@@ -1,4 +1,5 @@
 """JWT-scoped Infinia journey API; no provider IDs or arbitrary wallet inputs."""
+from decimal import Decimal
 from itertools import islice
 
 import graphene
@@ -165,6 +166,9 @@ class CreateInfiniaJourney(graphene.Mutation):
         bridge_id = graphene.UUID()
         credit_id = graphene.UUID()
         destination_id = graphene.UUID()
+        # An exact local amount the person typed (Pagar). Asked for only by a
+        # send in that mode, so an older server fails only that send.
+        exact_local_amount = graphene.Decimal()
     success = graphene.Boolean(required=True)
     errors = graphene.List(graphene.String, required=True)
     # Set for a refusal that comes from a prepared payment (payment_intents).
@@ -203,9 +207,17 @@ class CreateInfiniaJourney(graphene.Mutation):
                 if is_new_send and destination is not None:
                     from .local_money import require_current_destination
                     require_current_destination(destination)
+                # A prepared card's exact amount is the card's, never the client's.
+                exact = kwargs.pop('exact_local_amount', None)
+                if intent is not None:
+                    shown = (intent.params or {}).get('exact_local')
+                    if exact is not None and (not shown or Decimal(str(exact)) != Decimal(shown)):
+                        raise payment_intents._refuse('changed')
+                    exact = shown or None
                 # The monthly allowance is checked inside create_journey, under the owner lock.
                 row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
-                                     bridge=bridge, credit=credit, destination=destination, **kwargs)
+                                     bridge=bridge, credit=credit, destination=destination,
+                                     exact_payout=exact, **kwargs)
                 payment_intents.journey_created(intent)
             return cls(success=True, errors=[], journey=row)
         except Exception as exc:
