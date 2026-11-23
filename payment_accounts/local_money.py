@@ -1533,7 +1533,8 @@ def _same_qr_destinations(destination):
     rows = same_qr_rows(destination)
     if rows is None:
         return []
-    return [str(value) for value in rows.order_by('pk').values_list('internal_id', flat=True)[:SAME_QR_LIMIT + 1]]
+    # No ordering: the cap only counts, and an ORDER BY could steer the plan off the hash index.
+    return [str(value) for value in rows.values_list('internal_id', flat=True)[:SAME_QR_LIMIT + 1]]
 
 
 PAID = 'paid'
@@ -1561,7 +1562,11 @@ def held(key, exclude_request_id=None, destination=None, owner=None):
     state = ''
     for rows in sets:
         signed = rows.exclude(bridge__status='prepared')
-        if signed.exclude(stage='needs_review', payout_operation__isnull=True).exists():
+        # In review with no payout, or a payout that failed or came back:
+        # nobody was paid (REVIEW); anything else may have paid (PAID).
+        unpaid_review = Q(stage='needs_review') & (Q(payout_operation__isnull=True)
+                                                  | Q(payout_operation__status__in=('failed', 'reversed')))
+        if signed.exclude(unpaid_review).exists():
             return PAID
         if signed.exists():
             # Held by a payment in review that has not paid anyone: still
@@ -1617,7 +1622,7 @@ def legacy_payments(destination_ids, exclude_request_id=None, owner=None):
     bridge quote's money flow since 2026-09-24. Each lookup indexed; None (held,
     fail closed) when more flows name the QR than can be checked."""
     from .models import InfiniaJourney
-    flows = list(legacy_flows(destination_ids).order_by('pk').values_list('pk', flat=True)[:SAME_QR_LIMIT + 1])
+    flows = list(legacy_flows(destination_ids).values_list('pk', flat=True)[:SAME_QR_LIMIT + 1])
     if len(flows) > SAME_QR_LIMIT:
         return None
     base = InfiniaJourney.objects.filter(direction='to_bank').exclude(destination_snapshot__has_key='store_order')

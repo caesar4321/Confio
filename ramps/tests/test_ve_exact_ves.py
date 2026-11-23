@@ -28,6 +28,19 @@ def tearDownModule():
 
 
 
+def paced_adapter(remembered=()):
+    """An adapter whose quote_exact runs the caller's pace on a miss, as the
+    real one does (`remembered` amounts are served from memory)."""
+    adapter = mock.Mock()
+    quote = {'usd_amount': '16.40', 'estimated_ves': '15000.00', 'exact_ves': '15000.00'}
+    def quote_exact(ves, on_miss=None):
+        if str(ves) not in remembered and on_miss is not None:
+            on_miss()
+        return dict(quote)
+    adapter.quote_exact.side_effect = quote_exact
+    return adapter
+
+
 def relay_delivering(ratio=Decimal('0.98')):
     """A Relay estimate that delivers `ratio` of the deposited USDT."""
     relay = mock.Mock()
@@ -255,12 +268,10 @@ class ExactRound5Tests(TestCase):
                         side_effect=ve_pagomovil.VePagoMovilError('Verifica tu identidad para usar Pago Móvil.')):
             refused = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
         self.assertFalse(refused.success)
-        adapter = mock.Mock()
-        adapter.quote_exact.return_value = {'usd_amount': '16.40', 'estimated_ves': '15000.00', 'exact_ves': '15000.00'}
-        adapter.cached_exact.return_value = None   # every amount asks the providers
-        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock())), \
+        adapter = paced_adapter()   # every amount asks the providers
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock(pk=901))), \
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
-            from ramps.ve_pagomovil_schema import EXACT_QUOTES_PER_WINDOW
+            from payment_accounts.local_money import EXACT_QUOTES_PER_WINDOW   # one count for every exact price
             answers = [Query().resolve_ve_pagomovil_send_exact_quote(self.info, str(15000 + n))
                        for n in range(EXACT_QUOTES_PER_WINDOW + 1)]
         self.assertTrue(all(a.success for a in answers[:-1]))
@@ -341,12 +352,11 @@ class ExactRound11Tests(TestCase):
         self.info = mock.Mock(context=mock.Mock(user=self.user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
 
     def test_typing_amounts_never_uses_up_the_send_and_remembered_prices_are_free(self):
-        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, Query, EXACT_QUOTES_PER_WINDOW
-        adapter = mock.Mock()
-        adapter.quote_exact.return_value = {'usd_amount': '16.40', 'estimated_ves': '15000.00', 'exact_ves': '15000.00'}
-        adapter.cached_exact.side_effect = lambda ves: {'usd_amount': '16.40'} if str(ves) == '15000' else None
+        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, Query
+        from payment_accounts.local_money import EXACT_QUOTES_PER_WINDOW
+        adapter = paced_adapter(remembered=('15000',))
         adapter.create.side_effect = ve_pagomovil.VePagoMovilError('El precio cambió. Revisa el envío de nuevo.')
-        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock())), \
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock(pk=911))), \
                 mock.patch('security.face_step_up.missing_face_step_up', return_value=None), \
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
             for n in range(EXACT_QUOTES_PER_WINDOW):          # every new amount asks the providers
@@ -357,3 +367,30 @@ class ExactRound11Tests(TestCase):
         self.assertTrue(remembered.success, remembered.error)   # a remembered price costs no pace
         self.assertNotIn('Espera', order.error or '')           # the send has its own count
         adapter.create.assert_called_once()
+
+
+class ExactRound12Tests(TestCase):
+    def test_the_real_quote_paces_only_on_a_provider_ask(self):
+        from django.core.cache import cache
+        cache.clear()
+        asked = []
+        with mock.patch.object(pagoasap_send, 'quote_exact_now', return_value={'usd_amount': '16.40'}):
+            pagoasap_send.quote_exact('15000', on_miss=lambda: asked.append(1))
+            pagoasap_send.quote_exact('15000.00', on_miss=lambda: asked.append(1))   # remembered
+        self.assertEqual(asked, [1])
+
+    def test_the_charged_lines_add_up(self):
+        from django.contrib.auth import get_user_model
+        user = get_user_model().objects.create(username='ve-exact-12', firebase_uid='ve-exact-12')
+        quote = {'usd_amount': '19.50', 'usdt_amount': '19.30', 'confio_fee_usd': '0.20',
+                 'processor_fee_usd': '0.40', 'estimated_ves': '18000.00', 'exact_ves': '18000.00', 'rate': '923.0769'}
+        with mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
+                mock.patch.object(pagoasap_send, 'quote_exact_now', return_value=quote), \
+                mock.patch.object(ve_send, 'current_block', return_value=1000), \
+                mock.patch.object(ve_send, 'reserve') as reserve, mock.patch.object(ve_send, 'prepare'):
+            pagoasap_send.create(user, mock.Mock(), Decimal('19.51'), {}, exact_ves='18000.00')
+        estimate = reserve.call_args.kwargs['estimate']
+        _, deposit = ve_send.confio_amounts(Decimal('19.51'))
+        self.assertEqual(Decimal(estimate['usdt_amount']), (Decimal(deposit) / Decimal(10 ** 18)).quantize(ve_send.MICRO))
+        self.assertLessEqual(abs(Decimal(estimate['confio_fee_usd']) + Decimal(estimate['usdt_amount']) - Decimal('19.51')),
+                             Decimal('0.01'))

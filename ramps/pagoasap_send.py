@@ -286,31 +286,28 @@ PRICE_MOVED = 'El precio cambió. Revisa el envío de nuevo.'
 EXACT_QUOTE_CACHE_SECONDS = 15
 
 
-def cached_exact(ves):
-    """The remembered exact quote for `ves`, or None (no provider is asked)."""
-    from django.core.cache import cache
-    try:
-        return cache.get(_exact_cache_key(ves))
-    except (InvalidOperation, TypeError, ValueError):
-        return None
-
-
 def _exact_cache_key(ves):
     return f'pagoasap:exact:{Decimal(str(ves)).quantize(ve_send.CENT):f}'
 
 
-def quote_exact(ves) -> dict:
+def quote_exact(ves, on_miss=None) -> dict:
     """quote_exact_now, kept a few seconds per amount: typing asks again
-    often, and each answer is several Relay quotes and Pago ASAP previews."""
+    often, and each answer is several Relay quotes and Pago ASAP previews.
+    `on_miss` (the caller's pace) runs right before the providers are asked,
+    and only then."""
     from django.core.cache import cache
     try:
         key = _exact_cache_key(ves)
     except (InvalidOperation, TypeError, ValueError):
-        return quote_exact_now(ves)
-    cached = cache.get(key)
+        key = None
+    cached = cache.get(key) if key else None
     if cached is not None:
         return dict(cached)
+    if on_miss is not None:
+        on_miss()
     quote = quote_exact_now(ves)
+    if key is None:
+        return quote
     cache.set(key, dict(quote), EXACT_QUOTE_CACHE_SECONDS)
     return quote
 
@@ -394,8 +391,15 @@ def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
             from django.core.cache import cache
             cache.delete(_exact_cache_key(exact_ves))
             raise VePagoMovilError(PRICE_MOVED)
-        # What they saw (at most a cent above the fresh price): what is charged.
-        estimate = {**estimate, 'usd_amount': format(amount, 'f')}
+        # What they saw (at most a cent above the fresh price): what is
+        # charged, with the lines re-derived for it so they still add up.
+        _, deposit_wei = ve_send.confio_amounts(amount)
+        usdt = Decimal(deposit_wei) / Decimal(10 ** 18)
+        processor = Decimal(str(estimate.get('processor_fee_usd') or 0)) + (usdt - Decimal(str(estimate['usdt_amount'])))
+        estimate = {**estimate, 'usd_amount': format(amount, 'f'),
+                    'usdt_amount': format(usdt.quantize(ve_send.MICRO), 'f'),
+                    'confio_fee_usd': format(max(amount - usdt, Decimal('0')).quantize(ve_send.CENT), 'f'),
+                    'processor_fee_usd': format(max(processor, Decimal('0')).quantize(ve_send.CENT), 'f')}
     else:
         estimate = quote(amount)
     gross_wei, deposit_wei = ve_send.confio_amounts(amount)

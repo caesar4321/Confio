@@ -421,6 +421,8 @@ class LocalMoneyQuery(graphene.ObjectType):
         if local_money.is_fixed_amount_qr(row):
             # A Bre-B or Argentine QR with its own amount is answered here too: the
             # screen shows the computed dollars and the exact amount, as for a Pix charge.
+            if not local_money.fixed_qr_build_supported(info.context.META):
+                raise GraphQLError(local_money.UPDATE_FOR_FIXED_QR)
             from . import breb_location
             try:
                 method = local_money.method_of(row)

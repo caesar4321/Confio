@@ -171,6 +171,15 @@ def _require_exact_build(info):
 EXACT_ORDERS_PER_WINDOW = 10
 
 
+def _pace_exact_price(account):
+    from payment_accounts.local_money import pace_exact_quotes
+    from payment_accounts.services import PaymentAccountError
+    try:
+        pace_exact_quotes(account)
+    except PaymentAccountError as exc:
+        raise VePagoMovilError(str(exc)) from exc
+
+
 def _pace_exact(user, kind='quote'):
     """Every exact-bolívares price (a quote, or an order priced fresh) asks
     Pago ASAP and the bridge several times; their limits are shared with real
@@ -539,13 +548,11 @@ class Query(graphene.ObjectType):
             # provider and the bridge several times: only for those who can
             # send), and a per-person pace: Pago ASAP's limits are shared
             # with real payouts.
-            user, _ = _preflight(info, SEND)
+            user, account = _preflight(info, SEND)
             _require_exact_build(info)
-            adapter = _exact_adapter()
-            cached = getattr(adapter, 'cached_exact', None)
-            if not (callable(cached) and cached(ves_amount)):
-                _pace_exact(user)   # only a price that asks the providers counts
-            quote = adapter.quote_exact(ves_amount)
+            # Paced only when the providers are asked, on the one per-account
+            # count every exact price shares (Pagar, cards, this screen).
+            quote = _exact_adapter().quote_exact(ves_amount, on_miss=lambda: _pace_exact_price(account))
             quote.pop('exact_ves', None)
             for key, name in (('min_usd', 'VE_PAGOMOVIL_SEND_MIN_USD'), ('max_usd', 'VE_PAGOMOVIL_SEND_MAX_USD')):
                 cap = ve_pagomovil.optional_limit(name)

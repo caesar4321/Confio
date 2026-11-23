@@ -592,6 +592,9 @@ def read_pagomovil(owner, user, request, *, client=None):
     if not (ve_pagomovil.enabled(ve_pagomovil.SEND) and ve_pagomovil.client_supports(ve_pagomovil.SEND, meta)):
         raise _refuse('rail', 'Pago Móvil no está disponible ahora.')
     exact = exact_local(request)
+    if exact and request.get('amount_usd') not in (None, ''):
+        # Dollars or bolívares, never both: one would silently lose.
+        raise _refuse('no_amount', 'Escribe el monto en dólares o en bolívares, no los dos.')
     amount = usd_amount(request.get('amount_usd'))
     if amount is None and not exact:
         raise _refuse('no_amount', 'Dime cuántos dólares quieres enviar.')
@@ -606,10 +609,8 @@ def read_pagomovil(owner, user, request, *, client=None):
             adapter = ve_pagomovil.send_adapter()
             if not callable(getattr(adapter, 'quote_exact', None)):
                 raise _refuse('rail', 'Por ahora solo puedes enviar un monto en dólares por Pago Móvil.')
-            cached = getattr(adapter, 'cached_exact', None)
-            if not (callable(cached) and cached(exact)):
-                _pace(owner)   # only a price that asks the providers counts
-            quote = adapter.quote_exact(exact)
+            # Paced only when the providers are asked (the shared count).
+            quote = adapter.quote_exact(exact, on_miss=lambda: _pace(owner))
             amount = Decimal(str(quote['usd_amount']))
         else:
             quote = ve_pagomovil.send_adapter().quote(amount)
@@ -737,8 +738,10 @@ class PagoMovilRail(OrderRail):
 
     def request_of(self, intent, meta=None):
         params = intent.params or {}
-        return {'method_id': VE_PAGOMOVIL, 'amount_usd': intent.total_usd, 'meta': meta,
-                'amount_local': params.get('exact_ves'),
+        # An exact card is read again by its bolívares alone (reread_order
+        # still holds the new total to the card's).
+        return {'method_id': VE_PAGOMOVIL, 'amount_usd': None if params.get('exact_ves') else intent.total_usd,
+                'meta': meta, 'amount_local': params.get('exact_ves'),
                 **{key: params.get(key) for key in ('cedula', 'phone', 'bank_code', 'holder_name')}}
 
     def create(self, info, intent):

@@ -184,7 +184,7 @@ class PagoMovilExactCardTests(intent_fixture.PaymentIntentBase):
         mock.patch('ramps.ve_pagomovil.enabled', return_value=True).start()
         mock.patch('ramps.ve_pagomovil.client_supports', return_value=True).start()
         self.adapter = mock.Mock()
-        self.adapter.quote_exact.side_effect = lambda ves: {
+        self.adapter.quote_exact.side_effect = lambda ves, **kw: {
             'usd_amount': '16.40', 'usdt_amount': '16.20', 'confio_fee_usd': '0.20', 'processor_fee_usd': '0.30',
             'estimated_ves': format(Decimal(ves), '.2f'), 'exact_ves': format(Decimal(ves), '.2f'),
             'rate': '1000.0000'}
@@ -204,6 +204,14 @@ class PagoMovilExactCardTests(intent_fixture.PaymentIntentBase):
         from payment_accounts.intent_rails import PagoMovilRail
         self.assertEqual(PagoMovilRail().request_of(intent)['amount_local'], '15000.00')
 
+    def test_dollars_and_bolivares_together_are_refused_and_a_card_rereads_by_bolivares(self):
+        with self.assertRaises(IntentRefused) as both:
+            self.send(amount_usd='50')
+        self.assertEqual(both.exception.code, 'no_amount')
+        from payment_accounts.intent_rails import PagoMovilRail
+        again = PagoMovilRail().request_of(self.send())
+        self.assertEqual((again['amount_usd'], again['amount_local']), (None, '15000.00'))
+
     def test_the_order_is_made_with_the_cards_bolivares(self):
         from payment_accounts.intent_rails import PagoMovilRail
         intent = self.send()
@@ -216,9 +224,9 @@ class PagoMovilExactCardTests(intent_fixture.PaymentIntentBase):
         from payment_accounts import intent_rails
         intent = self.send()
         base = self.adapter.quote_exact.side_effect
-        self.adapter.quote_exact.side_effect = lambda ves: {**base(ves), 'processor_fee_usd': '0.45'}
+        self.adapter.quote_exact.side_effect = lambda ves, **kw: {**base(ves), 'processor_fee_usd': '0.45'}
         intent_rails.reread_order(self.owner, self.user, intent)          # same total: still the card
-        self.adapter.quote_exact.side_effect = lambda ves: {**base(ves), 'usd_amount': '16.41'}
+        self.adapter.quote_exact.side_effect = lambda ves, **kw: {**base(ves), 'usd_amount': '16.41'}
         with self.assertRaises(IntentRefused) as refused:
             intent_rails.reread_order(self.owner, self.user, intent)
         self.assertEqual(refused.exception.code, 'quote_changed')
@@ -874,6 +882,33 @@ class ExactLocalApiRound10Tests(ExactLocalApiTests):
         quote.assert_not_called()
 
 
+class ExactLocalRound12JourneyTests(ExactLocalRound10JourneyTests):
+    def test_a_payout_that_failed_is_review_not_paid(self):
+        from payment_accounts.models import MoneyOperation
+        fixed = self.fixed(breb('1249'))
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        key = first.destination_snapshot['store_order']['key']
+        payout = MoneyOperation.objects.create(money_flow=first.money_flow, provider='infinia', operation_type='payout',
+                                               status='failed', source_account=self.local, source_asset='PEN',
+                                               source_amount=Decimal('1249.00'), idempotency_key=str(uuid.uuid4()))
+        InfiniaJourney.objects.filter(pk=first.pk).update(stage='needs_review', payout_operation=payout)
+        self.assertEqual(local_money.held(key, destination=fixed), local_money.REVIEW)
+        MoneyOperation.objects.filter(pk=payout.pk).update(status='succeeded')
+        self.assertEqual(local_money.held(key, destination=fixed), local_money.PAID)
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound12Tests(ExactLocalApiTests):
+    def test_an_older_build_gets_no_fixed_qr_price(self):
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        local_money.fixed_qr_build_supported.return_value = False
+        with self.assertRaisesRegex(Exception, 'Actualiza la app'):
+            LocalMoneyQuery().resolve_local_pix_charge(self.info, fixed.internal_id)
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -909,3 +944,7 @@ only_own_tests(ExactLocalRound10JourneyTests, journey_fixture.JourneyTests, Exac
                ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
                ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests)
 only_own_tests(ExactLocalApiRound10Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound12JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
+               ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests)
+only_own_tests(ExactLocalApiRound12Tests, ExactLocalApiTests)
