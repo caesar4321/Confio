@@ -24,16 +24,19 @@ from .test_payment_intent_rails import EVERY_LEVEL
 
 
 # Tests run with real AWS credentials (the prod alert secret): nothing here may
-# ever reach the team's Telegram. Every send stops at its lowest layer.
-_telegram = mock.patch('config.ops_alerts._send', return_value=True)
+# ever reach the team's Telegram. Every send stops at its lowest layer, replaced
+# outright rather than by mock.patch: fixtures here call mock.patch.stopall(),
+# which would quietly undo a started patch after the first test.
+import config.ops_alerts as _ops_alerts
+_real_send = _ops_alerts._send
 
 
 def setUpModule():
-    _telegram.start()
+    _ops_alerts._send = lambda *args, **kwargs: True
 
 
 def tearDownModule():
-    _telegram.stop()
+    _ops_alerts._send = _real_send
 
 
 
@@ -975,3 +978,9 @@ only_own_tests(ExactLocalRound12JourneyTests, journey_fixture.JourneyTests, Exac
                ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests)
 only_own_tests(ExactLocalApiRound12Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound13Tests, ExactLocalApiTests)
+
+
+class TelegramGuardTests(intent_fixture.PaymentIntentBase):
+    def test_the_guard_survives_the_fixtures_stopall(self):
+        mock.patch.stopall()
+        self.assertIsNot(_ops_alerts._send, _real_send)

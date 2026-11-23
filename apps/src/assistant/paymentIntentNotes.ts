@@ -8,7 +8,7 @@ export function exactSurplusNote(intent: { amountExact?: boolean | null; family?
     return 'Incluye las comisiones y un margen por si el tipo de cambio se mueve: lo que sobre queda en tu cuenta en moneda local.';
   }
   if (intent.family === 'ramp_order' && intent.methodId === 've_pagomovil_send') {
-    return 'Incluye las comisiones y un pequeño margen por si la tasa se mueve; ese margen no se devuelve.';
+    return 'Incluye las comisiones y un pequeño margen por si la tasa se mueve; lo que sobre (incluido ese margen) no se devuelve.';
   }
   return '';
 }

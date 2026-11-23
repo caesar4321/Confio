@@ -508,7 +508,7 @@ export default function VePagoMovilSendScreen() {
               <View style={styles.disclaimerPill}>
                 <Icon name="info" size={14} color={colors.primaryDark} />
                 <Text style={styles.quoteNote}>{vesMode
-                  ? 'El precio incluye las comisiones y un pequeño margen por si la tasa se mueve; ese margen no se devuelve. Si al pagar no alcanzara, esperamos un rato y, si sigue sin alcanzar, lo revisamos contigo.'
+                  ? 'El precio incluye las comisiones y un pequeño margen por si la tasa se mueve; lo que sobre (incluido ese margen) no se devuelve. Si al pagar no alcanzara, esperamos un rato y, si sigue sin alcanzar, lo revisamos contigo.'
                   : 'Estimado: los bolívares finales se fijan al convertir tu envío.'}</Text>
               </View>
             </View>

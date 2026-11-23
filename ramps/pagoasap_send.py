@@ -303,6 +303,7 @@ def quote_exact(ves, on_miss=None) -> dict:
     cached = cache.get(key) if key else None
     if cached is not None:
         return dict(cached)
+    exact_ves_amount(ves)   # an amount refused anyway costs no pace
     if on_miss is not None:
         on_miss()
     quote = quote_exact_now(ves)
@@ -312,13 +313,8 @@ def quote_exact(ves, on_miss=None) -> dict:
     return quote
 
 
-def quote_exact_now(ves) -> dict:
-    """The dollars that pay exactly `ves` bolívares by Pago Móvil, all in.
-
-    Priced from Pago ASAP's own cost for that payout plus a margin
-    (VE_PAGOMOVIL_EXACT_MARGIN_BPS) against the rate moving before it runs;
-    the payout is exactly `ves` and what the deposit buys above it stays in
-    Confío's Pago ASAP balance (payout_terms). Same keys as quote()."""
+def exact_ves_amount(ves) -> Decimal:
+    """An exact bolívar amount Pago Móvil can pay, or a refusal in words."""
     try:
         ves = Decimal(str(ves))
     except (InvalidOperation, TypeError, ValueError):
@@ -326,6 +322,30 @@ def quote_exact_now(ves) -> dict:
     # Bounds before quantizing: a huge exponent cannot be quantized.
     if not ves.is_finite() or ves < MIN_PAYOUT_VES or ves >= Decimal('1e10') or ves != ves.quantize(ve_send.CENT):
         raise VePagoMovilError(f'Escribe un monto desde {MIN_PAYOUT_VES} bolívares, con hasta dos decimales.')
+    return ves
+
+
+def _exact_margin() -> Decimal:
+    """VE_PAGOMOVIL_EXACT_MARGIN_BPS as a fraction: finite and 0–999 bps, or
+    the default 100 (a bad setting never prices below Pago ASAP's own cost)."""
+    try:
+        bps = ve_pagomovil.setting_decimal('VE_PAGOMOVIL_EXACT_MARGIN_BPS', '100')
+    except (InvalidOperation, TypeError, ValueError):
+        bps = Decimal('100')
+    if not bps.is_finite() or bps < 0 or bps >= 1000:
+        logger.warning('VE_PAGOMOVIL_EXACT_MARGIN_BPS=%s is out of bounds; using 100', bps)
+        bps = Decimal('100')
+    return bps / 10_000
+
+
+def quote_exact_now(ves) -> dict:
+    """The dollars that pay exactly `ves` bolívares by Pago Móvil, all in.
+
+    Priced from Pago ASAP's own cost for that payout plus a margin
+    (VE_PAGOMOVIL_EXACT_MARGIN_BPS) against the rate moving before it runs;
+    the payout is exactly `ves` and what the deposit buys above it stays in
+    Confío's Pago ASAP balance (payout_terms). Same keys as quote()."""
+    ves = exact_ves_amount(ves)
     client = _client()
     try:
         cost = _cost(client, ves)
@@ -334,7 +354,7 @@ def quote_exact_now(ves) -> dict:
         raise VePagoMovilError(GENERIC_ERROR) from exc
     if cost <= 0:
         raise VePagoMovilError(GENERIC_ERROR)
-    margin = ve_pagomovil.setting_decimal('VE_PAGOMOVIL_EXACT_MARGIN_BPS', '100') / 10_000
+    margin = _exact_margin()
     needed = (cost * (1 + margin)).quantize(ve_send.CENT, rounding=ROUND_UP)
     rates = _rates(client)   # once per quote: each try only asks Relay again
     amount = needed

@@ -15,16 +15,19 @@ from .test_ve_send import WALLET, pagoasap_client
 
 
 # Tests run with real AWS credentials (the prod alert secret): nothing here may
-# ever reach the team's Telegram. Every send stops at its lowest layer.
-_telegram = mock.patch('config.ops_alerts._send', return_value=True)
+# ever reach the team's Telegram. Every send stops at its lowest layer, replaced
+# outright rather than by mock.patch: fixtures here call mock.patch.stopall(),
+# which would quietly undo a started patch after the first test.
+import config.ops_alerts as _ops_alerts
+_real_send = _ops_alerts._send
 
 
 def setUpModule():
-    _telegram.start()
+    _ops_alerts._send = lambda *args, **kwargs: True
 
 
 def tearDownModule():
-    _telegram.stop()
+    _ops_alerts._send = _real_send
 
 
 
@@ -397,3 +400,26 @@ class ExactRound12Tests(TestCase):
         # The processor's line moved by exactly what the deposit moved (19.30 at the fresh price).
         self.assertEqual(Decimal(estimate['processor_fee_usd']),
                          (Decimal('0.40') + Decimal(estimate['usdt_amount']) - Decimal('19.30')).quantize(ve_send.CENT))
+
+
+class ExactRound14Tests(TestCase):
+    def test_the_telegram_guard_survives_stopall(self):
+        mock.patch.stopall()   # what shared fixtures do in tearDown
+        self.assertIsNot(_ops_alerts._send, _real_send)
+        self.assertTrue(_ops_alerts._send('x'))
+
+    def test_a_bad_margin_setting_never_prices_below_cost(self):
+        for bad in ('-50', 'NaN', '5000', 'abc'):
+            with self.subTest(bps=bad), self.settings(VE_PAGOMOVIL_EXACT_MARGIN_BPS=bad):
+                self.assertEqual(pagoasap_send._exact_margin(), Decimal('0.01'))
+        with self.settings(VE_PAGOMOVIL_EXACT_MARGIN_BPS='150'):
+            self.assertEqual(pagoasap_send._exact_margin(), Decimal('0.015'))
+
+    def test_an_amount_refused_anyway_costs_no_pace(self):
+        from django.core.cache import cache
+        cache.clear()
+        paced = []
+        for bad in ('9.99', '12.345'):
+            with self.subTest(ves=bad), self.assertRaises(ve_pagomovil.VePagoMovilError):
+                pagoasap_send.quote_exact(bad, on_miss=lambda: paced.append(1))
+        self.assertEqual(paced, [])
