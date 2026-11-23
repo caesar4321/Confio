@@ -340,6 +340,21 @@ def store_order_terms(request):
     return {'amount': str(amount.quantize(CENT)), 'reference': reference}
 
 
+def _pace(owner):
+    try:
+        local_money.pace_exact_quotes(owner)
+    except PaymentAccountError as exc:
+        raise _refuse('rate_limited', str(exc)) from exc
+
+
+def _require_exact_card(owner, request):
+    """An exact card (a typed local amount, exact bolívares) is drawn only by
+    a build that says where its spare goes, and is paced like Pagar's."""
+    if not local_money.fixed_qr_build_supported(request.get('meta')):
+        raise _refuse('rail', 'Actualiza la app para enviar un monto exacto.')
+    _pace(owner)
+
+
 def _require_unpaid(destination):
     """A dynamic fixed-amount QR someone already paid ends the card
     (charge_changed), before any bridge is prepared for it."""
@@ -448,6 +463,10 @@ def read_transfer(owner, user, method_id, request, *, client=None):
     amount = usd_amount(request.get('amount_usd'))
     if amount is None and not exact and not typed:
         raise _refuse('no_amount', 'Dime cuántos dólares quieres enviar.')
+    if typed:
+        _require_exact_card(owner, request)
+    elif exact:
+        _pace(owner)
     local_money.require_rail(owner, _identity(owner), method)
     _location(owner, method, request.get('meta'))
     destination = local_money.recheck_destination(local_money.resolve_destination(owner, method_id, value,
@@ -556,6 +575,7 @@ def read_pagomovil(owner, user, request, *, client=None):
         if exact:
             # Exact bolívares: the provider prices them in dollars and pays
             # exactly them; one that cannot is refused, never guessed.
+            _require_exact_card(owner, request)
             adapter = ve_pagomovil.send_adapter()
             if not callable(getattr(adapter, 'quote_exact', None)):
                 raise _refuse('rail', 'Por ahora solo puedes enviar un monto en dólares por Pago Móvil.')

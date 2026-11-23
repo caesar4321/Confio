@@ -27,6 +27,7 @@ from .test_payment_intent_rails import EVERY_LEVEL
 class ExactLocalCardTests(intent_fixture.PaymentIntentBase):
     def setUp(self):
         super().setUp()
+        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.1 build
         self.rate = Decimal('5.40')
 
         def quote(owner, destination, *, amount=None, **kw):
@@ -162,6 +163,7 @@ class PagoMovilExactCardTests(intent_fixture.PaymentIntentBase):
 
     def setUp(self):
         super().setUp()
+        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.1 build
         mock.patch('ramps.ve_pagomovil.enabled', return_value=True).start()
         mock.patch('ramps.ve_pagomovil.client_supports', return_value=True).start()
         self.adapter = mock.Mock()
@@ -662,13 +664,18 @@ class ExactLocalRound6JourneyTests(ExactLocalRound4JourneyTests):
 
     def test_the_paid_once_lookups_use_their_indexes(self):
         from django.db import connection
-        lookups = (InfiniaJourney.objects.filter(destination_snapshot__store_order__key='k'),
-                   InfiniaJourney.objects.filter(destination_snapshot__destination_internal_id__in=['a']),
+        # The very querysets held() runs, not look-alikes.
+        fixed = self.fixed(breb('1249'))
+        lookups = (local_money.holding_payments('co_qr:qr:k'),
+                   local_money.legacy_payments(['a'])[0],
+                   local_money.legacy_flows(['a']),
                    PayoutDestination.objects.filter(provider_data__breb_qr__payload='p'),
                    PayoutDestination.objects.filter(details__qrCode='p'))
+        self.assertTrue(fixed.pk)
         with connection.cursor() as cursor:
             cursor.execute('SET LOCAL enable_seqscan = off')
             for qs, index in zip(lookups, ('infinia_journey_order_key_idx', 'infinia_journey_destination_id_idx',
+                                           'money_flow_local_destination_idx',
                                            'payout_destination_breb_qr_idx', 'payout_destination_qr_code_idx')):
                 sql, params = qs.query.sql_with_params()
                 cursor.execute('EXPLAIN ' + sql, params)
@@ -698,6 +705,37 @@ class ExactLocalApiRound6Tests(ExactLocalApiTests):
         self.assertEqual(refused.exception.code, 'quote_changed')
 
 
+class ExactLocalRound7JourneyTests(ExactLocalRound6JourneyTests):
+    def test_an_unsigned_payment_waits_rather_than_paid(self):
+        fixed = self.fixed(breb('1249'))
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        first.bridge.status = 'prepared'; first.bridge.save(update_fields=['status'])   # not signed yet
+        key = first.destination_snapshot['store_order']['key']
+        self.assertEqual(local_money.held(key, destination=fixed), local_money.SIGNING)
+        with self.assertRaisesRegex(PaymentAccountError, 'esperando firma'):
+            local_money.require_unpaid_qr(fixed)
+        first.bridge.status = 'submitted'; first.bridge.save(update_fields=['status'])
+        self.assertEqual(local_money.held(key, destination=fixed), local_money.PAID)
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound7Tests(ExactLocalApiTests):
+    def test_every_exact_card_needs_a_build_that_explains_it_and_is_paced(self):
+        request = {'method_id': 'br_pix', 'value': 'ana@example.com', 'amount_local': '500'}
+        local_money.fixed_qr_build_supported.return_value = False
+        with self.assertRaises(IntentRefused) as refused:
+            payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request=dict(request))
+        self.assertIn('Actualiza la app', str(refused.exception))
+        local_money.fixed_qr_build_supported.return_value = True
+        from django.core.cache import cache
+        cache.clear()
+        with mock.patch.object(local_money, 'EXACT_QUOTES_PER_WINDOW', 0), self.assertRaises(IntentRefused) as paced:
+            payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request=dict(request))
+        self.assertEqual(paced.exception.code, 'rate_limited')
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -719,3 +757,6 @@ only_own_tests(ExactLocalApiRound5Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalRound6JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
                ExactLocalRound4JourneyTests)
 only_own_tests(ExactLocalApiRound6Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound7JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests)
+only_own_tests(ExactLocalApiRound7Tests, ExactLocalApiTests)

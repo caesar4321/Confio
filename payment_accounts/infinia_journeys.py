@@ -204,15 +204,14 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         # What is being paid, in the person's words: a store's order, a QR's
         # charge or the amount they typed.
         what = ('el pedido' if str(order['key']).startswith('spei:')
-                else 'lo que debe recibir' if str(order['key']).startswith('exact:') else 'el cobro del QR')
+                else 'el monto exacto' if str(order['key']).startswith('exact:') else 'el cobro del QR')
         if minimum < Decimal(order['amount']):
             raise PaymentAccountError(f'El monto autorizado no cubre {what}. Revisa el pago de nuevo.')
-        from .local_money import is_held
-        if order.get('once', True) and is_held(order['key'], exclude_request_id=request_id, destination=destination,
-                                                owner=owner):
-            raise PaymentAccountError(
-                'Este pedido ya tiene un pago en Confío y no se puede pagar otra vez.' if what == 'el pedido'
-                else 'Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')
+        from .local_money import held, held_message
+        state = held(order['key'], exclude_request_id=request_id, destination=destination, owner=owner) \
+            if order.get('once', True) else ''
+        if state:
+            raise PaymentAccountError(held_message(state, 'pedido' if what == 'el pedido' else 'QR'))
     from .infinia_fee_policy import enabled as fee_enabled, freeze as freeze_fee
     fee = None
     if direction == 'to_bank':

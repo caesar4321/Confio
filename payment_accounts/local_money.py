@@ -1496,8 +1496,9 @@ def require_unpaid_qr(destination):
     order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
     if order is None or not order.get('once'):
         return
-    if is_held(order['key'], destination=destination):
-        raise PaymentAccountError('Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')
+    state = held(order['key'], destination=destination)
+    if state:
+        raise PaymentAccountError(held_message(state))
 
 
 SAME_QR_LIMIT = 500
@@ -1515,40 +1516,87 @@ def _same_qr_destinations(destination):
     return [str(value) for value in rows.order_by('pk').values_list('internal_id', flat=True)[:SAME_QR_LIMIT + 1]]
 
 
-def is_held(key, exclude_request_id=None, destination=None, owner=None):
-    """Whether a paid-once order or QR is held (holding_payments). Fails
-    closed: more rows holding the same QR than can be checked count as held."""
-    if destination is not None and ':qr:' in str(key) and len(_same_qr_destinations(destination)) > SAME_QR_LIMIT:
-        return True
-    return holding_payments(key, exclude_request_id=exclude_request_id, destination=destination,
-                            owner=owner).exists()
+PAID = 'paid'
+SIGNING = 'signing'
 
 
-def holding_payments(key, exclude_request_id=None, destination=None, owner=None):
-    """The payments that hold a paid-once order or QR: any that is not
-    failed, except one whose bridge was never signed and can no longer be
-    (someone who only opened a payment does not block everyone else). For a
-    QR (`destination`), also a payment of it made before QRs carried their
-    amount (paid in dollars, with no order key)."""
-    import time
-    from .models import InfiniaJourney
-    held = Q(destination_snapshot__store_order__key=key)
+def held(key, exclude_request_id=None, destination=None, owner=None):
+    """Whether a paid-once order or QR is held, and how: PAID (a payment of
+    it was signed, runs or is done), SIGNING (only an unsigned one that can
+    still be signed), or '' (free). Fails closed: more rows holding the same
+    QR than can be checked count as PAID. Each lookup is its own indexed
+    query (migration 0036): the order key first, a QR's older payments
+    (paid in dollars, with no key) only when needed."""
+    sets = [holding_payments(key, exclude_request_id=exclude_request_id, owner=owner)]
     if destination is not None and ':qr:' in str(key):
-        legacy = _same_qr_destinations(destination)
-        if legacy:
-            # Paid before QRs carried their amount: named in the snapshot
-            # since 2026-11-21, and in the bridge's quote since 2026-09-24.
-            held |= ((Q(destination_snapshot__destination_internal_id__in=legacy)
-                      | Q(bridge__quote__money_flow__metadata__local_destination_id__in=legacy))
-                     & ~Q(destination_snapshot__has_key='store_order'))
-    rows = InfiniaJourney.objects.filter(held, direction='to_bank') \
-        .exclude(stage='failed').exclude(bridge__status='prepared', bridge__deadline__lt=int(time.time()))
+        same = _same_qr_destinations(destination)
+        if len(same) > SAME_QR_LIMIT:
+            return PAID
+        if same:
+            legacy = legacy_payments(same, exclude_request_id=exclude_request_id, owner=owner)
+            if legacy is None:
+                return PAID
+            sets += legacy
+    state = ''
+    for rows in sets:
+        if rows.exclude(bridge__status='prepared').exists():
+            return PAID
+        if rows.exists():
+            state = SIGNING
+    return state
+
+
+def is_held(key, exclude_request_id=None, destination=None, owner=None):
+    return bool(held(key, exclude_request_id=exclude_request_id, destination=destination, owner=owner))
+
+
+def held_message(state, what='QR'):
+    if state == SIGNING:
+        return f'Hay un pago de este {what} esperando firma. Espera unos minutos y vuelve a intentarlo.'
+    return f'Este {what} ya tiene un pago en Confío y no se puede pagar otra vez.'
+
+
+def _live(rows, exclude_request_id=None, owner=None):
+    """Not failed, and not an unsigned bridge that can no longer be signed
+    (someone who only opened a payment does not block everyone else); never
+    the caller's own retry (same account and request id: a request id is the
+    client's, unique per account only)."""
+    import time
+    rows = rows.exclude(stage='failed').exclude(bridge__status='prepared', bridge__deadline__lt=int(time.time()))
     if exclude_request_id:
-        # Only the caller's own retry is not "another payment": a request id
-        # is the client's, unique per account only.
         rows = rows.exclude(request_id=exclude_request_id, confio_account=owner) if owner is not None \
             else rows.exclude(request_id=exclude_request_id)
     return rows
+
+
+def holding_payments(key, exclude_request_id=None, owner=None, destination=None):
+    """The live payments that carry this order or QR key."""
+    from .models import InfiniaJourney
+    return _live(InfiniaJourney.objects.filter(direction='to_bank', destination_snapshot__store_order__key=key),
+                 exclude_request_id, owner)
+
+
+def legacy_flows(destination_ids):
+    """The money flows whose bridge quote named one of these recipients."""
+    from .models import MoneyFlow
+    return MoneyFlow.objects.filter(metadata__local_destination_id__in=destination_ids)
+
+
+def legacy_payments(destination_ids, exclude_request_id=None, owner=None):
+    """Live payments of a QR made before QRs carried their amount (paid in
+    dollars, no order key): named in the snapshot since 2026-11-21, and in the
+    bridge quote's money flow since 2026-09-24. Each lookup indexed; None (held,
+    fail closed) when more flows name the QR than can be checked."""
+    from .models import InfiniaJourney
+    flows = list(legacy_flows(destination_ids).order_by('pk').values_list('pk', flat=True)[:SAME_QR_LIMIT + 1])
+    if len(flows) > SAME_QR_LIMIT:
+        return None
+    base = InfiniaJourney.objects.filter(direction='to_bank').exclude(destination_snapshot__has_key='store_order')
+    sets = [_live(base.filter(destination_snapshot__destination_internal_id__in=destination_ids),
+                  exclude_request_id, owner)]
+    if flows:
+        sets.append(_live(base.filter(bridge__quote__money_flow_id__in=flows), exclude_request_id, owner))
+    return sets
 
 
 def exact_qr_quote(destination, quote, exact=None):
