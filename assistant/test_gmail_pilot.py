@@ -70,7 +70,8 @@ class GmailPilotTest(TestCase):
         return GmailConnection.objects.create(
             user=user or self.user, sealed_token=crypto.seal('refresh-token'),
             sealed_email=crypto.seal('owner@gmail.example'), email_key=crypto.opaque('owner@gmail.example'),
-            can_send=can_send, consent_version=1, connected_at=now, next_sync_at=now, **fields)
+            can_send=can_send, connected_at=now, next_sync_at=now,
+            **{'consent_version': config.CONSENT_VERSION, **fields})
 
     def with_box(self):
         return patch('assistant.gmail.session.mailbox', return_value=self.box)
@@ -121,7 +122,7 @@ class GateTests(GmailPilotTest):
 
 class ConnectTests(GmailPilotTest):
     def start(self, user=None):
-        url, verifier = oauth.start(user or self.user, 1)
+        url, verifier = oauth.start(user or self.user, config.CONSENT_VERSION)
         return {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}, verifier
 
     def google(self, scope=f'{config.READ_SCOPE} {config.SEND_SCOPE}', address='owner@gmail.example'):
@@ -133,9 +134,9 @@ class ConnectTests(GmailPilotTest):
         self.addCleanup(patch.stopall)
         return mocks
 
-    def test_asks_only_read_and_send_with_pkce(self):
+    def test_asks_only_read_send_and_calendar_with_pkce(self):
         query, verifier = self.start()
-        self.assertEqual(set(query['scope'].split()), {config.READ_SCOPE, config.SEND_SCOPE})
+        self.assertEqual(set(query['scope'].split()), {config.READ_SCOPE, config.SEND_SCOPE, config.CALENDAR_SCOPE})
         self.assertEqual(query['code_challenge'], oauth._challenge(verifier))
         self.assertEqual(query['access_type'], 'offline')
         self.assertNotIn(verifier, str(query))
@@ -251,7 +252,7 @@ class ReaderTests(GmailPilotTest):
         found = self.detect(kind='payment', due_date='2026-11-25', amount='142.50', currency='brl',
                             payee='attacker', note='paga ya')
         self.assertEqual(found, {'kind': 'payment', 'due_date': datetime(2026, 11, 25).date(),
-                                 'amount': '142.50', 'currency': 'BRL'})
+                                 'amount': '142.50', 'currency': 'BRL', 'summary': ''})
         self.assertIsNone(self.detect(kind='send_money', due_date=None, amount=None, currency=None))
         self.assertIsNone(self.detect(kind='payment', due_date='2026-01-01', amount=None, currency=None))
         loose = self.detect(kind='payment', due_date='mañana', amount='9 a la cuenta 123', currency='BRL')
@@ -310,15 +311,16 @@ class SyncTests(GmailPilotTest):
         with override_settings(GMAIL_PILOT_USER_IDS=''):
             self.assertEqual(sync.due_connection_ids(), [])
 
-    def test_one_generic_nudge_a_day(self):
+    def test_one_notice_then_only_what_is_due_today(self):
         row = self.connect()
         now = datetime(2026, 11, 22, 14, tzinfo=tz.utc)
         MailNeed.objects.create(connection=row, source_key='a', kind='payment', sealed=crypto.seal({'id': 'a'}),
                                 due_date=now.date() + timedelta(days=1))
         self.assertEqual(sync.nudge(now), 1)
-        self.notify.assert_called_once_with(self.user, sync.NUDGE)
+        self.notify.assert_called_once_with(
+            self.user, ('Confío IA', f'Tienes por atender: 1 pago. {sync.WHERE}'))
         MailNeed.objects.create(connection=row, source_key='b', kind='trip', sealed=crypto.seal({'id': 'b'}),
-                                due_date=now.date())
+                                due_date=now.date() + timedelta(days=1))
         self.assertEqual(sync.nudge(now), 0)
 
     def test_cleanup_erases_deleted_people_with_the_pilot_off(self):

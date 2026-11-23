@@ -16,10 +16,20 @@ FAILED = 'No pude completar eso con tu correo. Inténtalo de nuevo.'
 
 class AssistantMailNeedType(graphene.ObjectType):
     id = graphene.ID(required=True)
-    kind = graphene.String(required=True, description='payment | ticket | trip | deadline')
+    kind = graphene.String(
+        required=True,
+        description='payment | ticket | trip | deadline | reply | appointment | delivery | money')
     due_date = graphene.Date()
     amount = graphene.String(description='As the mail said it: never prefill a payment with it')
     currency = graphene.String()
+    summary = graphene.String(description='One line about the mail, written by a model: show it as a claim')
+
+
+class AssistantMailEventType(graphene.ObjectType):
+    title = graphene.String(required=True)
+    day = graphene.Date(required=True, description="In the person's own timezone")
+    starts_at = graphene.DateTime(description='Null for an all-day event')
+    all_day = graphene.Boolean(required=True)
 
 
 class AssistantMailSourceType(graphene.ObjectType):
@@ -46,6 +56,8 @@ class AssistantMailType(graphene.ObjectType):
     connected = graphene.Boolean(required=True)
     needs_reconnect = graphene.Boolean(required=True)
     can_send = graphene.Boolean(required=True)
+    can_calendar = graphene.Boolean(required=True)
+    consent_outdated = graphene.Boolean(required=True, description='Show the consent text again before reconnecting')
     email = graphene.String()
     needs = graphene.List(graphene.NonNull(AssistantMailNeedType), required=True)
 
@@ -236,7 +248,20 @@ class SendAssistantMailDraft(_Result, graphene.Mutation):
         return _run(cls, info, action)
 
 
+class ShowAssistantMailAgenda(_Result, graphene.Mutation):
+    """A mutation on purpose: it calls Google, is counted, and must never be cached or batched with a query."""
+
+    events = graphene.List(graphene.NonNull(AssistantMailEventType))
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info):
+        return _run(cls, info, lambda user: {
+            'events': [AssistantMailEventType(**event) for event in service.agenda(user)]})
+
+
 class Mutation(graphene.ObjectType):
+    show_assistant_mail_agenda = ShowAssistantMailAgenda.Field()
     start_assistant_mail_connect = StartAssistantMailConnect.Field()
     complete_assistant_mail_connect = CompleteAssistantMailConnect.Field()
     disconnect_assistant_mail = DisconnectAssistantMail.Field()

@@ -2,6 +2,7 @@
 import logging
 
 from django.db.models import Q
+from django.utils import timezone
 
 from . import compose, config, crypto, limits, reader, session, text
 from .errors import GmailError, MailRefused
@@ -10,6 +11,8 @@ from .models import GmailConnection
 logger = logging.getLogger(__name__)
 MAX_WORDS = 1000
 ANSWER_FROM = 5
+AGENDA_DAYS = 2
+MAX_EVENT_TITLE = 80
 
 
 def words(value) -> str:
@@ -27,12 +30,16 @@ def overview(user, account, jwt_context) -> dict:
     connection = connection_of(user) if config.is_personal(account, jwt_context) else None
     available = config.allowed(user, account, jwt_context)
     result = {'available': available, 'connected': connection is not None, 'needs_reconnect': False,
-              'can_send': False, 'email': None, 'needs': []}
+              'can_send': False, 'can_calendar': False, 'consent_outdated': False, 'email': None, 'needs': []}
     if connection is None:
         return result
     result['needs_reconnect'] = connection.status != GmailConnection.Status.ACTIVE
     if not available:
         return result  # only enough to disconnect
+    if not config.consented(connection):
+        # Connected under an older text: nothing is read until they accept today's.
+        result.update(needs_reconnect=True, consent_outdated=True)
+        return result
     try:
         result['email'] = crypto.unseal(connection.sealed_email)
         shown = connection.needs.filter(Q(due_date__isnull=True) | Q(due_date__gte=config.local_today()),
@@ -40,13 +47,29 @@ def overview(user, account, jwt_context) -> dict:
         for need in shown:
             extra = crypto.unseal(need.sealed)
             result['needs'].append({'id': str(need.pk), 'kind': need.kind, 'due_date': need.due_date,
-                                    'amount': extra.get('amount'), 'currency': extra.get('currency')})
+                                    'amount': extra.get('amount'), 'currency': extra.get('currency'),
+                                    'summary': extra.get('summary') or None})
     except Exception as exc:  # noqa: BLE001 - unreadable (a wrong key): disconnect must stay reachable
         logger.warning('Gmail connection unreadable: %s', type(exc).__name__)
         result.update(needs_reconnect=True, email=None, needs=[])
         return result
     result['can_send'] = connection.can_send
+    result['can_calendar'] = connection.can_calendar
     return result
+
+
+def agenda(user) -> list:
+    """Today and tomorrow, read from Google for this one answer: never stored, never sent to a model."""
+    connection = connection_of(user)
+    if connection is None:
+        raise MailRefused('not_connected', 'Conecta tu Gmail primero.')
+    if not config.consented(connection):
+        raise MailRefused('reconnect', session.OUTDATED)
+    limits.claim(user, 'agenda')
+    events = session.calendar(connection).events(timezone.now(), AGENDA_DAYS, config.utc_offset(user))
+    return [{'title': text.strict_line(event['title'], MAX_EVENT_TITLE, numbers=True) or 'Sin título',
+             'day': event['day'], 'starts_at': event['starts_at'], 'all_day': event['all_day']}
+            for event in events]
 
 
 def ask(user, question) -> dict:

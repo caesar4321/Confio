@@ -240,7 +240,7 @@ source ──▶ detector ──▶ need (fixed fields) ──▶ nudge ──�
            no history    never free text         thread      by opening            or the Pagar screen
 ```
 
-- **Nudge.** A lock-screen-safe push ("Tienes algo pendiente"), at most one a day, 9:00 local, the day before the date. "No me avises de esto" closes the need.
+- **Nudge.** A lock-screen-safe push, at most one a day. Since 10d it carries counts by fixed kind ("2 pagos y 1 cita") and today's calendar count, never text from a mail or an event. "No me avises de esto" closes the need.
 - **Thread.** A card rendered from the need's fixed fields, pointing at the record by id, as the payment card does. No third-party text becomes a message the model reads on later turns.
 - **Action.** The button opens Pagar empty, or asks the owner to paste or scan the code. A payee, key, account or code is never taken from a mail or an event. A `PaymentIntent` starts only from the owner's own scan, paste or words, and the owner signs with Confío Face.
 - **Amount.** A detected amount is labelled "según el correo" and is never prefilled.
@@ -332,23 +332,23 @@ Three switches keep it off: `ASSISTANT_CALENDAR_ENABLED = false` in the app, Deb
 
 - Off until `GMAIL_PILOT_USER_IDS` lists testers (at most 100, no wildcard), the secret exists, and a build has `ASSISTANT_MAIL_ENABLED = true`.
 - Connect uses the system browser. The callback page only hands the code to the app. The exchange needs the signed-in person and a verifier their phone holds, so a forwarded link cannot attach a victim's mailbox to an attacker.
-- Background reading fetches only mails matching Gmail's own keyword filter: the newest 100 in the window, 20 a run, at most 200 a day, 30 days back at first. A busy first month can therefore miss some. A keyed hash of each mail already read is kept in the cache for 2 days per connection, so none is sent to the model twice. Disconnecting erases the needs, so reconnecting reads them again, inside the per-person daily cap.
+- Background reading fetched only mails matching Gmail's own keyword filter until 10d, which reads everything received except promotions, social and forums: the newest 100 in the window, 20 a run, at most 200 a day, 30 days back at first. A busy first month can therefore miss some. A keyed hash of each mail already read is kept in the cache for 2 days per connection, so none is sent to the model twice. Disconnecting erases the needs, so reconnecting reads them again, inside the per-person daily cap.
 - The sweep and the sync run on the analytics worker, never on the money queue: 30 seconds a sync, 20 syncs a sweep, and a task not started within 14 minutes is dropped. Past about 20 active testers each mailbox is read less often than every 15 minutes: give them a worker of their own then.
 - A send is built, read back and compared with what was confirmed before it leaves.
 - Secrets: codes are masked in every mail before a model sees it. Only a mail whose job is a code or a reset is dropped.
 - The "claims to be Confío" rule (section 8) looks at the sender, with look-alike letters folded. A body can still mention Confío.
 - The kill switch for the pilot is the tester list. `CONFIO_ASSISTANT_ENABLED` also hides the settings screen that holds Disconnect: while that is off, people disconnect at myaccount.google.com/permissions or through support.
-- It lives in its own sheet, outside the support thread. A nudge is one generic push a day.
+- It lives in its own sheet, outside the support thread. A nudge is one push a day (10d: counts only).
 - When two Confío accounts connect the same Gmail, the grant is revoked at Google only when the last one leaves.
 - With the pilot off (an empty tester list), disconnecting and deletion keep working and still revoke at Google, as long as `GMAIL_PILOT_SECRET_NAME` stays set.
 - **The migration must run before the first restart on this code, pilot or no pilot:** deleting a user cascades into these tables and the sweep queries them.
 
 ### Before the first tester
 
-1. Google Cloud, new project `confio-gmail-pilot`, signed in as the owner: enable the Gmail API. In Google Auth Platform set Branding (Confío, `confio.lat`, privacy URL), Audience External and Testing, add the testers' Gmail addresses, add the two scopes under Data Access, and create a Web client with redirect `https://confio.lat/gmail/connect/callback/`. Do not press Publish or submit for verification.
+1. Google Cloud, new project `confio-gmail-pilot`, signed in as the owner: enable the Gmail API and the Google Calendar API (10d; the third scope under Data Access is `calendar.events.readonly`). In Google Auth Platform set Branding (Confío, `confio.lat`, privacy URL), Audience External and Testing, add the testers' Gmail addresses, add the three scopes under Data Access, and create a Web client with redirect `https://confio.lat/gmail/connect/callback/`. Do not press Publish or submit for verification.
 2. Run the secret script.
-3. Publish the Privacy Policy's Google section (section 9) and update the store declarations for any build that ships the flag on.
-4. Deploy with the migration first, after the founder's go. `scripts/deployment/deploy_ec2_systemd.sh` continues when `migrate` fails (`|| true`): check that `showmigrations assistant` shows 0012 applied before the restart. Set `GMAIL_PILOT_SECRET_NAME=prod/gmail-pilot` and never unset it. Keep the one-time code out of nginx's error log, which records the full request line when the upstream is down (the root `nginx.conf` access log already drops queries):
+3. Publish the Privacy Policy's Google section (section 7 of the 1.15.0 draft) and update the store declarations for any build that ships the flag on.
+4. Deploy with the migration first, after the founder's go. `scripts/deployment/deploy_ec2_systemd.sh` continues when `migrate` fails (`|| true`): check that `showmigrations assistant` shows 0012 through 0015 applied before the restart. Set `GMAIL_PILOT_SECRET_NAME=prod/gmail-pilot` and never unset it. Keep the one-time code out of nginx's error log, which records the full request line when the upstream is down (the root `nginx.conf` access log already drops queries):
 
    ```
    location = /gmail/connect/callback/ {
@@ -447,3 +447,32 @@ script ignores a failed migrate, and deleting a user needs this table).
 **Before switching on:** discovery with the pilot off stores a yes/no only. With the pilot on it stores an address,
 which the privacy text has to cover first (the Gmail privacy draft, 1.15.0). Don't give places before a build with the mail
 flag on is in the stores: older builds can only say "Actualiza la app".
+
+## 10d. Beyond deadlines, and Google Calendar in the daily notice
+
+Decided by the founder on 2026-11-22: the pilot reads for context, not only for bills, and the daily push counts calendar items too. Built, not deployed; the pilot is still off.
+
+| Change | How |
+|---|---|
+| Mail read | The keyword filter is gone. Everything received is read except promotions, social, forums, sent, drafts, chats, spam and trash. Same caps: newest 100, 20 a run, 200 a day |
+| Kinds | `payment`, `ticket`, `trip`, `deadline` plus `reply`, `appointment`, `delivery`, `money`. Still a fixed list: anything else is dropped |
+| Old mail | A need without a date is kept only from a mail of the last 3 days, so the first 30-day read does not surface old letters |
+| Summary | One line (90 characters) written by the model, sealed with the need, shown only in the sheet as "Según el correo: …" |
+| Calendar | Third, optional scope `calendar.events.readonly` on the same grant. Primary calendar only. `GmailConnection.can_calendar` records whether it was ticked |
+| Push | `sync.notice`: "Tienes por atender: 2 pagos y 1 cita. Hoy en tu calendario: 3 eventos." One a day, 07:00 to 21:00 for the person, plus at most one more for something due that same day that arrived later. Counts above 9 read "más de 9". The calendar is counted once, between 07:00 and 11:00; if Google fails, the whole notice waits for the next sweep, for three tries or until 10:00 |
+| Sheet | "Hoy y mañana en tu calendario", read from Google when the sheet opens (`showAssistantMailAgenda`) |
+| Consent | Version 2, in the app and on the server. A build with the old text cannot connect, and a connection made under version 1 is not read at all (every Google call goes through `session._token`, which refuses it), noticed or shown until the person accepts the new text |
+
+What this changes in the rules above, and what holds them:
+
+- **Section 6 said "never free text".** The summary is the one exception. It never reaches a push, the support thread or a later model call. Numbers are removed in code, with the links, addresses and @handles it detects (`text.strict_line`, which also folds look-alike dots and drops joiners and stray combining marks), so a phone, an account or a code cannot ride in it as digits. Words can still spell one out. It can still be misleading words, which is why the sheet labels it as the mail's claim and keeps the existing warning.
+- **Nothing from the calendar is stored or sent to a model.** The push needs a number, so `events_today` returns only a count. The sheet shows titles with links removed, read for that one answer. Only the day of the last count is kept (`calendar_checked_on`).
+- **Invitations are untrusted (section 8).** Only events the person organizes and invitations they answered yes or maybe are counted or shown. Cancelled events, unanswered or declined invitations, events where they are not among the guests, birthdays, out-of-office, focus time, working location and events Gmail builds from a mail are left out. Pages are followed (4 of 250, the person's own guest entry only), so it takes more than a thousand earlier events in three days to push a real one out. Titles lose the links, addresses and @handles detected, any five digits in a row unless letters separate them, and every digit when the title holds eight or more (`text.strict_line`). A seven-digit number split by a word, or one spelled out, still passes: the titles are the person's own events or ones they accepted.
+- **To check by hand before the first tester:** from a second Gmail account, send an invitation whose API request sets the guest's `responseStatus` to `accepted`. If Google honours that on the guest's copy, `_mine` must stop trusting `accepted` for events the person does not organize.
+- **The day is the calendar's own.** Google names the calendar's timezone and the day is computed in it. The hour of the notice still comes from a fixed offset per country, which can be an hour or three off (Chile in winter, the US west coast).
+- **The notice is stored like any notification**, with its counts, and is erased on disconnect.
+- **Known limits.** Only the newest 100 mails of a window are listed and 200 a day are read, so a sender who floods a mailbox can crowd out a real bill for that day. The first read after connecting pays for up to 100 mails, most of which are dropped as old.
+- **Cost and exposure go up.** Every received mail is now sent to the model, not only keyword matches. The 200-a-day cap is the bound. The privacy draft asks counsel whether that needs its own consent.
+- **Apple Calendar is not covered** by this route. The phone-calendar slice (section 10) stays as built and off.
+
+Before the first tester, additionally: enable the Calendar API and add the third scope in the Google project (step 1 above), and ship a build whose consent screen is version 2.

@@ -16,9 +16,11 @@ import {
   GET_MAIL,
   MAIL_CONSENT_VERSION,
   NEED_LABELS,
+  SHOW_AGENDA,
   SHOW_NEED,
   START_CONNECT,
   type MailDraft,
+  type MailEvent,
   type MailNeed,
   type MailSource,
   type MailState,
@@ -40,6 +42,8 @@ const day = (value: string) => {
   return date.toLocaleDateString('es', { day: 'numeric', month: 'short' });
 };
 
+const hour = (value: string) => new Date(value).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+
 type Props = { userId: string; onClose: () => void };
 
 export default function MailSheet({ userId, onClose }: Props) {
@@ -52,6 +56,9 @@ export default function MailSheet({ userId, onClose }: Props) {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<{ text: string; sources: MailSource[] } | null>(null);
   const [shown, setShown] = useState<Record<string, MailSource>>({});
+  // null: not read yet. Never kept past this screen.
+  const [events, setEvents] = useState<MailEvent[] | null>(null);
+  const [calendarFailed, setCalendarFailed] = useState(false);
   // These four survive the app lock (session.ts).
   const saved = mailSession(userId);
   const [replyTo, setReplyToState] = useState<MailSource | null>(saved.replyTo);
@@ -145,6 +152,36 @@ export default function MailSheet({ userId, onClose }: Props) {
     };
   }, [finishConnect]);
 
+  const withCalendar = !!mail?.available && !!mail.connected && !mail.needsReconnect && mail.canCalendar;
+  useEffect(() => {
+    setEvents(null);
+    setCalendarFailed(false);
+    if (!withCalendar) {
+      return undefined;
+    }
+    // An answer asked before a disconnect or a reconnect belongs to nobody.
+    let current = true;
+    // Quiet: a calendar that did not load is no reason to cover the mail with an error.
+    client.mutate<any>({ mutation: SHOW_AGENDA, fetchPolicy: 'no-cache' })
+      .then(({ data }) => {
+        const result = data?.showAssistantMailAgenda;
+        if (!open.current || !current) {
+          return;
+        }
+        if (result?.errorCode === 'reconnect') {
+          setMail((state) => state && { ...state, needsReconnect: true });
+        }
+        setEvents(result?.success ? result.events ?? [] : null);
+        setCalendarFailed(!result?.success);
+      })
+      .catch(() => {
+        if (open.current && current) {
+          setCalendarFailed(true);
+        }
+      });
+    return () => { current = false; };
+  }, [client, withCalendar]);
+
   const connect = () => attempt(async () => {
     const result = await run(START_CONNECT, 'startAssistantMailConnect', { consentVersion: MAIL_CONSENT_VERSION });
     if (!result) {
@@ -171,6 +208,7 @@ export default function MailSheet({ userId, onClose }: Props) {
     }
     setAnswer(null);
     setShown({});
+    setEvents(null);
     setReplyTo(null);
     setDraft(null);
     await reload();
@@ -250,8 +288,21 @@ export default function MailSheet({ userId, onClose }: Props) {
   const intro = (
     <>
       <Text style={styles.paragraph}>
-        Con tu permiso, Confío IA lee tu Gmail para avisarte de pagos, vencimientos y viajes, responder tus
-        preguntas y escribir correos. Solo envía un correo cuando tú lo confirmas, y nunca paga por ti.
+        Con tu permiso, Confío IA lee tu Gmail para avisarte de lo que tienes por atender: pagos, vencimientos,
+        viajes, citas, entregas, dinero que recibes y correos que esperan tu respuesta. También responde tus
+        preguntas y escribe correos. Solo envía un correo cuando tú lo confirmas, y nunca paga por ti.
+      </Text>
+      <Text style={styles.paragraph}>
+        Para avisarte, lee los correos que recibes, salvo la publicidad, las redes sociales, los foros y el spam.
+        Cuando le haces una pregunta, busca en todo tu Gmail, salvo el spam y la papelera. Si también das el
+        permiso de calendario, cuenta los eventos de hoy de tu Google Calendar para el aviso diario y te muestra
+        aquí los de hoy y mañana. Tu calendario no se guarda ni se envía a OpenAI.
+      </Text>
+      <Text style={styles.paragraph}>
+        Te llega una notificación al día y, si después aparece algo que vence hoy, una más. Solo dice cuántas
+        cosas hay de cada tipo, por ejemplo «2 pagos y 1 cita», y cuántos eventos tienes hoy: nunca de quién son,
+        montos ni títulos. Queda en tu lista de notificaciones hasta que desconectes. Aparte, te aviso si tu
+        Gmail se desconecta.
       </Text>
       <Text style={styles.paragraph}>
         Para eso, Confío envía a OpenAI (Estados Unidos) el remitente, el asunto, la fecha y el texto de los correos
@@ -262,8 +313,8 @@ export default function MailSheet({ userId, onClose }: Props) {
       </Text>
       <Text style={styles.paragraph}>
         Confío no guarda tus correos. Guarda cifrados tu acceso y tu dirección hasta que desconectes. De cada aviso
-        guarda el tipo y la fecha y, cifrados, el monto y el identificador del correo, hasta 30 días después de esa
-        fecha (o de detectarlo, si no tiene fecha). Guarda cifrados los borradores sin enviar hasta 24 horas, con un
+        guarda el tipo y la fecha y, cifrados, el monto, un resumen de una línea y el identificador del correo,
+        hasta 30 días después de esa fecha (o de detectarlo, si no tiene fecha). Guarda cifrados los borradores sin enviar hasta 24 horas, con un
         margen de una hora.
       </Text>
       <Text style={styles.paragraph}>
@@ -271,6 +322,12 @@ export default function MailSheet({ userId, onClose }: Props) {
         datos de Google sigue la Política de Datos de Usuario de los Servicios API de Google, incluido el uso
         limitado.
       </Text>
+      {mail?.consentOutdated ? (
+        <Text style={styles.paragraph}>
+          Esto cambió desde que conectaste tu Gmail: ahora lee más correos y, si quieres, tu calendario. No leo
+          nada hasta que lo aceptes.
+        </Text>
+      ) : null}
       <Link label="Leer la Política de Privacidad" onPress={() => Linking.openURL(PRIVACY_URL).catch(() => undefined)} />
       <Text style={styles.paragraph}>
         Es una prueba: Google mostrará un aviso de app en pruebas y tendrás que volver a conectar cada 7 días. Elige
@@ -330,6 +387,7 @@ export default function MailSheet({ userId, onClose }: Props) {
                 .filter(Boolean).join(' · ')}
             </Text>
           ) : null}
+          {need.summary ? <Text style={styles.detail}>Según el correo: {need.summary}</Text> : null}
           {shown[need.id] ? source(shown[need.id]) : null}
           <View style={styles.links}>
             {shown[need.id] ? null : <Link label="Ver de quién es" disabled={busy} onPress={() => show(need)} />}
@@ -337,6 +395,32 @@ export default function MailSheet({ userId, onClose }: Props) {
           </View>
         </View>
       ))}
+      {mail.canCalendar ? (
+        <>
+          <Text style={styles.heading}>Hoy y mañana en tu calendario</Text>
+          {calendarFailed ? <Text style={styles.detail}>No pude leer tu calendario ahora.</Text> : null}
+          {events === null && !calendarFailed ? <ActivityIndicator color={colors.successText} /> : null}
+          {events && !events.length ? <Text style={styles.detail}>No tienes eventos.</Text> : null}
+          {(events ?? []).map((event, index) => (
+            <View key={`${event.day}-${event.startsAt ?? 'd'}-${index}`} style={styles.row}>
+              <Text style={styles.rowTitle}>{event.title}</Text>
+              <Text style={styles.detail}>
+                {/* A timed event: day and hour both on this phone's clock, so they cannot disagree. */}
+                {event.allDay || !event.startsAt
+                  ? `${day(event.day)} · Todo el día`
+                  : `${day(event.startsAt)} · ${hour(event.startsAt)}`}
+              </Text>
+            </View>
+          ))}
+        </>
+      ) : (
+        <>
+          <Text style={styles.paragraph}>
+            No diste permiso para ver tu calendario. El aviso diario cuenta solo tu correo.
+          </Text>
+          <Link label="Reconectar para incluir tu calendario" disabled={busy} onPress={connect} />
+        </>
+      )}
       <Text style={styles.heading}>Pregúntale a tu correo</Text>
       <TextInput
         style={styles.input}
@@ -377,8 +461,8 @@ export default function MailSheet({ userId, onClose }: Props) {
   } else {
     home = (
       <>
-        {mail.available && !connected ? intro : null}
-        {mail.available && connected && mail.needsReconnect ? (
+        {mail.available && (!connected || mail.consentOutdated) ? intro : null}
+        {mail.available && connected && mail.needsReconnect && !mail.consentOutdated ? (
           <>
             <Text style={styles.paragraph}>Tu conexión con Gmail venció. En la prueba pasa cada 7 días.</Text>
             <Action label="Volver a conectar Gmail" onPress={connect} disabled={busy} />

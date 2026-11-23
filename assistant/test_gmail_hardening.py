@@ -323,7 +323,7 @@ class OverviewTests(GmailPilotTest):
         self.assertTrue(shown['connected'] and shown['needs_reconnect'])
 
     def test_failed_connect_does_not_leave_an_orphan_grant(self):
-        url, verifier = oauth.start(self.user, 1)
+        url, verifier = oauth.start(self.user, config.CONSENT_VERSION)
         state = url.split('&state=')[1].split('&')[0]
         tokens = {'access_token': 'a', 'refresh_token': 'fresh', 'scope': config.READ_SCOPE}
         with patch.object(client, 'exchange_code', return_value=tokens), \

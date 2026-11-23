@@ -84,6 +84,37 @@ def redact_links(value) -> str:
     return ''.join('[enlace]' if part and not part.isspace() and _is_site(part) else part for part in parts)
 
 
+# More dots that render as one: only for text we show beside our own words.
+_MORE_DOTS = str.maketrans({chr(code): '.' for code in (0x06D4, 0x00B7, 0xA4F8, 0x2027, 0x30FB, 0x0701, 0x0702)})
+# Five digits with anything but a letter between them: a dash of any kind does not save a phone.
+_LONG_NUMBER = re.compile(r'\d(?:[\W_]*\d){4,}')
+# A title with this many digits in all is carrying a number in pieces.
+_MANY_DIGITS = 8
+_HANDLE = re.compile(r'(?<!\w)@\w{3,}')
+
+
+def strict_line(value, limit, numbers=False) -> str:
+    """A stranger's words shown in the app: one line, no link or address, and no phone, account or code.
+
+    Stricter than an answer: joiners go (they hide a dot from the site rule), compatibility forms are folded,
+    and every number is dropped unless `numbers`, which keeps short ones ("Sala 3", "15:00").
+    """
+    clean = ''.join(char for char in visible(str(value or '')[:MAX_HEADER]) if char not in _JOINERS)
+    clean = unicodedata.normalize('NFKC', clean).translate(_DOTS).translate(_MORE_DOTS)
+    # Circled, superscript and Roman digits are numbers to a reader and not to \d. A mark NFKC could not
+    # compose (Spanish accents are composed by now) only hides a dot or a digit from the rules below.
+    clean = ''.join(char for char in clean if unicodedata.category(char) not in ('No', 'Nl', 'Mn', 'Me'))
+    clean = _HANDLE.sub(' ', redact_for_answer(clean))
+    if numbers and sum(char.isdigit() for char in clean) < _MANY_DIGITS:
+        clean = _LONG_NUMBER.sub(' ', clean)
+    else:
+        clean = re.sub(r'\d[\d\s.,:/()+-]*', ' ', clean)
+    clean = ' '.join(clean.split())
+    if len(clean) > limit:
+        clean = clean[:limit].rsplit(' ', 1)[0] + '…'
+    return clean
+
+
 def redact_for_answer(value) -> str:
     """An answer must not carry an address or a site planted in a mail."""
     folded = _folded(value) if '@' in _folded(value) else value

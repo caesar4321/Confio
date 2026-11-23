@@ -27,6 +27,11 @@ class GmailConnection(models.Model):
     next_sync_at = models.DateTimeField(db_index=True)
     failures = models.PositiveSmallIntegerField(default=0)
     last_nudge_on = models.DateField(null=True, blank=True)
+    # The one extra notice a day, for something due today that arrived after the first.
+    last_urgent_on = models.DateField(null=True, blank=True)
+    can_calendar = models.BooleanField(default=False)
+    # The day the calendar was last counted for the notice. Nothing from the calendar is stored.
+    calendar_checked_on = models.DateField(null=True, blank=True)
 
     class Meta:
         app_label = 'assistant'
@@ -54,12 +59,16 @@ class MailNeed(models.Model):
         TICKET = 'ticket', 'Pasaje o entrada'
         TRIP = 'trip', 'Viaje'
         DEADLINE = 'deadline', 'Vencimiento'
+        REPLY = 'reply', 'Correo por responder'
+        APPOINTMENT = 'appointment', 'Cita o reunión'
+        DELIVERY = 'delivery', 'Entrega'
+        MONEY = 'money', 'Dinero recibido o por recibir'
 
     connection = models.ForeignKey(GmailConnection, on_delete=models.CASCADE, related_name='needs')
     source_key = models.CharField(max_length=64)
-    kind = models.CharField(max_length=10, choices=Kind.choices)
+    kind = models.CharField(max_length=12, choices=Kind.choices)
     due_date = models.DateField(null=True, blank=True)
-    sealed = models.TextField()  # message id, amount, currency
+    sealed = models.TextField()  # message id, amount, currency, one-line summary
     dismissed = models.BooleanField(default=False)
     notified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

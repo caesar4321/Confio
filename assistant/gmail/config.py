@@ -7,7 +7,10 @@ from assistant import conf
 
 READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
-CONSENT_VERSION = 1
+# Optional on Google's screen: without it the daily notice counts mail only.
+CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly'
+# 2: reads beyond bills, keeps a one-line summary, and reads Google Calendar.
+CONSENT_VERSION = 2
 # Google's own limit for a project in Testing.
 MAX_TESTERS = 100
 
@@ -47,6 +50,11 @@ def user_allowed(user) -> bool:
         return False
     return (bool(conf.get('CONFIO_ASSISTANT_ENABLED')) and configured() and str(user.pk) in tester_ids()
             and not banned(user))
+
+
+def consented(connection) -> bool:
+    """Agreed to what is read today. An older agreement covered less: nothing is read under it."""
+    return connection is not None and connection.consent_version >= CONSENT_VERSION
 
 
 def banned(user) -> bool:

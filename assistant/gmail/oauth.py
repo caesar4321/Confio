@@ -12,6 +12,7 @@ import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.db import transaction
 from django.utils import timezone
 
@@ -48,7 +49,7 @@ def start(user, consent_version):
         'client_id': config.value('GMAIL_OAUTH_CLIENT_ID'),
         'redirect_uri': config.value('GMAIL_OAUTH_REDIRECT_URI'),
         'response_type': 'code',
-        'scope': f'{config.READ_SCOPE} {config.SEND_SCOPE}',
+        'scope': f'{config.READ_SCOPE} {config.SEND_SCOPE} {config.CALENDAR_SCOPE}',
         'access_type': 'offline',
         'prompt': 'consent select_account',
         'state': state,
@@ -118,13 +119,17 @@ def _save(user, attempt, tokens, address):
                     logger.warning('Previous Gmail grant unreadable: %s', type(exc).__name__)
             row.delete()
             row = None
+            _forget_notices(user.pk)
         if row is None:
             row = GmailConnection(user=user)
         row.grant = uuid.uuid4()
         row.status = GmailConnection.Status.ACTIVE
         row.sealed_token, row.sealed_email = crypto.seal(tokens['refresh_token']), crypto.seal(address)
         row.email_key = email_key
-        row.can_send = config.SEND_SCOPE in set(str(tokens.get('scope') or '').split())
+        granted = set(str(tokens.get('scope') or '').split())
+        row.can_send = config.SEND_SCOPE in granted
+        row.can_calendar = config.CALENDAR_SCOPE in granted
+        row.calendar_checked_on = None
         row.consent_version = attempt.consent_version
         row.connected_at = row.next_sync_at = now
         row.failures = 0
@@ -133,6 +138,19 @@ def _save(user, attempt, tokens, address):
         AssistantConnectionRequest.objects.filter(
             user=user, feature=AssistantConnectionRequest.Feature.GMAIL).exclude(google_email='').update(google_email='')
     return row, stale
+
+
+NOTICE_TYPE = 'assistant_mail'
+
+
+def _forget_notices(user_id):
+    """The notices in the person's list say how many mails and events there were: they go with the rest."""
+    try:
+        from notifications.models import Notification
+        with transaction.atomic():  # its own savepoint: a failure here must not undo erasing the token
+            Notification.objects.filter(user_id=user_id, data__type=NOTICE_TYPE).delete()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('Gmail notices not erased: %s', type(exc).__name__)
 
 
 def disconnect(connection) -> bool:
@@ -144,12 +162,15 @@ def disconnect(connection) -> bool:
         if row:
             row.delete()
         GmailOAuthState.objects.filter(user_id=connection.user_id).delete()
+        _forget_notices(connection.user_id)
     if not blob:
         return True
     if _grant_shared(row.email_key):
         return True  # ours is erased, and the grant now belongs only to the other account
     try:
         return client.revoke(crypto.unseal(blob))
+    except SoftTimeLimitExceeded:
+        raise
     except Exception as exc:  # noqa: BLE001 - local deletion already happened
         logger.warning('Gmail revoke failed: %s', type(exc).__name__)
         return False

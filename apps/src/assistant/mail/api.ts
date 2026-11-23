@@ -2,9 +2,18 @@ import { gql } from '@apollo/client';
 
 // Own documents, all named *AssistantMail*: an older server rejects only these,
 // and both request logs redact on the name.
-export const MAIL_CONSENT_VERSION = 1;
+// 2: reads beyond bills, keeps a one-line summary, and reads Google Calendar.
+export const MAIL_CONSENT_VERSION = 2;
 
-export type MailNeed = { id: string; kind: string; dueDate: string | null; amount: string | null; currency: string | null };
+export type MailNeed = {
+  id: string;
+  kind: string;
+  dueDate: string | null;
+  amount: string | null;
+  currency: string | null;
+  summary: string | null;
+};
+export type MailEvent = { title: string; day: string; startsAt: string | null; allDay: boolean };
 export type MailSource = { handle: string; sender: string; subject: string; sentAt: string };
 export type MailDraft = {
   id: string | null;
@@ -22,6 +31,8 @@ export type MailState = {
   connected: boolean;
   needsReconnect: boolean;
   canSend: boolean;
+  canCalendar: boolean;
+  consentOutdated: boolean;
   email: string | null;
   needs: MailNeed[];
 };
@@ -32,6 +43,10 @@ export const NEED_LABELS: Record<string, string> = {
   ticket: 'Parece un pasaje o una entrada',
   trip: 'Parece un viaje',
   deadline: 'Parece un vencimiento',
+  reply: 'Parece que esperan tu respuesta',
+  appointment: 'Parece una cita o una reunión',
+  delivery: 'Parece una entrega',
+  money: 'Parece dinero que recibiste o vas a recibir',
 };
 
 const DRAFT = 'id sender to subject body isReply replyToDiffers canSend displayHash';
@@ -39,7 +54,10 @@ const SOURCE = 'handle sender subject sentAt';
 
 export const GET_MAIL = gql`
   query GetAssistantMail {
-    assistantMail { available connected needsReconnect canSend email needs { id kind dueDate amount currency } }
+    assistantMail {
+      available connected needsReconnect canSend canCalendar consentOutdated email
+      needs { id kind dueDate amount currency summary }
+    }
   }
 `;
 
@@ -70,6 +88,13 @@ export const ASK = gql`
 export const SHOW_NEED = gql`
   mutation ShowAssistantMailNeed($id: ID!) {
     showAssistantMailNeed(id: $id) { success error errorCode source { ${SOURCE} } }
+  }
+`;
+
+// Read from Google for this one answer: the server keeps nothing from the calendar.
+export const SHOW_AGENDA = gql`
+  mutation ShowAssistantMailAgenda {
+    showAssistantMailAgenda { success errorCode events { title day startsAt allDay } }
   }
 `;
 
