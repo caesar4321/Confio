@@ -28,7 +28,6 @@ MESSAGES = {
     'goal': 'Dime en una frase qué quieres comprar.',
     'active_task': 'Acabo de empezar esa compra hace un momento.',
     'store_busy': 'Estoy usando esa tienda para una compra tuya. Cuando termine puedes cerrar la sesión.',
-    'just_started': 'Ya estoy buscándolo en {site}.',
     'checkout_open': ('Tu pedido en {site} sigue abierto. Termínalo o cancélalo en la pantalla de la tienda y '
                       'después te ayudo con lo nuevo.'),
     'daily_limit': 'Llegaste al máximo de compras por hoy. Mañana seguimos.',
@@ -150,10 +149,6 @@ def start(account, user, *, goal, site, meta=None):
     open_order = mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=False).first()
     if open_order is not None:
         raise TaskRefused('checkout_open', MESSAGES['checkout_open'].format(site=open_order.site))
-    # A second message within a minute about the same store is the same purchase, not a new one.
-    recent = mine.filter(state__in=AgentTask.ACTIVE, site=store, created_at__gte=timezone.now() - timedelta(seconds=60))
-    if recent.exists():
-        raise TaskRefused('just_started', MESSAGES['just_started'].format(site=store))
     # Cancelled before its browser ever opened (no provider yet) costs nothing.
     free = Q(state='cancelled', provider='')
     if (mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(free).count()
@@ -363,7 +358,7 @@ def _sweep():
               'stranded')
     # Never started within minutes, worker or not: the person has moved on. It is not started late.
     _each(active.filter(state='queued', provider='', checkout_at__isnull=True,
-                        created_at__lt=now - timedelta(minutes=10)),
+                        created_at__lt=now - runner.NEVER_STARTED_AFTER),
           lambda task: runner.end(task, 'stopped', 'unavailable', only={'state': 'queued', 'provider': ''}),
           'never started')
 

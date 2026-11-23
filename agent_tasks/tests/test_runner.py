@@ -10,6 +10,8 @@ from django.utils import timezone
 from agent_tasks import agent, browsers, countries, runner, service
 from agent_tasks.cdp import CdpError
 from agent_tasks.models import AgentProfile, AgentTask
+
+REAL_KICK = runner.kick   # before RowsBase patches it
 from agent_tasks.tests.base import (BASE, CODE, CODE_TEXT, RowsBase, SITE, cart_button, element, link, picture,
                                     search_box, snap)
 
@@ -50,6 +52,19 @@ class LoopTests(StepBase):
         self.assertEqual(AgentProfile.objects.get(user=self.user, site=SITE).external_id, 'profile-1')
         self.browser.goto.assert_called_once_with(f'https://{SITE}/')
         self.decide.assert_not_called()
+
+    def test_a_step_that_comes_after_ten_minutes_never_opens_the_browser(self):
+        task = self.make_task(state='queued', provider='', session_id='', connect_url='', session_expires_at=None)
+        AgentTask.objects.filter(pk=task.pk).update(created_at=timezone.now() - timedelta(minutes=11))
+        task = self.step(AgentTask.objects.get(pk=task.pk))
+        self.assertEqual((task.state, task.reason), ('stopped', 'unavailable'))
+        self.vendor.open.assert_not_called()
+
+    def test_a_step_message_nobody_takes_expires(self):
+        with mock.patch('agent_tasks.tasks.step.apply_async') as sent, \
+                mock.patch('django.db.transaction.on_commit', side_effect=lambda send: send()):
+            REAL_KICK(1, countdown=20)
+        self.assertEqual(sent.call_args.kwargs['expires'], 320)
 
     def test_a_held_lease_or_a_spent_token_is_no_step(self):
         task = self.make_task(steps=4, lease_until=timezone.now() + timedelta(seconds=60))

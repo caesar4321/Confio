@@ -365,20 +365,25 @@ class WorkerTests(ServiceBase):
 
 
 class SameStoreTests(ServiceBase):
-    def test_a_follow_up_within_a_minute_is_the_same_purchase(self):
-        first = self.start()
-        with self.assertRaises(service.TaskRefused) as refused:
-            self.start(goal='y que sea USB-C')
-        self.assertEqual(refused.exception.code, 'just_started')
+    def test_a_refined_request_replaces_the_purchase_with_the_new_words(self):
+        first = self.start(goal='un cargador')
+        second = self.start(goal='un cargador USB-C')   # "que sea USB-C", seconds later
         first.refresh_from_db()
-        self.assertEqual(first.state, 'queued')
+        self.assertEqual((first.state, first.reason), ('cancelled', 'replaced'))
+        self.assertEqual((second.state, second.goal), ('queued', 'un cargador USB-C'))
 
     def test_one_never_started_within_minutes_is_not_started_late_even_with_a_worker(self):
         old = self.make_task(state='queued', provider='', session_id='', connect_url='', session_expires_at=None)
         AgentTask.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(minutes=11))
+        young_user, young_account = self.person()
+        young = self.make_task(user=young_user, account=young_account, state='queued', provider='', session_id='',
+                               connect_url='', session_expires_at=None)
+        AgentTask.objects.filter(pk=young.pk).update(created_at=timezone.now() - timedelta(minutes=9))
         service.sweep()   # a worker is alive here
         old.refresh_from_db()
+        young.refresh_from_db()
         self.assertEqual((old.state, old.reason), ('stopped', 'unavailable'))
+        self.assertEqual(young.state, 'queued')   # nine minutes: still its turn to start
 
     def test_forgetting_a_store_in_use_says_so(self):
         self.make_task(state='working')

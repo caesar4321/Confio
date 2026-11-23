@@ -61,6 +61,10 @@ class Lost(Exception):
     """The task was cancelled, ended or taken over while this step ran."""
 
 
+# A purchase not started within this is stopped, never started late (the sweep and the step both check).
+NEVER_STARTED_AFTER = timedelta(minutes=10)
+
+
 def kick(task_id, countdown=0):
     def send():
         from .tasks import step
@@ -250,6 +254,8 @@ class Step:
         if not task.session_id:
             if task.state != 'queued':
                 return self.stop('session_expired')
+            if task.created_at < timezone.now() - NEVER_STARTED_AFTER:
+                return self.stop('unavailable')   # the person has moved on: never started late
             self.open_browser()
         elif task.session_expires_at <= timezone.now() + SESSION_MARGIN:
             return self.stop('session_expired')
