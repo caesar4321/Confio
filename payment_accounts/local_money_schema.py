@@ -366,7 +366,7 @@ class LocalMoneyQuery(graphene.ObjectType):
             # The same floor as every exact card (a build that says where the spare goes).
             raise GraphQLError('Actualiza la app para enviar un monto exacto.')
         row = PayoutDestination.objects.filter(internal_id=destination_id, confio_account=owner,
-                                               provider='infinia').first()
+                                               provider='infinia', status__in=('pending', 'active')).first()
         if row is None:
             raise GraphQLError('Destino no encontrado')
         from . import breb_location
@@ -417,7 +417,7 @@ class LocalMoneyQuery(graphene.ObjectType):
         """Null for a recipient that is not a fixed-amount Pix code."""
         owner = _owner(info, 'send_funds', owner_only=True)
         row = PayoutDestination.objects.filter(internal_id=destination_id, confio_account=owner,
-                                               provider='infinia').first()
+                                               provider='infinia', status__in=('pending', 'active')).first()
         if row is None:
             raise GraphQLError('Destino no encontrado')
         if local_money.is_fixed_amount_qr(row):

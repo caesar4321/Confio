@@ -1039,6 +1039,33 @@ class ExactLocalApiRound16Tests(ExactLocalApiTests):
         quote.assert_not_called()
 
 
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound17Tests(ExactLocalApiTests):
+    def test_a_fixed_qr_is_never_priced_for_a_recipient_that_cannot_be_paid(self):
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        with mock.patch.object(local_money, 'verification_state', return_value=local_money.NOT_FOUND), \
+                mock.patch.object(local_money, 'payout_quote') as quote, \
+                self.assertRaisesRegex(PaymentAccountError, 'No encontramos'):
+            local_money.fixed_qr_charge_quote(self.owner, fixed)
+        quote.assert_not_called()
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        PayoutDestination.objects.filter(pk=fixed.pk).update(status='disabled')
+        with self.assertRaisesRegex(Exception, 'Destino no encontrado'):
+            LocalMoneyQuery().resolve_local_pix_charge(self.info, fixed.internal_id)
+
+    def test_an_exact_quote_never_says_what_the_server_would_not_pay(self):
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        quote = {'minimum_target': Decimal('5000'), 'target_amount': Decimal('5000'), 'rate': Decimal('5')}
+        order_row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        order_row.provider_data = dict(order_row.provider_data, store_order={'amount': '1249.00', 'reference': 'X'})
+        with self.assertRaisesRegex(PaymentAccountError, 'pedido'):
+            local_money.exact_qr_quote(order_row, dict(quote), '123')
+        self.assertEqual(local_money.exact_qr_quote(order_row, dict(quote), '1249')['minimum_target'], Decimal('1249.00'))
+        row.asset = 'COP'
+        with self.assertRaisesRegex(PaymentAccountError, 'sin centavos'):
+            local_money.exact_qr_quote(row, dict(quote), '500.50')
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -1089,6 +1116,7 @@ only_own_tests(ExactLocalRound16JourneyTests, journey_fixture.JourneyTests, Exac
                ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests,
                ExactLocalRound12JourneyTests, ExactLocalRound15JourneyTests)
 only_own_tests(ExactLocalApiRound16Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalApiRound17Tests, ExactLocalApiTests)
 
 
 class TelegramGuardTests(intent_fixture.PaymentIntentBase):

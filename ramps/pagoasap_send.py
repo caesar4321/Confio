@@ -411,9 +411,10 @@ def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
         raise VePagoMovilError(UNAVAILABLE)
     if exact_ves is not None:
         estimate = quote_exact_now(exact_ves)   # never a cached price for the order itself
-        # Priced again now: never more dollars than the person approved, and
-        # never more than the fresh price either (a stale screen does not
-        # overpay): the send is the fresh price, its lines as quoted.
+        # Priced again now: never more dollars than the person approved. While
+        # the fresh price is within the tolerance below them, the approved
+        # dollars are charged (what they saw); further below, or above, the
+        # screen asks again.
         fresh = Decimal(estimate['usd_amount'])
         # Relay's estimate wobbles a little between calls: a fresh price up
         # to VE_PAGOMOVIL_EXACT_PRICE_TOLERANCE_BPS (50, at most 200) below

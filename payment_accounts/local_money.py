@@ -1688,6 +1688,12 @@ def exact_qr_quote(destination, quote, exact=None):
     if exact is None:
         return quote
     exact = _exact_amount(exact)
+    # Never a quote the server would not pay: whole pesos where needed, and a
+    # store order only at its own amount.
+    require_whole_units(destination.asset, exact)
+    order_amount = ((destination.provider_data or {}).get('store_order') or {}).get('amount')
+    if order_amount not in (None, '') and exact != Decimal(str(order_amount)).quantize(FIAT_CENT):
+        raise PaymentAccountError('El monto no coincide con el del pedido. Revisa el pago de nuevo.')
     if Decimal(quote['minimum_target']) < exact:
         # Priced again next time, not from the few seconds' memory.
         from .intent_rails import forget_order_price
@@ -1721,6 +1727,14 @@ def pace_exact_quotes(owner):
         raise PaymentAccountError('Espera un momento antes de cotizar otro monto.')
 
 
+def _require_priceable(destination):
+    """Never priced for a recipient that cannot be paid (each exact price asks
+    the providers several times): one not found, or one to check again."""
+    if verification_state((destination.provider_data or {}).get('validation')) == NOT_FOUND:
+        raise PaymentAccountError('No encontramos a quien recibe. Revisa los datos.')
+    require_current_destination(destination)
+
+
 def exact_send_quote(owner, destination, exact, *, client=None):
     """What sending an exact local amount the person typed costs, all in
     (the Pagar screen's charge view): the dollars whose guaranteed minimum
@@ -1730,10 +1744,7 @@ def exact_send_quote(owner, destination, exact, *, client=None):
         raise PaymentAccountError('Este QR ya trae su monto.')
     if (destination.provider_data or {}).get('store_order'):
         raise PaymentAccountError('Este pedido ya trae su monto.')
-    # Never priced for a recipient that cannot be paid (the providers are asked several times).
-    if verification_state((destination.provider_data or {}).get('validation')) == NOT_FOUND:
-        raise PaymentAccountError('No encontramos a quien recibe. Revisa los datos.')
-    require_current_destination(destination)
+    _require_priceable(destination)
     exact = _exact_amount(exact)
     require_whole_units(destination.asset, exact)
     price = _order_price(owner, destination, exact, client=client)   # paced on a provider ask
@@ -1751,6 +1762,7 @@ def fixed_qr_charge_quote(owner, destination, *, client=None):
     payout is exactly those pesos and the rest stays in the person's own
     peso account."""
     from .intent_rails import _order_price
+    _require_priceable(destination)
     require_unpaid_qr(destination)
     order = store_order_snapshot(destination)
     exact = Decimal(order['amount'])
