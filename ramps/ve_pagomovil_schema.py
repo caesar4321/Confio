@@ -161,6 +161,13 @@ EXACT_QUOTES_PER_WINDOW = 20
 EXACT_QUOTE_WINDOW_SECONDS = 60
 
 
+def _require_exact_build(info):
+    """Exact bolívares only for a build that says the margin is not returned."""
+    from payment_accounts.local_money import fixed_qr_build_supported
+    if not fixed_qr_build_supported(info.context.META):
+        raise VePagoMovilError('Actualiza la app para enviar un monto exacto.')
+
+
 def _pace_exact(user):
     """Every exact-bolívares price (a quote, or an order priced fresh) asks
     Pago ASAP and the bridge several times; their limits are shared with real
@@ -386,6 +393,7 @@ class CreateVePagoMovilSend(graphene.Mutation):
                 raise VePagoMovilError(step_up, FACE_STEP_UP_NEXT_STEP)
             beneficiary = _beneficiary(cedula, phone, bank_code, beneficiary_name)
             if ves_amount not in (None, ''):
+                _require_exact_build(info)
                 _pace_exact(user)
                 ramp = _exact_adapter().create(user, account, amount, beneficiary, exact_ves=ves_amount)
             else:
@@ -526,6 +534,7 @@ class Query(graphene.ObjectType):
             # send), and a per-person pace: Pago ASAP's limits are shared
             # with real payouts.
             user, _ = _preflight(info, SEND)
+            _require_exact_build(info)
             _pace_exact(user)
             quote = _exact_adapter().quote_exact(ves_amount)
             quote.pop('exact_ves', None)

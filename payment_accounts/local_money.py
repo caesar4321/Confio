@@ -262,6 +262,9 @@ def normalize_value(method, raw):
         # A fixed amount is paid exactly: the dollars are priced to cover it
         # and the payout is the QR's pesos (store_order_snapshot).
         decode_breb_qr(value)
+        # One text per QR: the CRC is checked case-blind, so it is stored in
+        # capitals (the paid-once key and the same-QR lookup compare text).
+        value = value[:-4] + value[-4:].upper()
     elif method.id == 'mx_clabe':
         value = _digits(value)
         if not clabe_valid(value):
@@ -289,6 +292,7 @@ def normalize_value(method, raw):
         if method.id == 'br_qr':
             pix_code(value)
             return value
+        value = value[:-4] + value[-4:].upper()   # one text per QR (see co_qr)
         # A fixed amount is paid exactly (store_order_snapshot): the dollars
         # are priced to cover it and the payout is the QR's own amount.
         amount = fields.get('54')
@@ -1486,8 +1490,13 @@ def require_exact_for_fixed(destination, exact):
     """A fixed-amount QR is quoted only with its own amount (asked before any
     provider is): an older build that types dollars is told to update."""
     # A QR that cannot be read says so (its own error), not "update the app".
-    if exact is None and fixed_qr_amount(destination):
+    amount = fixed_qr_amount(destination)
+    if not amount:
+        return
+    if exact is None:
         raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
+    if _exact_amount(exact) != Decimal(amount).quantize(FIAT_CENT):
+        raise PaymentAccountError('El monto no coincide con el del QR. Revisa el pago de nuevo.')
 
 
 def require_unpaid_qr(destination):
@@ -1523,6 +1532,7 @@ def _same_qr_destinations(destination):
 
 PAID = 'paid'
 SIGNING = 'signing'
+REVIEW = 'review'
 
 
 def held(key, exclude_request_id=None, destination=None, owner=None):
@@ -1544,9 +1554,15 @@ def held(key, exclude_request_id=None, destination=None, owner=None):
             sets += legacy
     state = ''
     for rows in sets:
-        if rows.exclude(bridge__status='prepared').exists():
+        signed = rows.exclude(bridge__status='prepared')
+        if signed.exclude(stage='needs_review', payout_operation__isnull=True).exists():
             return PAID
-        if rows.exists():
+        if signed.exists():
+            # Held by a payment in review that has not paid anyone: still
+            # held (ops may yet pay it), but not said to be paid. Marking
+            # that journey failed releases the QR.
+            state = REVIEW
+        elif rows.exists() and state != REVIEW:
             state = SIGNING
     return state
 
@@ -1554,6 +1570,8 @@ def held(key, exclude_request_id=None, destination=None, owner=None):
 def held_message(state, what='QR'):
     if state == SIGNING:
         return f'Hay un pago de este {what} esperando firma. Espera unos minutos y vuelve a intentarlo.'
+    if state == REVIEW:
+        return f'Un pago anterior de este {what} está en revisión. Escríbenos si necesitas pagarlo.'
     # PAID ends the card for good: say so plainly.
     return f'Este {what} ya tiene un pago en Confío y no se puede pagar otra vez.'
 
@@ -1634,7 +1652,7 @@ def exact_qr_quote(destination, quote, exact=None):
     rate = quote.get('rate')
     target = Decimal(str(quote.get('target_amount') or 0))
     if rate not in (None, '') and target > 0:
-        rate = (exact * Decimal(str(rate)) / target).quantize(Decimal('0.0001'))
+        rate = (exact * Decimal(str(rate)) / target).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
     return {**quote, 'target_amount': exact, 'minimum_target': exact, 'expected_target': exact, 'rate': rate}
 
 
@@ -1673,7 +1691,7 @@ def exact_send_quote(owner, destination, exact, *, client=None):
             'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),
             'merchant_name': '', 'merchant_document': '', 'merchant_source': 'typed',
             'institution': '', 'expires_at': '', 'dynamic': False,
-            'rate': (exact / price['total_usd']).quantize(Decimal('0.0001'))}
+            'rate': (exact / price['total_usd']).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)}
 
 
 def fixed_qr_charge_quote(owner, destination, *, client=None):
@@ -1693,7 +1711,7 @@ def fixed_qr_charge_quote(owner, destination, *, client=None):
             'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),
             'merchant_name': (emv_fields(payload) or {}).get('59', ''), 'merchant_document': '', 'merchant_source': 'qr',
             'institution': '', 'expires_at': '', 'dynamic': order['once'],
-            'rate': (exact / price['total_usd']).quantize(Decimal('0.0001'))}
+            'rate': (exact / price['total_usd']).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)}
 
 
 def deposit_quote(owner, credit, *, client=None):

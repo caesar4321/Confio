@@ -329,7 +329,10 @@ function InfiniaLocalSendScreen() {
   // or a fixed-amount QR's own (Bre-B, Argentina; a Pix charge has its own path).
   const sentExact = exactLocal || (brebCharge ? pixCharge!.amount : '');
   const destinationId = destination?.id;
-  const destinationState = destination?.verification;
+  // Whether the recipient can be priced, not its exact state: a recheck that
+  // moves it from pending to verified must not reset a send under review.
+  const destinationQuotable = Boolean(destination) && destination!.verification !== 'not_found'
+    && destination!.verification !== 'pending';
   const available = limits?.known && limits.available != null ? Number(limits.available) : null;
   const perTransferMax = limits?.perTransferMax ? Number(limits.perTransferMax) : null;
   const spendable = savings.balanceUsd + cusdBalanceUsd;
@@ -564,8 +567,7 @@ function InfiniaLocalSendScreen() {
     setExactLoading(false);
     if (!localMode || chargeExpected) return;
     setAmount('');
-    if (!exactLocal || !destinationId || !pairReady || destinationState === 'not_found'
-      || destinationState === 'pending') return;
+    if (!exactLocal || !destinationId || !pairReady || !destinationQuotable) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       setExactLoading(true);
@@ -596,7 +598,7 @@ function InfiniaLocalSendScreen() {
     return () => { cancelled = true; clearTimeout(timer); };
   // The recipient's id and state, not the object: a background recheck that
   // returns the same recipient must not reset a send under review.
-  }, [localMode, chargeExpected, exactLocal, destinationId, destinationState, pairReady, resetReview, exactRetry,
+  }, [localMode, chargeExpected, exactLocal, destinationId, destinationQuotable, pairReady, resetReview, exactRetry,
     keepRepriceNotice]);
 
   // Live estimate while typing; the authoritative quote is priced again on

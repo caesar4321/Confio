@@ -14,6 +14,20 @@ from . import test_ve_send as send_fixture
 from .test_ve_send import WALLET, pagoasap_client
 
 
+# Tests run with real AWS credentials (the prod alert secret): nothing here may
+# ever reach the team's Telegram. Every send stops at its lowest layer.
+_telegram = mock.patch('config.ops_alerts._send', return_value=True)
+
+
+def setUpModule():
+    _telegram.start()
+
+
+def tearDownModule():
+    _telegram.stop()
+
+
+
 def relay_delivering(ratio=Decimal('0.98')):
     """A Relay estimate that delivers `ratio` of the deposited USDT."""
     relay = mock.Mock()
@@ -117,7 +131,7 @@ class ExactSchemaTests(TestCase):
     def setUp(self):
         from django.contrib.auth import get_user_model
         self.user = get_user_model().objects.create(username='ve-exact', firebase_uid='ve-exact')
-        self.info = mock.Mock(context=mock.Mock(user=self.user, META={}))
+        self.info = mock.Mock(context=mock.Mock(user=self.user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
 
     def test_a_provider_without_exact_bolivares_refuses_in_words(self):
         from ramps.ve_pagomovil_schema import Query
@@ -162,7 +176,7 @@ class ExactCreateSchemaTests(TestCase):
     def test_a_provider_without_exact_bolivares_refuses_the_order(self):
         from ramps.ve_pagomovil_schema import CreateVePagoMovilSend
         user, account = mock.Mock(), mock.Mock()
-        info = mock.Mock(context=mock.Mock(user=user, META={}))
+        info = mock.Mock(context=mock.Mock(user=user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
         with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(user, account)), \
                 mock.patch('security.face_step_up.missing_face_step_up', return_value=None), \
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=mock.Mock(spec=['quote', 'create'])) as adapter:
@@ -230,7 +244,7 @@ class ExactRound5Tests(TestCase):
         from django.core.cache import cache
         cache.clear()
         self.user = get_user_model().objects.create(username='ve-exact-5', firebase_uid='ve-exact-5')
-        self.info = mock.Mock(context=mock.Mock(user=self.user, META={}))
+        self.info = mock.Mock(context=mock.Mock(user=self.user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
 
     def test_the_exact_quote_is_for_those_who_can_send_and_paced(self):
         from ramps.ve_pagomovil_schema import Query
@@ -260,7 +274,7 @@ class ExactRound6Tests(TestCase):
         with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(user, mock.Mock())), \
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter), \
                 mock.patch('django.core.cache.cache.incr', side_effect=ValueError('expired')):
-            result = Query().resolve_ve_pagomovil_send_exact_quote(mock.Mock(context=mock.Mock(user=user, META={})), '15000')
+            result = Query().resolve_ve_pagomovil_send_exact_quote(mock.Mock(context=mock.Mock(user=user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'})), '15000')
         self.assertTrue(result.success, result.error)
 
 
@@ -282,7 +296,7 @@ class ExactRound9Tests(TestCase):
         from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, EXACT_QUOTES_PER_WINDOW
         cache.clear()
         user = get_user_model().objects.create(username='ve-exact-9', firebase_uid='ve-exact-9')
-        info = mock.Mock(context=mock.Mock(user=user, META={}))
+        info = mock.Mock(context=mock.Mock(user=user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
         adapter = mock.Mock()
         adapter.create.side_effect = ve_pagomovil.VePagoMovilError('El precio cambió. Revisa el envío de nuevo.')
         with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(user, mock.Mock())), \
@@ -293,3 +307,22 @@ class ExactRound9Tests(TestCase):
                        for _ in range(EXACT_QUOTES_PER_WINDOW + 1)]
         self.assertEqual(adapter.create.call_count, EXACT_QUOTES_PER_WINDOW)   # the last one never reaches Pago ASAP
         self.assertIn('Espera', answers[-1].error)
+
+
+class ExactRound10Tests(TestCase):
+    def test_an_older_build_gets_no_exact_bolivares(self):
+        from django.contrib.auth import get_user_model
+        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, Query
+        user = get_user_model().objects.create(username='ve-exact-10', firebase_uid='ve-exact-10')
+        info = mock.Mock(context=mock.Mock(user=user, META={'HTTP_X_CONFIO_VERSION': '5.3.7'}))
+        adapter = mock.Mock()
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(user, mock.Mock())), \
+                mock.patch('security.face_step_up.missing_face_step_up', return_value=None), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
+            quote = Query().resolve_ve_pagomovil_send_exact_quote(info, '15000')
+            order = CreateVePagoMovilSend().mutate(info, usd_amount='16.40', cedula='V12345678',
+                                                   phone='04141234567', bank_code='0102', ves_amount='15000')
+        self.assertIn('Actualiza la app', quote.error)
+        self.assertIn('Actualiza la app', order.error)
+        adapter.quote_exact.assert_not_called()
+        adapter.create.assert_not_called()

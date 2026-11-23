@@ -466,6 +466,16 @@ def read_transfer(owner, user, method_id, request, *, client=None):
     except PaymentAccountError as exc:
         raise _refuse('no_code', str(exc)) from exc
     exact = local_money.qr_amount(method, value)
+    asked = request.get('amount_local')
+    if exact and asked not in (None, ''):
+        # A QR that carries its own amount is paid that amount: another one
+        # asked for is refused, never silently replaced.
+        try:
+            differs = Decimal(str(asked)) != Decimal(exact)
+        except (InvalidOperation, TypeError, ValueError):
+            differs = True
+        if differs:
+            raise _refuse('no_amount', f'Este QR ya trae su monto ({exact}). Paga ese monto o pide otro QR.')
     if exact and not local_money.fixed_qr_build_supported(request.get('meta')):
         # An older build would show this card without saying where the spare
         # goes, and pay it as its own: told to update, as on Pagar.
@@ -512,6 +522,10 @@ def reread_transfer(owner, intent, request_meta=None, *, client=None):
     method = local_money.get_method(intent.rail_method_id, 'send')
     _location(owner, method, request_meta)
     order = (intent.params or {}).get('store_order')
+    if intent.amount_exact and not order and not local_money.fixed_qr_build_supported(request_meta):
+        # Confirmed from a build that does not say where the spare goes:
+        # refused before any bridge is prepared.
+        raise _refuse('rail', 'Actualiza la app para enviar un monto exacto.')
     if order:
         # The same order: its row still carries it, and the dollars shown still cover it.
         destination = intent.destination

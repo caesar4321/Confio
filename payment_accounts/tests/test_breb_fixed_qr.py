@@ -19,6 +19,20 @@ from .test_local_money import qr, tlv
 from .test_payment_intent_rails import EVERY_LEVEL
 
 
+# Tests run with real AWS credentials (the prod alert secret): nothing here may
+# ever reach the team's Telegram. Every send stops at its lowest layer.
+_telegram = mock.patch('config.ops_alerts._send', return_value=True)
+
+
+def setUpModule():
+    _telegram.start()
+
+
+def tearDownModule():
+    _telegram.stop()
+
+
+
 def argentina(amount=None, dynamic=True, name='KIOSCO'):
     fields = [('01', '12' if dynamic else '11'), ('43', 'com.mercadolibre'), ('53', '032')]
     fields += [('54', amount)] if amount else []

@@ -23,6 +23,20 @@ from .test_infinia_journeys import reconcile_provider_credit
 from .test_payment_intent_rails import EVERY_LEVEL
 
 
+# Tests run with real AWS credentials (the prod alert secret): nothing here may
+# ever reach the team's Telegram. Every send stops at its lowest layer.
+_telegram = mock.patch('config.ops_alerts._send', return_value=True)
+
+
+def setUpModule():
+    _telegram.start()
+
+
+def tearDownModule():
+    _telegram.stop()
+
+
+
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
 class ExactLocalCardTests(intent_fixture.PaymentIntentBase):
     def setUp(self):
@@ -804,6 +818,56 @@ class ExactLocalApiRound9Tests(ExactLocalApiTests):
         self.assertEqual(intent.rate, (Decimal('500') / intent.total_usd).quantize(Decimal('0.0001'), rounding='ROUND_DOWN'))
 
 
+class ExactLocalRound10JourneyTests(ExactLocalRound9JourneyTests):
+    def test_a_payment_in_review_that_paid_no_one_holds_but_is_not_called_paid(self):
+        fixed = self.fixed(breb('1249'))
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        InfiniaJourney.objects.filter(pk=first.pk).update(stage='needs_review')
+        key = first.destination_snapshot['store_order']['key']
+        self.assertEqual(local_money.held(key, destination=fixed), local_money.REVIEW)
+        with self.assertRaisesRegex(PaymentAccountError, 'en revisión'):
+            local_money.require_unpaid_qr(fixed)
+        InfiniaJourney.objects.filter(pk=first.pk).update(stage='failed')   # ops' release
+        self.assertEqual(local_money.held(key, destination=fixed), '')
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound10Tests(ExactLocalApiTests):
+    def test_another_amount_for_a_qr_with_its_own_is_refused(self):
+        with self.assertRaises(IntentRefused) as refused:
+            payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request={
+                'method_id': 'co_qr', 'value': breb('80000'), 'amount_local': '50000'})
+        self.assertEqual(refused.exception.code, 'no_amount')
+        self.assertIn('80000', str(refused.exception))
+
+    def test_an_exact_card_confirmed_from_an_older_build_is_refused_before_a_bridge(self):
+        from payment_accounts import intent_rails
+        card = mock.Mock(rail_method_id='br_pix', amount_exact=True, params={'exact_local': '500.00'})
+        local_money.fixed_qr_build_supported.return_value = False
+        with self.assertRaises(IntentRefused) as refused:
+            intent_rails.reread_transfer(self.owner, card, {})
+        self.assertIn('Actualiza la app', str(refused.exception))
+
+    def test_one_text_per_qr(self):
+        method = local_money.METHODS['co_qr']
+        upper = breb('25000')
+        lower = upper[:-4] + upper[-4:].lower()
+        self.assertEqual(local_money.normalize_value(method, lower), upper)
+        from .test_breb_fixed_qr import argentina
+        ar = argentina('1500.00')
+        self.assertEqual(local_money.normalize_value(local_money.METHODS['ar_qr'], ar[:-4] + ar[-4:].lower()), ar)
+
+    def test_a_fixed_qrs_mismatch_is_refused_before_a_provider(self):
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        with mock.patch.object(local_money, 'payout_quote') as quote, self.assertRaisesRegex(Exception, 'no coincide'):
+            LocalMoneyQuery().resolve_local_payout_quote(self.info, fixed.internal_id, amount=Decimal('50'),
+                                                         exact_local=Decimal('1000'))
+        quote.assert_not_called()
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -835,3 +899,7 @@ only_own_tests(ExactLocalRound9JourneyTests, journey_fixture.JourneyTests, Exact
                ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
                ExactLocalRound8JourneyTests)
 only_own_tests(ExactLocalApiRound9Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound10JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
+               ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests)
+only_own_tests(ExactLocalApiRound10Tests, ExactLocalApiTests)
