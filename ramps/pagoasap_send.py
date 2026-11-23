@@ -320,8 +320,9 @@ def exact_ves_amount(ves) -> Decimal:
     except (InvalidOperation, TypeError, ValueError):
         raise VePagoMovilError('Monto no válido.')
     # Bounds before quantizing: a huge exponent cannot be quantized.
-    # The same ceiling as every exact amount (intent_rails.exact_local).
-    if not ves.is_finite() or ves < MIN_PAYOUT_VES or ves >= Decimal('1e9') or ves != ves.quantize(ve_send.CENT):
+    if ves.is_finite() and ves >= Decimal('1e9'):   # the same ceiling as every exact amount
+        raise VePagoMovilError('Ese monto es demasiado alto para un envío.')
+    if not ves.is_finite() or ves < MIN_PAYOUT_VES or ves != ves.quantize(ve_send.CENT):
         raise VePagoMovilError(f'Escribe un monto desde {MIN_PAYOUT_VES} bolívares, con hasta dos decimales.')
     return ves
 

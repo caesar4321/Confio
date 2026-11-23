@@ -427,8 +427,18 @@ def prepare(owner, user, raw_code=None, *, created_by, source, request=None, mes
                                                      request.get('code') or request.get('value') or '')
             except PaymentAccountError as exc:
                 raise _refuse('no_code', str(exc)) from exc
-            facts = _read_pix_charge(owner, value, client=client)
             asked = request.get('amount_local')
+            if asked not in (None, ''):
+                # A code that states its amount (field 54) is compared before
+                # anything is read or priced; a dynamic charge after it is read.
+                stated = (local_money.emv_fields(value) or {}).get('54')
+                try:
+                    early = stated is not None and Decimal(str(asked)) != Decimal(stated)
+                except (ArithmeticError, TypeError, ValueError):
+                    early = True
+                if early:
+                    raise _refuse('no_amount', 'Este QR ya trae su monto. Paga ese monto o pide otro QR.')
+            facts = _read_pix_charge(owner, value, client=client)
             if asked not in (None, ''):
                 # The charge's own amount is paid: another one asked for is
                 # refused, never silently replaced.

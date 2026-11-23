@@ -225,6 +225,10 @@ def fixed_qr_amount(destination):
         raise PaymentAccountError('El monto del QR no es válido.')
     if amount and Decimal(amount) >= Decimal('1e9'):   # the ceiling of every exact amount
         raise PaymentAccountError('Ese monto es demasiado alto para un envío.')
+    if amount:
+        # A row stored before whole pesos were required is refused when read,
+        # never quoted at an amount the server would not pay.
+        require_whole_units(method.asset, amount)
     if amount and fields.get('53') != ISO_NUMERIC.get(method.asset):
         raise PaymentAccountError('El monto de este QR no está en la moneda del país.')
     return amount
@@ -1627,13 +1631,13 @@ def _live(rows, exclude_request_id=None, owner=None):
     the caller's own retry (same account and request id: a request id is the
     client's, unique per account only)."""
     import time
-    from django.db.models import CharField, Exists, OuterRef, Value
-    from django.db.models.functions import Cast, Concat
+    from django.db.models import Exists, OuterRef
     from blockchain.models import SponsoredBatch
     # A signed batch is recorded before it is broadcast; the bridge row is
     # marked submitted only afterwards. One with a batch is never "unsigned".
-    batch = SponsoredBatch.objects.filter(
-        client_request_id=Concat(Value('bridge:'), Cast(OuterRef('bridge__internal_id'), CharField())))
+    # (kind, source_id) is indexed (cpsb_kind_source_idx); submit_bridge
+    # records the batch as payment_bridge with the bridge's pk.
+    batch = SponsoredBatch.objects.filter(kind='payment_bridge', source_id=OuterRef('bridge_id'))
     rows = rows.exclude(stage='failed').annotate(_signed_batch=Exists(batch)).exclude(
         bridge__status='prepared', bridge__deadline__lt=int(time.time()), _signed_batch=False)
     # A bridge that ended without delivering, before any conversion: nothing

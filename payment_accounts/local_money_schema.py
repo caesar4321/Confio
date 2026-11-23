@@ -391,6 +391,8 @@ class LocalMoneyQuery(graphene.ObjectType):
                 if destination.status not in ('pending', 'active'):
                     raise PayoutDestination.DoesNotExist
                 local_money.require_unpaid_qr(destination)
+                local_money._require_priceable(destination)
+                local_money.pace_exact_quotes(owner)   # this quote always asks the providers
             bridge = (PaymentBridgeTransfer.objects.select_related('quote__funding_instruction').get(
                 internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None)
             local_money.require_exact_for_fixed(destination, exact_local)   # before any provider is asked

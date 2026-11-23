@@ -242,7 +242,7 @@ class ExactRound4Tests(TestCase):
 
     def test_a_huge_amount_gets_words(self):
         with mock.patch.object(pagoasap_send, '_client', return_value=pagoasap_client()), \
-                self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'bolívares'):
+                self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'demasiado alto'):
             pagoasap_send.quote_exact_now('1e30')
 
     def test_a_moved_price_is_quoted_fresh_next_time(self):
@@ -472,3 +472,11 @@ class ExactRound18Tests(TestCase):
         with self.settings(VE_PAGOMOVIL_EXACT_PRICE_TOLERANCE_BPS='300'), \
                 self.assertLogs('ramps.pagoasap_send', level='WARNING'):
             self.assertEqual(pagoasap_send._price_tolerance(), Decimal('0.005'))
+
+
+class ExactRound20Tests(TestCase):
+    def test_a_too_large_bolivar_amount_says_so(self):
+        with self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'demasiado alto'):
+            pagoasap_send.exact_ves_amount('1000000000')
+        with self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'desde'):
+            pagoasap_send.exact_ves_amount('5')

@@ -1102,8 +1102,8 @@ class ExactLocalRound19JourneyTests(ExactLocalRound16JourneyTests):
         first.bridge.save(update_fields=['status', 'deadline'])
         self.assertEqual(local_money.held(key, destination=fixed), '')   # never signed: free
         SponsoredBatch.objects.create(user=self.owner.user, user_bsc_address='0x' + '1' * 40, kind='payment_bridge',
-                                      num_calls=1, calls_json='[]', gas_limit=1, max_fee_wei='1',
-                                      client_request_id='bridge:' + str(first.bridge.internal_id))
+                                      source_id=first.bridge.pk, num_calls=1, calls_json='[]', gas_limit=1,
+                                      max_fee_wei='1', client_request_id='bridge:' + str(first.bridge.internal_id))
         self.assertTrue(local_money.held(key, destination=fixed))   # signed and broadcast: still held
 
     def test_a_qr_amount_has_the_exact_ceiling(self):
@@ -1112,6 +1112,40 @@ class ExactLocalRound19JourneyTests(ExactLocalRound16JourneyTests):
         with self.assertRaisesRegex(PaymentAccountError, 'demasiado alto'):
             local_money.normalize_value(local_money.METHODS['ar_qr'],
                                         qr(('01', '12'), ('53', '032'), ('54', '1000000000'), ('58', 'AR')))
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound20Tests(ExactLocalApiTests):
+    def test_a_stored_colombian_qr_with_centavos_is_never_quoted(self):
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        payload = breb('25000.50')   # stored before whole pesos were required
+        fixed.provider_data = dict(fixed.provider_data, breb_qr=dict(fixed.provider_data['breb_qr'], payload=payload,
+                                                                     amount='25000.50'))
+        fixed.save()
+        with mock.patch.object(local_money, 'payout_quote') as quote, \
+                self.assertRaisesRegex(PaymentAccountError, 'sin centavos'):
+            local_money.fixed_qr_charge_quote(self.owner, fixed)
+        quote.assert_not_called()
+
+    def test_a_pix_code_with_another_stated_amount_is_refused_before_reading_it(self):
+        from .test_local_money import tlv
+        stated = qr(('26', tlv('00', 'br.gov.bcb.pix') + tlv('01', 'ana@example.com')), ('53', '986'),
+                    ('54', '150.00'), ('58', 'BR'), ('59', 'ANA SILVA'))
+        with mock.patch.object(payment_intents, '_read_pix_charge') as read, self.assertRaises(IntentRefused) as refused:
+            payment_intents.prepare(self.owner, self.user, stated, created_by='assistant', source='pasted_code',
+                                    request={'amount_local': '10.00'})
+        self.assertEqual(refused.exception.code, 'no_amount')
+        read.assert_not_called()
+
+    def test_the_held_exact_quote_is_paced_and_priceable(self):
+        from django.core.cache import cache
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        cache.clear()
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        with mock.patch.object(local_money, 'EXACT_QUOTES_PER_WINDOW', 0), \
+                self.assertRaisesRegex(Exception, 'Espera'):
+            LocalMoneyQuery().resolve_local_payout_quote(self.info, row.internal_id, amount=Decimal('100'),
+                                                         exact_local=Decimal('500'))
 
 
 def only_own_tests(cls, *bases):
@@ -1166,6 +1200,7 @@ only_own_tests(ExactLocalRound16JourneyTests, journey_fixture.JourneyTests, Exac
 only_own_tests(ExactLocalApiRound16Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound17Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound18Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalApiRound20Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalRound19JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
                ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
                ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests,
