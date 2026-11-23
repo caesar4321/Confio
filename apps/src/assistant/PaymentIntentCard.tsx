@@ -24,6 +24,7 @@ import {
   payeeLevelLine, requotePaymentIntent, timeLeft, trackPaymentIntent, type PaymentIntent,
 } from '../services/paymentIntent';
 import { formatDecimal } from '../utils/numberLocale';
+import { exactSurplusNote } from './paymentIntentNotes';
 
 const EMERALD = '#047857';
 const INK = '#111827';
@@ -104,6 +105,7 @@ function ReviewSheet({ intent, onClose, onApprove }: {
             ) : null}
             {Number(intent.feeUsd) > 0 ? <Line label="Comisión incluida" value={usd(intent.feeUsd)} /> : null}
             <Line label="Sale de tu cuenta personal" value={usd(intent.totalUsd)} strong />
+            {exactSurplusNote(intent) ? <Text style={styles.sheetNote}>{exactSurplusNote(intent)}</Text> : null}
 
             {!expired ? (
               <Text style={styles.sheetNote}>

@@ -503,6 +503,15 @@ function InfiniaLocalSendScreen() {
   // A charge: what it costs all in, once the Pix network named its receiver.
   // The amount field then holds the computed dollars and is not editable.
   const chargeRun = useRef(0);
+  // "The price moved" stays on screen while the send is priced again: the
+  // re-pricing's own resetReview() must not clear what the person was told.
+  const repriceNotice = useRef('');
+  const keepRepriceNotice = useCallback(() => {
+    if (repriceNotice.current) {
+      setFlowError(repriceNotice.current);
+      repriceNotice.current = '';
+    }
+  }, []);
   const loadPixCharge = useCallback(async (row: LocalDestination) => {
     const run = ++chargeRun.current;
     setPixCharge(null);
@@ -516,14 +525,19 @@ function InfiniaLocalSendScreen() {
         return;
       }
       resetReview();
+      keepRepriceNotice();
       setPixCharge(next);
       setAmount(next.totalUsd);
     } catch (error: any) {
-      if (run === chargeRun.current && mounted.current) setPixChargeError(error?.message || 'No pudimos revisar este cobro.');
+      if (run === chargeRun.current && mounted.current) {
+        setPixChargeError(error?.message || 'No pudimos revisar este cobro.');
+        // A Bre-B location check offers the location screen, as everywhere else.
+        setLocationBlocked(isBrebLocationFailure(error));
+      }
     } finally {
       if (run === chargeRun.current && mounted.current) setPixChargeLoading(false);
     }
-  }, [resetReview]);
+  }, [resetReview, keepRepriceNotice]);
   useEffect(() => {
     chargeRun.current += 1;
     setPixCharge(null);
@@ -561,6 +575,7 @@ function InfiniaLocalSendScreen() {
           return;
         }
         resetReview();
+        keepRepriceNotice();
         setExactSend(next);
         setAmount(next.totalUsd);
       } catch (error: any) {
@@ -577,7 +592,8 @@ function InfiniaLocalSendScreen() {
     return () => { cancelled = true; clearTimeout(timer); };
   // The recipient's id and state, not the object: a background recheck that
   // returns the same recipient must not reset a send under review.
-  }, [localMode, chargeExpected, exactLocal, destinationId, destinationState, pairReady, resetReview, exactRetry]);
+  }, [localMode, chargeExpected, exactLocal, destinationId, destinationState, pairReady, resetReview, exactRetry,
+    keepRepriceNotice]);
 
   // Live estimate while typing; the authoritative quote is priced again on
   // the prepared bridge at review.
@@ -588,7 +604,7 @@ function InfiniaLocalSendScreen() {
     setQuoteLoading(false); // a cancelled estimate cannot clear its own spinner
     // A fixed-amount QR is estimated only with its own amount, once its price is in.
     if (!destination || destination.verification === 'not_found' || !pairReady || !amountNumber || amountError
-      || (chargeExpected && !pixCharge)) {
+      || (chargeExpected && !pixCharge) || (localMode && !chargeExpected && !exactSend)) {
       return;
     }
     let cancelled = false;
@@ -609,7 +625,8 @@ function InfiniaLocalSendScreen() {
       }
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [destination, pairReady, amountNumber, amountError, normalizedAmount, sentExact]);
+  }, [destination, pairReady, amountNumber, amountError, normalizedAmount, sentExact, chargeExpected, pixCharge,
+    localMode, exactSend]);
 
   const feeView = processorFeeView(fee, amountNumber);
   const finalFeeView = processorFeeView(finalFee, amountNumber);
@@ -677,11 +694,13 @@ function InfiniaLocalSendScreen() {
       // A charge whose price moved is priced again; Continue then uses the new total.
       if (pixCharge && recipient) {
         requestId.current = null;
+        repriceNotice.current = error?.message || '';
         void loadPixCharge(recipient);
       }
       // An exact amount whose dollars no longer cover it is priced again too.
       if (snapshot.exactLocal && !pixCharge) {
         requestId.current = null;
+        repriceNotice.current = error?.message || '';
         setExactRetry((n) => n + 1);
       }
     }

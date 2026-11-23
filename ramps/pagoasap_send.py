@@ -286,12 +286,16 @@ PRICE_MOVED = 'El precio cambió. Revisa el envío de nuevo.'
 EXACT_QUOTE_CACHE_SECONDS = 15
 
 
+def _exact_cache_key(ves):
+    return f'pagoasap:exact:{Decimal(str(ves)).quantize(ve_send.CENT):f}'
+
+
 def quote_exact(ves) -> dict:
     """quote_exact_now, kept a few seconds per amount: typing asks again
     often, and each answer is several Relay quotes and Pago ASAP previews."""
     from django.core.cache import cache
     try:
-        key = f'pagoasap:exact:{Decimal(str(ves)).quantize(ve_send.CENT):f}'
+        key = _exact_cache_key(ves)
     except (InvalidOperation, TypeError, ValueError):
         return quote_exact_now(ves)
     cached = cache.get(key)
@@ -313,7 +317,8 @@ def quote_exact_now(ves) -> dict:
         ves = Decimal(str(ves))
     except (InvalidOperation, TypeError, ValueError):
         raise VePagoMovilError('Monto no válido.')
-    if not ves.is_finite() or ves != ves.quantize(ve_send.CENT) or ves < MIN_PAYOUT_VES or ves >= Decimal('1e10'):
+    # Bounds before quantizing: a huge exponent cannot be quantized.
+    if not ves.is_finite() or ves < MIN_PAYOUT_VES or ves >= Decimal('1e10') or ves != ves.quantize(ve_send.CENT):
         raise VePagoMovilError(f'Escribe un monto desde {MIN_PAYOUT_VES} bolívares, con hasta dos decimales.')
     client = _client()
     try:
@@ -375,6 +380,9 @@ def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
         # overpay): the send is the fresh price, its lines as quoted.
         fresh = Decimal(estimate['usd_amount'])
         if fresh > amount:
+            # The screen asks again: priced fresh, not from the few seconds' memory.
+            from django.core.cache import cache
+            cache.delete(_exact_cache_key(exact_ves))
             raise VePagoMovilError(PRICE_MOVED)
         amount = fresh
     else:

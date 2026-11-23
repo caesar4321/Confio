@@ -170,7 +170,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     _require_capability(target, 'send_third_party')
     existing = InfiniaJourney.objects.filter(confio_account=owner, request_id=request_id).first()
     compared = snapshot
-    if existing and 'store_order' in snapshot and 'store_order' not in (existing.destination_snapshot or {}):
+    if existing and ':qr:' in str((snapshot.get('store_order') or {}).get('key', '')) \
+            and 'store_order' not in (existing.destination_snapshot or {}):
         # A journey made before this recipient was paid exactly (a fixed-
         # amount QR then paid in dollars): its retry returns it as it was.
         compared = {key: value for key, value in snapshot.items() if key != 'store_order'}
@@ -207,7 +208,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         if minimum < Decimal(order['amount']):
             raise PaymentAccountError(f'El monto autorizado no cubre {what}. Revisa el pago de nuevo.')
         from .local_money import holding_payments
-        if order.get('once', True) and holding_payments(order['key'], exclude_request_id=request_id).exists():
+        if order.get('once', True) and holding_payments(order['key'], exclude_request_id=request_id,
+                                                        destination=destination).exists():
             raise PaymentAccountError(
                 'Este pedido ya tiene un pago en Confío y no se puede pagar otra vez.' if what == 'el pedido'
                 else 'Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')

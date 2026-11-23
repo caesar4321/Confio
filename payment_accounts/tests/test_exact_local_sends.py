@@ -481,6 +481,99 @@ class ExactLocalApiRound3Tests(ExactLocalApiTests):
             local_money.exact_send_quote(self.owner, order_row, '10')
 
 
+class ExactLocalRound4JourneyTests(ExactLocalRound3Tests):
+    def mutate(self, destination, **kwargs):
+        from payment_accounts.journey_schema import CreateInfiniaJourney
+        info = mock.Mock(context=mock.Mock(user=self.owner.user, META={}))
+        with mock.patch('payment_accounts.schema._active_account', return_value=self.owner), \
+                mock.patch('payment_accounts.schema._require_adult'), \
+                mock.patch('payment_accounts.breb_location.require_for_country'):
+            return CreateInfiniaJourney.mutate(
+                None, info, local_account_id=self.local.internal_id, crypto_account_id=self.crypto.internal_id,
+                destination_id=destination.internal_id, direction='to_bank', request_id=uuid.uuid4(),
+                minimum_fx_output=Decimal('1249.00'), bridge_id=self.bridge().internal_id, **kwargs)
+
+    def test_a_current_build_pays_a_fixed_qr_with_its_own_amount_only(self):
+        fixed = self.fixed(breb('1249', dynamic=False))
+        wrong = self.mutate(fixed, exact_local_amount=Decimal('1000'))
+        self.assertFalse(wrong.success)
+        self.assertIn('no coincide', wrong.errors[0])
+        right = self.mutate(fixed, exact_local_amount=Decimal('1249'))
+        self.assertTrue(right.success, right.errors)
+        self.assertEqual(right.journey.destination_snapshot['store_order']['amount'], '1249.00')
+
+    def test_a_dynamic_qr_paid_in_dollars_before_still_holds_it(self):
+        fixed = self.fixed(breb('1249'))
+        old = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                             request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                             destination=fixed, minimum_fx_output='1249.00')
+        snapshot = dict(old.destination_snapshot); snapshot.pop('store_order')   # as paid before this change
+        InfiniaJourney.objects.filter(pk=old.pk).update(destination_snapshot=snapshot, stage='completed')
+        other = self.fixed(breb('1249'))   # the same QR, scanned again (any account)
+        with self.assertRaisesRegex(PaymentAccountError, 'QR ya tiene un pago'):
+            local_money.require_unpaid_qr(other)
+
+    def test_the_retry_exception_is_only_for_qrs(self):
+        row, t, request = self.destination(), self.bridge(), uuid.uuid4()
+        args = dict(owner=self.owner, local_account=self.local, crypto_account=self.crypto, request_id=request,
+                    direction='to_bank', bridge=t, destination=row, minimum_fx_output='1249.00')
+        create_journey(**args)   # a dollar journey
+        with self.assertRaisesRegex(PaymentAccountError, 'Request id already used'):
+            create_journey(**args, exact_payout=Decimal('1249.00'))   # never silently returned as exact
+
+    def test_a_row_without_its_rail_yet_is_still_its_qr(self):
+        row = self.fixed(breb('1249'))
+        row.provider_data = {'breb_qr': row.provider_data['breb_qr']}   # no method_id written yet
+        row.save()
+        self.assertTrue(local_money.is_fixed_amount_qr(row))
+        argentine = self.destination()
+        argentine.provider_data = {}
+        argentine.country = 'ARG'
+        argentine.details = {'type': 'QR_CODE', 'qrCode': qr(('01', '12'), ('53', '032'), ('54', '1500.00'), ('58', 'AR'))}
+        argentine.save()
+        self.assertEqual(local_money.fixed_qr_amount(argentine), '1500.00')
+
+    def test_an_unreadable_qr_says_so_not_update_the_app(self):
+        row = self.fixed(breb('1249'))
+        row.provider_data = dict(row.provider_data, breb_qr=dict(row.provider_data['breb_qr'], payload='garbage'))
+        row.save()
+        with self.assertRaisesRegex(PaymentAccountError, 'No pudimos leer'):
+            local_money.require_exact_for_fixed(row, None)
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound4Tests(ExactLocalApiTests):
+    def test_an_old_dollar_card_for_a_now_fixed_qr_ends(self):
+        from payment_accounts import intent_rails
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        card = mock.Mock(rail_method_id='co_qr', destination=fixed, amount_exact=False, params={})
+        with mock.patch.object(intent_rails, 'transfer_payee', return_value={}), \
+                self.assertRaises(IntentRefused) as refused:
+            intent_rails.reread_transfer(self.owner, card)
+        self.assertEqual(refused.exception.code, 'charge_changed')
+
+    def test_hostile_amounts_get_words_not_a_crash(self):
+        from payment_accounts import intent_rails
+        with self.assertRaises(IntentRefused) as refused:
+            intent_rails.exact_local({'amount_local': '1e30'})
+        self.assertEqual(refused.exception.code, 'no_amount')
+        with self.assertRaisesRegex(PaymentAccountError, 'demasiado alto'):
+            local_money._exact_amount('1e30')
+
+    def test_a_moved_price_is_priced_again_not_remembered(self):
+        from django.core.cache import cache
+        from payment_accounts import intent_rails
+        cache.clear()
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        local_money.exact_send_quote(self.owner, row, '500')
+        key = intent_rails._order_price_key(self.owner.pk, row.pk, '500')
+        self.assertIsNotNone(cache.get(key))
+        short = local_money.payout_quote(self.owner, row, amount=Decimal('5'))
+        with self.assertRaisesRegex(PaymentAccountError, 'cambió'):
+            local_money.exact_qr_quote(row, short, '500')
+        self.assertIsNone(cache.get(key))
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -496,3 +589,5 @@ only_own_tests(HoldingPaymentsTests, journey_fixture.JourneyTests, ExactLocalJou
 only_own_tests(ExactLocalApiEdgeTests, ExactLocalApiTests)
 only_own_tests(ExactLocalRound3Tests, journey_fixture.JourneyTests, ExactLocalJourneyTests)
 only_own_tests(ExactLocalApiRound3Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound4JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests)
+only_own_tests(ExactLocalApiRound4Tests, ExactLocalApiTests)

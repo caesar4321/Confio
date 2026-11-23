@@ -200,3 +200,25 @@ class ExactRound3Tests(TestCase):
             pagoasap_send.quote_exact('15000.00')
             pagoasap_send.quote_exact('15000')
         self.assertEqual(now.call_count, 1)
+
+
+class ExactRound4Tests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        self.user = get_user_model().objects.create(username='ve-exact-4', firebase_uid='ve-exact-4')
+
+    def test_a_huge_amount_gets_words(self):
+        with mock.patch.object(pagoasap_send, '_client', return_value=pagoasap_client()), \
+                self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'bolívares'):
+            pagoasap_send.quote_exact_now('1e30')
+
+    def test_a_moved_price_is_quoted_fresh_next_time(self):
+        from django.core.cache import cache
+        cache.clear()
+        cache.set(pagoasap_send._exact_cache_key('19800'), {'usd_amount': '19.00'})
+        quote = {'usd_amount': '25.00', 'estimated_ves': '19800.00', 'exact_ves': '19800.00'}
+        with mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
+                mock.patch.object(pagoasap_send, 'quote_exact_now', return_value=quote), \
+                self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'cambió'):
+            pagoasap_send.create(self.user, mock.Mock(), Decimal('20.00'), {}, exact_ves='19800.00')
+        self.assertIsNone(cache.get(pagoasap_send._exact_cache_key('19800')))

@@ -190,6 +190,13 @@ def qr_amount(method, value):
 def _qr_payload(destination):
     data = (destination.provider_data or {}) if destination is not None else {}
     method = METHODS.get(data.get('method_id'))
+    if method is None and destination is not None:
+        # A row whose check has not written its rail yet is still the QR it
+        # holds: read from its own fields, never taken for an open recipient.
+        if data.get('breb_qr'):
+            method = METHODS['co_qr']
+        elif destination.country == 'ARG' and (destination.details or {}).get('type') == 'QR_CODE':
+            method = METHODS['ar_qr']
     if method is None or method.id not in FIXED_QR_METHODS:
         return None, ''
     return method, _destination_value(destination, method)
@@ -1445,10 +1452,12 @@ def _exact_amount(value):
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         amount = None
-    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(FIAT_CENT):
+    if amount is None or not amount.is_finite() or amount <= 0:
         raise PaymentAccountError('Escribe el monto en moneda local con hasta dos decimales.')
-    if amount >= Decimal('1e9'):
+    if amount >= Decimal('1e9'):   # before quantizing: a huge exponent cannot be quantized
         raise PaymentAccountError('Ese monto es demasiado alto para un envío.')
+    if amount != amount.quantize(FIAT_CENT):
+        raise PaymentAccountError('Escribe el monto en moneda local con hasta dos decimales.')
     return amount.quantize(FIAT_CENT)
 
 
@@ -1467,7 +1476,8 @@ def fixed_qr_build_supported(meta):
 def require_exact_for_fixed(destination, exact):
     """A fixed-amount QR is quoted only with its own amount (asked before any
     provider is): an older build that types dollars is told to update."""
-    if exact is None and is_fixed_amount_qr(destination):
+    # A QR that cannot be read says so (its own error), not "update the app".
+    if exact is None and fixed_qr_amount(destination):
         raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
 
 
@@ -1477,17 +1487,36 @@ def require_unpaid_qr(destination):
     order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
     if order is None or not order.get('once'):
         return
-    if holding_payments(order['key']).exists():
+    if holding_payments(order['key'], destination=destination).exists():
         raise PaymentAccountError('Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')
 
 
-def holding_payments(key, exclude_request_id=None):
+def _same_qr_destinations(destination):
+    """Every recipient row (any account) that holds this very QR."""
+    method, payload = _qr_payload(destination)
+    if method is None or not payload:
+        return []
+    rows = PayoutDestination.objects.filter(provider='infinia')
+    rows = (rows.filter(provider_data__breb_qr__payload=payload) if method.id == 'co_qr'
+            else rows.filter(country='ARG', **{f'details__{method.field}': payload}))
+    return [str(value) for value in rows.values_list('internal_id', flat=True)[:500]]
+
+
+def holding_payments(key, exclude_request_id=None, destination=None):
     """The payments that hold a paid-once order or QR: any that is not
     failed, except one whose bridge was never signed and can no longer be
-    (someone who only opened a payment does not block everyone else)."""
+    (someone who only opened a payment does not block everyone else). For a
+    QR (`destination`), also a payment of it made before QRs carried their
+    amount (paid in dollars, with no order key)."""
     import time
     from .models import InfiniaJourney
-    rows = InfiniaJourney.objects.filter(direction='to_bank', destination_snapshot__store_order__key=key) \
+    held = Q(destination_snapshot__store_order__key=key)
+    if destination is not None and ':qr:' in str(key):
+        legacy = _same_qr_destinations(destination)
+        if legacy:
+            held |= (Q(destination_snapshot__destination_internal_id__in=legacy)
+                     & ~Q(destination_snapshot__has_key='store_order'))
+    rows = InfiniaJourney.objects.filter(held, direction='to_bank') \
         .exclude(stage='failed').exclude(bridge__status='prepared', bridge__deadline__lt=int(time.time()))
     return rows.exclude(request_id=exclude_request_id) if exclude_request_id else rows
 
@@ -1510,6 +1539,9 @@ def exact_qr_quote(destination, quote, exact=None):
         return quote
     exact = _exact_amount(exact)
     if Decimal(quote['minimum_target']) < exact:
+        # Priced again next time, not from the few seconds' memory.
+        from .intent_rails import forget_order_price
+        forget_order_price(destination, exact)
         raise PaymentAccountError('El precio cambió. Revisa el envío de nuevo.')
     return {**quote, 'target_amount': exact, 'minimum_target': exact, 'expected_target': exact}
 

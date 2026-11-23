@@ -313,10 +313,12 @@ def exact_local(request):
         amount = Decimal(str(raw))
     except (InvalidOperation, TypeError, ValueError):
         amount = None
-    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(CENT):
+    if amount is None or not amount.is_finite() or amount <= 0:
         raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
-    if amount >= Decimal('1e9'):
+    if amount >= Decimal('1e9'):   # before quantizing: a huge exponent cannot be quantized
         raise _refuse('no_amount', 'Ese monto es demasiado alto para un envío.')
+    if amount != amount.quantize(CENT):
+        raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
     return str(amount.quantize(CENT))
 
 
@@ -350,12 +352,25 @@ def _require_unpaid(destination):
 ORDER_PRICE_CACHE_SECONDS = 20
 
 
+def _order_price_key(owner_pk, destination_pk, exact):
+    return f'order_price:{owner_pk}:{destination_pk}:{Decimal(str(exact)).quantize(CENT):f}'
+
+
+def forget_order_price(destination, exact):
+    """A fresh check said the price moved: the next ask prices it again."""
+    from django.core.cache import cache
+    try:
+        cache.delete(_order_price_key(destination.confio_account_id, destination.pk, exact))
+    except (InvalidOperation, TypeError, ValueError):
+        pass
+
+
 def _order_price(owner, destination, exact, *, client=None):
     """The dollars whose guaranteed minimum covers `exact` local units.
     Kept a few seconds per recipient and amount: typing asks again often, and
     every try is a bridge estimate and a provider quote."""
     from django.core.cache import cache
-    key = f'order_price:{owner.pk}:{destination.pk}:{Decimal(exact).quantize(CENT):f}'
+    key = _order_price_key(owner.pk, destination.pk, exact)
     cached = cache.get(key)
     if cached is not None:
         return dict(cached)
@@ -477,6 +492,9 @@ def reread_transfer(owner, intent, request_meta=None, *, client=None):
     payee = transfer_payee(destination)
     if any(payee[key] != getattr(intent, key) for key in payee):
         raise _refuse('charge_changed', 'El destino cambió desde que lo viste. Revísalo de nuevo.')
+    if not intent.amount_exact and local_money.is_fixed_amount_qr(destination):
+        # A dollar card shown before this QR was paid exactly: the card is over.
+        raise _refuse('charge_changed', 'Este QR cobra un monto exacto. Escanéalo de nuevo para pagarlo.')
     _require_unpaid(destination)
     price = _transfer_price(owner, destination, intent.total_usd, client=client)
     if price['minimum_local'] < intent.minimum_local or price['fee_usd'] > intent.fee_usd \

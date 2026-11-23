@@ -219,12 +219,16 @@ class CreateInfiniaJourney(graphene.Mutation):
                         raise payment_intents._refuse('changed')
                     if fixed and not intent.amount_exact and is_new_send:
                         # A dollar card shown before fixed-amount QRs were paid
-                        # exactly: what it said is not what would be paid.
-                        raise payment_intents._refuse('changed')
+                        # exactly: what it said is not what would be paid. The
+                        # card ends (charge_changed), never offered again.
+                        raise payment_intents._refuse('charge_changed')
                     exact = shown or None
                 elif exact is None and fixed and is_new_send:
                     # A fixed-amount QR is paid only by a build that shows it
-                    # as one (a retry of an existing journey returns it as is).
+                    # as one (a retry of an existing journey returns it as is);
+                    # one that cannot be read says so instead.
+                    from .local_money import require_exact_for_fixed
+                    require_exact_for_fixed(destination, None)
                     raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
                 if is_new_send and destination is not None:
                     # A dynamic QR someone already paid ends its card (charge_changed).
