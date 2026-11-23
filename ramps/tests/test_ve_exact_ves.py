@@ -394,3 +394,6 @@ class ExactRound12Tests(TestCase):
         self.assertEqual(Decimal(estimate['usdt_amount']), (Decimal(deposit) / Decimal(10 ** 18)).quantize(ve_send.MICRO))
         self.assertLessEqual(abs(Decimal(estimate['confio_fee_usd']) + Decimal(estimate['usdt_amount']) - Decimal('19.51')),
                              Decimal('0.01'))
+        # The processor's line moved by exactly what the deposit moved (19.30 at the fresh price).
+        self.assertEqual(Decimal(estimate['processor_fee_usd']),
+                         (Decimal('0.40') + Decimal(estimate['usdt_amount']) - Decimal('19.30')).quantize(ve_send.CENT))

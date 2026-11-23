@@ -157,7 +157,6 @@ def _parse_usd(value) -> Decimal | None:
 
 
 EXACT_UNAVAILABLE = 'Por ahora solo puedes enviar un monto en dólares.'
-EXACT_QUOTES_PER_WINDOW = 20
 EXACT_QUOTE_WINDOW_SECONDS = 60
 
 
@@ -180,14 +179,14 @@ def _pace_exact_price(account):
         raise VePagoMovilError(str(exc)) from exc
 
 
-def _pace_exact(user, kind='quote'):
-    """Every exact-bolívares price (a quote, or an order priced fresh) asks
-    Pago ASAP and the bridge several times; their limits are shared with real
-    payouts, so each person is paced. Orders have their own count, so typing
-    amounts never uses up the send."""
+def _pace_exact_order(user):
+    """An exact-bolívares order is priced fresh (Pago ASAP and the bridge,
+    several times; their limits are shared with real payouts): orders are
+    paced on their own count, so typing amounts (paced on the shared
+    per-account count, _pace_exact_price) never uses up the send."""
     from django.core.cache import cache
-    key = f've_exact_{kind}:{user.pk}'
-    limit = EXACT_ORDERS_PER_WINDOW if kind == 'order' else EXACT_QUOTES_PER_WINDOW
+    key = f've_exact_order:{user.pk}'
+    limit = EXACT_ORDERS_PER_WINDOW
     cache.add(key, 0, EXACT_QUOTE_WINDOW_SECONDS)
     try:
         count = cache.incr(key)
@@ -195,8 +194,7 @@ def _pace_exact(user, kind='quote'):
         cache.set(key, 1, EXACT_QUOTE_WINDOW_SECONDS)
         count = 1
     if count > limit:
-        raise VePagoMovilError('Espera un momento antes de cotizar otro monto.' if kind == 'quote'
-                               else 'Espera un momento antes de enviar otra vez.')
+        raise VePagoMovilError('Espera un momento antes de enviar otra vez.')
 
 
 def _exact_adapter():
@@ -409,7 +407,7 @@ class CreateVePagoMovilSend(graphene.Mutation):
             beneficiary = _beneficiary(cedula, phone, bank_code, beneficiary_name)
             if ves_amount not in (None, ''):
                 _require_exact_build(info)
-                _pace_exact(user, kind='order')
+                _pace_exact_order(user)
                 ramp = _exact_adapter().create(user, account, amount, beneficiary, exact_ves=ves_amount)
             else:
                 ramp = ve_pagomovil.send_adapter().create(user, account, amount, beneficiary)

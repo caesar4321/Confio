@@ -871,7 +871,14 @@ class ExactLocalApiRound10Tests(ExactLocalApiTests):
         self.assertEqual(local_money.normalize_value(method, lower), upper)
         from .test_breb_fixed_qr import argentina
         ar = argentina('1500.00')
-        self.assertEqual(local_money.normalize_value(local_money.METHODS['ar_qr'], ar[:-4] + ar[-4:].lower()), ar)
+        lower = ar[:-4] + ar[-4:].lower()
+        # An Argentine QR is the payout's destination: kept as scanned; its identity is case-blind.
+        self.assertEqual(local_money.normalize_value(local_money.METHODS['ar_qr'], lower), lower)
+        self.assertEqual(local_money.qr_identity(lower), ar)
+        one = local_money.resolve_destination(self.owner, 'ar_qr', ar)
+        two = local_money.resolve_destination(self.owner, 'ar_qr', lower)
+        self.assertEqual(local_money.store_order_snapshot(one)['key'], local_money.store_order_snapshot(two)['key'])
+        self.assertEqual(set(local_money.same_qr_rows(two).values_list('pk', flat=True)), {one.pk, two.pk})
 
     def test_a_fixed_qrs_mismatch_is_refused_before_a_provider(self):
         from payment_accounts.local_money_schema import LocalMoneyQuery
@@ -907,6 +914,25 @@ class ExactLocalApiRound12Tests(ExactLocalApiTests):
         local_money.fixed_qr_build_supported.return_value = False
         with self.assertRaisesRegex(Exception, 'Actualiza la app'):
             LocalMoneyQuery().resolve_local_pix_charge(self.info, fixed.internal_id)
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound13Tests(ExactLocalApiTests):
+    def test_a_move_inside_the_margin_keeps_an_exact_card(self):
+        from payment_accounts import intent_rails
+        intent = payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request={
+            'method_id': 'br_pix', 'value': 'ana@example.com', 'amount_local': '500'})
+        margin = intent_rails._margin()
+        inside = {'fee_usd': intent.fee_usd, 'currency': intent.currency}
+        outside = dict(inside, minimum_local=Decimal('400.00'))
+        with mock.patch.object(intent_rails, '_transfer_price', return_value=outside), \
+                self.assertRaises(IntentRefused) as moved:
+            intent_rails.reread_transfer(self.owner, intent, {'HTTP_X_CONFIO_VERSION': '5.4.1'})
+        self.assertEqual(moved.exception.code, 'quote_changed')
+        # Within the margin: the raw guaranteed minimum is what still covers the card.
+        barely = dict(inside, minimum_local=(Decimal('500.00') * (1 - margin)).quantize(Decimal('0.01'), rounding='ROUND_UP'))
+        with mock.patch.object(intent_rails, '_transfer_price', return_value=barely):
+            intent_rails.reread_transfer(self.owner, intent, {'HTTP_X_CONFIO_VERSION': '5.4.1'})
 
 
 def only_own_tests(cls, *bases):
@@ -948,3 +974,4 @@ only_own_tests(ExactLocalRound12JourneyTests, journey_fixture.JourneyTests, Exac
                ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
                ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests)
 only_own_tests(ExactLocalApiRound12Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalApiRound13Tests, ExactLocalApiTests)

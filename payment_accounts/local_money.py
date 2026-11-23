@@ -292,7 +292,8 @@ def normalize_value(method, raw):
         if method.id == 'br_qr':
             pix_code(value)
             return value
-        value = value[:-4] + value[-4:].upper()   # one text per QR (see co_qr)
+        # The text itself is the payout's destination: sent as scanned. Its
+        # paid-once identity is case-blind (qr_identity).
         # A fixed amount is paid exactly (store_order_snapshot): the dollars
         # are priced to cover it and the payout is the QR's own amount.
         amount = fields.get('54')
@@ -1151,7 +1152,7 @@ def store_order_snapshot(destination):
         # paid once; a static one with an amount may be paid again.
         method, payload = _qr_payload(destination)
         return {'amount': str(Decimal(amount).quantize(FIAT_CENT)), 'reference': '',
-                'key': f'{method.id}:qr:' + _sha(payload),
+                'key': f'{method.id}:qr:' + _sha(qr_identity(payload)),
                 # Only a QR that says it is static (01=11) may be paid again.
                 'once': (emv_fields(payload) or {}).get('01') != '11'}
     order = (destination.provider_data or {}).get('store_order') if destination is not None else None
@@ -1518,14 +1519,24 @@ def qr_hold(destination):
 SAME_QR_LIMIT = 500
 
 
+def qr_identity(payload):
+    """One text per QR: its CRC is checked case-blind, so two copies that
+    differ only there are the same QR."""
+    return payload[:-4] + payload[-4:].upper() if len(payload) >= 4 else payload
+
+
 def same_qr_rows(destination):
     """The recipient rows (any account) that hold this very QR, or None."""
     method, payload = _qr_payload(destination)
     if method is None or not payload:
         return None
     rows = PayoutDestination.objects.filter(provider='infinia', country=method.country)
-    return (rows.filter(provider_data__breb_qr__payload=payload) if method.id == 'co_qr'
-            else rows.filter(**{f'details__{method.field}': payload}))
+    if method.id == 'co_qr':
+        return rows.filter(provider_data__breb_qr__payload=payload)   # stored in capitals
+    # An Argentine QR is kept as scanned (it is the payout's destination): its
+    # case variants of the CRC are the same QR.
+    variants = {payload, qr_identity(payload), payload[:-4] + payload[-4:].lower()}
+    return rows.filter(**{f'details__{method.field}__in': sorted(variants)})
 
 
 def _same_qr_destinations(destination):

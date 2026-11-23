@@ -125,7 +125,11 @@ class PaymentRequestInput(graphene.InputObjectType):
     # A key, an account number (CLABE, CVU/CBU), or a QR's text.
     value = graphene.String()
     amount_usd = graphene.String()    # dollars to send (transfers, Pago Móvil, Confío)
-    amount_local = graphene.String()  # QR Bolivia without an amount: bolivianos
+    # An exact local amount the recipient receives: bolivianos for a QR Bolivia
+    # without an amount; for a key/account/open QR (Infinia) or Pago Móvil, the
+    # pesos/reais/bolívares paid exactly (priced in dollars by the server).
+    # Never together with amount_usd (refused).
+    amount_local = graphene.String()
     phone = graphene.String()         # Pago Móvil
     cedula = graphene.String()
     bank_code = graphene.String()

@@ -340,6 +340,12 @@ def store_order_terms(request):
     return {'amount': str(amount.quantize(CENT)), 'reference': reference}
 
 
+def _raw_minimum(price):
+    """The guaranteed minimum before the pricing margin (_transfer_price's
+    floor is that minimum less the margin)."""
+    return (Decimal(price['minimum_local']) / (1 - _margin())).quantize(CENT, rounding=ROUND_DOWN)
+
+
 def _all_in_rate(exact, price):
     """What each dollar of an exact card buys, as Pagar shows it (the spare
     stays local, so it is part of this payment's cost)."""
@@ -534,8 +540,9 @@ def reread_transfer(owner, intent, request_meta=None, *, client=None):
         if (destination.provider_data or {}).get('store_order') != order:
             raise _refuse('charge_changed', 'El pedido cambió desde que lo viste. Revísalo de nuevo.')
         price = _transfer_price(owner, destination, intent.total_usd, client=client)
-        if price['minimum_local'] < Decimal(order['amount']) or price['fee_usd'] > intent.fee_usd \
+        if _raw_minimum(price) < Decimal(order['amount']) or price['fee_usd'] > intent.fee_usd \
                 or price['currency'] != intent.currency:
+            forget_order_price(destination, Decimal(order['amount']))   # a requote prices it fresh
             raise _refuse('quote_changed')
         return destination
     destination = local_money.recheck_destination(intent.destination, client=client)
@@ -547,7 +554,12 @@ def reread_transfer(owner, intent, request_meta=None, *, client=None):
         raise _refuse('charge_changed', 'Este QR cobra un monto exacto. Escanéalo de nuevo para pagarlo.')
     _require_unpaid(destination)
     price = _transfer_price(owner, destination, intent.total_usd, client=client)
-    if price['minimum_local'] < intent.minimum_local or price['fee_usd'] > intent.fee_usd \
+    # An exact card was priced with a margin on top of the guaranteed minimum:
+    # at confirmation that minimum itself must still cover it (a small move
+    # inside the margin is what the margin is for). The bridge's own minimum
+    # is checked again before anything is signed (bridged_minimum_ok).
+    covered = _raw_minimum(price) if intent.amount_exact else price['minimum_local']
+    if covered < intent.minimum_local or price['fee_usd'] > intent.fee_usd \
             or price['currency'] != intent.currency:
         if intent.amount_exact:
             # The new card is priced fresh, not from the few seconds' memory.
