@@ -67,6 +67,11 @@ def receipt(*logs):
 class ContractFundingTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create(username='ve-contract', firebase_uid='ve-contract')
+        # These are ramps alone, with no rule behind the order: the executed
+        # terms (smart_account.tests.test_payout_signed_terms) are given.
+        executed = mock.patch('smart_account.payouts.ramp_funding_problem', return_value='')
+        self.executed = executed.start()
+        self.addCleanup(executed.stop)
 
     def _ramp(self, funding_sender=VAULT, **section):
         values = {'phase': 'funding_reported', 'gross_usd': '20.00', 'deposit_wei': str(EXACT),
@@ -394,6 +399,25 @@ class ContractFundingIsolationTests(TestCase):
             ramp = ve_send.report_funding(self._ramp(), TX, by_payout=True)
             refused = ve_send.sync(ramp, rpc=chain(receipt_value=receipt(transfer(VAULT, amount_wei=over))))
         self.assertEqual(ve_send._phase(refused), 'funding_reported')
+
+    def test_an_order_whose_executed_rule_cannot_be_read_is_parked(self):
+        self.executed.side_effect = None
+        self.executed.return_value = 'run_not_found'
+        with self.settings(CUSD_VAULT_ADDRESS=VAULT):
+            ramp = ve_send.report_funding(self._ramp(), TX, by_payout=True)
+            parked = ve_send.sync(ramp, rpc=chain(receipt_value=receipt(transfer(VAULT))))
+        self.assertEqual((parked.status, ve_send._phase(parked), parked.status_detail),
+                         ('PROCESSING', 'payout_review', 'needs_review:contract_funding_terms_changed'))
+
+    def test_over_the_signed_gross_is_parked_whatever_the_rule_says(self):
+        with self.settings(CUSD_VAULT_ADDRESS=VAULT):
+            ramp = ve_send.report_funding(self._ramp(), TX, by_payout=True)
+            parked = ve_send.sync(ramp, rpc=chain(
+                receipt_value=receipt(transfer(VAULT, amount_wei=20 * 10 ** 18 + 1))))
+        section = ve_send._section(parked)
+        self.assertEqual((section['phase'], section['funding_terms_problem']),
+                         ('payout_review', 'amount_above_signed'))
+        self.assertEqual(section['funded_wei'], str(20 * 10 ** 18 + 1))      # tracked
 
     def test_underfunding_is_never_accepted(self):
         with self.settings(CUSD_VAULT_ADDRESS=VAULT):

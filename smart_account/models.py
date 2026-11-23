@@ -10,6 +10,7 @@ import uuid
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.db.models.signals import pre_save
 from django.utils import timezone
 
 from users.fields import EncryptedCharField
@@ -201,12 +202,16 @@ class SmartAccountStandingAuthorization(models.Model):
     rail = models.CharField(max_length=24)
     amount_usd = models.DecimalField(max_digits=18, decimal_places=2)
     frequency = models.CharField(max_length=10)
-    # sha256 over destination identity + amount + frequency.
+    # sha256 over destination identity + amount + frequency (and the fee
+    # ceiling of an Infinia payment, when there is one).
     binding_hash = models.CharField(max_length=64)
     # '' when Face did not apply to this user (never verified; business).
     face_action_key = models.CharField(max_length=160, blank=True, default='')
     face_required = models.BooleanField(default=True)
     max_bridge_cost_bps = models.PositiveIntegerField(default=150)
+    # The processor's fixed fee per payment the owner signed, as a ceiling.
+    # Outside max_bridge_cost_bps (spec decision 36). Empty authorizes none.
+    max_processor_fee_usd = models.DecimalField(max_digits=12, decimal_places=6, null=True, blank=True)
     fx_tolerance_bps = models.PositiveIntegerField(default=300)
     reference_fx_rate = models.DecimalField(max_digits=24, decimal_places=8, null=True, blank=True)
     # Venezuelan Pago Móvil rules (rail 've_pagomovil'): the saved beneficiary
@@ -214,6 +219,10 @@ class SmartAccountStandingAuthorization(models.Model):
     pagomovil_destination = models.ForeignKey(
         'smart_account.SmartAccountPagoMovilDestination', on_delete=models.PROTECT, null=True, blank=True,
         related_name='+')
+    # Pago Móvil: the beneficiary's name as the signed summary showed it, sent
+    # to Pago ASAP whatever the saved row is renamed to. Empty on rows signed
+    # before it was kept (payouts.signed_holder_name).
+    holder_name = models.CharField(max_length=120, null=True, blank=True)
     authorized_at = models.DateTimeField(default=timezone.now)
     revoked_at = models.DateTimeField(null=True, blank=True)
     revoked_reason = models.CharField(max_length=40, blank=True, default='')
@@ -597,3 +606,44 @@ class SmartAccountCardPull(models.Model):
 
     def __str__(self):
         return f'CardPulled rule {self.onchain_rule_id} {self.tx_hash}'
+
+
+# PayoutDestination.provider_data: the bank's last rejection of a CLABE or
+# Pix key. That row is Enviar's address book too, and a save there with the
+# lookup off replaces the answer with DISABLED: the rejection is kept beside
+# it, for payouts.key_rejected, until the bank verifies the key.
+KEY_REJECTED = 'rule_key_rejected'
+BANK_REJECTIONS = ('ERROR', 'REJECTED')
+
+
+def _keep_bank_rejection(sender, instance, raw=False, update_fields=None, **kwargs):
+    data = instance.provider_data
+    if raw or not isinstance(data, dict) or data.get('method_id') not in ('mx_clabe', 'br_pix'):
+        return
+    if update_fields is not None and 'provider_data' not in update_fields:
+        return
+    validation = data.get('validation') or {}
+    status = str(validation.get('status') or '').upper()
+    if status == 'SUCCESSFUL' and validation.get('holder_name'):
+        if KEY_REJECTED in data:
+            instance.provider_data = {key: value for key, value in data.items() if key != KEY_REJECTED}
+        return
+    if status in BANK_REJECTIONS:
+        kept = {'status': status, 'checked_at': validation.get('checked_at') or ''}
+    elif KEY_REJECTED in data or instance.pk is None:
+        return
+    else:
+        # What is being overwritten (the writer holds the row's lock).
+        before = sender.objects.filter(pk=instance.pk).values_list('provider_data', flat=True).first()
+        before = before if isinstance(before, dict) else {}
+        last = before.get('validation') or {}
+        kept = before.get(KEY_REJECTED)
+        if str(last.get('status') or '').upper() in BANK_REJECTIONS:
+            kept = {'status': str(last['status']).upper(), 'checked_at': last.get('checked_at') or ''}
+        if not kept:
+            return
+    instance.provider_data = {**data, KEY_REJECTED: kept}
+
+
+pre_save.connect(_keep_bank_rejection, sender='payment_accounts.PayoutDestination',
+                 dispatch_uid='smart_account.keep_bank_rejection')

@@ -13,6 +13,7 @@ from smart_account import offer, schema, services
 from smart_account.models import SmartAccountPreparedAction
 
 from .base import BUILD, VAULT, SmartAccountTestCase, WAD
+from .base import INFINIA_SWITCHES
 
 FLAG_OFF = 'Todavía no puedes abrir tu Cuenta inteligente.'
 
@@ -128,26 +129,26 @@ class OpeningTests(SmartAccountTestCase):
         self.assertEqual(schema.Query.resolve_smart_account(None, self.info(self.user)).status, 'none')
 
 
-@override_settings(SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True)
+@override_settings(SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True, **INFINIA_SWITCHES)
 class PayoutRailNameTests(SmartAccountTestCase):
     def test_options_come_from_the_server_names_for_exactly_the_offered_rails(self):
-        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='br_pix,ar_cvu,ar_qr,co_qr,br_qr,nope,br_pix_receive'):
-            self.assertEqual(offer.payout_rails(), ['br_pix', 'ar_cvu'])
+        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='br_pix,ar_cvu,co_breb,ar_qr,co_qr,br_qr,nope,br_pix_receive,mx_clabe'):
+            self.assertEqual(offer.payout_rails(), ['br_pix', 'mx_clabe'])
             self.assertEqual(offer.payout_rail_options(), [
                 {'key': 'br_pix', 'label': 'Pix', 'hint': 'Chave Pix: CPF, celular, e-mail o aleatoria'},
-                {'key': 'ar_cvu', 'label': 'CVU o CBU', 'hint': 'Mercado Pago, Ualá, Naranja X y bancos'},
+                {'key': 'mx_clabe', 'label': 'CLABE', 'hint': 'Transferencia SPEI a cualquier banco'},
             ])
             user = self.make_user('u')
             with mock.patch('smart_account.offer.crypto_investing_enabled', return_value=False):
                 result = schema.Query.resolve_smart_account_offer(None, self.info(user))
             self.assertEqual([(o.key, o.label) for o in result.payout_rail_options],
-                             [('br_pix', 'Pix'), ('ar_cvu', 'CVU o CBU')])
+                             [('br_pix', 'Pix'), ('mx_clabe', 'CLABE')])
 
     def test_assistant_names_a_newly_switched_on_rail(self):
         from assistant.prompts import _smart_account_rails
-        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='mx_clabe,ar_cvu'):
+        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='mx_clabe,br_pix,ar_cvu'):
             self.assertEqual(_smart_account_rails(),
-                             ' a otras personas en Confío y a cuentas guardadas de CLABE y CVU o CBU')
+                             ' a otras personas en Confío y a cuentas guardadas de CLABE y Pix')
         with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='ar_qr'):
             self.assertEqual(_smart_account_rails(), ' a otras personas en Confío')
 

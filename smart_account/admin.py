@@ -1,7 +1,7 @@
 """Admin for Cuenta inteligente. Registered on the custom admin site
 (config/admin_dashboard.py), never the default one. Mirrors of chain state
 are read-only: they are written by smart_account/reconcile.py only."""
-from django.contrib import admin
+from django.contrib import admin, messages
 
 from .models import (
     SmartAccount, SmartAccountBeneficiary, SmartAccountCardPause, SmartAccountCardPull, SmartAccountCardSpender,
@@ -89,11 +89,30 @@ class SmartAccountRuleRunAdmin(ReadOnlyAdmin):
 
 
 class SmartAccountPayoutAdmin(ReadOnlyAdmin):
+    """Read-only, with one action for superusers: ask a parked payment's
+    checks again (payouts.recheck). It cannot set an amount, a recipient or
+    a rate. Every use is in the object's history."""
+    actions = ('recheck_payouts',)
     list_display = ('rule_run', 'provider', 'rail', 'status', 'usdt_amount', 'fiat_amount', 'fiat_currency',
                     'deposit_address', 'ramp', 'created_at')
     list_filter = ('provider', 'rail', 'status')
     search_fields = ('deposit_address', 'ramp__internal_id')
     raw_id_fields = ('rule_run', 'journey', 'ramp')
+
+    def has_recheck_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    @admin.action(permissions=['recheck'],
+                  description='Revisar de nuevo y continuar (nunca si ya se devolvió a mano)')
+    def recheck_payouts(self, request, queryset):
+        from . import payouts
+        for payout in queryset:
+            try:
+                result, level = payouts.recheck(payout, operator=request.user.get_username()), messages.SUCCESS
+            except payouts.RecheckRefused as exc:
+                result, level = f'No continúa: {exc}', messages.ERROR
+            self.log_change(request, payout, f'Revisar de nuevo y continuar: {result}')
+            self.message_user(request, f'Pago {payout.pk}: {result}', level)
 
 
 class SmartAccountPagoMovilDestinationAdmin(ReadOnlyAdmin):
@@ -108,7 +127,7 @@ class SmartAccountPagoMovilDestinationAdmin(ReadOnlyAdmin):
 
 class SmartAccountStandingAuthorizationAdmin(ReadOnlyAdmin):
     list_display = ('internal_id', 'kind', 'user', 'rail', 'payee_address', 'amount_usd', 'frequency',
-                    'face_required', 'authorized_at', 'revoked_at', 'revoked_reason')
+                    'max_processor_fee_usd', 'face_required', 'authorized_at', 'revoked_at', 'revoked_reason')
     list_filter = ('kind', 'rail', 'frequency', ('revoked_at', admin.EmptyFieldListFilter))
     search_fields = ('user__username', 'binding_hash', 'payee_address')
     raw_id_fields = ('user', 'payout_destination', 'pagomovil_destination')

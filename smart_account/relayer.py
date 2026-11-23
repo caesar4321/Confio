@@ -10,9 +10,13 @@ hash, and a second run finds that row instead of sending again.
 from __future__ import annotations
 
 import logging
+import re
+import threading
+from contextlib import contextmanager
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.core.cache import cache
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.utils import timezone
 
 from . import abi, chain
@@ -23,6 +27,18 @@ logger = logging.getLogger(__name__)
 MAX_RELAY_GAS = 6_000_000
 # A forced sale is the one relayer call whose gas grows with its legs.
 MAX_RELAY_GAS_BY_KIND = {'smart_forced_sale': abi.RELAY_GAS_SALE_MAX}
+# sponsor_7702.acquire_sponsor_nonce_lock's key. It expires by itself, so
+# holding it is proven again before anything that depends on the nonce.
+NONCE_LOCK = 'bsc_sponsor_nonce_lock'
+STEP_HOLD_SECONDS = 15
+# A broadcast may try every endpoint: the lock is renewed while it runs, so
+# a killed worker leaves it for STEP_HOLD_SECONDS at most.
+RENEW_SECONDS = 4
+# An eth_call failure that says the call itself fails. Anything else is a
+# node that did not answer.
+REVERTED = re.compile(r'revert|out of gas|gas required exceeds|invalid opcode|invalid jump', re.IGNORECASE)
+# The claim's row locks, each inside the nonce lock's lifetime.
+CLAIM_LOCK_WAIT = '3s'
 
 
 def max_relay_gas(kind: str) -> int:
@@ -38,6 +54,36 @@ class RelayError(Exception):
         super().__init__(f'{code}: {detail}' if detail else code)
 
 
+def _hold(token: str, seconds: int) -> None:
+    """Still this signer's nonce lock, and for `seconds` more. Read again
+    after the extension: a lock that expired in between is someone else's."""
+    if cache.get(NONCE_LOCK) != token or not cache.touch(NONCE_LOCK, seconds) or cache.get(NONCE_LOCK) != token:
+        raise RelayError('sponsor_lock_lost')
+
+
+@contextmanager
+def _kept(token: str):
+    """Renews the lock while the block runs, and only while it is this
+    signer's."""
+    stop, every = threading.Event(), RENEW_SECONDS
+
+    def renew():
+        while not stop.wait(every):
+            try:
+                _hold(token, STEP_HOLD_SECONDS)
+            except RelayError:
+                return
+            except Exception:  # noqa: BLE001 — the cache: tried again before it expires
+                logger.warning('sponsor nonce lock not renewed', exc_info=True)
+    worker = threading.Thread(target=renew, name='sponsor-nonce-lock', daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        worker.join(STEP_HOLD_SECONDS)
+
+
 def live_tx(account, kind: str, source_id: str):
     return SmartAccountRelayTx.objects.filter(
         smart_account=account, kind=kind, source_id=str(source_id),
@@ -46,11 +92,15 @@ def live_tx(account, kind: str, source_id: str):
 
 def simulate(sponsor: str, to: str, calldata: str, gas: int) -> None:
     """eth_call under the REAL gas budget, from the sponsor (so the
-    contract's relayer check sees msg.sender == tx.origin == sponsor)."""
+    contract's relayer check sees msg.sender == tx.origin == sponsor).
+    simulation_reverted only for a call that fails; a node that did not
+    answer is simulation_unreadable. Neither is sent."""
     try:
         chain.rpc('eth_call', [{'from': sponsor, 'to': to, 'data': calldata, 'gas': hex(int(gas))}, 'latest'])
     except Exception as exc:  # noqa: BLE001 — a revert or an unreadable node: do not send
-        raise RelayError('simulation_reverted', str(exc)[:300]) from exc
+        detail = str(exc)
+        reverted = REVERTED.search(detail) or abi.revert_error(detail)
+        raise RelayError('simulation_reverted' if reverted else 'simulation_unreadable', detail[:300]) from exc
 
 
 def relay_target(account, calldata: str, kind: str) -> str:
@@ -79,7 +129,8 @@ def relay_target(account, calldata: str, kind: str) -> str:
     return factory
 
 
-def send_relayer_call(account, calldata: str, kind: str, source_id, *, gas: int | None = None):
+def send_relayer_call(account, calldata: str, kind: str, source_id, *, gas: int | None = None,
+                      before_sign=None, claim=None):
     """Sign and broadcast one relayer call. Returns (row, created).
 
     Idempotent on (account, kind, source_id): while a transaction for that
@@ -87,6 +138,14 @@ def send_relayer_call(account, calldata: str, kind: str, source_id, *, gas: int 
     nothing is signed. Raises RelayError when nothing was broadcast; any
     exception from the broadcast itself propagates with the row left
     'signed' for the reconciler.
+
+    `before_sign()` runs under the sponsor nonce lock immediately before
+    signing. `claim(tx_hash)` runs inside the transaction that writes the
+    durable row, before it: what it locks stays locked until that row is
+    visible. Either refuses with RelayError and nothing is broadcast. So
+    does a nonce lock that is no longer this call's (sponsor_lock_lost; if
+    that is seen after the row committed, the row stays 'signed' until the
+    reconciler drops it) and a row lock not granted in time (claim_busy).
 
     Only the calls in abi.RELAY_KIND_CALLS are ever signed: the account's
     relayer and keeper functions, to the account, and the factory's
@@ -141,23 +200,39 @@ def send_relayer_call(account, calldata: str, kind: str, source_id, *, gas: int 
             'data': calldata,
             'accessList': [],
         }
+        if before_sign is not None:
+            before_sign()
+        _hold(lock, STEP_HOLD_SECONDS)
         raw, tx_hash = signer.sign_typed_transaction(tx)
+        _hold(lock, STEP_HOLD_SECONDS)
 
         # DURABLE record BEFORE broadcast.
         try:
             with transaction.atomic():
+                if claim is not None:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT set_config('lock_timeout', %s, true)", [CLAIM_LOCK_WAIT])
+                    claim(tx_hash)
                 row = SmartAccountRelayTx.objects.create(
                     smart_account=account, kind=kind, source_id=source_id, calldata=calldata,
                     signed_tx_hash=tx_hash, sponsor_nonce=sponsor_nonce, gas_limit=gas,
                     max_fee_wei=str(fee_per_gas), status='signed')
+                # Lost while waiting above: nothing is recorded.
+                _hold(lock, STEP_HOLD_SECONDS)
+        except OperationalError as exc:
+            raise RelayError('claim_busy', str(exc)[:300]) from exc
         except IntegrityError:
             # Another worker owns this (account, kind, source): never broadcast.
             existing = live_tx(account, kind, source_id)
             if existing is not None:
                 return existing, False
             raise
+        # Lost since the commit: another signer may hold this nonce now, and
+        # there are never two on the wire.
+        _hold(lock, STEP_HOLD_SECONDS)
         try:
-            chain.rpc('eth_sendRawTransaction', [raw])
+            with _kept(lock):
+                chain.rpc('eth_sendRawTransaction', [raw])
         except Exception:  # noqa: BLE001
             # Kept as 'signed' with the real hash: the reconciler reads the
             # chain and either finds it or, after the grace window, drops it.

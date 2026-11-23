@@ -142,6 +142,8 @@ def quote_provider_funding(*, confio_account, funding_instruction_id, amount, re
         ).first()
         if not row:
             return None
+        from .contract_funding import refuse_owner_action
+        refuse_owner_action(row.money_flow)
         if row.money_flow.metadata.get('local_destination_id') != (str(destination_id) if destination_id else None):
             raise PaymentAccountError('Request id was already used for a different local destination')
         # Compare the user's original amount, not a freshly priced net amount.

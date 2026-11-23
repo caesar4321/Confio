@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from django.conf import settings
 
-from payment_accounts.clients import InfiniaClient, first_item, verify_infinia_signature
+from payment_accounts.clients import InfiniaClient, ProviderAPIError, first_item, verify_infinia_signature
 from payment_accounts.compliance import build_infinia_self_declared_payload, didit_ubo_parties
 from security.didit import (
     retrieve_didit_decision,
@@ -13,6 +13,21 @@ from security.didit import (
 
 from .base import PaymentAccountProvider, ProviderCapabilityError
 from .common import ProviderResult, account_status, iso_alpha2, operation_status
+
+
+def _post_money(operation, create, payload):
+    """A 429 on a contract-funded leg is replayed under the operation's own
+    key, as a lost answer is: its money is out and nobody is there to sign
+    again. A manual send's stays what it was (ops decide: a merchant's
+    charge may have been paid another way meanwhile)."""
+    try:
+        return create(payload)
+    except ProviderAPIError as exc:
+        if exc.status_code == 429 and operation.idempotency_key:
+            from payment_accounts.contract_funding import is_contract_flow
+            if is_contract_flow(getattr(operation, 'money_flow', None)):
+                exc.retryable = True
+        raise
 
 
 class InfiniaProvider(PaymentAccountProvider):
@@ -188,7 +203,7 @@ class InfiniaProvider(PaymentAccountProvider):
         callback_base = getattr(settings, 'PAYMENT_ACCOUNTS_CALLBACK_BASE_URL', '').rstrip('/')
         if callback_base:
             payload['callbackUrl'] = f'{callback_base}/api/payment-accounts/infinia/webhook/'
-        response = self.client.create_payout(payload)
+        response = _post_money(operation, self.client.create_payout, payload)
         status, raw_status = operation_status(response)
         return ProviderResult(str(response['id']), status, raw_status, response)
 
@@ -235,7 +250,7 @@ class InfiniaProvider(PaymentAccountProvider):
             payload['callback_url'] = (
                 f'{callback_base}/api/payment-accounts/infinia/webhook/'
             )
-        response = self.client.create_internal_transfer(payload)
+        response = _post_money(operation, self.client.create_internal_transfer, payload)
         status, raw_status = operation_status(response)
         if raw_status == 'COMPLETED':
             status = 'settling'

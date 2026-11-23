@@ -314,12 +314,22 @@ class SmartAccountPayoutMethodType(graphene.ObjectType):
     label = graphene.String(required=True)
     holder_name = graphene.String(required=True)
     available = graphene.Boolean(required=True)
+    holder_verified = graphene.Boolean(
+        description='True: the bank verified the holder. False: not verified by the bank (the lookup is off); '
+                    'holderName is then empty and the label carries what the owner typed, marked. Null: the rail has '
+                    'no bank lookup.')
+
+
+def _payout_method(row: dict) -> 'SmartAccountPayoutMethodType':
+    """A services.payout_method_rows row as the app gets it."""
+    return SmartAccountPayoutMethodType(
+        payout_method_id=row['payout_method_id'], rail=row['rail'],
+        label=services.marked_label(row['label'], row.get('owner_holder') or ''),
+        holder_name=row['holder_name'], available=row['available'], holder_verified=row['holder_verified'])
 
 
 def _pagomovil_method(destination, available: bool) -> 'SmartAccountPayoutMethodType':
-    return SmartAccountPayoutMethodType(
-        payout_method_id=str(destination.internal_id), rail='ve_pagomovil', label=destination.label,
-        holder_name=destination.holder_name or '', available=bool(available))
+    return _payout_method(services.pagomovil_row(destination, available))
 
 
 class SmartAccountPagoMovilDestinationResultType(graphene.ObjectType):
@@ -421,7 +431,7 @@ def _rule_type(rule) -> SmartAccountRuleType:
     out = SmartAccountRuleType(
         id=str(rule.internal_id), onchain_id=str(rule.onchain_id) if rule.onchain_id is not None else None,
         kind=rule.kind, frequency=rule.frequency, amount_usd=format(rule.amount, 'f'), active=rule.active,
-        next_run_at=rule.scheduled_for or rule.next_run_at,
+        next_run_at=services.next_run_shown(rule),
         last_run_at=last.updated_at if last else None, last_run_status=last.status if last else None,
         last_run_message=(last.message or None) if last else None)
     if rule.kind == 'send' and rule.payee_user is not None:
@@ -431,11 +441,10 @@ def _rule_type(rule) -> SmartAccountRuleType:
         out.payout_rail = rule.payout_rail or None
         if rule.payout_method is not None:
             out.payout_method_id = str(rule.payout_method.internal_id)
-            out.payout_label = ' · '.join(p for p in (rule.payout_method.label, rule.payout_method.holder_name) if p)
+            out.payout_label = services.destination_title(rule.payout_method)
         elif rule.pagomovil_destination is not None:
             out.payout_method_id = str(rule.pagomovil_destination.internal_id)
-            out.payout_label = ' · '.join(p for p in (rule.pagomovil_destination.label,
-                                                      rule.pagomovil_destination.holder_name) if p)
+            out.payout_label = services.destination_title(rule.pagomovil_destination)
     if rule.kind == 'card':
         # Pulled by the card issuer, never scheduled: no next run. The
         # card's name rides in payeeName so every build has a label.
@@ -694,7 +703,7 @@ class Query(graphene.ObjectType):
         viewer = _viewer(info, require_wallet=False)
         if viewer is None:
             return None
-        return [SmartAccountPayoutMethodType(**row) for row in services.payout_method_rows(viewer)]
+        return [_payout_method(row) for row in services.payout_method_rows(viewer)]
 
     def resolve_smart_account_buyable_assets(self, info, search=None, first=30, after=None):
         viewer = _viewer(info, require_wallet=False)
@@ -980,6 +989,37 @@ class SaveSmartAccountPagoMovilDestination(graphene.Mutation):
         return result(success=True, payout_method=_pagomovil_method(row, True))
 
 
+class SaveSmartAccountClabeDestination(graphene.Mutation):
+    """Server-only: saves a Mexican CLABE to the owner's address book (the
+    personal account's saved recipients, Enviar's own save path) for bank
+    payment rules. No transaction; a rule naming it is still created with
+    prepareSmartAccountPayoutRule and Face."""
+    class Arguments:
+        clabe = graphene.String(required=True, description='18 digits with a valid check digit')
+        holder_name = graphene.String(description='Optional: the holder as the owner writes it (not bank-verified)')
+
+    Output = SmartAccountPagoMovilDestinationResultType
+
+    def mutate(self, info, clabe, holder_name=None):
+        result = SmartAccountPagoMovilDestinationResultType
+        try:
+            viewer = context.resolve_viewer(info)
+            row = services.save_clabe_destination(viewer, clabe, holder_name or '')
+            method = services.payout_method_row(viewer, row.internal_id)
+        except context.ContextError as exc:
+            return result(success=False, error_code=exc.code, error_message=exc.message)
+        except services.PrepareError as exc:
+            return result(success=False, error_code=exc.code, error_message=exc.message)
+        except Exception:  # noqa: BLE001 — nothing to undo; the user retries
+            logger.exception('smart account: saving a CLABE destination failed')
+            return result(success=False, error_code='internal_error',
+                          error_message='No pudimos guardar la CLABE. Inténtalo de nuevo.')
+        if method is None:
+            return result(success=False, error_code='payout_method_unverified',
+                          error_message=services.MESSAGES['payout_method_unverified'])
+        return result(success=True, payout_method=_payout_method(method))
+
+
 class DeleteSmartAccountWatch(graphene.Mutation):
     """Server-only: the owner deletes one of their alerts (moves no money)."""
     class Arguments:
@@ -1002,6 +1042,7 @@ class DeleteSmartAccountWatch(graphene.Mutation):
 class Mutation(graphene.ObjectType):
     delete_smart_account_watch = DeleteSmartAccountWatch.Field()
     save_smart_account_pago_movil_destination = SaveSmartAccountPagoMovilDestination.Field()
+    save_smart_account_clabe_destination = SaveSmartAccountClabeDestination.Field()
     prepare_smart_account_subscribe = PrepareSmartAccountSubscribe.Field()
     prepare_smart_account_deposit = PrepareSmartAccountDeposit.Field()
     prepare_smart_account_move_everything = PrepareSmartAccountMoveEverything.Field()

@@ -27,6 +27,9 @@ def execution_enabled(source_token):
 def check_owner(quote, owner):
     if quote.confio_account_id != owner.pk or owner.deleted_at:
         raise PaymentAccountError('Bridge not found')
+    # A Cuenta inteligente's bridge has nothing for the owner to prepare or sign.
+    from .contract_funding import refuse_owner_action
+    refuse_owner_action(quote.money_flow)
     if address(owner.bsc_address) != quote.source_address:
         raise PaymentAccountError('Bridge wallet changed')
 
@@ -310,6 +313,14 @@ def reconcile_bridge(t, *, intents=None):
         t = bind_payout_hash(t)
         if not t.source_tx_hash:
             return t
+    if t.funding_mode == 'contract' and not t.source_tx_hash:
+        # Funded by executeRule: no batch to adopt, no owner signature to
+        # expire. Only its reported hash's receipt binds a source.
+        from .contract_funding import prove_funding
+        t = prove_funding(t)
+        if not t.source_tx_hash:
+            return t
+        q = t.quote
     if not t.source_tx_hash and q.source_token_id == 'BSC:USDT':
         _adopt_bsc_batch(t)
     if not t.source_tx_hash:
@@ -341,11 +352,18 @@ def reconcile_bridge(t, *, intents=None):
     # The provider movement binds the source hash to the user's payout. Infinia
     # may send from its hot wallet, which is distinct from the refund wallet.
     sender = None if t.funding_mode == 'infinia' else q.source_address
+    expected = int(q.amount_units)
+    if t.funding_mode == 'contract':
+        # The cUSD vault pays the deposit; the contract is only the refund
+        # address. Its proven amount may exceed the quote (usdtOut >= minUsdtOut).
+        from .contract_funding import KEY, funded_units
+        sender, expected = t.binding[KEY]['sender'], funded_units(t)
     transferred = chain.received_units(source, q.source_token_id, t.deposit_address, sender)
-    if transferred != int(q.amount_units):
+    if transferred != expected:
         t.status = 'failed' if transferred == 0 and t.funding_mode == 'wallet' else 'needs_review'
         t.failure_code = 'source_transfer_mismatch'
     else:
+        parked = t.funding_mode == 'contract' and t.status == 'needs_review' and t.failure_code
         from cusd_plus.tasks import repair_payment_bridge_deposit
         repair_payment_bridge_deposit(t, source)
         # Record the canonical on-chain perimeter fee even when the generic
@@ -357,6 +375,9 @@ def reconcile_bridge(t, *, intents=None):
         if t.binding.get('provider') == 'relay':
             from .relay_settlement import reconcile_relay
             reconcile_relay(t)
+            if parked and parked.startswith('relay_') and t.status == 'bridging':
+                # Followed after review: only an outcome moves it, never a pass without one.
+                t.status, t.failure_code = 'needs_review', parked
             return _record_bridge_result(t)
         status = intents.status(t.deposit_address)
         if status.get('quoteResponse', {}).get('quoteRequest') != t.binding['quoteResponse']['quoteRequest']:

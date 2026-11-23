@@ -237,6 +237,12 @@ export interface SmartAccountPayoutMethod {
   label: string;
   holderName: string;
   available: boolean;
+  /**
+   * false: the bank did not verify the holder (its lookup is off); holderName
+   * is what the owner typed, if anything. true: bank-verified. null/absent:
+   * the rail has no bank lookup, or the server predates the field.
+   */
+  holderVerified?: boolean | null;
 }
 
 export interface SmartAccountBuyableAsset {
@@ -607,8 +613,31 @@ export const fetchSmartAccountMovePreview = (
     { direction },
   );
 
-export const fetchSmartAccountPayoutMethods = (): Promise<SmartRead<SmartAccountPayoutMethod[]>> =>
-  read(SMART_ACCOUNT_PAYOUT_METHODS, (d) => (d?.smartAccountPayoutMethods ?? []) as SmartAccountPayoutMethod[]);
+// Own document: a server without holderVerified fails only this read, and
+// the list then shows without the note (never the whole list failing).
+const SMART_ACCOUNT_PAYOUT_METHOD_CHECKS = gql`
+  query SmartAccountPayoutMethodChecks {
+    smartAccountPayoutMethods { payoutMethodId holderVerified }
+  }
+`;
+
+export const fetchSmartAccountPayoutMethods = async (): Promise<SmartRead<SmartAccountPayoutMethod[]>> => {
+  const [methods, checks] = await Promise.all([
+    read(SMART_ACCOUNT_PAYOUT_METHODS, (d) => (d?.smartAccountPayoutMethods ?? []) as SmartAccountPayoutMethod[]),
+    read(SMART_ACCOUNT_PAYOUT_METHOD_CHECKS,
+      (d) => (d?.smartAccountPayoutMethods ?? []) as Array<{ payoutMethodId: string; holderVerified: boolean | null }>),
+  ]);
+  if (!methods.ok || !checks.ok) {
+    return methods;
+  }
+  const verified = new Map(checks.data.map((c) => [c.payoutMethodId, c.holderVerified]));
+  return {
+    ok: true,
+    data: methods.data.map((m) => (verified.has(m.payoutMethodId)
+      ? { ...m, holderVerified: verified.get(m.payoutMethodId) ?? null }
+      : m)),
+  };
+};
 
 export const fetchSmartAccountBuyableAssets = (params: {
   search?: string;
@@ -1324,5 +1353,72 @@ export const saveSmartAccountPagoMovilDestination = async (
       return failed('unsupported', 'Esta opción todavía no está disponible. No se guardó nada.');
     }
     return failed('network', 'No pudimos guardar la cuenta. Revisa tu conexión e inténtalo de nuevo.');
+  }
+};
+
+// ------------------------------------------------------- CLABE destinations
+// A Mexican CLABE saved to the owner's own saved recipients (the same ones
+// Enviar uses) for bank payment rules. Own document, like Pago Móvil's.
+
+const SAVE_SMART_ACCOUNT_CLABE_DESTINATION = gql`
+  mutation SaveSmartAccountClabeDestination($clabe: String!, $holderName: String) {
+    saveSmartAccountClabeDestination(clabe: $clabe, holderName: $holderName) {
+      success errorCode errorMessage
+      payoutMethod { payoutMethodId rail label holderName available holderVerified }
+    }
+  }
+`;
+
+export interface SmartAccountClabeInput {
+  clabe: string;
+  holderName?: string;
+}
+
+const CLABE_SAVE_ERROR = 'No pudimos guardar la CLABE. Inténtalo de nuevo.';
+
+/** The digits of a CLABE as typed (spaces, dots, dashes dropped). */
+export const clabeDigits = (value: string): string => value.replace(/[\s.\-/]/g, '');
+
+/** 18 digits with the SPEI check digit (weights 3, 7, 1). */
+export function clabeValid(value: string): boolean {
+  const digits = clabeDigits(value);
+  if (!/^\d{18}$/.test(digits)) {
+    return false;
+  }
+  const weights = [3, 7, 1];
+  let total = 0;
+  for (let i = 0; i < 17; i += 1) {
+    total += (Number(digits[i]) * weights[i % 3]) % 10;
+  }
+  return (10 - (total % 10)) % 10 === Number(digits[17]);
+}
+
+export const saveSmartAccountClabeDestination = async (
+  input: SmartAccountClabeInput,
+): Promise<SmartAccountPagoMovilSaveResult> => {
+  const failed = (errorCode: string, errorMessage: string): SmartAccountPagoMovilSaveResult => (
+    { success: false, errorCode, errorMessage, payoutMethod: null });
+  try {
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.mutate({
+      mutation: SAVE_SMART_ACCOUNT_CLABE_DESTINATION,
+      variables: { clabe: clabeDigits(input.clabe), holderName: input.holderName?.trim() || null },
+    });
+    const out = data?.saveSmartAccountClabeDestination as SmartAccountPagoMovilSaveResult | null | undefined;
+    if (!out) {
+      return failed('no_response', CLABE_SAVE_ERROR);
+    }
+    if (!out.success || !out.payoutMethod) {
+      return failed(out.errorCode || 'refused', out.errorMessage || CLABE_SAVE_ERROR);
+    }
+    return out;
+  } catch (e) {
+    if (isSmartContextRefusal(e)) {
+      return failed(SMART_CONTEXT_REFUSAL_CODE, SMART_CONTEXT_REFUSAL_MESSAGE);
+    }
+    if (isSchemaMismatch(e as any)) {
+      return failed('unsupported', 'Esta opción todavía no está disponible. No se guardó nada.');
+    }
+    return failed('network', 'No pudimos guardar la CLABE. Revisa tu conexión e inténtalo de nuevo.');
   }
 };

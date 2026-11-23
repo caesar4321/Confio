@@ -19,6 +19,14 @@ from .services import (PaymentAccountError, _require_provider_enabled,
 from .infinia_bridge import SETTLED_BRIDGE_FAILURES, live_journeys
 
 
+class JourneyBusy(PaymentAccountError):
+    """The owner's accounts are held by another payment for now."""
+
+
+def contract_funded(j):
+    return bool(j.direction == 'to_bank' and j.bridge_id and j.bridge.funding_mode == 'contract')
+
+
 def enabled():
     if not getattr(settings, 'INFINIA_JOURNEYS_ENABLED', False):
         raise PaymentAccountError('Infinia payment journeys are not enabled')
@@ -73,7 +81,12 @@ def validate_accounts(owner, local, crypto, destination_country):
 
 @transaction.atomic
 def create_journey(*, owner, local_account, crypto_account, request_id, minimum_fx_output,
-                   direction, bridge=None, credit=None, destination=None, minimum_wallet_output=None):
+                   direction, bridge=None, credit=None, destination=None, minimum_wallet_output=None,
+                   funding=None):
+    """`funding` is a contract_funding.ContractFunding, built server-side from
+    a rule run; no GraphQL argument reaches it. With it the bridge is funded
+    by the account contract and the standing authorization replaces this
+    journey's Face grant. A contract-funded bridge accepts nothing else."""
     enabled()
     request_id = uuid.UUID(str(request_id))
     minimum = positive(minimum_fx_output)
@@ -103,7 +116,19 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
             raise PaymentAccountError('An owned bridge to this crypto account is required')
         if credit:
             raise PaymentAccountError('Outbound credit is resolved from bridge evidence')
+        from .contract_funding import MODE, OWNER_REFUSAL, authorize_journey
+        authority = None
+        if funding is not None or bridge.funding_mode == MODE:
+            if funding is None or charge is not None:
+                raise PaymentAccountError(OWNER_REFUSAL)
+            authority = authorize_journey(funding, owner=owner, destination=destination, bridge=bridge,
+                                          local_account=local_account)
+            # Where a refund returns: the account contract, not the wallet.
+            wallet = bridge.quote.source_address
     else:
+        authority = None
+        if funding is not None:
+            raise PaymentAccountError('Invalid journey funding')
         if (bridge or not credit or credit.financial_account_id != local_account.pk or credit.provider != 'infinia'
                 or credit.direction != 'credit' or credit.asset != local_account.asset or positive(credit.amount) <= 0
                 or (credit.provider_data.get('operation') or {}).get('type') not in {None, 'PAYIN', 'CREDIT'}):
@@ -147,7 +172,10 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     if direction == 'to_bank':
         fee = bridge.quote.money_flow.metadata.get('infinia_fee')
         from .infinia_legacy_fees import predates_rollout
-        if fee or (fee_enabled(local_account.country) and not predates_rollout(bridge.quote)):
+        # A contract-funded run collects nothing in a batch: its fee is the
+        # carry-forward debt recorded when it is paid (contract_funding).
+        if authority is None and (
+                fee or (fee_enabled(local_account.country) and not predates_rollout(bridge.quote))):
             if (not fee or fee['local_account_id'] != str(local_account.internal_id)
                     or bridge.quote.money_flow.metadata.get('local_destination_id') != str(destination.internal_id)):
                 raise PaymentAccountError('Solicita una nueva cotización para incluir los costos del envío.')
@@ -169,17 +197,17 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     if MoneyOperation.objects.filter(provider='infinia', source_account__in=[local_account, crypto_account],
             status__in=['created', 'submitted', 'processing', 'settling', 'unknown']).exclude(
                 money_flow__infinia_journey__stage='completed').exists():
-        raise PaymentAccountError('An existing provider operation is still pending')
+        raise JourneyBusy('An existing provider operation is still pending')
     # One provider journey per owner while unsettled, to avoid concurrent
     # conversion/payout balance races. Only journeys the worker will still
     # advance can race: a needs_review row nothing will ever touch again must
     # not deny the owner every future payment (production lockout 2026-09-15).
     if live_journeys(InfiniaJourney.objects.filter(confio_account=owner)).exists():
-        raise PaymentAccountError('Ya tienes un pago local en curso.')
+        raise JourneyBusy('Ya tienes un pago local en curso.')
     if credit and InfiniaJourney.objects.filter(funding_credit=credit).exists():
         raise PaymentAccountError('Deposit already used by a journey')
     face_action_key = ''
-    if direction == 'to_bank':
+    if direction == 'to_bank' and authority is None:
         quote = bridge.quote
         face_action_key = require_outgoing_face(
             owner,
@@ -215,6 +243,7 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         target_asset=local_account.asset if direction == 'to_bank' else 'USDT_BSC',
         metadata={'orchestrator': 'infinia', 'minimum_fx_output': str(minimum),
                   **({'infinia_fee': fee} if fee else {}),
+                  **({'contract_funding': authority} if authority else {}),
                   **({'face_action_key': face_action_key} if face_action_key else {})})
     if direction == 'to_wallet':
         from .infinia_maintenance import reserve
@@ -386,6 +415,12 @@ def _authorized_fx_quote(j, source, target, amount, client=None):
             and str(quote.get('target_account_id')) == target.provider_account_id
             and positive(quote.get('source_amount')) == amount
             and positive(quote.get('target_amount')) >= j.minimum_fx_output)
+        if valid and contract_funded(j):
+            # An amount floor lets a fuller delivery hide a lower rate.
+            from .contract_funding import rate_allowed, rate_passed
+            valid = rate_allowed(j, amount, positive(quote.get('target_amount')))
+            if valid:
+                rate_passed(j)
     except (AttributeError, TypeError, ValueError, ArithmeticError, PaymentAccountError):
         valid = False
     return quote if valid else None
@@ -841,6 +876,15 @@ def _start_exact_conversion(j, source, target, credit_amount, client=None):
     return j.fx_operation
 
 
+def _quote_refused(j):
+    if contract_funded(j):
+        # The money is already out: wait for the rate, for a bounded while.
+        from .contract_funding import rate_refused
+        rate_refused(j)
+    else:
+        _state(j, 'needs_review', failure='fx_quote_outside_authorization')
+
+
 def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None):
     """Persist each leg under a row lock, submit only after COMMIT.
 
@@ -851,6 +895,9 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
     # Network reads for a Pix charge happen here, before any lock is taken.
     charge_answer = prefetch_charge_answer(journey_id)
     payout_lookup = prefetch_payout_lookup(journey_id, client)
+    from .contract_funding import owner_problem, refresh_payee
+    refresh_payee(journey_id)
+    owner_held = owner_problem(journey_id)
     with transaction.atomic():
         j = InfiniaJourney.objects.select_for_update(of=('self',)).select_related(
             'money_flow', 'confio_account', 'local_account__provider_profile',
@@ -908,6 +955,26 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 if unwinding:
                     _unwind_mark(j, 'stopped')
                 _state(j, 'needs_review', failure='provider_refund_posted'); return j
+        if contract_funded(j):
+            # Before any conversion or payout leaves: what the contract
+            # executed must be what the owner signed for this run, and the
+            # payee still the one signed for.
+            from . import contract_funding
+            if contract_funding.payout_unsent(j):
+                problem = contract_funding.before_paying(j)
+                if problem == contract_funding.EVENT_NOT_SEEN:
+                    return j    # the event scan is behind
+                if problem:
+                    contract_funding.park_terms_changed(j.bridge, j, problem)
+                    return j
+                problem, waiting = contract_funding.payee_problem(j)
+                if problem:
+                    if not waiting:
+                        contract_funding.park_payee_changed(j, problem)
+                    return j
+                if owner_held and (j.funding_credit_id or j.bridge.provider_credit_id):
+                    contract_funding.park_not_payable(j, owner_held)
+                    return j
         enabled()
         if j.direction == 'to_wallet':
             from .payin_admission import assess
@@ -916,7 +983,9 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 _state(j, 'needs_review', failure=f'payin_{admission.reason}')
                 return j
         validate_accounts(j.confio_account, j.local_account, j.crypto_account, j.destination_snapshot['country'])
-        if address(j.confio_account.bsc_address) != j.wallet_address:
+        # A contract-funded journey pins the immutable account contract.
+        pinned = j.bridge.quote.source_address if contract_funded(j) else j.confio_account.bsc_address
+        if address(pinned) != j.wallet_address:
             _state(j, 'needs_review', failure='wallet_changed'); return j
         source, target = (j.crypto_account, j.local_account) if j.direction == 'to_bank' else (j.local_account, j.crypto_account)
         if not j.funding_credit_id:
@@ -1002,9 +1071,15 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 _state(j, 'needs_review', failure='fx_source_below_precision')
                 return j
             amount = fx_source_amount(credit_amount)
+            if contract_funded(j):
+                # A sweep can bring a stranger's dust (or more) along: never
+                # convert over what was signed; the rest stays in the owner's
+                # account, recorded as the remainder below.
+                from .contract_funding import signed_usd
+                amount = min(amount, fx_source_amount(signed_usd(j)))
             quote = _authorized_fx_quote(j, source, target, amount, client)
             if quote is None:
-                _state(j, 'needs_review', failure='fx_quote_outside_authorization'); return j
+                _quote_refused(j); return j
             if j.direction == 'to_wallet' and j.minimum_wallet_output is not None:
                 from .infinia_bridge import preflight, InfiniaBridgeReview
                 try:
@@ -1060,7 +1135,7 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
             else:
                 quote = _authorized_fx_quote(j, source, target, amount, client)
             if quote is None:
-                _state(j, 'needs_review', failure='fx_quote_outside_authorization'); return j
+                _quote_refused(j); return j
             if j.direction == 'to_wallet' and j.minimum_wallet_output is not None:
                 from .infinia_bridge import preflight, InfiniaBridgeReview
                 try:
@@ -1196,6 +1271,9 @@ def _complete_wallet(j):
 @transaction.atomic
 def attach_return_bridge(*, owner, journey_id, bridge):
     j = InfiniaJourney.objects.select_for_update().get(internal_id=journey_id, confio_account=owner)
+    from .contract_funding import refuse_owner_action
+    refuse_owner_action(j.money_flow)
+    refuse_owner_action(bridge.quote.money_flow)
     if j.bridge_id:
         if j.bridge_id != bridge.pk:
             raise PaymentAccountError('Journey already has a return bridge')

@@ -2,6 +2,7 @@
 delivery are patched for every test (local tests otherwise reach the real
 team channel and real devices)."""
 import itertools
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
 
@@ -34,6 +35,46 @@ SETTINGS = dict(
     CUSD_PLUS_STOCK_ROUTER_ADDRESS=STOCK_ROUTER, CRYPTO_SWAP_ROUTER_ADDRESS=SWAP_ROUTER,
     CUSD_CONVERSION_FEE_ENABLED=False,
 )
+
+# The provider switches an Infinia payout rail needs besides its own flag
+# (payouts.rail_ready): a rail is never offered on a path that is switched off.
+INFINIA_SWITCHES = dict(
+    INFINIA_PAYMENT_ACCOUNTS_ENABLED=True, INFINIA_JOURNEYS_ENABLED=True, PAYMENT_BRIDGE_QUOTES_ENABLED=True,
+    PAYMENT_BRIDGE_BSC_ENABLED=True, CUSD_PLUS_7702_ENABLED=True, LOCAL_MONEY_METHODS=None,
+    RELAY_API_KEY='fake-relay-key',
+)
+
+
+def priced_payout():
+    """A passing payouts preflight, for tests of something else: the real one
+    runs against a fake Relay and Infinia in test_infinia_payouts / _prepare."""
+    return mock.patch('smart_account.infinia_payouts.preflight',
+                      return_value=SimpleNamespace(rate=Decimal('18.5'), fee=None, units=99_100_000 * 10 ** 12,
+                                                   cost_usd=Decimal('0.23'), cost_bps=24))
+
+
+def sent_before(sender, recipient):
+    """A confirmed send by `sender`: a name may select `recipient` from then on."""
+    from send.models import SendTransaction
+    return SendTransaction.objects.create(
+        sender_user=sender, recipient_user=recipient, sender_address='0x' + '1' * 40,
+        recipient_address='0x' + '2' * 40, amount=Decimal('5'), token_type='CUSD_PLUS', status='CONFIRMED')
+
+
+def priced_pagomovil():
+    """The same for Pago Móvil: the real one is test_authority_audit's."""
+    return mock.patch('smart_account.services.preflight_pagomovil',
+                      side_effect=lambda viewer, own, amount, *a: SimpleNamespace(
+                          conversion=amount * Decimal('0.009'), sending=amount * Decimal('0.011'),
+                          paid=amount * Decimal('0.98')))
+
+
+def own_nonce_lock(*args, **kwargs):
+    """sponsor_7702.acquire_sponsor_nonce_lock, granted at once: the token
+    is really in the cache, where relayer._hold looks for it."""
+    cache.set('bsc_sponsor_nonce_lock', 'token', 15)
+    return 'token'
+
 
 _addresses = itertools.count(1)
 
@@ -182,6 +223,8 @@ class SmartAccountTestCase(TestCase):
             mock.patch('cusd_plus.gm_holdings.invalidate_holdings'),
             mock.patch('cusd_plus.crypto_holdings.invalidate_holdings'),
             mock.patch('smart_account.offer.viewer_dollar', return_value='cusd_plus'),
+            # Whatever today is: that check has its own test (test_payout_provenance).
+            mock.patch('smart_account.assistant_ops._starts_late_in_month', return_value=False, create=True),
         ]
         if self.mock_approvals:
             # The factory approval sent before a designation/acceptance batch

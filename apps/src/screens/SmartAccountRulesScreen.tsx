@@ -65,8 +65,11 @@ export function ruleNote(rule: SmartAccountRule & { lastRunReason?: string | nul
 /** The bank-rule choice: a Pago Móvil account can be added on the next screen. */
 export function payoutKindSubtitle(rails: string[]): string {
   const names = railsPhrase(rails, ',');
-  return rails.includes('ve_pagomovil')
-    ? `A una cuenta guardada o a una Pago Móvil que agregues: ${names}.`
+  // Pago Móvil accounts and CLABEs are added from the rule itself.
+  const addable = [rails.includes('ve_pagomovil') ? 'una Pago Móvil' : '', rails.includes('mx_clabe') ? 'una CLABE' : '']
+    .filter(Boolean).join(' o ');
+  return addable
+    ? `A una cuenta guardada o a ${addable} que agregues: ${names}.`
     : `A una cuenta que ya guardaste: ${names}.`;
 }
 

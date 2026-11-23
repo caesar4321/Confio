@@ -15,7 +15,7 @@ from eth_abi import decode as abi_decode
 from smart_account import abi, assistant_ops, automation, payouts, quotes, schema, services
 from smart_account.models import SmartAccountPayout, SmartAccountRule, SmartAccountRuleRun
 
-from .base import CUSD, VAULT, WAD, SmartAccountTestCase, vault_preview
+from .base import CUSD, VAULT, WAD, SmartAccountTestCase, priced_pagomovil, vault_preview
 from .test_pagomovil_payouts import DEPOSIT, TX, VE_ON, PagoMovilBase, _reserve_without_sender, quote
 from .test_tasks import RelayHarness
 
@@ -140,6 +140,8 @@ class PagoMovilPlusTests(PagoMovilBase):
         self.target = mock.MagicMock(return_value={
             'deposit_address': DEPOSIT, 'binding': {'provider': 'relay', 'request_id': 'r1', 'response': {},
                                                     'deadline': int(timezone.now().timestamp()) + 900}})
+        from .test_pagomovil_payouts import per_order
+        per_order(self.target)
         self.relay = mock.MagicMock(return_value=(SimpleNamespace(signed_tx_hash=TX), True))
         self.window = mock.MagicMock(return_value=(WAD, WAD))
         patches = [
@@ -148,6 +150,7 @@ class PagoMovilPlusTests(PagoMovilBase):
             mock.patch('ramps.pagoasap_send.quote', return_value=quote()),
             mock.patch('ramps.pagoasap_send.funding_target', self.target),
             mock.patch('ramps.ve_send.current_block', return_value=100),
+            mock.patch('ramps.pagoasap_send.pays_at_floor', return_value=True),
             mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=vault_preview(90)),
             mock.patch('smart_account.quotes.plus_price_window', self.window),
             mock.patch('smart_account.relayer.send_relayer_call', self.relay),
@@ -185,10 +188,9 @@ class PagoMovilPlusTests(PagoMovilBase):
         self.assertEqual(SmartAccountPayout.objects.get().status, 'prepared')
 
     def test_a_retry_pins_the_reserved_usdt_while_the_window_moves(self):
-        from smart_account import relayer
-        self.relay.side_effect = [relayer.RelayError('nonce'), (SimpleNamespace(signed_tx_hash=TX), True)]
+        self.relay.side_effect = [RuntimeError('the worker died'), (SimpleNamespace(signed_tx_hash=TX), True)]
         self.run_rule()
-        self.assertEqual(SmartAccountRuleRun.objects.get().status, 'failed')
+        self.assertEqual(SmartAccountRuleRun.objects.get().status, 'pending')
         self.window.return_value = (WAD, WAD + 3 * 10 ** 12)        # a slightly grown pPlus window
         self.run_rule()
         self.assertEqual(SmartAccountRuleRun.objects.get().status, 'sent')
@@ -196,11 +198,11 @@ class PagoMovilPlusTests(PagoMovilBase):
         first, second = (bytes(abi.decode_call(c[0][1])[1][1]) for c in self.relay.call_args_list)
         self.assertEqual(first, second)
 
-    def test_a_fee_change_between_reads_skips(self):
+    def test_a_fee_change_between_reads_waits(self):
         with mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=vault_preview(45)):
             self.run_rule()
         run = SmartAccountRuleRun.objects.get()
-        self.assertEqual((run.status, run.error), ('skipped', 'provider_unavailable'))
+        self.assertEqual((run.status, run.error), ('pending', 'provider_unavailable'))
         self.relay.assert_not_called()
         self.assertFalse(self.ramps().exists())
 
@@ -265,6 +267,7 @@ class DustTests(SmartAccountTestCase):
                 mock.patch('ramps.ve_send.CONTRACT_FUNDING', True, create=True), \
                 mock.patch('payment_accounts.services.require_outgoing_face', return_value='face-key-1'), \
                 mock.patch('security.face_step_up.step_up_applies', return_value=True), \
+                priced_pagomovil(), \
                 mock.patch('smart_account.payouts.reference_ves_rate', return_value=Decimal('40')):
             self.assertIn('ve_pagomovil', offer.payout_rails())
             saved = schema.SaveSmartAccountPagoMovilDestination.mutate(

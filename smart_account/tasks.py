@@ -14,6 +14,7 @@ Two classes, by what switching the feature flag off must still allow:
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 
 from celery import shared_task
@@ -29,13 +30,17 @@ logger = logging.getLogger(__name__)
 def _single(name: str, ttl: int, fn):
     """One run at a time per task: two overlapping runs would only race for
     the same idempotency keys, but there is no reason to pay for it."""
-    key = f'smart_account_task_lock:{name}'
-    if not cache.add(key, 1, ttl):
+    key, owner = f'smart_account_task_lock:{name}', uuid.uuid4().hex
+    if not cache.add(key, owner, ttl):
         return {'skipped': 'already_running'}
     try:
         return fn()
     finally:
-        cache.delete(key)
+        # A run that outlived its lock never releases the next one's. (The
+        # lock only saves work: sending and closing exclude each other in
+        # the database, relayer claim / close_unfunded / close_unsent.)
+        if cache.get(key) == owner:
+            cache.delete(key)
 
 
 @shared_task(name='smart_account.reconcile_events', ignore_result=True)
@@ -45,7 +50,20 @@ def reconcile_events():
     if not chain.factory_address():
         return {'skipped': 'disabled'}
     from . import reconcile
-    return _single('reconcile_events', 240, reconcile.reconcile)
+
+    def follow():
+        try:
+            return reconcile.reconcile()
+        finally:
+            # Money already sent is followed to its end, the flag on or off,
+            # and whether or not the event scan worked.
+            from . import infinia_payouts, payouts
+            for mirror in (infinia_payouts.mirror_payouts, payouts.mirror_ramp_payouts):
+                try:
+                    mirror()
+                except Exception:  # noqa: BLE001 — retried next minute
+                    logger.exception('payout mirror failed')
+    return _single('reconcile_events', 240, follow)
 
 
 @shared_task(name='smart_account.collect_due_fees', ignore_result=True)

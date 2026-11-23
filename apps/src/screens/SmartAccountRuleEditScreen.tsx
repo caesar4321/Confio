@@ -6,9 +6,12 @@
 // run this rule as written.
 //
 //   send    -> someone on Confío (contacts or @usuario; the server resolves)
-//   payout  -> a bank destination the viewer already saved, on a rail the
-//              server lists. The dollar amount is fixed; the local-currency
-//              amount follows the day's rate, and the screen says so.
+//   payout  -> a bank destination the viewer saved (or adds here: a CLABE or
+//              a Pago Móvil account), on a rail the server lists. One the bank
+//              could not verify (its lookup is off) is marked "Titular no
+//              verificado por el banco". The dollar amount is fixed; the
+//              local-currency amount follows the day's rate, and the screen
+//              says so.
 //   buy     -> a stock, or bitcoin / gold where this build and the server
 //              both offer them (iOS builds compile without those surfaces).
 //
@@ -49,25 +52,45 @@ import {
 import type { MainStackParamList } from '../types/navigation';
 import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import { PagoMovilDestinationForm } from '../components/smartAccount/PagoMovilDestinationForm';
+import { ClabeDestinationForm } from '../components/smartAccount/ClabeDestinationForm';
 
-/** The rail whose destination can be added right here (Venezuela). */
+/** The rails whose destination can be added right here. */
 export const PAGO_MOVIL_RAIL = 've_pagomovil';
+export const CLABE_RAIL = 'mx_clabe';
+const ADDABLE_RAILS = [PAGO_MOVIL_RAIL, CLABE_RAIL];
+export const UNVERIFIED_HOLDER_NOTE = 'Titular no verificado por el banco';
 
 /**
  * Why there is no bank account to pick, and where to get one: a Pago Móvil
- * account is added here; the other rails' accounts are saved from Enviar.
+ * account or a CLABE is added here; the other rails' accounts are saved
+ * from Enviar.
  */
 export function payoutEmptyCopy(rails: string[]): string {
   if (rails.length === 0) {
     return 'Los pagos automáticos a cuenta bancaria todavía no están disponibles para ti.';
   }
-  if (!rails.includes(PAGO_MOVIL_RAIL)) {
+  const addable = rails.filter((r) => ADDABLE_RAILS.includes(r));
+  if (addable.length === 0) {
     return `Guarda primero una cuenta ${railsPhrase(rails)} desde Enviar. Después podrás pagarle de forma automática.`;
   }
-  const others = rails.filter((r) => r !== PAGO_MOVIL_RAIL);
+  const here = addable.map((r) => (r === PAGO_MOVIL_RAIL ? 'una cuenta Pago Móvil' : 'una CLABE')).join(' o ');
+  const others = rails.filter((r) => !ADDABLE_RAILS.includes(r));
   return others.length > 0
-    ? `Agrega aquí una cuenta Pago Móvil. Las cuentas ${railsPhrase(others)} se guardan desde Enviar.`
-    : 'Agrega una cuenta Pago Móvil y podrás pagarle de forma automática.';
+    ? `Agrega aquí ${here}. Las cuentas ${railsPhrase(others)} se guardan desde Enviar.`
+    : `Agrega ${here} y podrás pagarle de forma automática.`;
+}
+
+/** A saved destination's second line: its rail and holder, never a dangling "·". */
+export function payoutMethodSubtitle(m: SmartAccountPayoutMethod): string {
+  return [railLabel(m.rail), m.holderName].filter(Boolean).join(' · ');
+}
+
+/** A saved destination's quiet third line, or undefined. */
+export function payoutMethodNote(m: SmartAccountPayoutMethod): string | undefined {
+  if (!m.available) {
+    return 'Todavía no admite pagos automáticos.';
+  }
+  return m.holderVerified === false ? UNVERIFIED_HOLDER_NOTE : undefined;
 }
 
 /** The pending-step notice: the IA+ sentence only when there is a plan to go back to. */
@@ -303,8 +326,9 @@ function RuleEditForm() {
   const [firstRunAt, setFirstRunAt] = useState<string | null>(prefill?.firstRunAt ?? null);
   const stopOpened = useRef(false);
   const [picker, setPicker] = useState(false);
-  // The payout picker shows the "Agregar cuenta Pago Móvil" form instead of the list.
-  const [addingPagoMovil, setAddingPagoMovil] = useState(false);
+  // The payout picker shows an "Agregar" form (Pago Móvil or CLABE) instead of the list.
+  const [adding, setAdding] = useState<null | 'pagomovil' | 'clabe'>(null);
+  const addingPagoMovil = adding === 'pagomovil';
   const [touched, setTouched] = useState(false);
   // A step of a multi-step proposal whose outcome is still unknown: the rest
   // of the plan must not open on top of it (it may not have gone through).
@@ -368,7 +392,7 @@ function RuleEditForm() {
       return null;
     }
     if (kind === 'payout') {
-      if (method) { return { label: method.label, sub: `${railLabel(method.rail)} · ${method.holderName}` }; }
+      if (method) { return { label: method.label, sub: payoutMethodSubtitle(method) }; }
       if (existing?.payoutMethodId && !proposedMethodId) { return { label: existing.payoutLabel || railLabel(existing.payoutRail) }; }
       return null;
     }
@@ -513,15 +537,25 @@ function RuleEditForm() {
   const noMethods = !ruleId && kind === 'payout' && !methods.loading && !methods.failed && usableMethods.length === 0
     && !method;
   const canAddPagoMovil = rails.includes(PAGO_MOVIL_RAIL);
-  const openAddPagoMovil = () => {
-    setAddingPagoMovil(true);
+  const canAddClabe = rails.includes(CLABE_RAIL);
+  const openAdd = (which: 'pagomovil' | 'clabe' | null) => {
+    setAdding(which);
     setPicker(true);
   };
+  // The empty state's one action: straight to the form when only one kind
+  // can be added here, else the sheet that offers both.
+  const emptyAction = canAddPagoMovil && canAddClabe
+    ? { label: 'Agregar cuenta', onPress: () => openAdd(null) }
+    : canAddPagoMovil
+    ? { label: 'Agregar cuenta Pago Móvil', onPress: () => openAdd('pagomovil') }
+    : canAddClabe
+    ? { label: 'Agregar CLABE', onPress: () => openAdd('clabe') }
+    : null;
   const closePicker = () => {
     setPicker(false);
-    setAddingPagoMovil(false);
+    setAdding(null);
   };
-  const onPagoMovilSaved = (saved: SmartAccountPayoutMethod) => {
+  const onDestinationSaved = (saved: SmartAccountPayoutMethod) => {
     if (saved.available) {
       setMethod(saved);
     }
@@ -553,8 +587,8 @@ function RuleEditForm() {
           icon="home"
           title="Aún no guardaste una cuenta bancaria"
           body={payoutEmptyCopy(rails)}
-          actionLabel={canAddPagoMovil ? 'Agregar cuenta Pago Móvil' : undefined}
-          onAction={canAddPagoMovil ? openAddPagoMovil : undefined}
+          actionLabel={emptyAction?.label}
+          onAction={emptyAction?.onPress}
         />
       ) : (
         <View style={kitStyles.pad}>
@@ -596,6 +630,11 @@ function RuleEditForm() {
               testID="rule-destination"
             />
           </Card>
+          {kind === 'payout' && method?.holderVerified === false ? (
+            <Text style={styles.fieldNote} testID="payout-unverified-note">
+              {`${UNVERIFIED_HOLDER_NOTE}: revisa que la cuenta sea la correcta.`}
+            </Text>
+          ) : null}
           {(touched || proposedGone || cryptoBlocked) && destinationError ? (
             <Text style={styles.fieldError} testID="rule-destination-error">{destinationError}</Text>
           ) : null}
@@ -640,7 +679,7 @@ function RuleEditForm() {
           {sentence ? (
             <Card flat style={styles.sentence}>
               <Text style={styles.sentenceText}>{sentence}</Text>
-              <Text style={kitStyles.small}>Si un día no alcanza el saldo, esa vez se omite y te avisamos.</Text>
+              <Text style={kitStyles.small}>Si un día no alcanza el saldo, te avisamos y lo reintentamos por un tiempo.</Text>
             </Card>
           ) : null}
 
@@ -662,10 +701,12 @@ function RuleEditForm() {
         <Sheet
           visible={picker}
           onClose={closePicker}
-          title={addingPagoMovil ? 'Agregar cuenta Pago Móvil' : 'Tus cuentas guardadas'}
+          title={addingPagoMovil ? 'Agregar cuenta Pago Móvil' : adding === 'clabe' ? 'Agregar CLABE' : 'Tus cuentas guardadas'}
         >
           {addingPagoMovil ? (
-            <PagoMovilDestinationForm onSaved={onPagoMovilSaved} onCancel={() => setAddingPagoMovil(false)} />
+            <PagoMovilDestinationForm onSaved={onDestinationSaved} onCancel={() => setAdding(null)} />
+          ) : adding === 'clabe' ? (
+            <ClabeDestinationForm onSaved={onDestinationSaved} onCancel={() => setAdding(null)} />
           ) : methods.loading && !methods.data ? <RowsSkeleton rows={2} /> : methods.failed && !methods.data ? (
             <LoadError onRetry={methods.reload} />
           ) : usableMethods.length === 0 ? (
@@ -676,21 +717,32 @@ function RuleEditForm() {
               divider={i > 0}
               left={<IconDisc icon="home" tone={m.available ? 'mint' : 'neutral'} />}
               title={m.label}
-              subtitle={`${railLabel(m.rail)} · ${m.holderName}`}
-              note={m.available ? undefined : 'Todavía no admite pagos automáticos.'}
+              subtitle={payoutMethodSubtitle(m)}
+              note={payoutMethodNote(m)}
               onPress={m.available ? () => { setMethod(m); setPicker(false); } : undefined}
               chevron
             />
           ))}
-          {!addingPagoMovil && canAddPagoMovil && !(methods.loading && !methods.data) ? (
+          {!adding && canAddPagoMovil && !(methods.loading && !methods.data) ? (
             <Row
               divider={usableMethods.length > 0}
               left={<IconDisc icon="plus" tone="mint" />}
               title="Agregar cuenta Pago Móvil"
               subtitle="Banco, teléfono y cédula de quien recibe."
-              onPress={() => setAddingPagoMovil(true)}
+              onPress={() => setAdding('pagomovil')}
               chevron
               testID="payout-add-pagomovil"
+            />
+          ) : null}
+          {!adding && canAddClabe && !(methods.loading && !methods.data) ? (
+            <Row
+              divider={usableMethods.length > 0 || canAddPagoMovil}
+              left={<IconDisc icon="plus" tone="mint" />}
+              title="Agregar CLABE"
+              subtitle="Los 18 dígitos de la cuenta de quien recibe."
+              onPress={() => setAdding('clabe')}
+              chevron
+              testID="payout-add-clabe"
             />
           ) : null}
         </Sheet>
@@ -794,6 +846,7 @@ const styles = StyleSheet.create({
   gap: { marginTop: 12 },
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
   fieldError: { fontSize: 13, color: SA.noticeText, marginTop: 8, marginLeft: 4 },
+  fieldNote: { fontSize: 13, color: SA.muted, marginTop: 8, marginLeft: 4 },
   sentence: { marginTop: 20, paddingVertical: 16, backgroundColor: SA.mint },
   sentenceText: { fontSize: 17, lineHeight: 24, fontWeight: '600', color: SA.deep, marginBottom: 6 },
   stop: { marginTop: 28 },

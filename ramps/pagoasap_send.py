@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_UP, Decimal, InvalidOperation
 
 from django.conf import settings
 
 from ramps import ve_pagomovil, ve_send
-from ramps.pagoasap_client import PagoAsapAmbiguousError, PagoAsapClient, PagoAsapError, idempotency_key
+from ramps.pagoasap_client import (
+    PagoAsapAmbiguousError, PagoAsapAuthError, PagoAsapClient, PagoAsapError, idempotency_key,
+)
 from ramps.ve_pagomovil import VePagoMovilError
 from ramps.ve_send import Outcome, Settlement
 
@@ -28,10 +30,10 @@ logger = logging.getLogger(__name__)
 
 PROVIDER = 'pagoasap'
 # Several sends of one person may share a Relay deposit route: tag amounts.
-# A contract-funded send (ve_send.CONTRACT_FUNDING) is untagged and may share
-# the route with an earlier order of the same account for the same amount, so
-# ve_send proves it only by the reported executeRule hash (never by a log
-# scan) and refuses a second open one of the same account and amount.
+# A contract-funded send (ve_send.CONTRACT_FUNDING) is untagged: it asks for
+# a one-time address (a used one is refused), and ve_send proves it only by
+# the reported executeRule hash (never by a log scan) and refuses a second
+# open one of the same account and amount.
 SHARED_DEPOSIT_TARGET = True
 TARGET_AT_CLAIM = True
 SOURCE, DESTINATION = 'BSC:USDT', 'POL:USDC'
@@ -105,7 +107,13 @@ def funding_target(ramp) -> dict:
     recipient = _polygon_address()
     if not recipient:
         raise VePagoMovilError(UNAVAILABLE)
-    client = RelayClient()
+    if section.get('funding_sender'):
+        # As an Infinia run: a one-time address, and (refundTo is the account
+        # contract, which cannot sign a withdrawal) who may recover a refund.
+        from payment_accounts.contract_funding import OneTimeDepositRelay
+        client = OneTimeDepositRelay((section.get('funding_terms') or {}).get('recovery') or '')
+    else:
+        client = RelayClient()
     try:
         route = client.routes(SOURCE, DESTINATION, amount, ramp.actor_address, recipient)[0]
         build = client.build(route, source_address=ramp.actor_address, destination_address=recipient)
@@ -137,19 +145,29 @@ def settle(ramp) -> Settlement:
     bridge = section.get('bridge') or {}
     if not bridge.get('request_id') or not section.get('funding_tx_hash'):
         return Settlement('review', reason='bridge_binding_missing')
+    binding = {'request_id': bridge['request_id'], 'response': bridge['response']}
+    sender = section.get('funding_sender')
+    if sender:
+        # As an Infinia run: the request Relay bound to the deposit address
+        # and our funding hash, never the quote's id; a sweep may carry more.
+        binding['contract_funding'] = {
+            **(section.get('relay_follow') or {}),      # the request found for this deposit
+            'sender': str(sender).lower(), 'funded_units': str(section.get('funded_wei') or ''),
+            'recovery': str((section.get('funding_terms') or {}).get('recovery') or '').lower()}
     transfer = SimpleNamespace(
+        pk=f've{ramp.pk}', internal_id=ramp.internal_id, provider_name='Pago Móvil',
         quote=SimpleNamespace(source_token_id=SOURCE, destination_token_id=DESTINATION,
                               amount_units=str(section['deposit_wei']),
                               source_address=(ramp.actor_address or '').lower(),
                               destination_address=bridge['recipient']),
-        binding={'request_id': bridge['request_id'], 'response': bridge['response']},
+        binding=binding,
         deadline=int(bridge['deadline']), source_tx_hash=section['funding_tx_hash'],
         deposit_address=section['deposit_address'],
         # A contract-funded send (ve_send.CONTRACT_FUNDING): the vault, not
         # source_address, sent the deposit; ve_send already proved that
         # Transfer from funding_sender. Any mode other than 'wallet' makes
-        # relay_settlement match the funding without a sender; refunds still
-        # go to source_address (the account contract).
+        # relay_settlement match the funding by that vault (binding); refunds
+        # still go to source_address (the account contract).
         funding_mode='contract' if section.get('funding_sender') else 'wallet',
         # A contract-funded order may be funded above deposit_wei (a vault
         # exit, ve_send._check_receipt; recorded as funding_excess_wei): the
@@ -158,6 +176,13 @@ def settle(ramp) -> Settlement:
         funded_units=(str(section.get('funded_wei') or '') or None) if section.get('funding_sender') else None,
         amount_out_min=bridge['amount_out_min'], status='bridging', failure_code='',
         actual_out_units=None, destination_tx_hash='')
+    if sender:
+        follow = dict(section.get('relay_follow') or {})
+
+        def remember(values):
+            follow.update(values)
+            ve_send._update(ramp.pk, relay_follow=dict(follow))
+        transfer.remember = remember
     try:
         reconcile_relay(transfer)
     except NextError:
@@ -167,8 +192,14 @@ def settle(ramp) -> Settlement:
         expected = int(bridge.get('amount_out') or 0)
         # The receipt check sums every USDC transfer to Pago ASAP in the
         # delivery transaction: credit at most this order's own quoted output,
-        # and let ops look when the transaction plainly carries more.
-        if expected <= 0 or received > expected + max(expected // 50, 50_000):
+        # and let ops look when the transaction plainly carries more than
+        # what was swept for it explains.
+        explained = expected
+        if sender:
+            quoted = int(section['deposit_wei'])
+            swept = int((transfer.binding.get('settlement_evidence') or {}).get('collected_units') or 0)
+            explained = expected * max(swept, quoted) // quoted
+        if expected <= 0 or received > explained + max(explained // 50, 50_000):
             return Settlement('review', reason='delivery_amount_unattributable')
         units = min(received, expected)
         usd = Decimal(units) / Decimal(10 ** TOKENS[DESTINATION][1])
@@ -178,6 +209,18 @@ def settle(ramp) -> Settlement:
     if transfer.status == 'needs_review':
         return Settlement('review', reason=transfer.failure_code or 'bridge')
     return Settlement('pending')
+
+
+def route_cost_bps(deposit_wei, amount_out) -> int:
+    """What a deposit route and the deposit fee keep of the USDT it is
+    funded with. Raises when the route does not say what it delivers."""
+    from payment_accounts.allbridge_next import TOKENS
+    usdt = Decimal(int(deposit_wei)) / Decimal(10 ** TOKENS[SOURCE][1])
+    out = Decimal(int(str(amount_out))) / Decimal(10 ** TOKENS[DESTINATION][1])
+    if usdt <= 0 or out <= 0:
+        raise ValueError('The route names no amount')
+    kept = max(usdt - _fee_free_usd(out), Decimal('0'))
+    return int((kept / usdt * 10_000).to_integral_value(rounding=ROUND_UP))
 
 
 def quote(amount: Decimal) -> dict:
@@ -280,21 +323,46 @@ def _affordable(client, usd: Decimal, rate: Decimal):
     return best
 
 
+def pays_at_floor(usd: Decimal, rate: Decimal, floor: Decimal) -> bool:
+    """Whether `usd` buys at least what the signed floor gives, the provider's
+    own payout cost included. Asked before a contract funds a send, by the
+    measure payout_terms pays by: money is never sent only to be held."""
+    if rate < floor:
+        return False
+    priced = _affordable(_client(), usd, rate)
+    return priced is not None and priced[0] >= _ves_for(usd, floor)
+
+
 def payout_terms(ramp, inflight) -> dict | None:
     """Price the payout now and check the balance covers it after payouts
     in flight. None: not payable yet (deposit not credited, below minimum)."""
-    client = _client()
     section = ve_send._section(ramp)
     # What Relay actually delivered to Pago ASAP (proven on Polygon).
-    usd = _fee_free_usd(Decimal(str(section.get('credited_usd') or '0')))
+    credited = Decimal(str(section.get('credited_usd') or '0'))
+    if section.get('funding_sender') and credited > Decimal(str(section.get('gross_usd') or '0')):
+        # A contract-funded send never pays over what its owner signed.
+        return {'review': ve_send.TERMS_CHANGED}
+    client = _client()
+    usd = _fee_free_usd(credited)
     rate = client.rate('USD', 'VES')
     if rate <= 0 or usd <= 0:
         return None
+    floor = None
+    if section.get('funding_sender'):
+        from smart_account.payouts import ramp_fx_floor
+        floor = ramp_fx_floor(ramp)
+        if floor is None:
+            return {'review': ve_send.TERMS_CHANGED}
+        if rate < floor:
+            return {'wait': ve_send.RATE_OUTSIDE}
     priced = _affordable(client, usd, rate)
     if priced is None:
         # No amount at or above the minimum fits the funded dollars.
         return {'review': 'payout_unpriceable'}
     ves, total = priced
+    if floor is not None and ves < _ves_for(usd, floor):
+        # The rate alone is not it: the provider's own cost counts.
+        return {'wait': ve_send.RATE_OUTSIDE}
     symbol = str(getattr(settings, 'PAGOASAP_BALANCE_SYMBOL', 'USD')).upper()
     symbol = 'USD' if symbol == 'USDT' else symbol  # balances() names dollars "USD"
     balance = client.balances().get(symbol, Decimal('0'))
@@ -320,7 +388,13 @@ def dispatch(ramp, claim: dict) -> Outcome:
             idempotency_key=idempotency_key(claim['key']))
     except PagoAsapAmbiguousError:
         return Outcome('ambiguous')
+    except PagoAsapAuthError:
+        return Outcome('retry', reason=ve_send.NOT_SENT)
     except PagoAsapError as exc:
+        if exc.status == 429:
+            # Too many requests, not a refusal of this payout: the same key
+            # again, and nothing was taken (the replay window does not run).
+            return Outcome('ambiguous', reason=ve_send.RATE_LIMITED)
         if exc.status in (400, 422) or (exc.status == 403 and exc.code in REFUSALS_403):
             # Validation refusal, or a partner/beneficiary limit or IP
             # allowlist refusal: checked before creation, no intent exists.

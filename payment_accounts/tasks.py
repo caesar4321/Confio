@@ -116,6 +116,9 @@ def reconcile_operations():
                 if not MoneyOperation.objects.filter(**snapshot).update(**updates):
                     continue
                 if can_retry:
+                    from .contract_funding import replay_refusal
+                    if replay_refusal(operation):
+                        continue    # nothing is sent again; still looked up
                     submit_money_operation(operation)
                     reconciled += 1
                 else:

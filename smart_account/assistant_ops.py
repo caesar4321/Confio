@@ -398,7 +398,7 @@ def rules_snapshot(user, *, meta=None, tz=None) -> dict:
         rules.append({
             'regla_id': str(rule.internal_id), 'tipo': rule.kind, 'monto_usd': format(rule.amount, 'f'),
             'frecuencia': rule.frequency, 'activa': rule.active,
-            'proxima_ejecucion': (_local(rule.scheduled_for or rule.next_run_at, tz)
+            'proxima_ejecucion': (_local(services.next_run_shown(rule), tz)
                                   if rule.active and rule.kind in abi.EXECUTABLE_RULE_KINDS else None),
             **_rule_target(rule),
             'ultima_ejecucion': ({'fecha': _local(last.scheduled_for, tz), 'estado': last.status,

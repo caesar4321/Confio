@@ -864,7 +864,11 @@ def _rule_updated(account, event):
         _card_stored(account, event, rule, kept_spent=kept_spent)
     if old_authorization is not None and old_authorization.pk != getattr(rule.standing_authorization, 'pk', None):
         _revoke(old_authorization, 'rule_updated')
-    return []
+    if rule.kind != 'payout':
+        return []
+    from . import payouts
+    rule_pk = rule.pk
+    return [lambda: payouts.close_superseded_orders(rule_pk)]
 
 
 def _card_stored(account, event, rule, *, kept_spent) -> None:
@@ -949,25 +953,44 @@ def _rule_executed(account, event):
     gap = timedelta(days=abi.MIN_GAP_DAYS[rule.frequency])
     rule.next_run_at = event.block_time + gap
     rule.save(update_fields=['next_run_at', 'updated_at'])
-    run = rule.runs.filter(tx_hash__iexact=event.tx_hash).first()
-    if run is None:
+    from .automation import run_of_transaction
+    run = (run_of_transaction(account, rule, event.tx_hash)
+           or rule.runs.filter(tx_hash__iexact=event.tx_hash).first())
+    known = run is not None
+    if not known:
         run = SmartAccountRuleRun.objects.create(
             rule=rule, scheduled_for=event.block_time, tx_hash=event.tx_hash, status='sent')
     if run.status == 'ok':
         return []
+    if run.status != 'sent':
+        # Told it was not made (or never saved as sent), and it ran.
+        run.message = 'Pago en camino.' if rule.kind == 'payout' else ''
+    run.tx_hash = event.tx_hash
     run.status = 'ok'
     run.amount_in, run.amount_out = str(args['amountIn']), str(args['amountOut'])
     run.error = ''
     run.message = run.message or 'Listo.'
     run.save()
     from .automation import schedule_next
-    schedule_next(rule, after=event.block_time)
+    if (known and rule.scheduled_for is not None
+            and rule.scheduled_for > max(run.scheduled_for, event.block_time)):
+        # Given up (or set again) before it was seen mined: the slot already
+        # moved on. Only the contract's gap may push it.
+        if rule.scheduled_for < rule.next_run_at:
+            rule.scheduled_for = rule.next_run_at
+            rule.save(update_fields=['scheduled_for', 'updated_at'])
+    else:
+        schedule_next(rule, after=event.block_time)
     if rule.kind == 'payout':
         return []  # told at delivery, with the fiat amount (PayoutSent + provider)
 
+    run.rule = rule     # with the date it really runs next
+
     def _after():
-        if SmartAccountRuleRun.objects.filter(pk=run.pk, notified_at__isnull=True).update(notified_at=timezone.now()):
-            notifications.rule_run(run)
+        # Announced whatever was told before: this is the transition to ok,
+        # and an event seen again returned above.
+        SmartAccountRuleRun.objects.filter(pk=run.pk).update(notified_at=timezone.now())
+        notifications.rule_run(run)
     return [_after]
 
 
@@ -1001,10 +1024,10 @@ def _unmatched_payout(account, rule, event):
                 payout = group[0] if len(group) == 1 else None
                 break
     if payout is None:
-        from config.ops_alerts import send_ops_alert
-        send_ops_alert(f'Cuenta inteligente: PayoutSent sin pago que le corresponda (cuenta {account.pk}, regla '
-                       f'{_args_id(event)}, destino {destination or "?"}, tx {event.tx_hash}). Revisar a mano.',
-                       dedupe_key=f'smart_payout_unmatched_{event.tx_hash}', dedupe_seconds=86400)
+        _alert_after_commit(
+            f'Cuenta inteligente: PayoutSent sin pago que le corresponda (cuenta {account.pk}, regla '
+            f'{_args_id(event)}, destino {destination or "?"}, tx {event.tx_hash}). Revisar a mano.',
+            f'smart_payout_unmatched_{event.tx_hash}')
         return None
     run = payout.rule_run
     if (run.tx_hash or '').lower() != event.tx_hash.lower():
@@ -1025,34 +1048,54 @@ def _args_id(event):
 def _payout_sent(account, event):
     args = event.args
     rule = SmartAccountRule.all_objects.filter(smart_account=account, onchain_id=int(args['id'])).first()
-    run = rule.runs.filter(tx_hash__iexact=event.tx_hash).first() if rule is not None else None
-    payout = SmartAccountPayout.objects.filter(rule_run=run).first() if run is not None else None
+    from . import payouts
+    from .automation import run_of_transaction
+    run = payout = None
+    if rule is not None:
+        # The relayer's durable row first: it names the (rule, slot) even
+        # when a retry's hash was never saved on the run.
+        run = run_of_transaction(account, rule, event.tx_hash)
+        payout = SmartAccountPayout.objects.filter(rule_run=run).first() if run is not None else None
+        if payout is None:
+            run = rule.runs.filter(tx_hash__iexact=event.tx_hash).first()
+            payout = SmartAccountPayout.objects.filter(rule_run=run).first() if run is not None else None
     if payout is None:
         payout = _unmatched_payout(account, rule, event)
         if payout is None:
             return []
         run = payout.rule_run
+    if (run.tx_hash or '').lower() != event.tx_hash.lower():
+        SmartAccountRuleRun.objects.filter(pk=run.pk).update(tx_hash=event.tx_hash, updated_at=timezone.now())
+        run.tx_hash = event.tx_hash
+    # What another worker writes meanwhile is read, never saved over.
+    payout = SmartAccountPayout.objects.select_for_update().get(pk=payout.pk)
+    order = (payout.journey_id, payout.ramp_id)
+    payout = payouts.follow_destination(payout, run, str(args.get('destination') or '').lower())
+    replaced = order != (payout.journey_id, payout.ramp_id)     # it paid an order already closed
     if payout.deposit_address and payout.deposit_address.lower() != args['destination']:
-        from config.ops_alerts import send_ops_alert
-        send_ops_alert(f'Cuenta inteligente: PayoutSent a {args["destination"]} no coincide con el puente '
-                       f'esperado (run {run.pk})', dedupe_key=f'smart_payout_dest_{run.pk}', dedupe_seconds=86400)
+        _alert_after_commit(f'Cuenta inteligente: PayoutSent a {args["destination"]} no coincide con el puente '
+                            f'esperado (run {run.pk})', f'smart_payout_dest_{run.pk}')
     payout.usdt_amount = str(args['usdtOut'])
     # 'cancelled' too: a payout given up (its order closed) that the chain
     # shows paid after all is on its way, and the mirror follows its ramp.
-    revived = payout.status == 'cancelled'
+    revived = payout.status == 'cancelled' or replaced
     if payout.status in ('reserving', 'prepared', 'pending', 'cancelled'):
         payout.status = 'onchain_sent'
     payout.save(update_fields=['usdt_amount', 'status', 'updated_at'])
-    if payout.ramp_id is None:
+    if payout.ramp_id is None and payout.journey_id is None:
         return []
-    _check_ramp_amount(payout, run, args)
-    from . import payouts
+    if payout.ramp_id is not None:
+        _check_ramp_amount(payout, run, args)
+    else:
+        _check_journey_amount(payout, run, args)
     payout_pk, tx_hash = payout.pk, event.tx_hash
     effects = []
     if revived:
-        # The owner was told this run did not happen: tell them it left.
+        # The owner was told this run did not happen (or failed, and its order
+        # was replaced): tell them it left.
         effects.append(lambda: notifications.safe(notifications.payout_resumed, run))
     # Pago Móvil: ramps proves this funding and pays the beneficiary.
+    # CLABE / Pix: payment_accounts proves it, its journey pays.
     effects.append(lambda: payouts.after_payout_sent(payout_pk, tx_hash))
     return effects
 
@@ -1071,13 +1114,23 @@ def _check_ramp_amount(payout, run, args) -> None:
         expected, sent = None, None
     if expected is not None and sent == expected:
         return
+    _alert_after_commit(f'Cuenta inteligente: PayoutSent usdtOut {args.get("usdtOut")} no coincide con el '
+                        f'depósito del envío ({expected}) (run {run.pk}, payout {payout.pk})',
+                        f'smart_payout_amount_{run.pk}')
+
+
+def _check_journey_amount(payout, run, args) -> None:
+    """As _check_ramp_amount, against the USDT the run's bridge was quoted
+    for (more is proven and recorded; less is never proven)."""
     try:
-        from config.ops_alerts import send_ops_alert
-        send_ops_alert(f'Cuenta inteligente: PayoutSent usdtOut {args.get("usdtOut")} no coincide con el '
-                       f'depósito del envío ({expected}) (run {run.pk}, payout {payout.pk})',
-                       dedupe_key=f'smart_payout_amount_{run.pk}', dedupe_seconds=86400)
-    except Exception:  # noqa: BLE001
-        logger.exception('ops alert failed')
+        expected, sent = int(payout.journey.bridge.quote.amount_units), int(args['usdtOut'])
+    except (AttributeError, TypeError, ValueError, KeyError):
+        expected, sent = None, None
+    if expected is not None and sent == expected:
+        return
+    _alert_after_commit(f'Cuenta inteligente: PayoutSent usdtOut {args.get("usdtOut")} no coincide con el '
+                        f'puente del envío ({expected}) (run {run.pk}, payout {payout.pk})',
+                        f'smart_payout_amount_{run.pk}')
 
 
 def _beneficiary_named(account, event):
@@ -1116,6 +1169,11 @@ def _beneficiary_named(account, event):
     user, plan = account.owner_user, account.plan
     return [lambda: notifications.beneficiary_named(row),
             lambda: funnel.record(user, 'beneficiary_set', plan=plan)]
+
+
+def _alert_after_commit(message: str, key: str) -> None:
+    """Telegram is HTTP: never while the event's row locks are held."""
+    transaction.on_commit(lambda: _ops_alert(message, key))
 
 
 def _ops_alert(message: str, key: str) -> None:

@@ -57,6 +57,22 @@ def _link_mint(j):
         j.wallet_conversion = rows[0]
 
 
+# A payment rule's journey: the money left the account contract and a
+# refund returns there, never to the wallet.
+CONTRACT_MESSAGES = {
+    'refunded': ('Se devolvieron fondos a tu Cuenta inteligente. '
+                 'Consulta el importe y la moneda recibidos.'),
+    'refunding': 'No se pudo hacer tu pago automático. Estamos devolviendo tus dólares a tu Cuenta inteligente.',
+    'failed': 'Tu pago automático no se completó. Consulta el estado en tu Cuenta inteligente.',
+    'needs_review': 'Estamos revisando el pago automático de tu Cuenta inteligente. No lo repitas.',
+    'completed': 'El pago automático de tu Cuenta inteligente se completó.',
+}
+
+
+def contract_funded(j):
+    return bool(j.direction == 'to_bank' and j.bridge_id and j.bridge.funding_mode == 'contract')
+
+
 def display_stage(j):
     if j.direction == 'to_bank' and j.bridge_id and j.bridge.status == 'refunded':
         return 'refunded'
@@ -82,6 +98,8 @@ def display_stage(j):
 
 def progress_message(j, stage):
     incoming = j.direction == 'to_wallet'
+    if contract_funded(j) and stage in CONTRACT_MESSAGES:
+        return CONTRACT_MESSAGES[stage]
     currency = j.local_account.asset
     currency = {'MXN': 'pesos mexicanos', 'COP': 'pesos colombianos',
         'ARS': 'pesos argentinos', 'BRL': 'reales', 'PEN': 'soles',
@@ -173,6 +191,10 @@ def sync_activity(journey_id, *, notify=True):
     owner = j.confio_account
     business = owner.business if owner.account_type == 'business' else None
     stage = display_stage(j)
+    if contract_funded(j):
+        from .infinia_journeys import _requotable
+        if _requotable(j):
+            stage = 'converting'    # the worker requotes it: not a review
     amount = j.money_flow.source_amount if not incoming else Decimal(0)
     token = 'CUSD_BSC'
     if incoming and j.wallet_conversion_id and j.wallet_conversion.status == 'COMPLETED':
@@ -181,6 +203,12 @@ def sync_activity(journey_id, *, notify=True):
         token = 'CUSD_PLUS' if conversion.conversion_type == 'to_savings' else 'CUSD_BSC'
     status = 'CONFIRMED' if stage == 'completed' else 'FAILED' if stage in ['failed', 'refunded'] else 'PENDING'
     label = 'Ingreso por cuenta local' if incoming else 'Envío reembolsado' if stage == 'refunded' else 'Envío a banco o billetera'
+    sender_name = owner.display_name or ''
+    by_contract = contract_funded(j)
+    if by_contract:
+        sender_name = 'Cuenta inteligente'
+        label = ('Pago devuelto a tu Cuenta inteligente' if stage == 'refunded'
+                 else 'Pago automático de tu Cuenta inteligente')
     destination = j.destination_snapshot.get('display_label', '')
     from .incoming_details import sender_details, incoming_credit
     sender = sender_details(incoming_credit(j)) or {}
@@ -192,7 +220,7 @@ def sync_activity(journey_id, *, notify=True):
         'sender_user': None if incoming or business else owner.user,
         'sender_business': None if incoming else business,
         'sender_type': 'external' if incoming else 'business' if business else 'user',
-        'sender_display_name': (sender.get('name') or 'Cuenta local') if incoming else owner.display_name or '',
+        'sender_display_name': (sender.get('name') or 'Cuenta local') if incoming else sender_name,
         'sender_address': '' if incoming else j.wallet_address,
         'counterparty_user': owner.user if incoming and not business else None,
         'counterparty_business': business if incoming else None,
@@ -254,6 +282,12 @@ def sync_activity(journey_id, *, notify=True):
     previous_stage = notice.data.get('stage') if notice else None
     push_stages = {'completed', 'failed', 'needs_review', 'refunded',
                    'awaiting_wallet_authorization', 'awaiting_wallet_conversion'}
+    if by_contract:
+        # The account's own notices tell delivery, and a closed payment that
+        # left after all: only what they do not tell is pushed from here.
+        from .contract_funding import RATE_OUTSIDE
+        told = ((bridge.binding or {}).get('contract_funding') or {}).get('late') or j.failure_code == RATE_OUTSIDE
+        push_stages = {'refunded'} if told else {'refunded', 'needs_review'}
     if notice:
         notice.title, notice.message = label, progress_message(j, stage)
         notice.data = dict(notice.data, event_key=key, stage=stage, direction=j.direction)

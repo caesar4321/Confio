@@ -43,7 +43,8 @@ Adapter contract (module attributes/functions):
     the wallet pays this target, e.g. an exact-output bridge's input
   settle(ramp) -> Settlement   (optional: funded -> settled; else immediate)
   payout_terms(ramp, inflight) -> dict | None (amount + body; None = wait;
-    {'review': reason} = not payable as priced)
+    {'review': reason} = not payable as priced; {'wait': reason} = not
+    payable at this moment: asked again for RATE_WAIT, then that review)
   dispatch(ramp, claim) -> Outcome
   poll(ramp) -> Outcome
 """
@@ -104,9 +105,10 @@ MAX_AMOUNT_TAG = 9999
 # A send may be funded by a contract instead of the sender of record's wallet
 # (the Cuenta inteligente payout: CusdVault.redeemWithFee sends the USDT to
 # the deposit address claimed for the order). That address is NOT the
-# order's own: Relay may hand the same deposit route to every order of one
-# source address, and the amount is untagged, so an earlier order of the
-# same account can look identical on chain. A contract-funded order is
+# order's own by itself: it is asked as a one-time address and a used one is
+# refused (start_funding), but orders made before that may share a route,
+# and the amount is untagged, so an earlier order of the same account can
+# look identical on chain. A contract-funded order is
 # therefore proven ONLY through the executeRule hash the payout path reports
 # (report_funding), by the Transfer in that transaction's receipt; it is never
 # matched by a log scan, nor by the late-funding watch's scan.
@@ -117,6 +119,30 @@ CONTRACT_FUNDING = True
 # Closed without any funding having been possible to see: the late-funding
 # watch keeps these (wallet sends by scan, contract-funded by reported hash).
 CLOSED_UNFUNDED = ('expired_unfunded', 'cancelled_by_user', 'payout_not_sent')
+# executeRule pays the rule as stored when it is mined: a contract-funded
+# order is paid only while that is what the owner signed for it (amount,
+# payoutRef, authorization: smart_account.payouts.ramp_funding_problem).
+TERMS_CHANGED = 'contract_funding_terms_changed'
+TERMS_CHANGED_DETAIL = f'needs_review:{TERMS_CHANGED}'
+# The owner may not pay now, and no rate inside the rule's signed floor.
+NOT_PAYABLE = 'contract_funding_not_payable'
+RATE_OUTSIDE = 'fx_quote_outside_authorization'
+RATE_WAIT = timedelta(hours=1)
+# An Outcome reason: this request never left (no token).
+NOT_SENT = 'not_sent'
+# An ambiguous answer that took nothing: the provider refused the request for
+# rate (429). The key's replay window does not run on it.
+RATE_LIMITED = 'rate_limited'
+# Replays refused only for rate end this long after the key's first dispatch.
+RATE_LIMITED_REPLAY_MAX = timedelta(hours=2)
+# The executeRule event of a proven hash is not in the mirror yet: no
+# evidence either way, so it waits and parks nothing.
+EVENT_NOT_SEEN = 'event_not_found'
+LATE_FUNDING = 'needs_review:late_funding'
+PARKED_DETAILS = (TERMS_CHANGED_DETAIL, f'needs_review:{NOT_PAYABLE}', f'needs_review:{RATE_OUTSIDE}')
+# A contract-funded settlement in review that may still end by itself.
+SETTLEMENT_FOLLOWED = ('needs_review:settlement:relay_settlement_delayed',
+                       'needs_review:settlement:relay_refund_failed_')
 
 
 class VeSendError(VePagoMovilError):
@@ -250,7 +276,10 @@ def check_limits(user, gross_usd: Decimal, provider: str = 'pagoasap') -> None:
     # Every send not definitely unfunded counts, by when money can move.
     recent = list(_sends().filter(country_code=country).filter(
         Q(created_at__gte=since) | Q(status__in=OPEN_STATUSES) | Q(completed_at__gte=since),
-    ).exclude(status='FAILED'))
+    ).exclude(status='FAILED')
+        # A parked automatic payment waits for ops: its day's, not a hold on
+        # the owner's own sends for ever.
+        .exclude(status_detail__in=PARKED_DETAILS, created_at__lt=since))
     user_total = sum((counted_usd(r) for r in recent if r.actor_user_id == user.pk), Decimal('0'))
     if user_cap is not None and user_total + gross_usd > user_cap:
         raise VeSendLimitError('Alcanzaste tu límite diario de envíos. Intenta mañana.', passing=True)
@@ -275,10 +304,13 @@ def _phase(ramp: RampTransaction) -> str:
     return _section(ramp).get('phase') or 'preparing'
 
 
-def _update(ramp_pk: int, *, require=None, status=None, detail=None, row=None, **values) -> RampTransaction | None:
+def _update(ramp_pk: int, *, require=None, status=None, detail=None, row=None, quiet=False,
+            **values) -> RampTransaction | None:
     """Merge into metadata.ve_send under the row lock, never from a stale
     copy. `require(current) -> bool` gates the write; None when it refuses.
-    `row` sets model fields in the same write."""
+    `row` sets model fields in the same write. `quiet`: the status changes
+    without the generic ramp push (ramps.signals announces a transition it
+    sees on save); the ledger still follows."""
     with transaction.atomic():
         current = RampTransaction.objects.select_for_update().get(pk=ramp_pk)
         if require is not None and not require(current):
@@ -290,6 +322,8 @@ def _update(ramp_pk: int, *, require=None, status=None, detail=None, row=None, *
         current.metadata = metadata
         fields = ['metadata', 'updated_at']
         if status is not None:
+            if quiet:
+                RampTransaction.objects.filter(pk=current.pk).update(status=status)
             current.status = status
             fields.append('status')
         if detail is not None:
@@ -350,13 +384,14 @@ def _watched_amounts(sender: str) -> set[int]:
 @transaction.atomic
 def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: dict, gross_wei: int | None,
             deposit_wei: int, created_block: int, estimate: dict,
-            funding_sender: str | None = None) -> RampTransaction:
+            funding_sender: str | None = None, funding_terms: dict | None = None) -> RampTransaction:
     """Persist the send before any provider call, under the reservation lock
     the limits need and the Account lock the wallet re-enrollment gate uses.
 
     funding_sender: the contract whose USDT Transfer funds the order (see
     CONTRACT_FUNDING), when it is not the wallet of record. Its amount is
-    exact (no tag) and its deposit address is the order's own."""
+    exact (no tag) and its deposit address is the order's own.
+    funding_terms: the rule as signed, for such an order (TERMS_CHANGED)."""
     from users.models import Account
 
     if funding_sender is not None:
@@ -438,7 +473,15 @@ def reserve(*, provider: str, user, account, gross_usd: Decimal, beneficiary: di
     }}
     if funding_sender:
         ramp.metadata[SECTION]['funding_sender'] = funding_sender
-    ramp.save()
+        if funding_terms:
+            ramp.metadata[SECTION]['funding_terms'] = dict(funding_terms)
+    if funding_sender and _fresh_order(ramp):
+        # A slot's fresh order is not a new withdrawal to announce: no
+        # "created" push, the same ledger row.
+        RampTransaction.objects.bulk_create([ramp])
+        ramp.save(update_fields=['updated_at'])
+    else:
+        ramp.save()
     return ramp
 
 
@@ -489,24 +532,77 @@ def prepare(ramp: RampTransaction) -> RampTransaction:
     return updated or RampTransaction.objects.get(pk=ramp.pk)
 
 
+def hide_replaced(ramp_pk: int) -> None:
+    """An attempt closed unfunded that a fresh order replaced: the slot
+    keeps one row in history. Shown again if money lands on it after all
+    (_mark_funded); a row support retracted is never touched."""
+    from users.models_unified import UnifiedTransactionTable
+    with transaction.atomic():
+        if UnifiedTransactionTable.objects.filter(
+                ramp_transaction_id=ramp_pk, status='FAILED', deleted_at__isnull=True).update(
+                    deleted_at=timezone.now()):
+            _update(ramp_pk, history_replaced_at=_now_iso())
+
+
+def _show_replaced(ramp: RampTransaction) -> None:
+    if _section(ramp).get('history_replaced_at'):
+        from users.models_unified import UnifiedTransactionTable
+        UnifiedTransactionTable.objects.filter(ramp_transaction_id=ramp.pk).update(deleted_at=None)
+
+
+def _fresh_order(ramp: RampTransaction) -> bool:
+    """A slot's second or later order: not announced as a withdrawal."""
+    return int((_section(ramp).get('funding_terms') or {}).get('attempt') or 1) > 1
+
+
 def fail_unfunded(ramp: RampTransaction, detail: str) -> RampTransaction:
-    """Close an order no funding can have been sent for (never claimed)."""
+    """Close an order no funding can have been sent for (never claimed). A
+    contract-funded one closes quietly: its run tells the owner, and may
+    still pay with another order."""
     updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING'
                       and _phase(c) in ('preparing', 'awaiting_funding'),
-                      status='FAILED', detail=detail)
+                      status='FAILED', detail=detail, quiet=_contract_funded(ramp))
     return updated or RampTransaction.objects.get(pk=ramp.pk)
 
 
-def close_unsent(ramp: RampTransaction) -> RampTransaction:
+def _may_land(ramp: RampTransaction) -> bool:
+    """A relayer transaction of this contract-funded order's slot may land."""
+    if not _contract_funded(ramp):
+        return False
+    from smart_account.payouts import ramp_may_land
+    return ramp_may_land(ramp)
+
+
+def lock_fundable(ramp_pk: int, deposit: str, deposit_wei) -> RampTransaction | None:
+    """The sender's half of send-or-close (smart_account.payouts.lock_sendable):
+    inside the transaction that records the signed executeRule, so a closer
+    waiting on this lock then sees that row and refuses."""
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError('lock_fundable() runs inside the transaction that records the send')
+    ramp = RampTransaction.objects.select_for_update().get(pk=ramp_pk)
+    section = _section(ramp)
+    deadline = (section.get('bridge') or {}).get('deadline')
+    open_ = (ramp.status == 'PENDING' and _contract_funded(ramp) and _phase(ramp) == 'funding_reported'
+             and not section.get('funding_tx_hashes')
+             and str(section.get('deposit_address') or '').lower() == deposit.lower()
+             and str(section.get('deposit_wei')) == str(deposit_wei)
+             and (not deadline or int(deadline) >= int(timezone.now().timestamp())))
+    return ramp if open_ else None
+
+
+def close_unsent(ramp: RampTransaction, *, quiet: bool = False) -> RampTransaction:
     """A contract-funded order whose payout run ended without broadcasting
     the executeRule that would fund it: closed now instead of lingering to
-    UNFUNDED_EXPIRY. Never one with a reported hash. Should that call land
+    UNFUNDED_EXPIRY. Never one with a reported hash, nor while a relayer
+    transaction of its slot may land (asked under the row's lock:
+    lock_fundable). `quiet`: closed to make room for the slot's fresh order.
+    Should that call land
     after all, its reported hash still proves it, into ops review
     (report_funding accepts it on a closed order; sync's late watch)."""
     updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _contract_funded(c)
                       and _phase(c) in ('preparing', 'awaiting_funding', 'funding_reported')
-                      and not _section(c).get('funding_tx_hashes'),
-                      status='FAILED', detail='payout_not_sent')
+                      and not _section(c).get('funding_tx_hashes') and not _may_land(c),
+                      status='FAILED', detail='payout_not_sent', quiet=quiet)
     return updated or RampTransaction.objects.get(pk=ramp.pk)
 
 
@@ -543,10 +639,18 @@ def _refuse_owner_on_contract_funded(ramp: RampTransaction, by_payout: bool) -> 
         raise VeSendError(CONTRACT_FUNDED_REFUSAL)
 
 
+def _deposit_used(ramp_pk: int, deposit: str) -> bool:
+    from payment_accounts.models import PaymentBridgeTransfer
+    return (_sends().filter(**{f'metadata__{SECTION}__deposit_address': deposit}).exclude(pk=ramp_pk).exists()
+            or PaymentBridgeTransfer.objects.filter(deposit_address__iexact=deposit).exists())
+
+
 def start_funding(ramp: RampTransaction, *, by_payout: bool = False) -> RampTransaction:
     """The single right to fund this order: from here it can never be funded
     again, nor cancelled while a broadcast may still land."""
-    _refuse_owner_on_contract_funded(RampTransaction.objects.get(pk=ramp.pk), by_payout)
+    current = RampTransaction.objects.get(pk=ramp.pk)
+    _refuse_owner_on_contract_funded(current, by_payout)
+    one_time = _contract_funded(current)
     values, row = {}, None
     if getattr(adapter(ramp), 'TARGET_AT_CLAIM', False):
         if not can_fund(RampTransaction.objects.get(pk=ramp.pk)):
@@ -570,8 +674,19 @@ def start_funding(ramp: RampTransaction, *, by_payout: bool = False) -> RampTran
             # History and the ledger record what leaves the wallet.
             usdt = (Decimal(int(priced)) / Decimal(10 ** 18)).quantize(MICRO, rounding=ROUND_DOWN)
             row = {'crypto_amount_estimated': usdt, 'final_amount': usdt}
-    updated = _update(ramp.pk, require=can_fund, detail='confirming_funding', row=row,
-                      phase='funding_reported', funding_started_at=_now_iso(), **values)
+    reused, updated = False, None
+    with transaction.atomic():
+        deposit = values.get('deposit_address')
+        if one_time and deposit:
+            # A one-time address is this order's alone, ever.
+            _advisory_lock(f've_send:deposit:{deposit}')
+            reused = _deposit_used(ramp.pk, deposit)
+        if not reused:
+            updated = _update(ramp.pk, require=can_fund, detail='confirming_funding', row=row,
+                              phase='funding_reported', funding_started_at=_now_iso(), **values)
+    if reused:
+        _alert(current, 'deposit_address_reused')
+        raise VeSendError('No pudimos preparar el envío. Intenta de nuevo en unos minutos.')
     if updated is None:
         raise VeSendError('Este envío ya se está procesando.')
     return updated
@@ -593,6 +708,8 @@ def report_funding(ramp: RampTransaction, tx_hash: str | None, *, by_payout: boo
     def accepts(c):
         if c.status == 'PENDING' and _phase(c) == 'funding_reported':
             return True
+        if bool(tx_hash) and _contract_funded(c) and c.status == 'PROCESSING' and _phase(c) == 'funding_reported':
+            return True     # reviewed while its call was on the wire (sync)
         # A contract-funded order closed before its funding call was seen:
         # the call's hash is its only proof, so it is still recorded (sync's
         # late watch proves it into review).
@@ -821,13 +938,27 @@ def _find_funding(ramp: RampTransaction, rpc=None):
     return _UNKNOWN if unknown else None
 
 
+def _terms_problem(ramp: RampTransaction, tx_hash, funded_wei) -> str:
+    """Contract-funded: '' only while the executed rule is the signed one."""
+    if not _contract_funded(ramp):
+        return ''
+    try:
+        gross = Decimal(str(_section(ramp).get('gross_usd')))
+        if int(funded_wei) > int(gross * Decimal(10 ** 18)):
+            return 'amount_above_signed'
+    except (InvalidOperation, TypeError, ValueError):
+        return 'amount_unknown'
+    from smart_account.payouts import ramp_funding_problem
+    return ramp_funding_problem(ramp, str(tx_hash or ''), funded_wei)
+
+
 def _mark_funded(ramp: RampTransaction, tx_hash: str, wei: int, *, late: bool = False) -> RampTransaction:
     def allowed(current):
         if late:
             return current.status == 'FAILED' and current.status_detail in CLOSED_UNFUNDED
         return (current.status in ('PENDING', 'PROCESSING')
                 and _phase(current) in ('awaiting_funding', 'funding_reported'))
-    detail = 'needs_review:late_funding' if late else 'funded'
+    detail = LATE_FUNDING if late else 'funded'
     # Late money is ops' to route, never paid out automatically: it lands
     # straight in review, in the same write.
     phase = 'payout_review' if late else 'funded'
@@ -845,10 +976,26 @@ def _mark_funded(ramp: RampTransaction, tx_hash: str, wei: int, *, late: bool = 
         _advisory_lock(f've_send:tx:{tx_hash}')
         if _hash_claimed_elsewhere(ramp, tx_hash):
             return RampTransaction.objects.get(pk=ramp.pk)
+        problem = _terms_problem(RampTransaction.objects.get(pk=ramp.pk), tx_hash, wei)
+        if problem == EVENT_NOT_SEEN:
+            if not late:
+                return RampTransaction.objects.get(pk=ramp.pk)      # proven again next poll
+            problem = ''        # late money is ops' whatever was executed
+        if problem:
+            # Recorded, and parked before any payout: never paid automatically.
+            values['funding_terms_problem'] = problem
+            phase = 'payout_review'
+            if not late:
+                detail = TERMS_CHANGED_DETAIL
         updated = _update(ramp.pk, require=allowed, status='PROCESSING', detail=detail, phase=phase,
-                          funding_tx_hash=tx_hash, funded_wei=str(wei), funded_at=_now_iso(), **values)
+                          quiet=bool(problem), funding_tx_hash=tx_hash, funded_wei=str(wei), funded_at=_now_iso(),
+                          **values)
+        if updated is not None:
+            _show_replaced(updated)
     if updated is None:
         return RampTransaction.objects.get(pk=ramp.pk)
+    if problem:
+        _alert(updated, TERMS_CHANGED_DETAIL)
     if late:
         _alert(updated, detail)
     if excess > 0:
@@ -892,6 +1039,7 @@ def _fresh_attempt(section: dict) -> dict:
         payout_attempt=int(section.get('payout_attempt') or 0) + 1,
         payout_key=None, payout_claim=None, payout_sent_at=None, last_replay_at=None,
         operation_id=None, pending_since=None, dispatch_lease_until=None, payout_ambiguous=False,
+        payout_unanswered=None, payout_in_doubt=None, payout_first_sent_at=None,
     )
 
 
@@ -909,6 +1057,8 @@ def retry_payout(ramp: RampTransaction, *, operator: str, reviewed_key: str, rev
                 or int(section.get('beneficiary_revision') or 0) != int(reviewed_revision)
                 or not _lease_expired(section)):
             raise VeSendError('Este envío cambió o no se puede reintentar. Recarga la página.')
+        if _contract_funded(current) and current.status_detail == LATE_FUNDING:
+            raise VeSendError('Llegó para un pago automático ya cerrado: solo se devuelve a mano.')
         metadata = dict(current.metadata or {})
         # Delivery never proven (e.g. reviewed during settlement): settle again
         # before any payout; otherwise pay from what was credited.
@@ -924,7 +1074,10 @@ def retry_payout(ramp: RampTransaction, *, operator: str, reviewed_key: str, rev
 def update_beneficiary(ramp: RampTransaction, beneficiary: dict, *, operator: str, reviewed_key: str,
                        reviewed_revision: int) -> RampTransaction:
     """Ops: correct the destination after a definite refusal, before retrying;
-    only from the form of the attempt and destination ops reviewed."""
+    only from the form of the attempt and destination ops reviewed. Never a
+    contract-funded payment's: that recipient is what its owner signed."""
+    if _contract_funded(RampTransaction.objects.get(pk=ramp.pk)):
+        raise VeSendError('El destinatario de un pago automático es el que firmó el dueño: no se cambia.')
     def allowed(current):
         section = _section(current)
         return (current.status == 'PROCESSING' and _phase(current) == 'payout_failed'
@@ -972,17 +1125,50 @@ def _inflight(ramp: RampTransaction) -> list[RampTransaction]:
     ).exclude(pk=ramp.pk))
 
 
+def _owner_problem(ramp: RampTransaction) -> str:
+    """Contract-funded: why its owner may not pay now ('' to pay)."""
+    if not _contract_funded(ramp):
+        return ''
+    from smart_account.payouts import ramp_owner_problem
+    return ramp_owner_problem(ramp)
+
+
 def _claim_payout(ramp: RampTransaction) -> dict | None:
     """Under the payout lock: let the adapter price the payout and check the
     provider balance net of payouts in flight, then commit the attempt (key
     and exact body) before anything leaves. None when not payable now."""
+    held = _owner_problem(ramp)     # before any lock: the gate may take the user's row
     with transaction.atomic():
         _advisory_lock(PAYOUT_LOCK)
         current = RampTransaction.objects.select_for_update().get(pk=ramp.pk)
         section = _section(current)
         if current.status != 'PROCESSING' or _phase(current) != 'settled':
             return None
-        terms = adapter(current).payout_terms(current, _inflight(current))
+        problem = _terms_problem(current, section.get('funding_tx_hash'), section.get('funded_wei'))
+        if problem == EVENT_NOT_SEEN:
+            return None
+        if problem:
+            # Also one funded before this was checked, or retried by ops.
+            section['funding_terms_problem'] = problem
+            terms = {'review': TERMS_CHANGED}
+        elif held:
+            section['owner_problem'] = held
+            terms = {'review': NOT_PAYABLE}
+        else:
+            terms = adapter(current).payout_terms(current, _inflight(current))
+        if terms and terms.get('wait'):
+            now, since = timezone.now(), _parse_time(section.get('payout_wait_since'))
+            if since is not None and since <= now - RATE_WAIT:
+                terms = {'review': terms['wait']}
+            else:
+                if since is None or current.status_detail != 'waiting_rate':
+                    metadata = dict(current.metadata or {})
+                    section.update(payout_wait_since=section.get('payout_wait_since') or now.isoformat())
+                    metadata[SECTION] = section
+                    current.metadata = metadata
+                    current.status_detail = 'waiting_rate'
+                    current.save(update_fields=['metadata', 'status_detail', 'updated_at'])
+                return None
         if terms and terms.get('review'):
             # Definitely not sent, and not payable as priced: ops decides.
             metadata = dict(current.metadata or {})
@@ -993,14 +1179,19 @@ def _claim_payout(ramp: RampTransaction) -> dict | None:
             current.save(update_fields=['metadata', 'status_detail', 'updated_at'])
             return {'review': True}
         if not terms:
-            if current.status_detail != 'waiting_balance':
+            if current.status_detail != 'waiting_balance' or section.get('payout_wait_since'):
+                # Not the rate any more: a later refusal waits its own hour.
+                section.update(payout_wait_since=None)
+                current.metadata = dict(current.metadata or {}, **{SECTION: section})
                 current.status_detail = 'waiting_balance'
-                current.save(update_fields=['status_detail', 'updated_at'])
+                current.save(update_fields=['metadata', 'status_detail', 'updated_at'])
             return None
         attempt = int(section.get('payout_attempt') or 0)
         claim = {'key': f'{current.external_id}:payout:{attempt}', **terms}
         metadata = dict(current.metadata or {})
         section.update(phase='paying', payout_key=claim['key'], payout_claim=claim, payout_sent_at=_now_iso(),
+                       payout_wait_since=None, payout_unanswered=True, payout_in_doubt=False,
+                       payout_first_sent_at=_now_iso(),
                        payout_ves=str(terms.get('ves_amount') or ''),
                        dispatch_lease_until=(timezone.now() + DISPATCH_LEASE).isoformat())
         metadata[SECTION] = section
@@ -1033,6 +1224,35 @@ def _set_payout(ramp: RampTransaction, key: str, phase: str, detail: str, *,
     return current
 
 
+def _in_doubt(section: dict) -> bool:
+    """Whether a request of this attempt may have been taken: an answer
+    lost, or a dispatch that recorded none (a worker that died). An attempt
+    from before these fields: as soon as anything was ambiguous."""
+    if 'payout_in_doubt' not in section or section.get('payout_in_doubt') is None:
+        return bool(section.get('payout_ambiguous'))
+    return bool(section.get('payout_in_doubt'))
+
+
+def _replay_closed(section: dict, now, window) -> str:
+    """Why this attempt may not be replayed now ('' while it may). A key
+    only ever refused for rate is replayed for RATE_LIMITED_REPLAY_MAX from
+    its first dispatch, whatever the provider's window; a key whose earlier
+    request may have been taken, for the provider's window from its first
+    dispatch (payout_sent_at is not refreshed by replays): it may close
+    early, never late."""
+    first = _parse_time(section.get('payout_first_sent_at') or section.get('payout_sent_at'))
+    if not _in_doubt(section) and section.get('payout_unanswered') is False:
+        if first is None or first < now - RATE_LIMITED_REPLAY_MAX:
+            return f'needs_review:payout_unknown:{RATE_LIMITED}'
+        return ''
+    if window is None:
+        return ''
+    sent_at = _parse_time(section.get('payout_sent_at'))
+    if sent_at is None or sent_at < now - window:
+        return 'needs_review:payout_unknown:replay_window'
+    return ''
+
+
 def apply_outcome(ramp: RampTransaction, outcome: Outcome, key: str) -> RampTransaction:
     current = RampTransaction.objects.get(pk=ramp.pk)
     section = _section(current)
@@ -1040,7 +1260,18 @@ def apply_outcome(ramp: RampTransaction, outcome: Outcome, key: str) -> RampTran
     if outcome.kind == 'ambiguous':
         # No answer: replayed under the same key by the next poll, inside the
         # window. From now on no refusal of this attempt proves it unpaid.
-        updated = _update(ramp.pk, require=_same_attempt(key), payout_ambiguous=True)
+        if outcome.reason == RATE_LIMITED and not _in_doubt(section):
+            # Every request of this key so far was refused for rate: the
+            # provider holds nothing under it. Its replay window does not
+            # run; the age of the key does (_replay_closed).
+            updated = _update(ramp.pk, require=_same_attempt(key), payout_ambiguous=True,
+                              payout_unanswered=False)
+            closed = _replay_closed(_section(updated or current), timezone.now(), None)
+            if updated is not None and closed:
+                return _set_payout(ramp, key, 'payout_review', closed)
+        else:
+            updated = _update(ramp.pk, require=_same_attempt(key), payout_ambiguous=True,
+                              payout_unanswered=False, payout_in_doubt=True)
         return updated or current
     if outcome.kind == 'paid':
         updated = _update(ramp.pk, require=_same_attempt(key), status='COMPLETED', detail='delivered', phase='paid',
@@ -1065,6 +1296,9 @@ def apply_outcome(ramp: RampTransaction, outcome: Outcome, key: str) -> RampTran
                           dispatch_lease_until=None, operation_id=operation_id,
                           pending_since=section.get('pending_since') or _now_iso())
         return updated or RampTransaction.objects.get(pk=ramp.pk)
+    if outcome.kind == 'retry' and outcome.reason == NOT_SENT and earlier_unknown:
+        # Nothing new left and nothing was refused: replayed under its key.
+        return current
     if outcome.kind in ('failed', 'retry') and earlier_unknown:
         # A refusal now only says THIS request was refused; an earlier
         # dispatch of the attempt may have paid.
@@ -1101,6 +1335,9 @@ def pay_out(ramp: RampTransaction) -> RampTransaction:
     if claim.get('review'):
         current = RampTransaction.objects.get(pk=ramp.pk)
         _alert(current, current.status_detail)
+        if current.status_detail == f'needs_review:{RATE_OUTSIDE}' and _contract_funded(current):
+            from smart_account.payouts import tell_rate_held
+            tell_rate_held(current)
         return RampTransaction.objects.get(pk=ramp.pk)
     return _dispatch(ramp, claim)
 
@@ -1113,23 +1350,28 @@ def _resume_payout(ramp: RampTransaction) -> RampTransaction:
     if not _lease_expired(section):
         return ramp  # a dispatch of this attempt may still be in flight
     window = adapter(ramp).replay_window()
-    sent_at = _parse_time(section.get('payout_sent_at'))
-    if sent_at is None or sent_at < timezone.now() - window:
-        return _set_payout(ramp, key, 'payout_review', 'needs_review:payout_unknown:replay_window',
-                           lease_free=True)
+    closed = _replay_closed(section, timezone.now(), window)
+    if closed:
+        return _set_payout(ramp, key, 'payout_review', closed, lease_free=True)
     claim = section.get('payout_claim')
     if not key or not isinstance(claim, dict) or claim.get('key') != key:
         return _set_payout(ramp, key, 'payout_review', 'needs_review:payout_unknown:no_claim', lease_free=True)
+    if _owner_problem(ramp):
+        # A replay may be the first that arrives: ops ask the provider instead.
+        return _set_payout(ramp, key, 'payout_review', 'needs_review:payout_unknown:owner_not_payable',
+                           lease_free=True)
 
     def replayable(current):
         now_section = _section(current)
-        sent = _parse_time(now_section.get('payout_sent_at'))
         return (_same_attempt(key, ('paying',))(current) and _lease_expired(now_section)
-                and sent is not None and sent >= timezone.now() - window)
+                and not _replay_closed(now_section, timezone.now(), window))
     # Re-checked and leased under the row lock right before it leaves. A
     # replay exists only because an earlier answer was never recorded
     # (timeout or a worker that died): that earlier dispatch may have paid.
+    # The previous dispatch recorded no answer: it may have been taken.
+    doubt = _in_doubt(section) or section.get('payout_unanswered') is not False
     if _update(ramp.pk, require=replayable, last_replay_at=_now_iso(), payout_ambiguous=True,
+               payout_in_doubt=doubt, payout_unanswered=True,
                dispatch_lease_until=(timezone.now() + DISPATCH_LEASE).isoformat()) is None:
         return RampTransaction.objects.get(pk=ramp.pk)
     return _dispatch(ramp, claim)
@@ -1151,6 +1393,13 @@ def _poll(ramp: RampTransaction) -> RampTransaction:
     return ramp
 
 
+def _settlement_followed(ramp: RampTransaction) -> bool:
+    """A delay or a stuck refund is watched to its end: a key or a service
+    that comes back, or a refund made by hand, resolves it."""
+    return (ramp.status == 'PROCESSING' and _phase(ramp) == 'payout_review' and _contract_funded(ramp)
+            and (ramp.status_detail or '').startswith(SETTLEMENT_FOLLOWED))
+
+
 def _settle(ramp: RampTransaction) -> RampTransaction:
     """funded -> settled once the provider holds the money: the adapter's
     settlement step (e.g. a bridge delivery proven on the destination chain),
@@ -1166,7 +1415,10 @@ def _settle(ramp: RampTransaction) -> RampTransaction:
         except Exception:  # noqa: BLE001 — try again next poll
             logger.warning('VE send settlement check failed for %s', ramp.pk, exc_info=True)
             return ramp
-    funded = lambda c: c.status == 'PROCESSING' and _phase(c) == 'funded'  # noqa: E731
+    funded = lambda c: ((c.status == 'PROCESSING' and _phase(c) == 'funded')  # noqa: E731
+                        or _settlement_followed(c))
+    if _settlement_followed(ramp) and result.kind in ('pending', 'review'):
+        return ramp     # still with ops; only an outcome moves it
     if result.kind == 'pending':
         updated = _update(ramp.pk, require=funded, detail='bridging')
         return updated or RampTransaction.objects.get(pk=ramp.pk)
@@ -1218,13 +1470,14 @@ def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
         deadline = (section.get('bridge') or {}).get('deadline')
         if (found is None and _contract_funded(ramp) and not section.get('funding_tx_hashes')
                 and str(deadline or '').isdigit()
-                and int(deadline) < int((now - CLAIMED_FUNDING_QUIET).timestamp())):
+                and int(deadline) < int((now - CLAIMED_FUNDING_QUIET).timestamp())
+                and not _may_land(ramp)):
             # The payout's quote is long dead and no executeRule hash was
             # reported: that run will not fund this order. Closed now; a
             # late reported hash still proves it into review.
             updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'funding_reported'
-                              and not _section(c).get('funding_tx_hashes'),
-                              status='FAILED', detail='expired_unfunded')
+                              and not _section(c).get('funding_tx_hashes') and not _may_land(c),
+                              status='FAILED', detail='expired_unfunded', quiet=True)
             return updated or RampTransaction.objects.get(pk=ramp.pk)
         if found is _UNKNOWN and started < now - UNVERIFIABLE_AFTER:
             updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'funding_reported',
@@ -1233,12 +1486,13 @@ def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
                 _alert(updated, updated.status_detail)
                 return updated
         if found is None and started < now - UNFUNDED_EXPIRY:
-            if not section.get('funding_tx_hashes'):
+            if not section.get('funding_tx_hashes') and not _may_land(ramp):
                 # Claimed, never broadcast (or never mined): close it; the
                 # late-funding watch keeps looking.
                 updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING'
-                                  and _phase(c) == 'funding_reported' and not _section(c).get('funding_tx_hashes'),
-                                  status='FAILED', detail='expired_unfunded')
+                                  and _phase(c) == 'funding_reported' and not _section(c).get('funding_tx_hashes')
+                                  and not _may_land(c),
+                                  status='FAILED', detail='expired_unfunded', quiet=_contract_funded(ramp))
                 return updated or RampTransaction.objects.get(pk=ramp.pk)
             updated = _update(ramp.pk, require=lambda c: c.status == 'PENDING' and _phase(c) == 'funding_reported',
                               status='PROCESSING', detail='needs_review:funding_not_found')
@@ -1261,7 +1515,7 @@ def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
         if found not in (None, _UNKNOWN):
             return _mark_funded(ramp, *found)
         return ramp
-    if phase == 'funded':
+    if phase == 'funded' or _settlement_followed(ramp):
         return _settle(ramp)
     if phase == 'settled':
         return pay_out(ramp)
@@ -1288,7 +1542,7 @@ def due_for_sync(ramp: RampTransaction) -> bool:
     """Open sends every poll; closed-unfunded ones (a chain scan) every 10 min;
     one waiting on ops costs nothing."""
     if ramp.status == 'PROCESSING' and _phase(ramp) in ('payout_failed', 'payout_review'):
-        return False
+        return _settlement_followed(ramp)
     if ramp.status == 'FAILED':
         return ramp.updated_at < timezone.now() - timedelta(minutes=10)
     return True

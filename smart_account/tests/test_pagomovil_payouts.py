@@ -17,10 +17,11 @@ from smart_account.models import (
     SmartAccountStandingAuthorization,
 )
 
-from .base import CUSD, WAD, SmartAccountTestCase
+from .base import CUSD, INFINIA_SWITCHES, WAD, SmartAccountTestCase, priced_pagomovil
 
 VE_ON = dict(SMART_ACCOUNT_PAYOUT_RAILS='ve_pagomovil', SMART_ACCOUNT_PAYOUT_VERIFIED_ADAPTERS='pagoasap',
-             VE_PAGOMOVIL_SEND_ENABLED=True, PAGOASAP_DEPOSIT_ADDRESS_POLYGON='0x' + '9a' * 20)
+             VE_PAGOMOVIL_SEND_ENABLED=True, PAGOASAP_DEPOSIT_ADDRESS_POLYGON='0x' + '9a' * 20,
+             RELAY_API_KEY='fake-relay-key')
 DEPOSIT = '0x' + 'de' * 20
 TX = '0x' + 'ab' * 32
 EXACT = 49_550_000_000_000_000_000          # previewRedeem(50).net at 0.9%
@@ -43,6 +44,7 @@ class PagoMovilBase(SmartAccountTestCase):
             mock.patch('payment_accounts.services.require_outgoing_face', return_value='face-key-1'),
             mock.patch('security.face_step_up.step_up_applies', return_value=True),
             mock.patch('smart_account.payouts.reference_ves_rate', return_value=Decimal('40')),
+            priced_pagomovil(),
         ]
         self.mocks = [p.start() for p in patches]
         self.face_mock = self.mocks[1]
@@ -77,7 +79,8 @@ class OfferAndDestinationTests(PagoMovilBase):
         # Infinia's flag never turns on Pago ASAP, nor 'infinia' in the new list Infinia.
         with override_settings(SMART_ACCOUNT_PAYOUT_VERIFIED_ADAPTERS='', SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True):
             self.assertEqual(offer.payout_rails(), [])
-        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='co_breb', SMART_ACCOUNT_PAYOUT_VERIFIED_ADAPTERS='infinia'):
+        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='mx_clabe', SMART_ACCOUNT_PAYOUT_VERIFIED_ADAPTERS='infinia',
+                               **INFINIA_SWITCHES):     # a rail with an adapter, so only the flag keeps it off
             self.assertEqual(offer.payout_rails(), [])
         with override_settings(SMART_ACCOUNT_PAYOUT_RAILS=''):
             self.assertEqual(offer.payout_rails(), [])
@@ -86,15 +89,16 @@ class OfferAndDestinationTests(PagoMovilBase):
             self.assertEqual(offer.payout_rails(), [])
 
     def test_qr_still_excluded(self):
-        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='co_qr,br_qr,ve_pagomovil,co_breb,ar_qr',
-                               SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True):
-            self.assertEqual(offer.payout_rails(), ['ve_pagomovil', 'co_breb'])
+        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='co_qr,br_qr,ve_pagomovil,co_breb,ar_qr,mx_clabe',
+                               SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True, **INFINIA_SWITCHES):
+            # co_breb has no adapter: no flag offers it.
+            self.assertEqual(offer.payout_rails(), ['ve_pagomovil', 'mx_clabe'])
 
     def test_destination_is_saved_validated_encrypted_and_listed(self):
         result = self.save()
         self.assertTrue(result.success)
-        self.assertEqual((result.payout_method.rail, result.payout_method.holder_name),
-                         ('ve_pagomovil', 'Ana Pérez'))
+        self.assertEqual((result.payout_method.rail, result.payout_method.holder_name, result.payout_method.label),
+                         ('ve_pagomovil', '', 'Pago Móvil · Banesco · 4567 · C.I. …5678 (escribiste: Ana Pérez)'))
         row = SmartAccountPagoMovilDestination.objects.get()
         self.assertEqual((row.phone, row.bank_code, row.id_number), ('584141234567', '0134', 'V12345678'))
         self.assertEqual(row.label, 'Pago Móvil · Banesco · 4567')
@@ -175,6 +179,23 @@ class PrepareTests(PagoMovilBase):
         self.assertEqual(raised.exception.code, 'payout_method_not_found')
 
 
+def per_order(target):
+    """What Relay does for a one-time route: an address per order (the first
+    is DEPOSIT) and an output that follows the amount deposited."""
+    given = []
+
+    def answer(ramp):
+        value = dict(target.return_value)
+        if given:
+            value['deposit_address'] = f'0x{0xde000 + len(given):040x}'
+        given.append(ramp.pk)
+        deposit = int(ramp.metadata['ve_send']['deposit_wei'])
+        # Unless a test quotes its own.
+        value['binding'] = dict({'amount_out': str(deposit * 997 // 1000 // 10 ** 12)}, **value['binding'])
+        return value
+    target.side_effect = answer
+
+
 def _reserve_without_sender(real):
     """The current ramps reserve has no funding_sender: record it and drop it."""
     seen = {}
@@ -205,12 +226,15 @@ class RunBase(PagoMovilBase):
         self.target = mock.MagicMock(return_value={
             'deposit_address': DEPOSIT, 'binding': {'provider': 'relay', 'request_id': 'r1', 'response': {},
                                                     'deadline': int(timezone.now().timestamp()) + 900}})
+        per_order(self.target)
         self.relay = mock.MagicMock(return_value=(SimpleNamespace(signed_tx_hash=TX), True))
         patches = [
             mock.patch('ramps.ve_send.reserve', side_effect=reserve),
             mock.patch.object(pagoasap_send, 'SHARED_DEPOSIT_TARGET', False),
             mock.patch('ramps.pagoasap_send.quote', self.quote),
             mock.patch('ramps.pagoasap_send.funding_target', self.target),
+            # Pago ASAP's preview (test_money_path_audit runs the real check).
+            mock.patch('ramps.pagoasap_send.pays_at_floor', return_value=True),
             mock.patch('ramps.ve_send.current_block', return_value=100),
             mock.patch('cusd_plus.cusd_vault.preview_redeem_wei',
                        return_value=SimpleNamespace(net_wei=EXACT)),
@@ -290,7 +314,9 @@ class RunTests(RunBase):
         run = SmartAccountRuleRun.objects.create(rule=self.rule, scheduled_for=self.slot)
         with mock.patch('smart_account.notifications._send') as sent:
             notifications.payout_delivered(run, '1.960,00', 'Bs.')
-        self.assertIn('Enviamos Bs. 1.960,00 a Ana Pérez', sent.call_args[0][2])
+        # The name was typed: in the label, marked, never as the holder.
+        self.assertEqual(sent.call_args[0][2],
+                         f'Enviamos Bs. 1.960,00 a {self.dest.label} (escribiste: Ana Pérez).')
 
     def assert_skipped(self, code):
         run = self.last_run()
@@ -298,16 +324,29 @@ class RunTests(RunBase):
         self.told.assert_called_once()
         self.relay.assert_not_called()
 
+    def assert_retried(self, code):
+        """Today's cost or rate: the slot is asked again inside its 24 hours."""
+        run = self.last_run()
+        self.assertEqual((run.status, run.error), ('failed', code))
+        self.relay.assert_not_called()
+
+    def assert_waiting(self, code):
+        """Asked again inside the slot, untold (money-path audit 11)."""
+        run = self.last_run()
+        self.assertEqual((run.status, run.error), ('pending', code))
+        self.told.assert_not_called()
+        self.relay.assert_not_called()
+
     def test_quote_outside_the_rules_limits_skips_without_an_order(self):
         self.quote.return_value = quote(ves='1880.00')          # 47 delivered of 49.55: ~515 bps
         self.run_rule()
-        self.assert_skipped('bridge_cost_above_limit')
+        self.assert_retried('bridge_cost_above_limit')
         self.assertFalse(self.ramps().exists())
         SmartAccountRuleRun.objects.all().delete()
         SmartAccountRule.objects.filter(pk=self.rule.pk).update(scheduled_for=self.slot)
         self.quote.return_value = quote(rate='30', ves='1470.00')  # 25% under the reference 40
         self.run_rule()
-        self.assert_skipped('fx_rate_below_limit')
+        self.assert_retried('fx_rate_below_limit')
         self.assertFalse(self.ramps().exists())
 
     @override_settings(VE_PAGOMOVIL_SEND_MAX_USD='10')
@@ -321,7 +360,7 @@ class RunTests(RunBase):
     def test_a_daily_cap_in_the_pre_check_retries_the_slot(self):
         self.run_rule()
         run = self.last_run()
-        self.assertEqual((run.status, run.error), ('failed', 'limit_exceeded'))
+        self.assertEqual((run.status, run.error), ('pending', 'limit_exceeded'))    # a wait
         self.rule.refresh_from_db()
         self.assertEqual(self.rule.scheduled_for, self.slot)   # not given up
         self.assertFalse(self.ramps().exists())
@@ -329,7 +368,7 @@ class RunTests(RunBase):
     def test_a_limit_under_the_reservation_lock_is_decided_like_the_pre_check(self):
         from ramps import ve_send
         real = ve_send.check_limits
-        for passing, expected in ((False, ('skipped', 'limit_exceeded')), (True, ('failed', 'limit_exceeded'))):
+        for passing, expected in ((False, ('skipped', 'limit_exceeded')), (True, ('pending', 'limit_exceeded'))):
             SmartAccountRuleRun.objects.all().delete()
             SmartAccountRule.objects.filter(pk=self.rule.pk).update(scheduled_for=self.slot)
             calls = []
@@ -346,23 +385,23 @@ class RunTests(RunBase):
             self.assertEqual((run.status, run.error), expected, passing)
             self.assertFalse(self.ramps().exists())
 
-    def test_provider_down_skips(self):
+    def test_provider_down_waits(self):
         from ramps.pagoasap_client import PagoAsapError
         self.quote.side_effect = PagoAsapError('boom', status=503)
         self.run_rule()
-        self.assert_skipped('provider_unavailable')
+        self.assert_waiting('provider_unavailable')
         self.assertFalse(self.ramps().exists())
 
     @override_settings(VE_PAGOMOVIL_SEND_ENABLED=False)
-    def test_ve_sends_switched_off_skips(self):
+    def test_ve_sends_switched_off_waits(self):
         self.run_rule()
-        self.assert_skipped('provider_unavailable')
+        self.assert_waiting('payouts_disabled')
 
     def test_bridge_target_failure_closes_the_order(self):
         from ramps.ve_pagomovil import VePagoMovilError
         self.target.side_effect = VePagoMovilError('No pudimos preparar el envío.')
         self.run_rule()
-        self.assert_skipped('provider_unavailable')
+        self.assert_waiting('provider_unavailable')
         ramp = self.ramps().get()
         self.assertEqual((ramp.status, ramp.status_detail), ('FAILED', 'deposit_target_unavailable'))
         self.assertEqual(SmartAccountPayout.objects.get().status, 'cancelled')
@@ -374,11 +413,10 @@ class RunTests(RunBase):
         self.assertEqual(self.ramps().count(), 1)
         self.assertEqual(SmartAccountPayout.objects.count(), 1)
 
-    def test_a_failed_relay_call_retries_the_same_order_and_address(self):
-        from smart_account import relayer
-        self.relay.side_effect = [relayer.RelayError('nonce'), (SimpleNamespace(signed_tx_hash=TX), True)]
+    def test_an_interrupted_call_retries_the_same_order_and_address(self):
+        self.relay.side_effect = [RuntimeError('the worker died'), (SimpleNamespace(signed_tx_hash=TX), True)]
         self.run_rule()
-        self.assertEqual(self.last_run().status, 'failed')
+        self.assertEqual(self.last_run().status, 'pending')
         self.run_rule()
         self.assertEqual(self.last_run().status, 'sent')
         self.assertEqual(self.ramps().count(), 1)
@@ -406,7 +444,7 @@ class RunTests(RunBase):
     def test_not_run_until_ramps_supports_contract_funding(self):
         with mock.patch('ramps.ve_send.CONTRACT_FUNDING', False, create=True):
             self.run_rule()
-        self.assert_skipped('payouts_disabled')
+        self.assert_waiting('payouts_disabled')
         self.assertFalse(self.ramps().exists())
 
     def test_rule_survives_reconcile_with_its_beneficiary(self):
@@ -444,7 +482,7 @@ class ReviewFixRunTests(RunBase):
         from ramps import ve_send
         from ramps.models import RampTransaction
         section = {'phase': 'funding_reported', 'gross_usd': '50.00', 'deposit_wei': str(EXACT),
-                   'deposit_address': DEPOSIT, 'created_block': 90,
+                   'deposit_address': '0x' + 'd7' * 20, 'created_block': 90,     # its own route
                    'funding_started_at': timezone.now().isoformat()}
         if contract:
             section['funding_sender'] = CUSD
@@ -465,7 +503,7 @@ class ReviewFixRunTests(RunBase):
         other = self._other_ramp(contract=True)
         self.run_rule()
         run = self.last_run()
-        self.assertEqual((run.status, run.error), ('failed', 'send_refused'))
+        self.assertEqual((run.status, run.error), ('pending', 'send_refused'))      # a wait
         self.rule.refresh_from_db()
         self.assertEqual(self.rule.scheduled_for, self.slot)   # not given up
         self.relay.assert_not_called()
@@ -494,7 +532,8 @@ class ReviewFixRunTests(RunBase):
         self._expire_slot()
         self.relay.side_effect = relayer.RelayError('nonce')
         with mock.patch.object(SmartAccountRelayTx.objects, 'filter') as rows:
-            rows.return_value.exists.return_value = True
+            # Live once the order exists (with one already live, plan_run opens none).
+            rows.return_value.exists.side_effect = lambda: self.ramps().exists()
             self.run_rule()
         self.assertEqual(self.ramps().get().status, 'PENDING')
 
@@ -593,7 +632,8 @@ class ReviewFixRunTests(RunBase):
         self.assertTrue(ha_old)
         b = self._second_payout(run_hash=hb)
         event = SimpleNamespace(args={'id': 1, 'destination': DEPOSIT, 'usdtOut': EXACT}, tx_hash=ha)
-        self.assertIsNone(reconcile._unmatched_payout(self.account, a.rule_run.rule, event))
+        with self.captureOnCommitCallbacks(execute=True):       # the alert waits for the commit
+            self.assertIsNone(reconcile._unmatched_payout(self.account, a.rule_run.rule, event))
         self.assertEqual(SmartAccountRuleRun.objects.get(pk=b.rule_run_id).tx_hash, hb)
         self.assertEqual(SmartAccountRuleRun.objects.get(pk=a.rule_run_id).tx_hash, ha_old)
         texts = [c.args[0] for c in self.alert.call_args_list]
@@ -605,7 +645,8 @@ class ReviewFixRunTests(RunBase):
         status = payout.status
         event = SimpleNamespace(args={'id': 1, 'destination': '0x' + '4c' * 20, 'usdtOut': EXACT},
                                 tx_hash='0x' + 'e2' * 32)
-        with mock.patch('smart_account.payouts.after_payout_sent') as after:
+        with mock.patch('smart_account.payouts.after_payout_sent') as after, \
+                self.captureOnCommitCallbacks(execute=True):
             self.assertEqual(reconcile._payout_sent(self.account, event), [])
         after.assert_not_called()
         texts = [c.args[0] for c in self.alert.call_args_list]
@@ -619,7 +660,8 @@ class ReviewFixRunTests(RunBase):
         for usdt_out, alerted in ((EXACT, False), (EXACT + 7, True)):
             self.alert.reset_mock()
             event = SimpleNamespace(args={'id': 1, 'destination': DEPOSIT, 'usdtOut': usdt_out}, tx_hash=run.tx_hash)
-            with mock.patch('smart_account.payouts.after_payout_sent'):
+            with mock.patch('smart_account.payouts.after_payout_sent'), \
+                    self.captureOnCommitCallbacks(execute=True):
                 reconcile._payout_sent(self.account, event)
             texts = [c.args[0] for c in self.alert.call_args_list]
             self.assertEqual(any('no coincide con el depósito' in t for t in texts), alerted, texts)

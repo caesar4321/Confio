@@ -48,6 +48,14 @@ def price(local, direction, *, destination=None):
                   total_usd=str(Decimal(tariff['total_usd']) + maintenance))
     from .infinia_fee_debt import quoted
     ids, debt = quoted(local.provider_profile.confio_account)
+    if direction == 'to_wallet' and ids:
+        # A payment rule's fee waits for a transfer the owner signs: it is
+        # neither taken from a deposit nor a reason to park one.
+        from .models import InfiniaFeeDebt
+        automated = dict(InfiniaFeeDebt.objects.filter(
+            pk__in=ids, source_flow__metadata__has_key='contract_funding').values_list('pk', 'amount_usd'))
+        ids = [pk for pk in ids if pk not in automated]
+        debt -= sum(automated.values(), Decimal(0))
     tariff = dict(tariff, debt_ids=ids, debt_usd=str(debt),
                   total_usd=str(Decimal(tariff['total_usd']) + debt))
     return dict(tariff, local_account_id=str(local.internal_id),

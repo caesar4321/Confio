@@ -12,6 +12,7 @@ from smart_account.models import (
 )
 
 from .base import BUILD, CUSD, FACTORY, VAULT, SmartAccountTestCase, WAD, vault_preview
+from .base import INFINIA_SWITCHES, priced_payout
 
 
 class OfferTests(SmartAccountTestCase):
@@ -321,7 +322,8 @@ class DesignationTests(SmartAccountTestCase):
         self.assertEqual((name, args[0].lower(), args[1]), ('setBeneficiary', self.heir.wallet, 365 * 86400))
 
 
-PAYOUTS_ON = dict(SMART_ACCOUNT_PAYOUT_RAILS='co_breb', SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True)
+PAYOUTS_ON = dict(SMART_ACCOUNT_PAYOUT_RAILS='mx_clabe', SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True,
+                  **INFINIA_SWITCHES)
 
 
 class PayoutRuleTests(SmartAccountTestCase):
@@ -332,16 +334,19 @@ class PayoutRuleTests(SmartAccountTestCase):
         self.account = self.make_account(self.owner)
         self.personal = self.account.owner_account
         self.destination = PayoutDestination.objects.create(
-            confio_account=self.personal, provider='infinia', kind='breb_key', country='COL', asset='COP',
-            label='Bre-B · 3001112233', holder_name='Ana P.', status='active',
-            details={'type': 'BREB_KEY', 'brebKey': '3001112233'},
-            provider_data={'method_id': 'co_breb', 'validation': {
+            confio_account=self.personal, provider='infinia', kind='bank_account', country='MEX', asset='MXN',
+            label='CLABE · 002180000000004322', holder_name='Ana P.', status='active',
+            details={'type': 'CLABE', 'clabe': '002180000000004322', 'reference': 'Confio'},
+            provider_data={'method_id': 'mx_clabe', 'validation': {
                 'id': 'v1', 'status': 'VERIFIED', 'holder_name': 'Ana P.',
                 'checked_at': timezone.now().isoformat()}})
         for p in (mock.patch('payment_accounts.local_money.verification_state', return_value='verified'),
                   mock.patch('payment_accounts.local_money.checked_recently', return_value=True)):
             p.start()
             self.addCleanup(p.stop)
+        priced = priced_payout()
+        priced.start()
+        self.addCleanup(priced.stop)
         self.face = mock.patch('payment_accounts.services.require_outgoing_face', return_value='face-key-1')
         self.face_mock = self.face.start()
         self.addCleanup(self.face.stop)
@@ -363,12 +368,13 @@ class PayoutRuleTests(SmartAccountTestCase):
     def test_a_rail_not_confirmed_for_unattended_payouts_is_not_offered(self):
         self.assertEqual(offer.payout_rails(), [])
         self.assertEqual(self._code(), 'payout_not_available')
-        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='co_breb'):
+        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='mx_clabe', **INFINIA_SWITCHES):
             self.assertEqual(offer.payout_rails(), [])   # listed but the adapter is unverified
-        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='br_pix', SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True):
+        with override_settings(SMART_ACCOUNT_PAYOUT_RAILS='br_pix', SMART_ACCOUNT_PAYOUT_ADAPTER_VERIFIED=True,
+                               **INFINIA_SWITCHES):
             self.assertEqual(self._code(), 'payout_rail_not_available')
             methods = schema.Query.resolve_smart_account_payout_methods(None, self.info(self.owner))
-            self.assertEqual([(m.rail, m.available) for m in methods], [('co_breb', False)])
+            self.assertEqual([(m.rail, m.available) for m in methods], [('mx_clabe', False)])
 
     @override_settings(**PAYOUTS_ON)
     def test_standing_authorization_is_created_with_face_and_bound(self):
@@ -426,7 +432,7 @@ class PayoutRuleTests(SmartAccountTestCase):
     def test_an_edited_or_deleted_method_deactivates_its_rule(self):
         rule = self._onchain_rule()
         self.assertIsNone(payouts.authorization_problem(rule))
-        self.destination.details = {'type': 'BREB_KEY', 'brebKey': '3009998877'}
+        self.destination.details = {'type': 'CLABE', 'clabe': '012180000000001234', 'reference': 'Confio'}
         self.destination.save()
         rule.refresh_from_db()
         self.assertEqual(payouts.authorization_problem(rule), 'destination_changed')
@@ -456,7 +462,7 @@ class PayoutRuleTests(SmartAccountTestCase):
             # deposit from the exact exit it is handed.
             plan.min_usdt_out = usdt
             return plan
-        with mock.patch.object(payouts.ProviderAdapter, 'open', side_effect=opened), \
+        with mock.patch.object(payouts.InfiniaAdapter, 'open', side_effect=opened), \
                 mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=vault_preview()):
             with self.assertRaises(payouts.PayoutSkip) as raised:
                 payouts.plan_run(rule, run, 49 * WAD)
@@ -477,7 +483,11 @@ class PayoutRuleTests(SmartAccountTestCase):
     def test_the_unverified_provider_path_refuses_to_run(self):
         rule = self._onchain_rule()
         run = SmartAccountRuleRun.objects.create(rule=rule, scheduled_for=rule.scheduled_for)
+        # A rail with no adapter (Bre-B): refused even if something offered it.
+        rule.payout_rail = 'co_breb'
         with self.assertRaises(payouts.PayoutSkip) as raised, \
+                mock.patch('smart_account.payouts.rail_ready', return_value=True), \
+                mock.patch('smart_account.payouts.authorization_problem', return_value=None), \
                 mock.patch('cusd_plus.cusd_vault.preview_redeem_wei', side_effect=vault_preview()):
             payouts.plan_run(rule, run, 49 * WAD)
         self.assertEqual(raised.exception.code, 'provider_path_unverified')

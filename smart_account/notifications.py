@@ -30,8 +30,15 @@ def _usd(value) -> str:
     return 'US$' + format(Decimal(value).quantize(Decimal('0.01')), ',.2f')
 
 
-def _date(dt) -> str:
-    return timezone.localtime(dt).strftime('%d/%m/%Y') if dt else ''
+def _date(dt, owner=None) -> str:
+    """With `owner`, the day it is where they live."""
+    if not dt:
+        return ''
+    zone = None
+    if owner is not None:
+        from .services import owner_tz
+        zone = owner_tz(owner)
+    return timezone.localtime(dt, zone).strftime('%d/%m/%Y')
 
 
 def _name(user) -> str:
@@ -48,6 +55,8 @@ SCREENS = {
     'rule_ok': 'SmartAccountRules', 'rule_skipped': 'SmartAccountRules', 'rule_failed': 'SmartAccountRules',
     'payout_delivered': 'SmartAccountRules', 'rule_deactivated': 'SmartAccountRules',
     'payout_resumed': 'SmartAccountRules', 'card_pulled': 'SmartAccountRules',
+    'payout_unconfirmed': 'SmartAccountRules',
+    'payout_review': 'SmartAccountRules', 'payout_refunded': 'SmartAccountRules',
     'beneficiary_named': 'BeneficiaryInvite', 'beneficiary_removed': 'BeneficiaryInvite',
     'beneficiary_accepted': 'BeneficiaryStatus', 'beneficiary_declined': 'BeneficiaryStatus',
     'beneficiary_stale_address': 'BeneficiaryStatus',
@@ -150,24 +159,59 @@ def rule_run(run):
     account = rule.smart_account
     label = {'send': 'envío automático', 'payout': 'pago automático',
              'buy': 'compra automática'}.get(rule.kind, 'regla automática')
+    # Still on this slot: it is being retried, until the date in the message.
+    pending = (run.status in ('skipped', 'failed') and rule.active and rule.scheduled_for is not None
+               and rule.scheduled_for == run.scheduled_for)
     if run.status == 'ok':
         title, body = f'Tu {label} se realizó', f'{_usd(rule.amount)} · {run.message or "Listo."}'
+        if rule.active and rule.scheduled_for and rule.scheduled_for > timezone.now():
+            body += f' Próxima fecha: {_date(rule.scheduled_for, account.owner_user)}.'
+    elif pending:
+        title, body = f'Tu {label} está pendiente', run.message or 'Lo estamos reintentando.'
     elif run.status == 'skipped':
-        title, body = f'Tu {label} no se realizó hoy', run.message or 'Lo intentaremos en la próxima fecha.'
+        title, body = f'Tu {label} no se realizó', run.message or 'Lo intentaremos en la próxima fecha.'
     else:
-        title, body = f'No pudimos hacer tu {label}', run.message or 'Volveremos a intentarlo.'
+        title, body = f'No pudimos hacer tu {label}', run.message or 'No se realizó.'
     return _send(account.owner_user, title, body, kind=f'rule_{run.status}', account=account,
                  data={'rule_id': str(rule.internal_id)})
 
 
-def payout_delivered(run, fiat_amount, currency):
+def _paid_to(run) -> str:
+    """Who this run paid (the rule may name someone else by now), masked:
+    a push shows on a locked screen. Only a bank's answer is shown as a
+    holder; a typed name is marked as the owner's."""
+    from payment_accounts.models import PayoutDestination
+    from . import payouts, services
+    from .models import SmartAccountPagoMovilDestination, SmartAccountPayout
     rule = run.rule
-    account = rule.smart_account
     destination = rule.payout_method or rule.pagomovil_destination
-    if rule.pagomovil_destination is not None:
-        label = ' · '.join(p for p in (rule.pagomovil_destination.holder_name, rule.pagomovil_destination.label) if p)
-    else:
-        label = destination.label if destination is not None else 'tu destino'
+    payout = SmartAccountPayout.objects.select_related('journey', 'ramp').filter(rule_run=run).first()
+    if payout is not None and payout.journey is not None:
+        paid = (payout.journey.destination_snapshot or {}).get('destination_internal_id')
+        row = PayoutDestination.objects.filter(internal_id=paid).first() if paid else None
+        destination = row or destination
+    elif payout is not None and payout.ramp is not None:
+        who = ((payout.ramp.metadata or {}).get('ve_send') or {}).get('beneficiary') or {}
+        if who:
+            wanted = payouts._payment_identity(who.get('phone'), who.get('bank_code'), who.get('cedula'))
+            row = next((d for d in SmartAccountPagoMovilDestination.all_objects.filter(
+                user_id=payout.ramp.actor_user_id)
+                if payouts._payment_identity(d.phone, d.bank_code, d.id_number) == wanted), None)
+            label = row.label if row is not None else f'Pago Móvil · {str(who.get("phone") or "")[-4:]}'
+            return services.marked_label(label, who.get('name') or '')
+    if destination is None:
+        return 'tu destino'
+    shown = services.masked_destination(destination)
+    if getattr(destination, 'phone', None) is not None:
+        return services.marked_label(shown, destination.holder_name)
+    if services.payout_holder_state(destination) == services.HOLDER_VERIFIED:
+        return ' · '.join(part for part in (shown, destination.holder_name) if part)
+    return services.marked_label(shown, services.owner_holder(destination))
+
+
+def payout_delivered(run, fiat_amount, currency):
+    account = run.rule.smart_account
+    label = _paid_to(run)
     if fiat_amount:
         amount = f'{currency} {fiat_amount}' if currency == 'Bs.' else f'{fiat_amount} {currency}'
         body = f'Enviamos {amount} a {label}.'
@@ -184,12 +228,47 @@ def payout_resumed(run):
     return _send(account.owner_user, 'Tu pago automático sí salió',
                  f'Tu pago automático de {_usd(rule.amount)} salió de tu Cuenta inteligente. '
                  'Lo estamos revisando y te avisaremos cuando llegue.',
-                 kind='payout_resumed', account=account, data={'rule_id': str(rule.internal_id)})
+                 kind='payout_resumed', account=account, data={'rule_id': str(rule.internal_id), 'run_id': run.pk})
+
+
+def payout_unconfirmed(run):
+    """A slot that ends with a payment that may have left and no executed
+    run: neither "done" nor "not done" would be true."""
+    rule = run.rule
+    account = rule.smart_account
+    return _send(account.owner_user, 'Tu pago automático está en revisión', run.message,
+                 kind='payout_unconfirmed', account=account,
+                 data={'rule_id': str(rule.internal_id), 'run_id': run.pk})
+
+
+def payout_review(run, amount):
+    """Parked, refused by the bank or unknown: it may or may not have
+    arrived. Not when another notice already said so for this run."""
+    from notifications.models import Notification
+    rule = run.rule
+    account = rule.smart_account
+    if Notification.objects.filter(
+            user=account.owner_user, data__run_id=run.pk, data__smart_account_event__in=(
+                'payout_review', 'payout_rate_held', 'payout_resumed', 'payout_unconfirmed')).exists():
+        return None
+    return _send(account.owner_user, 'Tu pago automático está en revisión',
+                 f'Estamos revisando tu pago automático de {_usd(amount)}: no confirmamos que haya llegado a quien '
+                 'recibe. No lo repitas.',
+                 kind='payout_review', account=account, data={'rule_id': str(rule.internal_id), 'run_id': run.pk})
+
+
+def payout_refunded(run, amount):
+    rule = run.rule
+    account = rule.smart_account
+    return _send(account.owner_user, 'Tu pago automático volvió',
+                 f'Tu pago automático de {_usd(amount)} no llegó a quien recibe: el dinero volvió a tu Cuenta '
+                 'inteligente. Puede ser un poco menos por el costo de devolverlo.',
+                 kind='payout_refunded', account=account, data={'rule_id': str(rule.internal_id), 'run_id': run.pk})
 
 
 def rule_deactivated(rule, reason: str):
-    return _send(rule.smart_account.owner_user, 'Pausamos un pago automático',
-                 'El destino guardado cambió o ya no existe. Firma la regla de nuevo para reactivarla.',
+    from .payouts import authorization_message
+    return _send(rule.smart_account.owner_user, 'Pausamos un pago automático', authorization_message(reason),
                  kind='rule_deactivated', account=rule.smart_account, data={'reason': reason})
 
 
@@ -331,3 +410,23 @@ def claim_executed(account, previous_owner, new_owner):
                  'Puedes mover sus activos a tu cuenta personal o a tu Cuenta inteligente.',
                  kind='claim_executed_new_owner', account=account,
                  data={'inheritedAccountId': str(account.internal_id)})
+
+
+def payout_rate_held(run_pk, amount):
+    """A payment whose money had left when the rate went outside its limit,
+    parked after the wait: true of both rails, and told once per run."""
+    from notifications.models import Notification
+    from .models import SmartAccountRuleRun
+    run = SmartAccountRuleRun.objects.select_related('rule__smart_account__owner_user').filter(pk=run_pk).first()
+    if run is None:
+        return None
+    account = run.rule.smart_account
+    if Notification.objects.filter(user=account.owner_user, data__smart_account_event='payout_rate_held',
+                                   data__run_id=run.pk).exists():
+        return None
+    return _send(account.owner_user, 'Tu pago automático está detenido',
+                 f'Tu pago de {_usd(amount)} salió de tu Cuenta inteligente, pero no conseguimos una tasa '
+                 'de cambio dentro del límite de este pago y no lo enviamos a quien recibe. Lo estamos revisando: '
+                 'no lo repitas.',
+                 kind='payout_rate_held', account=account,
+                 data={'run_id': run.pk, 'rule_id': str(run.rule.internal_id), 'screen': 'SmartAccountRules'})

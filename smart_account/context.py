@@ -177,7 +177,10 @@ ALLOWED_MUTATIONS = frozenset({
     # - a Pago Móvil destination is saved under the JWT user, the same scope
     #   as prepareSmartAccountPayoutRule above, which names it and is signed
     #   with Face on the viewer's own account.
-    'deleteSmartAccountWatch', 'saveSmartAccountPagoMovilDestination',
+    # - a CLABE is saved to the JWT user's own personal account (its saved
+    #   recipients, Enviar's save path), the same scope and the same later
+    #   prepare + Face as a Pago Móvil destination.
+    'deleteSmartAccountWatch', 'saveSmartAccountPagoMovilDestination', 'saveSmartAccountClabeDestination',
 })
 
 

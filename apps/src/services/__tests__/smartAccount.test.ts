@@ -25,6 +25,7 @@ import {
   prepareSmartAccountSubscribe, prepareClaimCancel, prepareSmartAccountBuyRule, prepareSmartAccountCancelRule, signAndSubmitPrepared, toBatchCalls,
   IDENTITY_RESTRICTED_CODE, sponsorErrorCode,
   deleteSmartAccountWatch, isSmartContextRefusal, saveSmartAccountPagoMovilDestination, fetchSmartAccountPagoMovilBanks,
+  saveSmartAccountClabeDestination, fetchSmartAccountPayoutMethods, clabeValid,
   type SmartAccountPreparedBatch,
 } from '../smartAccount';
 
@@ -302,5 +303,48 @@ describe('smart-context refusals and Pago Móvil destinations', () => {
   it('reads the bank list', async () => {
     mockQuery.mockResolvedValue({ data: { vePagomovilBanks: [{ code: '0134', name: 'Banesco' }] } });
     expect(await fetchSmartAccountPagoMovilBanks()).toEqual({ ok: true, data: [{ code: '0134', name: 'Banesco' }] });
+  });
+});
+
+describe('CLABE destinations (fake numbers)', () => {
+  it('checks the 18 digits and the check digit', () => {
+    expect(clabeValid('002180000000004322')).toBe(true);
+    expect(clabeValid('0021 8000 0000 0043 22')).toBe(true);
+    expect(clabeValid('002180000000004321')).toBe(false);
+    expect(clabeValid('00218000000000432')).toBe(false);
+  });
+
+  it('saves with its own document, digits only, name optional', async () => {
+    const method = { payoutMethodId: 'pm7', rail: 'mx_clabe', label: 'CLABE · 002180000000004322', holderName: '',
+      available: true, holderVerified: false };
+    mockMutate.mockResolvedValue({ data: { saveSmartAccountClabeDestination: { success: true, errorCode: null, errorMessage: null, payoutMethod: method } } });
+    const out = await saveSmartAccountClabeDestination({ clabe: '0021 8000 0000 0043 22', holderName: ' ' });
+    expect(out.payoutMethod).toEqual(method);
+    expect(mockMutate.mock.calls[0][0].mutation.definitions[0].name.value).toBe('SaveSmartAccountClabeDestination');
+    expect(mockMutate.mock.calls[0][0].variables).toEqual({ clabe: '002180000000004322', holderName: null });
+    mockMutate.mockResolvedValue({ data: { saveSmartAccountClabeDestination: {
+      success: false, errorCode: 'bad_clabe', errorMessage: 'Esa CLABE no es válida: revisa los 18 dígitos.', payoutMethod: null } } });
+    expect(await saveSmartAccountClabeDestination({ clabe: '002180000000004321' })).toMatchObject({
+      success: false, errorCode: 'bad_clabe', errorMessage: 'Esa CLABE no es válida: revisa los 18 dígitos.' });
+    mockMutate.mockRejectedValue(new Error('offline'));
+    expect((await saveSmartAccountClabeDestination({ clabe: '002180000000004322' })).errorCode).toBe('network');
+  });
+
+  it('reads holderVerified in its own document; an older server keeps the list', async () => {
+    const row = { payoutMethodId: 'pm7', rail: 'mx_clabe', label: 'CLABE · 002180000000004322', holderName: '', available: true };
+    mockQuery.mockImplementation(async ({ query }: any) => {
+      const name = query.definitions[0].name.value;
+      return name === 'SmartAccountPayoutMethodChecks'
+        ? { data: { smartAccountPayoutMethods: [{ payoutMethodId: 'pm7', holderVerified: false }] } }
+        : { data: { smartAccountPayoutMethods: [row] } };
+    });
+    expect(await fetchSmartAccountPayoutMethods()).toEqual({ ok: true, data: [{ ...row, holderVerified: false }] });
+    mockQuery.mockImplementation(async ({ query }: any) => {
+      if (query.definitions[0].name.value === 'SmartAccountPayoutMethodChecks') {
+        throw new Error('Cannot query field "holderVerified"');
+      }
+      return { data: { smartAccountPayoutMethods: [row] } };
+    });
+    expect(await fetchSmartAccountPayoutMethods()).toEqual({ ok: true, data: [row] });
   });
 });

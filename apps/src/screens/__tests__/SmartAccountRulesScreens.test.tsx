@@ -8,9 +8,11 @@ import {
 } from '../../components/smartAccount/testing/fixtures';
 import { SmartAccountRulesScreen, payoutKindSubtitle, ruleNote, ruleSubtitle } from '../SmartAccountRulesScreen';
 import {
-  SmartAccountRuleEditScreen, cryptoBlockedMessage, cryptoBuyAllowed, payoutEmptyCopy, pendingStepBody,
+  SmartAccountRuleEditScreen, cryptoBlockedMessage, cryptoBuyAllowed, payoutEmptyCopy, payoutMethodNote, payoutMethodSubtitle,
+  pendingStepBody,
 } from '../SmartAccountRuleEditScreen';
 import { pagoMovilFieldErrors } from '../../components/smartAccount/PagoMovilDestinationForm';
+import { clabeFieldError } from '../../components/smartAccount/ClabeDestinationForm';
 import { DEX_TRADING_UI_ENABLED } from '../../config/features';
 import { HELP_WATCHES } from '../../components/smartAccount/help';
 
@@ -780,6 +782,73 @@ describe('Pago Móvil destinations from the payout picker', () => {
     expect(ok_).toEqual({ bank: '', phone: '', idNumber: '', holderName: '' });
     const bad = pagoMovilFieldErrors({ bank: null, phone: '0212 1234567', idNumber: 'X1', holderName: ' ' });
     expect(Object.values(bad).every(Boolean)).toBe(true);
+  });
+});
+
+describe('CLABE destinations from the payout picker (fake numbers)', () => {
+  const unverified = { payoutMethodId: 'pmc', rail: 'mx_clabe', label: 'CLABE · 002180000000004322',
+    holderName: 'Ana Prueba', available: true, holderVerified: false };
+
+  beforeEach(() => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ payoutRails: ['mx_clabe'] })));
+    api.fetchSmartAccountPayoutMethods.mockResolvedValue(ok([]));
+    (api.saveSmartAccountClabeDestination as jest.Mock).mockResolvedValue(
+      { success: true, errorCode: null, errorMessage: null, payoutMethod: unverified });
+  });
+
+  it('the empty state offers to add a CLABE here, never Enviar', async () => {
+    setRouteParams({ kind: 'payout' });
+    await mount(<SmartAccountRuleEditScreen />);
+    expect(text(tree)).toContain('Agrega una CLABE');
+    expect(text(tree)).not.toContain('desde Enviar');
+    expect(hasTappable(tree, 'Agregar CLABE')).toBe(true);
+  });
+
+  it('checks the CLABE locally, saves it, selects it and signs the rule naming it', async () => {
+    setRouteParams({ kind: 'payout' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'Agregar CLABE');
+    await flush();
+    await type('clabe-number', '002180000000004321');   // wrong check digit
+    await tap(tree, 'clabe-save');
+    expect(api.saveSmartAccountClabeDestination).not.toHaveBeenCalled();
+    expect(text(tree)).toContain('Esa CLABE no es válida: revisa los 18 dígitos.');
+    await type('clabe-number', '0021 8000 0000 0043 22');
+    await type('clabe-name', 'Ana Prueba');
+    await tap(tree, 'clabe-save');
+    await flush();
+    expect(api.saveSmartAccountClabeDestination).toHaveBeenCalledWith(
+      { clabe: '0021 8000 0000 0043 22', holderName: 'Ana Prueba' });
+    expect(text(tree)).toContain('CLABE · 002180000000004322');
+    expect(text(tree)).toContain('Titular no verificado por el banco');
+    await type('rule-amount', '1');
+    await tap(tree, 'rule-review');
+    expect(api.prepareSmartAccountPayoutRule).toHaveBeenCalledWith(expect.objectContaining({ payoutMethodId: 'pmc', amountUsd: '1.00' }));
+  });
+
+  it('lists an unverified CLABE with its note, next to both add rows', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ payoutRails: ['mx_clabe', 've_pagomovil'] })));
+    api.fetchSmartAccountPayoutMethods.mockResolvedValue(ok([unverified]));
+    setRouteParams({ kind: 'payout' });
+    await mount(<SmartAccountRuleEditScreen />);
+    await tap(tree, 'rule-destination');
+    const out = text(tree);
+    expect(out).toContain('CLABE · 002180000000004322');
+    expect(out).toContain('Titular no verificado por el banco');
+    expect(hasTappable(tree, 'payout-add-clabe')).toBe(true);
+    expect(hasTappable(tree, 'payout-add-pagomovil')).toBe(true);
+  });
+
+  it('copy and subtitles', () => {
+    expect(payoutEmptyCopy(['mx_clabe'])).toBe('Agrega una CLABE y podrás pagarle de forma automática.');
+    expect(payoutEmptyCopy(['ve_pagomovil', 'mx_clabe'])).toBe('Agrega una cuenta Pago Móvil o una CLABE y podrás pagarle de forma automática.');
+    expect(payoutKindSubtitle(['mx_clabe'])).toContain('o a una CLABE que agregues');
+    expect(payoutMethodSubtitle({ ...unverified, holderName: '' })).not.toContain('·');
+    expect(payoutMethodNote(unverified)).toBe('Titular no verificado por el banco');
+    expect(payoutMethodNote({ ...unverified, holderVerified: true })).toBeUndefined();
+    expect(payoutMethodNote({ ...unverified, holderVerified: undefined })).toBeUndefined();
+    expect(clabeFieldError('12345')).toBe('La CLABE tiene 18 dígitos.');
+    expect(clabeFieldError('002180000000004322')).toBe('');
   });
 });
 

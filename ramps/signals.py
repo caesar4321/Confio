@@ -750,6 +750,8 @@ def sync_unified_transaction_from_ramp(ramp_tx: RampTransaction) -> UnifiedTrans
 def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_status: str | None):
     if not ramp_tx.actor_user_id:
         return
+    if ((ramp_tx.metadata or {}).get('ve_send') or {}).get('funding_sender'):
+        return  # a Cuenta inteligente payout: the rule's own notices tell it
 
     is_on_ramp = ramp_tx.direction == 'on_ramp'
     label = 'recarga' if is_on_ramp else 'retiro'

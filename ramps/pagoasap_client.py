@@ -38,6 +38,11 @@ class PagoAsapError(Exception):
         self.payload = payload
 
 
+class PagoAsapAuthError(PagoAsapError):
+    """No access token: the request this token was for was never sent (or,
+    refreshing after a 401, was not processed)."""
+
+
 class PagoAsapAmbiguousError(PagoAsapError):
     """The request may have reached Pago ASAP; its outcome is unknown."""
 
@@ -134,10 +139,10 @@ class PagoAsapClient:
             })
             payload = response.json()
         except (requests.RequestException, ValueError) as exc:
-            raise PagoAsapError(f'Pago ASAP auth failed ({type(exc).__name__})') from exc
+            raise PagoAsapAuthError(f'Pago ASAP auth failed ({type(exc).__name__})') from exc
         token = payload.get('access_token') if isinstance(payload, dict) else None
         if not response.ok or not token:
-            raise PagoAsapError('Pago ASAP auth refused', status=response.status_code)
+            raise PagoAsapAuthError('Pago ASAP auth refused', status=response.status_code)
         expires = int(payload.get('expires_in') or 3600)
         cache.set(cache_key, token, max(expires - 300, 60))
         return token

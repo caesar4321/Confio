@@ -12,13 +12,17 @@ reached through a server-issued opaque id checked against that user.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
+import re
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
+from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import transaction
@@ -74,7 +78,14 @@ MESSAGES = {
     'payout_method_unverified': 'Revisa de nuevo a quien recibe antes de programar el pago.',
     'payout_quote_unavailable': 'No pudimos consultar la tasa del día. Inténtalo de nuevo en unos minutos.',
     'bad_pagomovil_destination': 'Revisa los datos de Pago Móvil.',
+    'bad_clabe': 'Esa CLABE no es válida: revisa los 18 dígitos.',
+    'bad_pix_key': 'Esa chave Pix no es válida: usa CPF, CNPJ, celular con +55, e-mail o clave aleatoria.',
+    'payout_method_rejected': 'El banco no reconoce esa cuenta. Revisa los datos e inténtalo de nuevo.',
+    'payout_method_pending': 'Estamos revisando esa cuenta con el banco. Inténtalo de nuevo en unos minutos.',
     'too_many_destinations': 'Ya tienes demasiados destinos guardados.',
+    'too_many_lookups': 'Revisaste muchas cuentas seguidas. Inténtalo de nuevo en una hora.',
+    'payout_method_check_failed': 'No pudimos revisar esa cuenta con el banco. Inténtalo de nuevo en unos minutos.',
+    'payout_run_in_flight': 'Este pago se está haciendo ahora. Podrás cambiar la regla cuando termine.',
     'stock_needs_dollar_plus': 'La compra automática de acciones usa Confío Dollar+.',
     'trade_not_available': 'Esta inversión no está disponible para tu cuenta.',
     'beneficiary_disabled': 'El beneficiario todavía no está disponible.',
@@ -238,6 +249,7 @@ def with_cancel_claim(user, calls: list) -> list:
 
 
 def _register(viewer, kind: str, calls: list, *, target: str, smart_account=None, summary=None,
+              stored_summary=None,
               payload=None, append_cancel_claim: bool = True) -> PreparedBatch:
     calls = [abi.call(c['to'], c['data']) for c in calls]
     if append_cancel_claim:
@@ -249,7 +261,7 @@ def _register(viewer, kind: str, calls: list, *, target: str, smart_account=None
     SmartAccountPreparedAction.objects.create(
         request_id=request_id, user=viewer.user, signer_address=viewer.signer_address,
         target_address=target.lower(), smart_account=smart_account, kind=kind, calls=calls,
-        calls_hash=calls_hash(calls), payload={**(payload or {}), 'summary': list(summary or [])},
+        calls_hash=calls_hash(calls), payload={**(payload or {}), 'summary': list(stored_summary or summary or [])},
         not_after=not_after,
         expires_at=timezone.now() + timedelta(seconds=PREPARED_TTL_SECONDS))
     return PreparedBatch(request_id=request_id, calls=calls, kind=kind, summary=summary or [], not_after=not_after)
@@ -628,6 +640,8 @@ def requested_first_run(first_run_at, frequency: str, *, floor: int = 0, now=Non
     now = now or timezone.now()
     if when < now - timedelta(minutes=5) or when > now + timedelta(days=MAX_FIRST_RUN_DAYS):
         raise PrepareError('bad_first_run', 'Elige una fecha de inicio entre hoy y los próximos dos meses.')
+    if frequency == 'monthly' and when.day > 28:
+        raise PrepareError('bad_first_run', 'Elige un día del mes del 1 al 28, para que caiga todos los meses.')
     from .automation import next_slot
     while floor and int(when.timestamp()) < floor:
         when = next_slot(frequency, when)
@@ -654,7 +668,7 @@ def _first_run_at(own: SmartAccount, existing: SmartAccountRule | None) -> int:
 
 
 def _rule_batch(viewer, own, existing, draft_fields: dict, rule_tuple: tuple, summary: list,
-                proposal=None) -> PreparedBatch:
+                proposal=None, stored_summary=None) -> PreparedBatch:
     with transaction.atomic():
         # Stored on chain in the epoch it is signed in; the relay refuses it
         # once the account's epoch moved on (relay_policy.rule_epoch_refusal).
@@ -667,6 +681,7 @@ def _rule_batch(viewer, own, existing, draft_fields: dict, rule_tuple: tuple, su
             data = abi.encode_call('createRule', rule_tuple)
         return _register(viewer, 'smart_rule', [abi.call(own.contract_address, data)],
                          target=own.contract_address, smart_account=own, summary=summary,
+                         stored_summary=stored_summary,
                          payload={'rule_pk': draft.pk, 'replaces_pk': existing.pk if existing else None,
                                   **_proposal_payload(proposal)})
 
@@ -832,7 +847,8 @@ def prepare_send_rule(viewer, rule_id, payee_handle: str, amount_usd, frequency:
     token_in = account_dollar_token(own, viewer.user, viewer.meta)
     rule_tuple = abi.rule_input('send', frequency, token_in, payee=payee_address,
                                 amount_usd_wei=int(amount * WAD), first_run_at=first_run_at)
-    summary = [f'Enviar {usd_text(amount)} a {payee_label(payee)} {FREQUENCY_LABELS[frequency]}']
+    summary = [f'Enviar {usd_text(amount)} a {payee_label(payee, _plain)} '
+               + schedule_text(frequency, first_run_at, owner_tz(viewer.user), kind='send', update=existing is not None)]
     # Money leaves to another person with nobody present: Face once, at
     # creation or edit, bound to payee, amount and frequency (the personal
     # send flow's step-up; payouts.create_send_authorization).
@@ -884,6 +900,9 @@ def owned_pagomovil_destination(viewer, payout_method_id):
 
 
 MAX_PAGOMOVIL_DESTINATIONS = 20
+# Per rail of the personal address book, which Enviar's recipients share.
+MAX_LOCAL_DESTINATIONS = 50
+DESTINATION_LOOKUPS_PER_HOUR = 20
 
 
 def pagomovil_destinations(user) -> list:
@@ -891,11 +910,292 @@ def pagomovil_destinations(user) -> list:
     return list(SmartAccountPagoMovilDestination.objects.filter(user=user).order_by('-created_at'))
 
 
+HOLDER_VERIFIED, HOLDER_UNVERIFIED = 'verified', 'unverified'
+# Only for choosing and preparing (payout_holder_state), never for a run:
+# the bank must be asked again, before Face.
+HOLDER_RECHECK = 'recheck'
+UNVERIFIED_HOLDER_NOTE = 'Titular no verificado por el banco'
+# Where the holder name the owner typed for an unverified destination is
+# kept: never in holder_name, which only a bank answer fills (and a recheck
+# clears), and never in the details a rule's binding hash pins.
+OWNER_HOLDER_KEY = 'owner_holder_name'
+MX_CLABE = 'mx_clabe'
+BR_PIX = 'br_pix'
+
+
+def _well_formed(destination, rail: str) -> bool:
+    """The saved account identifier parses for its rail exactly as Enviar's
+    own check (local_money.normalize_value) reads it."""
+    from payment_accounts import local_money
+    method = local_money.METHODS.get(rail)
+    if method is None or not method.field:
+        return False
+    value = str((destination.details or {}).get(method.field) or '')
+    if not value:
+        return False
+    try:
+        return local_money.normalize_value(method, value) == value
+    except Exception:  # noqa: BLE001 — anything that does not parse is refused
+        return False
+
+
+def payout_destination_state(destination) -> str:
+    """What is recorded about a saved Infinia destination, as a run judges
+    it (payouts.authorization_problem):
+
+    - HOLDER_VERIFIED: the bank's holder lookup answered with a name;
+    - HOLDER_UNVERIFIED: the lookup did not run (status DISABLED, or no
+      answer recorded), it still cannot run (the paid validation is off) AND
+      the account identifier is well-formed for its rail. The owner sees
+      that the holder is not verified;
+    - '' (not usable): any answer that is not a verification — a definite
+      not-found / rejection, a check still running, a failed check —, a
+      check that never ran while the bank can now be asked, or an identifier
+      that does not parse.
+    Face, the owner's signature and the binding hash are unchanged by this."""
+    from payment_accounts import local_money
+    validation = (destination.provider_data or {}).get('validation') or {}
+    if local_money.verification_state(validation) == local_money.VERIFIED:
+        return HOLDER_VERIFIED
+    status = str(validation.get('status') or '').upper()
+    if (status in ('', 'DISABLED') and not _lookup_on()
+            and _well_formed(destination, destination_rail(destination))):
+        return HOLDER_UNVERIFIED
+    return ''
+
+
+def _lookup_on() -> bool:
+    return bool(getattr(settings, 'INFINIA_ACCOUNT_VALIDATION_ENABLED', False))
+
+
+def payout_holder_state(destination) -> str:
+    """The holder as it may be shown and signed for now:
+
+    - HOLDER_VERIFIED: only a recent bank answer (a key can be re-registered
+      to someone else);
+    - HOLDER_RECHECK: the lookup is on and must be asked before Face (a
+      stale answer, or a check that never ran or did not finish);
+    - HOLDER_UNVERIFIED: the lookup is off; a stale answer is then no better
+      and no worse than none;
+    - '': not usable."""
+    from payment_accounts import local_money
+    validation = (destination.provider_data or {}).get('validation') or {}
+    recorded = payout_destination_state(destination)
+    if recorded == HOLDER_VERIFIED and local_money.checked_recently(validation):
+        return HOLDER_VERIFIED
+    if recorded == HOLDER_UNVERIFIED:
+        return HOLDER_UNVERIFIED
+    status = str(validation.get('status') or '').upper()
+    askable = recorded == HOLDER_VERIFIED or (
+        _lookup_on() and status in ('', 'DISABLED', 'TEMPORARY_FAILURE', 'IN_PROGRESS'))
+    if not askable or not _well_formed(destination, destination_rail(destination)):
+        return ''
+    return HOLDER_RECHECK if _lookup_on() else HOLDER_UNVERIFIED
+
+
+def owner_holder(destination) -> str:
+    """The name the owner typed for a destination: never a verified holder."""
+    return str((destination.provider_data or {}).get(OWNER_HOLDER_KEY) or '')
+
+
+def marked_label(label: str, typed: str) -> str:
+    """Builds in the field show holderName as the bank's: a typed name is
+    only ever in the label, marked as the owner's."""
+    typed = ' '.join(str(typed or '').split())
+    return f'{label} (escribiste: {typed[:60]})' if typed else label
+
+
+def ascii_digits(value) -> str:
+    """As typed, with any script's digits as ASCII: only those are stored."""
+    text = unicodedata.normalize('NFKC', str(value or ''))
+    return ''.join(str(unicodedata.decimal(c)) if c.isdecimal() else c for c in text)
+
+
+def pagomovil_label(phone, bank_code, id_number) -> str:
+    from ramps import ve_pagomovil
+    return _with_cedula_tail(f'Pago Móvil · {ve_pagomovil.BANK_NAMES.get(bank_code, bank_code)} · {phone[-4:]}',
+                             id_number)
+
+
+def _with_cedula_tail(label: str, id_number) -> str:
+    """Two payees may share one phone: the cédula's tail tells them apart."""
+    return f'{label} · C.I. …{str(id_number)[-4:]}' if id_number else label
+
+
+def destination_label(destination) -> str:
+    if getattr(destination, 'phone', None) is not None:
+        return _with_cedula_tail(destination.label, destination.id_number)
+    return destination.label
+
+
+def _destination_value(destination) -> str:
+    from payment_accounts import local_money
+    method = local_money.METHODS.get(destination_rail(destination))
+    return str((destination.details or {}).get(method.field) or '') if method and method.field else ''
+
+
+def masked_destination(destination) -> str:
+    """A destination where others may read it (a lock screen, a log)."""
+    if getattr(destination, 'phone', None) is not None:
+        return destination.label        # bank and the phone's last four
+    from payment_accounts import local_money
+    method = local_money.METHODS.get(destination_rail(destination))
+    value = _destination_value(destination)
+    if not method or not value:
+        return method.title if method else 'tu destino'
+    local, at, domain = value.rpartition('@')
+    return f'{method.title} · ' + (f'{local[:2]}…@{domain}' if at else f'…{value[-4:]}')
+
+
+def rule_pays(rule, destination) -> bool:
+    """The saved destination is still exactly the one this rule signed."""
+    if not rule.payout_ref:
+        return True
+    if getattr(destination, 'phone', None) is not None:
+        from . import payouts
+        ref = payouts.pagomovil_ref_for(destination)
+    else:
+        ref = payout_ref_for(destination)
+    return rule.payout_ref.lower() == '0x' + ref.hex()
+
+
+def owner_tz(user):
+    """The zone a signed date is written in, for the sheet and the proposal alike."""
+    from security.geo import country_of
+    from users.cashflow import resolve_timezone
+    return resolve_timezone(None, country_of(user))
+
+
+FIRST_RUN_WORDS = {'payout': ('primer pago', 'próximo pago'), 'send': ('primer envío', 'próximo envío'),
+                   'buy': ('primera compra', 'próxima compra')}
+
+
+def schedule_text(frequency: str, first: int, tz, *, kind: str = 'payout', update: bool = False, now=None) -> str:
+    """How often, and the first run after any floor: said the same way on
+    the sheet the owner signs and in the assistant's proposal."""
+    from datetime import datetime
+    now = now or timezone.now()
+    runs_now = not first or first <= now.timestamp()
+    when = (now if runs_now else datetime.fromtimestamp(first, tz)).astimezone(tz)
+    every = FREQUENCY_LABELS[frequency]
+    if not runs_now and frequency == 'monthly':
+        every += f', el día {when.day}'
+    elif not runs_now and frequency in ('weekly', 'biweekly'):
+        every += ', los ' + ('lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados', 'domingos')[when.weekday()]
+    which = FIRST_RUN_WORDS[kind][1 if update else 0]
+    return f'{every}; {which}: {"apenas firmes, hoy " if runs_now else ""}{when:%d/%m/%Y}'
+
+
+def _plain(value, limit: int) -> str:
+    """Someone else's text on the sheet: one line, nothing invisible."""
+    text = ''.join(c for c in str(value or '') if unicodedata.category(c) not in ('Cf', 'Co') and
+                   (unicodedata.category(c) != 'Cc' or c.isspace()))
+    return ' '.join(text.split())[:limit]
+
+
+def _signed_destination(destination) -> str:
+    """The whole destination that is being bound."""
+    if getattr(destination, 'phone', None) is not None:
+        from ramps import ve_pagomovil
+        phone, cedula = destination.phone, destination.id_number
+        return (f'A Pago Móvil: teléfono +{phone[:2]} {phone[2:5]} {phone[5:]}, '
+                f'banco {ve_pagomovil.BANK_NAMES.get(destination.bank_code, "")} ({destination.bank_code}), '
+                f'cédula {cedula[:1]}-{cedula[1:]}')
+    rail, value = destination_rail(destination), _destination_value(destination)
+    if rail == MX_CLABE and len(value) == 18:
+        # Bank, city, account and check digit, ending in the four people know.
+        return 'A la CLABE: ' + ' '.join((value[:3], value[3:6], value[6:10], value[10:14], value[14:]))
+    if rail == BR_PIX:
+        kind = ('e-mail' if '@' in value else 'celular' if value.startswith('+') else
+                {11: 'CPF', 14: 'CNPJ'}.get(len(value), 'clave aleatoria') if value.isdigit() else 'clave aleatoria')
+        return f'A la chave Pix ({kind}): {value}'
+    return f'A {destination.label}: {value}'
+
+
+@dataclass(frozen=True)
+class AmountCosts:
+    """What comes out of a payout's amount at today's prices, as its preflight priced it."""
+    conversion: Decimal     # the vault's exit fee
+    sending: Decimal        # the bridge, and a provider cost paid from the amount
+    paid: Decimal           # the dollars that become local money
+
+
+def payout_gross(amount: Decimal, token_in: str) -> Decimal:
+    """What of the amount is redeemed. A cUSD+ exit leaves its unwrap margin
+    in the account (payouts.plus_gross_cap): that margin is no fee."""
+    from . import payouts
+    if not payouts.rule_is_plus(SimpleNamespace(token_in=token_in)):
+        return amount
+    return Decimal(payouts.plus_gross_cap(int(amount * WAD), ())) / WAD
+
+
+def _infinia_costs(amount: Decimal, token_in: str, priced) -> AmountCosts:
+    sent = Decimal(priced.units) / WAD
+    return AmountCosts(conversion=max(payout_gross(amount, token_in) - sent, Decimal(0)),
+                       sending=priced.cost_usd, paid=sent - priced.cost_usd)
+
+
+def _costs_line(amount: Decimal, costs: AmountCosts) -> list[str]:
+    parts = [f'{usd_text(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))} {what}'
+             for value, what in ((costs.conversion, 'de comisión de conversión'),
+                                 (costs.sending, 'de costo de envío'))
+             if value >= Decimal('0.005')]
+    lines = [f'De esos {usd_text(amount)} salen hoy aprox. {" y ".join(parts)}.'] if parts else []
+    margin = (amount - costs.conversion - costs.sending - costs.paid).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if margin > 0:
+        lines.append(f'Hasta {usd_text(margin)} de margen no se envía: queda en tu cuenta.')
+    return lines
+
+
+def _local_amount_line(authorization, costs: AmountCosts, currency: str) -> str:
+    line = 'El monto en dólares es fijo; lo que llega en moneda local sigue la tasa y los costos del día.'
+    if not authorization.reference_fx_rate:
+        return line
+    local = (costs.paid * Decimal(str(authorization.reference_fx_rate))).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
+    shown = f'{local:,.2f}'.translate(str.maketrans(',.', '.,'))
+    return f'Son aprox. {shown} {currency} cada vez, a la tasa de referencia y con los costos de hoy. {line}'
+
+
+def _payout_summary(viewer, existing, *, destination, payout_ref: bytes, amount: Decimal, frequency: str,
+                    first_run_at: int, verified_holder: str, typed: str, authorization, currency: str,
+                    costs: AmountCosts) -> list[str]:
+    """The proof of intent (spec 3.5): the sheet shows these lines verbatim,
+    built from exactly the values being bound and signed."""
+    when = schedule_text(frequency, first_run_at, owner_tz(viewer.user), update=existing is not None)
+    lines = [f'Pagar {usd_text(amount)} (dólares) {when}', _signed_destination(destination)]
+    if verified_holder:
+        lines.append(f'Titular verificado por el banco: {_plain(verified_holder, 120)}')
+    else:
+        check = 'los datos' if getattr(destination, 'phone', None) is not None else 'que la cuenta sea la correcta'
+        typed = _plain(typed, 60)
+        lines.append(f'{UNVERIFIED_HOLDER_NOTE}' + (f' (escribiste: {typed})' if typed else '') + f': revisa {check}.')
+    if existing is not None and (existing.payout_ref or '').lower() != '0x' + payout_ref.hex():
+        was = existing.payout_method or existing.pagomovil_destination
+        before = f' Antes pagaba a {masked_destination(was)}.' if was is not None else ''
+        lines.append(f'Cambia el destino de esta regla.{before}')
+    return lines + [*_costs_line(amount, costs), _local_amount_line(authorization, costs, currency),
+                    *fx_floor_lines(authorization, currency)]
+
+
+def destination_title(destination) -> str:
+    """A rule's destination as the rules list names it."""
+    if getattr(destination, 'phone', None) is not None:     # Pago Móvil
+        return marked_label(destination_label(destination), destination.holder_name)
+    if payout_holder_state(destination) == HOLDER_VERIFIED:
+        return ' · '.join(p for p in (destination.label, destination.holder_name) if p)
+    return marked_label(destination.label, owner_holder(destination))
+
+
 def payout_method_rows(viewer) -> list[dict]:
-    """The viewer's saved bank destinations a payment rule may name (verified
-    Infinia destinations that are not QR intents, and saved Pago Móvil
+    """The viewer's saved bank destinations a payment rule may name (Infinia
+    destinations that are not QR intents and are usable or can be checked
+    again before Face — payout_holder_state — and saved Pago Móvil
     beneficiaries), each with whether its rail is live for unattended
-    payouts. Shared by the GraphQL list and the assistant's rule tools."""
+    payouts. `holder_name` is only a current bank answer; `holder_verified`
+    True/False for Infinia rows, None for Pago Móvil (no bank lookup exists
+    for it). `identifier` and `owner_holder` (what the owner typed) are the
+    server's own fields, not the GraphQL type's. Shared by the GraphQL list
+    and the assistant's rule tools."""
     from payment_accounts import local_money
     from payment_accounts.models import PayoutDestination
     from . import payouts
@@ -908,43 +1208,265 @@ def payout_method_rows(viewer) -> list[dict]:
         method = local_money.METHODS.get(rail)
         if method is None or method.direction != 'send' or method.kind == 'qr' or rail.endswith('_qr'):
             continue  # a QR is a one-time payment intent, not a saved destination
-        if local_money.verification_state((destination.provider_data or {}).get('validation')) != local_money.VERIFIED:
+        state = payout_holder_state(destination)
+        if not state:
             continue
+        verified = state == HOLDER_VERIFIED
         out.append(dict(payout_method_id=str(destination.internal_id), rail=rail, label=destination.label,
-                        holder_name=destination.holder_name or '', available=rail in rails))
+                        holder_name=(destination.holder_name or '') if verified else '',
+                        # A key the bank rejected never runs (payouts.authorization_problem).
+                        available=rail in rails and not payouts.key_rejected(destination),
+                        holder_verified=verified, owner_holder='' if verified else owner_holder(destination),
+                        identifier=str((destination.details or {}).get(method.field) or '')))
     for destination in pagomovil_destinations(viewer.user):
-        out.append(dict(payout_method_id=str(destination.internal_id), rail=payouts.VE_PAGOMOVIL,
-                        label=destination.label, holder_name=destination.holder_name or '',
-                        available=payouts.VE_PAGOMOVIL in rails))
+        out.append(pagomovil_row(destination, payouts.VE_PAGOMOVIL in rails))
     return out
 
 
-def save_pagomovil_destination(viewer, phone, bank_code, id_number, holder_name):
-    """Save a Venezuelan Pago Móvil beneficiary for payment rules, with the
-    VE send's own validation (ramps.ve_pagomovil). The same beneficiary
-    saved again is the same row."""
+def pagomovil_row(destination, available: bool) -> dict:
+    from . import payouts
+    return dict(payout_method_id=str(destination.internal_id), rail=payouts.VE_PAGOMOVIL,
+                label=destination_label(destination), holder_name='', available=bool(available), holder_verified=None,
+                owner_holder=destination.holder_name or '', identifier=destination.phone,
+                id_number=destination.id_number)
+
+
+def payout_method_row(viewer, payout_method_id) -> dict | None:
+    return next((r for r in payout_method_rows(viewer) if r['payout_method_id'] == str(payout_method_id)), None)
+
+
+def clean_clabe(value) -> str:
+    return re.sub(r'[\s.\-/]', '', ascii_digits(value))
+
+
+def save_clabe_destination(viewer, clabe, holder_name=''):
+    """Save a Mexican CLABE to the owner's address book (the personal
+    account's PayoutDestination, through Enviar's own save path,
+    local_money.resolve_destination) for payment rules, behind Enviar's own
+    gates (check_local_destination). The same CLABE saved again is the same
+    row. `holder_name` is optional and only the owner's words: kept apart
+    from the bank-verified holder. Refuses an invalid CLABE and one the bank
+    lookup definitely did not verify."""
+    return _save_local_destination(viewer, MX_CLABE, clean_clabe(clabe), holder_name)
+
+
+def save_pix_destination(viewer, key, holder_name=''):
+    """Save a Pix key exactly as save_clabe_destination saves a CLABE, read
+    by local_money's own parser: the same key saved again is the same row,
+    an e-mail in any case."""
+    return _save_local_destination(viewer, BR_PIX, ascii_digits(key).strip(), holder_name)
+
+
+@dataclass
+class CheckedDestination:
+    value: str = ''
+    saved: object = None        # the row it already is, if any
+    payable: object = None      # what preflight may price; never saved
+
+
+def _as_unverified(destination):
+    """A copy for pricing, never saved: preflight must not need a lookup."""
+    probe = copy.copy(destination)
+    probe.provider_data = {**(destination.provider_data or {}),
+                           'validation': {'status': 'DISABLED'}}
+    return probe
+
+
+def payable_preview(destination):
+    """What the assistant prices for a saved destination. Nothing is written
+    and the bank is not asked; prepare does both before Face."""
+    state = payout_holder_state(destination)
+    if not state:
+        raise PrepareError('payout_method_unverified')
+    return destination if state == HOLDER_VERIFIED else _as_unverified(destination)
+
+
+def _require_sender(viewer):
+    """Who may send at all, as Enviar decides it without a request."""
+    from payment_accounts import contract_funding
+    try:
+        contract_funding.require_owner(viewer.personal_account)
+    except contract_funding.Refused as exc:
+        raise PrepareError(exc.code, exc.message) from exc
+
+
+def _require_local_sender(viewer, method):
+    """ResolveLocalDestination's gates: an adult sender, then identity,
+    eligibility, document and region (require_rail). Before any paid lookup
+    or holder name."""
+    from payment_accounts import local_money
+    from payment_accounts.schema import _verified_identity
+    _require_sender(viewer)
+    try:
+        identity = _verified_identity(viewer.personal_account)
+    except local_money.PaymentAccountError:
+        identity = None
+    try:
+        local_money.require_rail(viewer.personal_account, identity, method)
+    except local_money.PaymentAccountError as exc:
+        raise PrepareError('rail_not_eligible', str(exc)) from exc
+
+
+def _count_lookup(viewer):
+    from django.core.cache import cache
+    key = f'smart_account:destination_lookups:{viewer.user.pk}'
+    try:
+        cache.add(key, 0, 3600)
+        used = cache.incr(key)
+    except Exception as exc:  # noqa: BLE001 — uncounted is refused
+        logger.warning('smart account: lookup counter unavailable', exc_info=True)
+        raise PrepareError('payout_method_check_failed') from exc
+    if used > DESTINATION_LOOKUPS_PER_HOUR:
+        raise PrepareError('too_many_lookups')
+
+
+def check_local_destination(viewer, rail: str, value) -> CheckedDestination:
+    """Everything that decides whether this CLABE or Pix key may be saved
+    for a rule. Writes nothing and asks the bank nothing."""
+    from payment_accounts import local_money
+    from payment_accounts.models import PayoutDestination
+    _require_enabled()
+    _require_no_identity_hold(viewer.user)
+    if rail not in offer.payout_rails():
+        raise PrepareError('payout_not_available')
+    if viewer.personal_account is None:
+        raise PrepareError('payout_method_not_found')
+    method = local_money.METHODS[rail]
+    try:
+        value = local_money.normalize_value(method, ascii_digits(value))
+    except local_money.PaymentAccountError as exc:
+        raise PrepareError('bad_pix_key' if rail == BR_PIX else 'bad_clabe') from exc
+    _own_active(viewer)
+    _require_local_sender(viewer, method)
+    email = rail == BR_PIX and '@' in value
+    if email:
+        value = value.lower()       # an e-mail key is one key in any case
+    details = {'type': method.destination_type, method.field: value, **dict(method.constants)}
+    rows = PayoutDestination.objects.filter(
+        confio_account=viewer.personal_account, provider='infinia', kind=method.kind, country=method.country)
+    same = list((rows.filter(details__type=method.destination_type, **{f'details__{method.field}__iexact': value})
+                 if email else rows.filter(details=details)).order_by('-created_at'))
+    if not _lookup_on():
+        # Saving again cannot ask the bank, so it never replaces its answer
+        # (a definite not-found would become DISABLED, and usable).
+        for row in same:
+            validation = (row.provider_data or {}).get('validation') or {}
+            if validation.get('status') and not payout_holder_state(row):
+                _require_answered(row)
+    saved = next((row for row in same if row.details == details), same[0] if same else None)
+    if saved is None:
+        if rows.filter(provider_data__method_id=rail).count() >= MAX_LOCAL_DESTINATIONS:
+            raise PrepareError('too_many_destinations')
+        return CheckedDestination(value, None, PayoutDestination(
+            confio_account=viewer.personal_account, provider='infinia', kind=method.kind, country=method.country,
+            asset=method.asset, status='active', details=details,
+            provider_data={'method_id': rail, 'validation': {'status': 'DISABLED'}}))
+    if saved.status not in ('pending', 'active'):
+        raise PrepareError('payout_method_rejected')
+    if not _lookup_on():
+        from . import payouts
+        if payouts.key_rejected(saved):
+            raise PrepareError('payout_method_rejected')
+    value = saved.details[method.field]
+    payable = saved
+    if payout_holder_state(saved) != HOLDER_VERIFIED:
+        payable = _as_unverified(saved)
+        payable.provider_data['method_id'] = rail
+    return CheckedDestination(value, saved, payable)
+
+
+def _save_local_destination(viewer, rail, value, holder_name):
+    from django.db import transaction as db_transaction
+    from payment_accounts import local_money
+    from payment_accounts.models import PayoutDestination
+    checked = check_local_destination(viewer, rail, value)
+    destination = checked.saved
+    answered = ((destination.provider_data or {}).get('validation') or {}) if destination is not None else {}
+    # With the lookup off there is nothing to learn from resolving a row that
+    # already has an answer, and an answer to lose. With it on, a current
+    # answer is reused and anything else is a counted, paid lookup.
+    if not answered or (_lookup_on() and payout_holder_state(destination) != HOLDER_VERIFIED):
+        if _lookup_on():
+            _count_lookup(viewer)
+        try:
+            destination = local_money.resolve_destination(viewer.personal_account, rail, checked.value)
+        except local_money.PaymentAccountError as exc:
+            # The number itself already passed: what refused is the provider side
+            # (accounts switched off), never shown as a bad number.
+            logger.warning('smart account: %s destination not saved: %s', rail, exc)
+            raise PrepareError('payout_not_available') from exc
+    if destination.status not in ('pending', 'active'):
+        raise PrepareError('payout_method_rejected')
+    _require_answered(destination)
+    name = ' '.join(str(holder_name or '').split())[:120]
+    if name:
+        with db_transaction.atomic():
+            row = PayoutDestination.objects.select_for_update().get(pk=destination.pk)
+            row.provider_data = {**(row.provider_data or {}), OWNER_HOLDER_KEY: name}
+            row.save(update_fields=['provider_data', 'updated_at'])
+        destination = row
+    return destination
+
+
+def _require_answered(destination) -> str:
+    """The holder state after the bank was asked, or why it cannot be used."""
+    from payment_accounts import local_money
+    state = payout_holder_state(destination)
+    if state in (HOLDER_VERIFIED, HOLDER_UNVERIFIED):
+        return state
+    validation = (destination.provider_data or {}).get('validation') or {}
+    if local_money.verification_state(validation) == local_money.PENDING:
+        raise PrepareError('payout_method_pending')
+    if state == HOLDER_RECHECK or validation.get('status') == 'TEMPORARY_FAILURE':
+        raise PrepareError('payout_method_check_failed')
+    raise PrepareError('payout_method_rejected')
+
+
+def check_pagomovil_destination(viewer, phone, bank_code, id_number, holder_name) -> CheckedDestination:
+    """Everything that decides whether this Pago Móvil beneficiary may be
+    saved for a rule. Writes nothing."""
     from ramps import ve_pagomovil
-    from .models import SmartAccountPagoMovilDestination
     from . import payouts
     _require_enabled()
     _require_no_identity_hold(viewer.user)
     if payouts.VE_PAGOMOVIL not in offer.payout_rails():
         raise PrepareError('payout_not_available')
     try:
-        phone = ve_pagomovil.normalize_phone(phone)
-        bank = ve_pagomovil.normalize_bank(bank_code)
-        cedula = ve_pagomovil.normalize_cedula(id_number)
+        identity = (ve_pagomovil.normalize_phone(ascii_digits(phone)),
+                    ve_pagomovil.normalize_bank(ascii_digits(bank_code)),
+                    ve_pagomovil.normalize_cedula(ascii_digits(id_number)))
     except ve_pagomovil.VePagoMovilError as exc:
         raise PrepareError('bad_pagomovil_destination', str(exc)) from exc
-    name = ' '.join(str(holder_name or '').split())[:120]
-    if len(name) < 2:
+    if len(' '.join(str(holder_name or '').split())) < 2:
         raise PrepareError('bad_pagomovil_destination', 'Escribe el nombre de quien recibe.')
+    if viewer.personal_account is None:
+        raise PrepareError('payout_method_not_found')
+    _own_active(viewer)
+    _require_sender(viewer)
     saved = pagomovil_destinations(viewer.user)
     for row in saved:
-        if (row.phone, row.bank_code, row.id_number) == (phone, bank, cedula):
-            return row
+        if (row.phone, row.bank_code, row.id_number) == identity:
+            return CheckedDestination(identity, row)
     if len(saved) >= MAX_PAGOMOVIL_DESTINATIONS:
         raise PrepareError('too_many_destinations')
+    return CheckedDestination(identity)
+
+
+def save_pagomovil_destination(viewer, phone, bank_code, id_number, holder_name):
+    """Save a Venezuelan Pago Móvil beneficiary for payment rules, with the
+    VE send's own validation (ramps.ve_pagomovil). The same beneficiary
+    saved again is the same row, under the name typed last: the name is only
+    shown ("escribiste"), and is in no identity, ref or binding (a signed rule's orders keep its first's name)."""
+    from ramps import ve_pagomovil
+    from .models import SmartAccountPagoMovilDestination
+    checked = check_pagomovil_destination(viewer, phone, bank_code, id_number, holder_name)
+    name = ' '.join(str(holder_name).split())[:120]
+    if checked.saved is not None:
+        if checked.saved.holder_name != name:
+            checked.saved.holder_name = name
+            checked.saved.save(update_fields=['holder_name', 'updated_at'])
+        return checked.saved
+    phone, bank, cedula = checked.value
     label = f'Pago Móvil · {ve_pagomovil.BANK_NAMES[bank]} · {phone[-4:]}'[:100]
     return SmartAccountPagoMovilDestination.objects.create(
         user=viewer.user, phone=phone, bank_code=bank, id_number=cedula, holder_name=name, label=label)
@@ -956,6 +1478,7 @@ def _prepare_pagomovil_rule(viewer, own, existing, first_run_at, destination, ra
     rail = payouts.VE_PAGOMOVIL
     if rail not in rails:
         raise PrepareError('payout_rail_not_available')
+    _require_sender(viewer)     # an adult with no hold, as saving one asks
     # Either dollar: a cUSD+ run exits an exact USDT amount too
     # (payouts.payout_exit), so the order's deposit is exact.
     token_in = account_dollar_token(own, viewer.user, viewer.meta)
@@ -966,18 +1489,188 @@ def _prepare_pagomovil_rule(viewer, own, existing, first_run_at, destination, ra
         raise PrepareError('payout_quote_unavailable') from exc
     ref = payouts.pagomovil_ref_for(destination)
     _refuse_duplicate_create(viewer, own, existing, 'payout', amount, frequency, payout_ref='0x' + ref.hex())
+    costs = preflight_pagomovil(viewer, own, amount, token_in, reference)
     # Face, once, at rule creation: bound to phone + bank + cédula, amount
     # and frequency (spec 7.5).
     authorization = payouts.create_pagomovil_authorization(
         viewer, destination=destination, amount=amount, frequency=frequency, reference_fx_rate=reference)
     rule_tuple = abi.rule_input('payout', frequency, token_in, payout_ref=ref, amount_usd_wei=int(amount * WAD),
                                 first_run_at=first_run_at)
-    summary = [f'Pagar {usd_text(amount)} por Pago Móvil a {destination.holder_name} {FREQUENCY_LABELS[frequency]}',
-               'El monto en dólares es fijo; los bolívares siguen la tasa del día.']
+    summary = _payout_summary(
+        viewer, existing, destination=destination, payout_ref=ref, amount=amount, frequency=frequency,
+        first_run_at=first_run_at, verified_holder='', typed=destination.holder_name, authorization=authorization,
+        currency='VES', costs=costs)
+    # The phone and cédula are encrypted at rest: the stored copy keeps tails.
+    stored = [summary[0], destination_label(destination), *summary[2:]]
     return _rule_batch(viewer, own, existing, dict(
         kind='payout', token_in=token_in, payout_method=None, pagomovil_destination=destination,
         payout_ref='0x' + ref.hex(), payout_rail=rail, standing_authorization=authorization, amount=amount,
-        frequency=frequency), rule_tuple, summary, proposal)
+        frequency=frequency), rule_tuple, summary, proposal, stored_summary=stored)
+
+
+def fx_floor_lines(authorization, currency: str) -> list[str]:
+    """The rate floor the owner signs: the rate alone (payouts.check_rule_limits),
+    and for Pago Móvil also after the provider's payout cost
+    (PagoAsapAdapter._check_payable, pagoasap_send.payout_terms)."""
+    reference = authorization.reference_fx_rate
+    if not reference:
+        return []
+    tolerance = int(authorization.fx_tolerance_bps)
+    floor = Decimal(str(reference)) * Decimal(10_000 - tolerance) / Decimal(10_000)
+    shown = f'{floor.quantize(Decimal("0.0001"), rounding=ROUND_DOWN).normalize():f}'.replace('.', ',')
+    percent = f'{(Decimal(tolerance) / 100).normalize():f}'.replace('.', ',')
+    counted = ' contando el costo del proveedor por pagarlo,' if currency == 'VES' else ''
+    return [f'Si un día 1 dólar vale menos de {shown} {currency} ({percent}% bajo la tasa de referencia de hoy),'
+            f'{counted} ese pago no se hace y te avisamos. Si el dinero ya salió, nunca se paga por debajo de esa tasa: '
+            'espera hasta una hora y, si no mejora, queda en revisión.']
+
+
+def next_run_shown(rule):
+    """The date shown as a rule's next run. A slot still being retried is
+    due now, never on a day already gone."""
+    due = rule.scheduled_for or rule.next_run_at
+    if due and rule.active and rule.kind in abi.EXECUTABLE_RULE_KINDS:
+        return max(due, timezone.now())
+    return due
+
+
+def rule_run_in_flight(rule) -> bool:
+    """A payment of this rule is on the wire, may still land, or has an
+    order open with the provider."""
+    from .models import SmartAccountPayout, SmartAccountRelayTx
+    if rule.runs.filter(status='sent').exists():
+        return True
+    if SmartAccountPayout.objects.filter(rule_run__rule=rule).exclude(
+            status__in=('paid', 'refunded', 'cancelled', 'review')).exists():
+        # 'review' is no longer moving: ops hold it, the rule may change.
+        return True
+    transactions = SmartAccountRelayTx.objects.filter(smart_account=rule.smart_account, kind='smart_execute_rule')
+    if transactions.filter(source_id__startswith=f'rule:{rule.pk}:', status__in=('signed', 'sent')).exists():
+        return True
+    if rule.scheduled_for is None:
+        return False
+    # Mined but not yet mirrored, or reorged out (it can be mined again).
+    slot = f'rule:{rule.pk}:{int(rule.scheduled_for.timestamp())}'
+    return (transactions.filter(source_id=slot, status__in=('confirmed', 'reorged')).exists()
+            and not rule.runs.filter(scheduled_for=rule.scheduled_for, status='ok').exists())
+
+
+def require_no_run_in_flight(rule):
+    """An edit racing its own payment would send the old recipient the new
+    amount. Funding enforces it again; stopping the rule stays allowed."""
+    if rule is not None and rule.kind == 'payout' and rule_run_in_flight(rule):
+        raise PrepareError('payout_run_in_flight')
+
+
+def require_payable_holder(viewer, destination):
+    """(destination, holder state) to sign for, before Face: an old or
+    missing answer is asked again and labelled by the result. With the
+    lookup off a stale answer is signed as unverified and left as recorded:
+    an authorization pinned to that holder still requires it verified
+    (payouts.authorization_problem), and a run judges the new one
+    (payouts.refresh_holder)."""
+    from payment_accounts import local_money
+    state = payout_holder_state(destination)
+    if not state:
+        raise PrepareError('payout_method_unverified')
+    if state != HOLDER_RECHECK:
+        return destination, state       # recent, or no way to ask
+    _require_local_sender(viewer, local_money.METHODS[destination_rail(destination)])
+    _count_lookup(viewer)
+    try:
+        destination = local_money.recheck_destination(destination)
+    except Exception as exc:  # noqa: BLE001 — an unknown holder is never signed for
+        logger.warning('smart account: holder recheck before Face failed', exc_info=True)
+        raise PrepareError('payout_method_check_failed') from exc
+    return destination, _require_answered(destination)
+
+
+def preflight_payout(viewer, own, destination, amount, token_in):
+    """What would stop this rule from ever running, said before Face (and
+    by the assistant instead of proposing). Returns today's price."""
+    from . import infinia_payouts, payouts
+    try:
+        return infinia_payouts.preflight(viewer.personal_account, own.contract_address, destination,
+                                         destination_rail(destination), amount, token_in)
+    except payouts.PayoutSkip as exc:
+        raise PrepareError(exc.code, exc.message) from exc
+
+
+def preflight_pagomovil(viewer, own, amount: Decimal, token_in: str,
+                        reference: Decimal | None = None) -> AmountCosts:
+    """The checks a run makes before it funds a Pago Móvil (PagoAsapAdapter.open
+    and _plan_for: the estimate, then the one-time route that gets the money),
+    asked before Face and before the assistant proposes: a rule that would
+    skip every time is refused. `reference`: the rate being signed (today's
+    when none is yet). Writes nothing and funds nothing: the route is asked
+    for as contract_funding.price does for Infinia."""
+    from payment_accounts.allbridge_next import TOKENS
+    from ramps import pagoasap_send, ve_pagomovil, ve_send
+    from . import infinia_payouts, payouts
+    adapter = payouts.PagoAsapAdapter()
+    rule = SimpleNamespace(pk=None, amount=amount, token_in=token_in)
+    try:
+        try:
+            ve_send.check_limits(viewer.user, amount, payouts.PAGOASAP)
+        except ve_send.VeSendLimitError as exc:
+            if not exc.passing:     # today's cap frees up; a per-send bound never does
+                raise PrepareError('limit_exceeded', str(exc)) from exc
+        exit_ = payouts.payout_exit(rule, unavailable=MESSAGES['payout_quote_unavailable'])
+        plan = adapter._price(rule, exit_)
+        limit = int(getattr(settings, 'SMART_ACCOUNT_PAYOUT_MAX_BRIDGE_COST_BPS', 150))
+        signed = SimpleNamespace(
+            max_bridge_cost_bps=limit, reference_fx_rate=reference or plan.fx_rate,
+            fx_tolerance_bps=int(getattr(settings, 'SMART_ACCOUNT_PAYOUT_FX_TOLERANCE_BPS', 300)))
+        quoted = Decimal(plan.estimate['usdt_amount'])
+        arrives = Decimal(plan.estimate['estimated_ves']) / plan.fx_rate
+        try:
+            payouts.check_rule_limits(signed, plan)
+            adapter._check_payable(signed, plan.estimate, plan.fx_rate)
+            order = SimpleNamespace(pk=None, actor_address=own.contract_address.lower(), metadata={ve_send.SECTION: {
+                'deposit_wei': str(exit_.usdt_wei), 'funding_sender': (chain.cusd_address() or '').lower(),
+                'funding_terms': {'recovery': (own.owner_account.bsc_address or '').lower()}}})
+            try:
+                route = pagoasap_send.funding_target(order)['binding']['amount_out']
+            except ve_pagomovil.VePagoMovilError as exc:
+                if str(exc) == pagoasap_send.TOO_SMALL:
+                    raise PrepareError('amount_too_small', str(exc)) from exc
+                raise
+            plan.bridge_cost_bps = pagoasap_send.route_cost_bps(exit_.usdt_wei, route)
+            quoted = Decimal(exit_.usdt_wei) / WAD
+            arrives = pagoasap_send._fee_free_usd(
+                Decimal(int(route)) / Decimal(10 ** TOKENS[pagoasap_send.DESTINATION][1]))
+            payouts.check_rule_limits(signed, plan)
+        except payouts.PayoutSkip as exc:
+            if exc.code == 'bridge_cost_above_limit':
+                cost = max(quoted - arrives, Decimal(0))
+                minimum = infinia_payouts.suggested_minimum(cost, Decimal(0), quoted, amount, limit)
+                message = (f'Hoy el envío de {usd_text(amount)} por Pago Móvil cuesta '
+                           f'{infinia_payouts._percent(plan.bridge_cost_bps)}, más del '
+                           f'{infinia_payouts._percent(limit)} que permite una regla.')
+                if minimum is not None and minimum <= MAX_RULE_USD:
+                    message += f' Con los costos de hoy funciona desde unos {usd_text(minimum)}.'
+                raise PrepareError(exc.code, message) from exc
+            if exc.code == 'fx_rate_below_limit':
+                raise PrepareError(exc.code, 'Hoy la tasa, con el costo del proveedor por pagar, deja ese pago por '
+                                             'debajo del límite de una regla. Prueba con otro monto o más tarde.') from exc
+            raise
+        sent = Decimal(exit_.usdt_wei) / WAD
+        # As settlement prices it: the most bolívares whose cost fits what arrived.
+        priced = pagoasap_send._affordable(pagoasap_send._client(), arrives, plan.fx_rate)
+    except PrepareError:
+        raise
+    except payouts.PayoutSkip as exc:
+        if exc.code == 'provider_unavailable':
+            raise PrepareError('payout_quote_unavailable') from exc
+        raise PrepareError(exc.code, exc.message) from exc
+    except Exception as exc:  # noqa: BLE001 — unknown is never inside the limits
+        logger.warning('Pago Móvil preflight failed', exc_info=True)
+        raise PrepareError('payout_quote_unavailable') from exc
+    if priced is None:
+        raise PrepareError('amount_too_small', 'El monto es muy bajo para este pago.')
+    paid = priced[0] / plan.fx_rate
+    return AmountCosts(conversion=max(payout_gross(amount, token_in) - sent, Decimal(0)),
+                       sending=max(sent - paid, Decimal(0)), paid=paid)
 
 
 def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency: str,
@@ -990,6 +1683,7 @@ def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency
     _check_frequency(frequency)
     amount = _parse_usd(amount_usd)
     existing = _existing_rule(own, rule_id, 'payout')
+    require_no_run_in_flight(existing)
     first_run_at = requested_first_run(first_run_at, frequency, floor=_first_run_at(own, existing))
     pagomovil = owned_pagomovil_destination(viewer, payout_method_id)
     if pagomovil is not None:
@@ -999,25 +1693,34 @@ def prepare_payout_rule(viewer, rule_id, payout_method_id, amount_usd, frequency
     rail = destination_rail(destination)
     if rail not in rails:
         raise PrepareError('payout_rail_not_available')
-    from payment_accounts import local_money
-    validation = (destination.provider_data or {}).get('validation')
-    if local_money.verification_state(validation) != local_money.VERIFIED or not local_money.checked_recently(validation):
-        raise PrepareError('payout_method_unverified')
-    from . import payouts
+    destination, holder = require_payable_holder(viewer, destination)
+    from . import infinia_payouts, payouts
     token_in = account_dollar_token(own, viewer.user, viewer.meta)
     ref = payout_ref_for(destination)
     _refuse_duplicate_create(viewer, own, existing, 'payout', amount, frequency, payout_ref='0x' + ref.hex())
-    # Face, once, at rule creation: the standing authorization (spec 7.5).
+    priced = preflight_payout(viewer, own, payable_preview(destination), amount, token_in)
+    fee = infinia_payouts.signed_fee(priced)
+    # Face, once, at rule creation: the standing authorization (spec 7.5),
+    # with today's rate as the reference of the rule's FX tolerance and
+    # today's fixed fee as the most a payment may ever charge (decision 36).
+    verified_holder = destination.holder_name if holder == HOLDER_VERIFIED else ''
     authorization = payouts.create_standing_authorization(
-        viewer, destination=destination, rail=rail, amount=amount, frequency=frequency)
+        viewer, destination=destination, rail=rail, amount=amount, frequency=frequency,
+        reference_fx_rate=Decimal(priced.rate).quantize(Decimal('1e-8')), processor_fee=fee,
+        verified_holder=verified_holder)
     rule_tuple = abi.rule_input('payout', frequency, token_in, payout_ref=ref, amount_usd_wei=int(amount * WAD),
                                 first_run_at=first_run_at)
-    summary = [f'Pagar {usd_text(amount)} a {destination.label} {FREQUENCY_LABELS[frequency]}',
-               'El monto en dólares es fijo; el monto en moneda local sigue la tasa del día.']
+    summary = _payout_summary(
+        viewer, existing, destination=destination, payout_ref=ref, amount=amount, frequency=frequency,
+        first_run_at=first_run_at, verified_holder=verified_holder, typed=owner_holder(destination),
+        authorization=authorization, currency=destination.asset, costs=_infinia_costs(amount, token_in, priced))
+    summary += infinia_payouts.fee_lines(fee)
+    # The key or CLABE is whole only on the sheet: the stored copy keeps its end.
+    stored = [summary[0], masked_destination(destination), *summary[2:]]
     return _rule_batch(viewer, own, existing, dict(
         kind='payout', token_in=token_in, payout_method=destination, payout_ref='0x' + ref.hex(),
         payout_rail=rail, standing_authorization=authorization, amount=amount, frequency=frequency),
-        rule_tuple, summary, proposal)
+        rule_tuple, summary, proposal, stored_summary=stored)
 
 
 def buyable_assets(viewer, search: str = '') -> list[dict]:
@@ -1095,7 +1798,7 @@ def prepare_buy_rule(viewer, rule_id, asset_key: str, amount_usd, frequency: str
     rule_tuple = abi.rule_input('buy', frequency, token_in, token_out=token_out,
                                 amount_usd_wei=int(amount * WAD), first_run_at=first_run_at)
     summary = [f'Comprar {usd_text(amount)} de {symbol.removesuffix("on") if kind == "stock" else symbol} '
-               f'{FREQUENCY_LABELS[frequency]}']
+               + schedule_text(frequency, first_run_at, owner_tz(viewer.user), kind='buy', update=existing is not None)]
     return _rule_batch(viewer, own, existing, dict(
         kind='buy', token_in=token_in, token_out=token_out, asset_key=asset_key,
         amount=amount, frequency=frequency), rule_tuple, summary, proposal)

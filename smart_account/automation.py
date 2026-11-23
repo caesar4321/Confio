@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import calendar
 import logging
+import re
 from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from . import abi, assets as assets_mod, chain, notifications, quotes, relayer
@@ -38,6 +40,56 @@ BPS = 10_000
 FORCED_SALE_MARGIN_BPS = 500          # contract cap: shortfall + 5% + US$1
 FORCED_SALE_ROUNDING_WEI = WAD
 RULE_SLOT_GIVE_UP = timedelta(hours=24)
+NO_BALANCE = 'insufficient_balance'
+BALANCE_GIVE_UP = timedelta(days=3)     # founder, 2026-11-22: no balance, monthly rules only
+NO_BALANCE_TEXT = 'No había saldo suficiente en tu Cuenta inteligente.'
+# A closed session, and one that could not be read: waited out to the next slot.
+MARKET_WAITS = ('market_closed', 'market_status_unavailable')
+# Kept by the waits that follow them and through a dropped transaction.
+CARRIED_WAITS = (NO_BALANCE,) + MARKET_WAITS
+NOT_PAID = 'No hicimos este pago.'
+NOT_DONE = {'payout': 'No hicimos este pago', 'send': 'No hicimos este envío', 'buy': 'No hicimos esta compra'}
+NOT_COMPLETED = 'No se pudo completar.'
+UNCONFIRMED = 'No pudimos confirmar si este pago salió de tu Cuenta inteligente. Lo estamos revisando: no lo repitas.'
+SESSION_UNKNOWN = 'No pudimos confirmar si el mercado está abierto: lo haremos cuando lo esté, antes de tu próxima fecha.'
+MARKET_WAIT = 'El mercado está cerrado: lo haremos cuando abra, si es antes de tu próxima fecha.'
+# What the owner can do about a skip that is retried.
+RETRY_ACTION = {
+    NO_BALANCE: 'Agrega saldo', 'account_unavailable': 'Escríbenos por soporte',
+    'identity_hold': 'Escríbenos por soporte', 'trade_not_available': 'Escríbenos por soporte',
+    'review_amount_cap': 'Edita la regla con un monto menor',
+}
+# Why a held owner's slot was given up: what they can do about it.
+HELD_TEXT = {
+    'account_suspended': 'Tu cuenta está suspendida. Escríbenos por soporte.',
+    'identity_hold': 'Tu cuenta está en revisión. Escríbenos por soporte.',
+    'account_unavailable': 'Tu cuenta no está disponible. Escríbenos por soporte.',
+    'owner_held': 'Tu cuenta está en revisión. Escríbenos por soporte.',
+}
+
+
+def _held_text(error: str) -> str:
+    code = _code(error)
+    if code == 'owner_held':     # "owner_held: <the refusal's code>"
+        return HELD_TEXT.get((error or '').partition(':')[2].strip(), HELD_TEXT[code])
+    return HELD_TEXT.get(code, '')
+
+
+# The assistant reads 160 characters of a run's message: the date must fit.
+RETRY_TEXT_MAX = 160
+# Nothing was broadcast, and the next pass reads the new state or gets the
+# lock: the slot waits with its order.
+RELAY_WAITS = ('rule_changed', 'rule_unreadable', 'order_closed', 'claim_busy', 'sponsor_lock_lost', 'sponsor_busy',
+               'owner_held')
+# Nothing was signed, for a reason of Confío's that may last: the slot waits
+# too, its order stops holding the owner's accounts, and ops see an error.
+INFRA_WAITS = ('simulation_unreadable', 'gas_price_too_high', 'sponsor_balance_low')
+# Today's cost or rate outside the rule's signed limits: the slot is asked
+# again, and its unfunded order stops holding the owner's accounts meanwhile.
+LIMIT_RETRIES = ('bridge_cost_above_limit', 'fx_rate_below_limit')
+# Each retry prices a new route: asked again hourly, not every pass.
+LIMIT_RETRY_EVERY = timedelta(hours=1)
+RUN_SENT = ('sent', 'ok')
 MAX_SALE_LEGS = abi.MAX_SALE_LEGS
 
 
@@ -541,12 +593,54 @@ def on_relay_tx_final(row) -> None:
             _record_sale_failure(row.smart_account, sale, f'transaction {row.status}', timezone.now(),
                                  count_attempt=False)
     elif row.kind == 'smart_execute_rule':
-        run = SmartAccountRuleRun.objects.filter(tx_hash=row.signed_tx_hash, status='sent').first()
+        values = dict(status='failed', tx_hash=row.signed_tx_hash, updated_at=timezone.now())
+        sent = SmartAccountRuleRun.objects.filter(tx_hash__iexact=row.signed_tx_hash, status='sent')
+        run = sent.select_related('rule__smart_account__owner_user').first()
         if run is not None:
-            run.status = 'failed'
-            run.error = f'transaction {row.status}'
-            run.message = 'No se pudo completar. Volveremos a intentarlo.'
-            run.save(update_fields=['status', 'error', 'message', 'updated_at'])
+            error = _unlanded(run.error, row.status)
+            if sent.filter(pk=run.pk).update(**values, error=error, message=_not_completed(run, error)):
+                return
+        # A hash that was never saved on its run: the row's source names it.
+        # A run on the wire under another transaction's hash is that one's.
+        run = run_of_relay(row)
+        if (run is not None and run.rule.scheduled_for == run.scheduled_for     # not a slot already finished
+                and relayer.live_tx(row.smart_account, row.kind, row.source_id) is None):
+            error = _unlanded(run.error, row.status)
+            (SmartAccountRuleRun.objects.filter(pk=run.pk, status__in=('pending', 'failed', 'sent'))
+             .exclude(Q(status='sent') & ~Q(tx_hash=''))
+             .update(**values, error=error, message=_not_completed(run, error)))
+
+
+def _not_completed(run, error: str) -> str:
+    """A call that did not land: until when, while this slot still retries."""
+    rule = run.rule
+    if (rule.active and rule.scheduled_for == run.scheduled_for
+            and timezone.now() <= retry_deadline(_code(error), rule.frequency, run.scheduled_for)):
+        return _pending_message(rule, run.scheduled_for, 'failed', NOT_COMPLETED, error)
+    return NOT_COMPLETED
+
+
+def run_of_relay(row):
+    """The (rule, slot) an executeRule was sent for, from its source_id."""
+    try:
+        kind, rule_pk, slot = str(row.source_id).split(':')
+        start = chain.to_dt(int(slot))
+        rule_pk = int(rule_pk)
+    except (TypeError, ValueError):
+        return None
+    if kind != 'rule' or start is None:
+        return None
+    return SmartAccountRuleRun.objects.filter(
+        rule_id=rule_pk, rule__smart_account_id=row.smart_account_id,
+        scheduled_for__gte=start, scheduled_for__lt=start + timedelta(seconds=1)).order_by('pk').first()
+
+
+def run_of_transaction(account, rule, tx_hash: str):
+    """The run whose executeRule this transaction is, by its durable row."""
+    row = SmartAccountRelayTx.objects.filter(
+        smart_account=account, kind='smart_execute_rule', signed_tx_hash__iexact=tx_hash).first()
+    run = run_of_relay(row) if row is not None else None
+    return run if run is not None and run.rule_id == rule.pk else None
 
 
 # ── USDT conversion ─────────────────────────────────────────────────────
@@ -604,13 +698,72 @@ def next_slot(frequency: str, after):
     return after + timedelta(days={'daily': 1, 'weekly': 7, 'biweekly': 14}[frequency])
 
 
+def retry_deadline(code: str, frequency: str, slot):
+    """Until when a slot is retried after this outcome, for the executor and
+    for what the owner is told. Only a monthly rule waits days for balance:
+    a late run moves the next weekly or biweekly date for good. A market
+    wait lasts to the next slot (spec 7.5)."""
+    if code in MARKET_WAITS:
+        return next_slot(frequency, slot)
+    window = BALANCE_GIVE_UP if code == NO_BALANCE and frequency == 'monthly' else RULE_SLOT_GIVE_UP
+    return min(slot + window, next_slot(frequency, slot))
+
+
+def _code(error: str) -> str:
+    """A wait that follows one of CARRIED_WAITS is kept as "<that>: why"."""
+    return (error or '').split(':')[0]
+
+
+def _carried(error: str) -> str:
+    code = _code(error)
+    return code if code in CARRIED_WAITS else ''
+
+
+def _sent_error(error: str) -> str:
+    """What a sent run keeps, in case its transaction never lands."""
+    carried = _carried(error)
+    return f'{carried}: sent' if carried else ''
+
+
+def _unlanded(error: str, status: str) -> str:
+    """A dropped call loses no promise; a real revert keeps 24 hours."""
+    carried = _carried(error) if status != 'reverted' else ''
+    return f'{carried}: transaction {status}' if carried else f'transaction {status}'
+
+
+def _monthly_anchor(rule):
+    """A monthly rule's own day: its first slot since the owner last set it.
+    A late run moves February's date (the contract's 28 days) for that month
+    only. None when the mirror has no such event or slot."""
+    if rule.frequency != 'monthly' or not rule.pk or rule.onchain_id is None:
+        return None
+    from . import payouts
+    applied = [e for e in payouts._rule_settings(rule.smart_account.contract_address, rule.onchain_id)
+               if e.applied_at is not None]
+    if not applied:
+        return None
+    return (rule.runs.filter(scheduled_for__gte=applied[-1].block_time).order_by('scheduled_for')
+            .values_list('scheduled_for', flat=True).first())
+
+
+def _following(frequency: str, slot, anchor=None):
+    if anchor is None:
+        return next_slot(frequency, slot)
+    # Pushed past the end of its month (the 30th run on March 2): that
+    # month's own date is still ahead.
+    month = slot if anchor.day - slot.day > 15 else next_slot(frequency, slot)
+    day = min(anchor.day, calendar.monthrange(month.year, month.month)[1])
+    return anchor.replace(year=month.year, month=month.month, day=day)
+
+
 def schedule_next(rule, *, after=None) -> None:
     """Move the rule's calendar slot on. Never earlier than the contract's
     own minimum gap (rule.next_run_at)."""
     now = timezone.now()
-    slot = next_slot(rule.frequency, rule.scheduled_for or after or now)
+    anchor = _monthly_anchor(rule)
+    slot = _following(rule.frequency, rule.scheduled_for or after or now, anchor)
     while slot <= now:
-        slot = next_slot(rule.frequency, slot)
+        slot = _following(rule.frequency, slot, anchor)
     if rule.next_run_at and slot < rule.next_run_at:
         slot = rule.next_run_at
     SmartAccountRule.all_objects.filter(pk=rule.pk).update(scheduled_for=slot, updated_at=now)
@@ -671,12 +824,13 @@ def build_rule_call(rule, onchain: dict | None = None) -> tuple[str, int, str]:
     # cover the most it can come to.
     limit, limit_most = prices.limit_bounds(amount_wei) if in_plus else (amount_wei, amount_wei)
     if chain.balance_of(rule.token_in, account.contract_address) < limit_most:
-        raise RuleSkip('insufficient_balance', 'No había saldo suficiente en tu Cuenta inteligente.')
+        raise RuleSkip(NO_BALANCE, NO_BALANCE_TEXT)
     referrer, share = _referrer(account)
 
     if rule.kind == 'send':
-        if outgoing_identity_restriction(owner):
-            raise RuleSkip('identity_hold', 'Tu cuenta está en revisión.')
+        refusal = owner_refusal(owner)
+        if refusal is not None:
+            raise refusal
         payee = rule.payee_user
         from .context import personal_account
         payee_account = personal_account(payee) if payee is not None else None
@@ -725,7 +879,22 @@ def build_rule_call(rule, onchain: dict | None = None) -> tuple[str, int, str]:
     # payout
     from . import payouts
     if outgoing_identity_restriction(owner):
-        raise RuleSkip('identity_hold', 'Tu cuenta está en revisión.')
+        # As contract_funding.require_owner: a hold may be lifted inside the slot.
+        raise payouts.PayoutSkip('identity_hold', 'Tu cuenta está en revisión.', wait=True)
+    if onchain:
+        # The contract exits what IT holds; the deposit is quoted from the
+        # mirror. A mirror behind an update waits for its event.
+        amount_moved = 'amount_usd_wei' in onchain and int(onchain['amount_usd_wei']) != amount_wei
+        ref = str(onchain.get('payout_ref') or '').lower()
+        token = str(onchain.get('token_in') or '').lower()
+        # updateRule always sets nextRunAt, so it also shows an update that
+        # kept the amount and the recipient (another authorization).
+        set_again = (rule.next_run_at is not None and 'next_run_at' in onchain
+                     and int(onchain['next_run_at']) != int(rule.next_run_at.timestamp()))
+        if (amount_moved or set_again or (ref and ref != (rule.payout_ref or '').lower())
+                or (token and token != (rule.token_in or '').lower())
+                or onchain.get('frequency', rule.frequency) != rule.frequency):
+            raise payouts.PayoutSkip('rule_mirror_behind', 'Tu regla se está actualizando.', wait=True)
     fee_bps = chain.conversion_fee_bps()
     usdt_estimate = amount_wei * (BPS - fee_bps) // BPS
     run = rule.runs.filter(scheduled_for=rule.scheduled_for).first()
@@ -742,6 +911,21 @@ def build_rule_call(rule, onchain: dict | None = None) -> tuple[str, int, str]:
             abi.RELAY_GAS_RULE['payout'], 'Pago en camino.')
 
 
+def owner_refusal(owner) -> RuleSkip | None:
+    """The owner's own state, with nobody present to be refused by
+    SecurityMiddleware. Skips the run only: the rule stays as it is and the
+    owner's withdrawals are not asked here."""
+    from security.identity_reuse import outgoing_identity_restriction
+    from security.utils import check_user_banned
+    if not owner.is_active or getattr(owner, 'deleted_at', None):
+        return RuleSkip('account_unavailable', 'Tu cuenta no está disponible para reglas automáticas.')
+    if check_user_banned(owner)[0]:
+        return RuleSkip('account_suspended', 'Tu cuenta está suspendida. Escríbenos por soporte.')
+    if outgoing_identity_restriction(owner):
+        return RuleSkip('identity_hold', 'Tu cuenta está en revisión.')
+    return None
+
+
 def buy_rule_refusal(rule, crypto=None) -> RuleSkip | None:
     """The SAME entry gates prepare_buy_rule applied, re-run at every run
     (eligibility can change after the rule was created: a new country, a
@@ -753,9 +937,9 @@ def buy_rule_refusal(rule, crypto=None) -> RuleSkip | None:
     unavailable = RuleSkip('trade_not_available', 'La compra automática no está disponible para tu cuenta por ahora.')
     # Same hold as creating or changing the rule (sponsor_7702: smart_rule
     # is not exempt): no automatic purchase runs while it lasts.
-    from security.identity_reuse import outgoing_identity_restriction
-    if outgoing_identity_restriction(owner):
-        return RuleSkip('identity_hold', 'Tu cuenta está en revisión.')
+    refusal = owner_refusal(owner)
+    if refusal is not None:
+        return refusal
     from security.geo import review_cap_exceeded
     if review_cap_exceeded(owner, rule.amount):
         return RuleSkip('review_amount_cap', 'Ese monto supera el límite de tu cuenta.')
@@ -801,12 +985,18 @@ def run_rules() -> dict:
     out = {'sent': 0, 'skipped': 0, 'waiting': 0, 'errors': 0}
     if not _ready():
         return {'skipped': 'disabled'}
-    # Mirror the Pago Móvil sends already under way (no transaction).
+    # Mirror the Pago Móvil sends and Infinia journeys already under way (no
+    # transaction).
     try:
         from . import payouts
         payouts.mirror_ramp_payouts()
     except Exception:  # noqa: BLE001 — retried next run
         logger.exception('payout mirror failed')
+    try:
+        from . import infinia_payouts
+        infinia_payouts.mirror_payouts()
+    except Exception:  # noqa: BLE001 — retried next run
+        logger.exception('journey payout mirror failed')
     if chain.relayer_paused():
         return {'skipped': 'relayer_paused'}
     for rule in due_rules():
@@ -818,32 +1008,135 @@ def run_rules() -> dict:
     return _report('run_rules', out)
 
 
+def _left_the_account(run) -> bool:
+    """The slot's payout was seen sent, whatever the run row says."""
+    from .models import SmartAccountPayout
+    return (SmartAccountPayout.objects.filter(rule_run=run)
+            .exclude(status__in=('reserving', 'prepared', 'pending', 'cancelled')).exists())
+
+
+def _lock_slot(rule, run):
+    """(run, rule) fresh, with the account and the run locked, in the order
+    the event mirror takes them (account first). Inside a transaction."""
+    SmartAccount.all_objects.select_for_update().filter(pk=rule.smart_account_id).first()
+    current = SmartAccountRuleRun.objects.select_for_update().get(pk=run.pk)
+    return current, SmartAccountRule.all_objects.get(pk=rule.pk)
+
+
+def _with_tail(reason: str, tail: str) -> str:
+    """`reason` without its own promise of a retry, cut before the tail is."""
+    reason = re.sub(r'\s*(Volveremos a intentarlo|Lo intentaremos[^.]*)\.', '', reason or '').strip()
+    room = RETRY_TEXT_MAX - len(tail) - 1
+    if len(reason) > room:
+        reason = reason[:room - 1].rstrip() + '…'
+    return f'{reason} {tail}'.strip()
+
+
+def _until(rule, slot, code: str) -> str:
+    return notifications._date(retry_deadline(code, rule.frequency, slot), rule.smart_account.owner_user)
+
+
+def _pending_message(rule, slot, status: str, reason: str, error: str) -> str:
+    code = _code(error)
+    # What the owner can do is about the outcome itself, not a wait it kept.
+    action = RETRY_ACTION.get(error, 'No tienes que hacer nada' if status == 'failed' else '')
+    tail = f'{action}: lo reintentamos' if action else 'Lo reintentamos'
+    return _with_tail(reason, f'{tail} hasta el {_until(rule, slot, code)}.')
+
+
+def _not_done_message(rule, reason: str = '') -> str:
+    when = notifications._date(rule.scheduled_for, rule.smart_account.owner_user)
+    what = NOT_DONE.get(rule.kind, 'No se realizó')
+    return _with_tail(reason, f'{what}; el próximo intento es el {when}.' if when else f'{what}.')
+
+
+def _tell(rule, run) -> None:
+    run.rule = rule     # as it now stands: retrying, or moved on
+    notifications.safe(notifications.rule_run, run)
+
+
 def _finish_run(rule, run, status: str, message: str, error: str = '', *, final: bool) -> None:
-    run.status, run.message, run.error = status, message[:200], error[:2000]
-    run.save(update_fields=['status', 'message', 'error', 'updated_at'])
-    # One message per slot, at the first skip or failure.
-    if SmartAccountRuleRun.objects.filter(pk=run.pk, notified_at__isnull=True).update(notified_at=timezone.now()):
-        notifications.safe(notifications.rule_run, run)
+    """Compare-and-set: never over a run that was sent or executed, nor over
+    a slot another worker already finished (the sender's claim takes the
+    same locks)."""
+    now = timezone.now()
+    with transaction.atomic():
+        current, fresh = _lock_slot(rule, run)
+        if current.status in RUN_SENT or fresh.scheduled_for != run.scheduled_for:
+            return
+        if rule.kind == 'payout' and (slot_may_land(rule, run) or _left_the_account(run)):
+            return
+        retrying = current.status in ('skipped', 'failed')
+        timed_out = final and now > retry_deadline(_code(error), rule.frequency, run.scheduled_for)
+        if final:
+            schedule_next(rule)
+            fresh.scheduled_for = rule.scheduled_for
+        if not final:
+            message = _pending_message(rule, run.scheduled_for, status, message, error)
+        elif fresh.active and (retrying or timed_out):
+            # The end of the slot: nothing will be retried or "done later".
+            held = _held_text(error)
+            message = _not_done_message(rule, held or ('' if timed_out and status == 'failed' else message))
+        # The rule's own limits are the owner's, not an incident: the owner is told, ops are not.
+        alert = (final and rule.kind == 'payout' and (status == 'failed' or error.startswith(f'{NO_BALANCE}:'))
+                 and _code(error) not in LIMIT_RETRIES)
+        values = dict(status=status, message=message[:200], error=error[:2000], updated_at=now)
+        SmartAccountRuleRun.objects.filter(pk=run.pk).update(**values)
+        run.status, run.message, run.error = values['status'], values['message'], values['error']
+        # One message per transition: pending at the first skip or failure,
+        # then given up (or done, reconcile._rule_executed). Never one a pass.
+        tell = SmartAccountRuleRun.objects.filter(pk=run.pk, notified_at__isnull=True).update(notified_at=now) == 1
+        if final and retrying and not tell:
+            tell = SmartAccountRuleRun.objects.filter(pk=run.pk).update(notified_at=now) == 1
+    if tell:
+        _tell(fresh, run)
     if final:
         _close_unsent_payout(rule, run)
-        schedule_next(rule)
+    if alert:
+        _alert_not_paid(rule, run)
 
 
-def _close_unsent_payout(rule, run) -> None:
-    """A payout slot that ends without its executeRule on the wire closes
-    its own VE send now (it would otherwise linger PENDING to ramps' expiry).
-    Not while any relayer transaction of the slot may still land."""
-    if rule.kind != 'payout':
-        return
+def _alert_not_paid(rule, run) -> None:
+    try:
+        from config.ops_alerts import send_ops_alert
+        send_ops_alert(f'Cuenta inteligente: pago automático no hecho, se agotó su plazo (regla {rule.pk}, '
+                       f'run {run.pk}, {run.error[:120]}).',
+                       dedupe_key=f'smart_payout_given_up_{run.pk}', dedupe_seconds=86400)
+    except Exception:  # noqa: BLE001
+        logger.exception('ops alert failed')
+
+
+def _alert_unconfirmed(rule, run) -> None:
+    try:
+        from config.ops_alerts import send_ops_alert
+        send_ops_alert(f'Cuenta inteligente: fecha de pago superada sin ejecución confirmada (regla {rule.pk}, '
+                       f'run {run.pk}): el pago pudo salir. Revisar la cadena y su orden; el dueño fue avisado.',
+                       dedupe_key=f'smart_payout_unconfirmed_{run.pk}', dedupe_seconds=86400)
+    except Exception:  # noqa: BLE001
+        logger.exception('ops alert failed')
+
+
+def slot_may_land(rule, run) -> bool:
+    """A relayer transaction of this slot is on the wire, confirmed, or
+    reorged out (it can be mined again)."""
     from .models import SmartAccountRelayTx
     source_id = f'rule:{rule.pk}:{int(run.scheduled_for.timestamp())}'
-    if SmartAccountRelayTx.objects.filter(
-            smart_account=rule.smart_account, kind='smart_execute_rule', source_id=source_id,
-            status__in=SmartAccountRelayTx.LIVE_STATUSES + ('reorged',)).exists():
+    return SmartAccountRelayTx.objects.filter(
+        smart_account=rule.smart_account, kind='smart_execute_rule', source_id=source_id,
+        status__in=SmartAccountRelayTx.LIVE_STATUSES + ('reorged',)).exists()
+
+
+def _close_unsent_payout(rule, run, *, quiet: bool = False) -> None:
+    """A payout slot that ends, or a pass whose call was refused, without its
+    executeRule on the wire closes its own order now (a VE send, or a bridge
+    and journey that would keep holding the owner's accounts). Not while any
+    relayer transaction of the slot may still land. `quiet`: the slot will
+    try again with a fresh order."""
+    if rule.kind != 'payout' or slot_may_land(rule, run):
         return
     try:
         from . import payouts
-        payouts.close_unsent_order(run)
+        payouts.close_unsent_order(run, quiet=quiet)
     except Exception:  # noqa: BLE001 — ramps' own expiry still closes it
         logger.exception('closing the order of run %s failed', run.pk)
 
@@ -851,28 +1144,179 @@ def _close_unsent_payout(rule, run) -> None:
 def _supersede_slot(rule, run, now) -> None:
     """This slot's time is over (the next calendar slot is due) and it never
     ran. Recorded as skipped and told once (only when there was a reason to
-    tell, e.g. the market stayed closed), then the rule moves to the latest
-    slot that is due, which runs on its own: the current slot is never lost
-    and the old one never runs into it."""
-    if run.status in ('pending', 'failed'):
-        reason = run.error or ''
-        run.status = 'skipped'
-        run.message = ('El mercado estaba cerrado.' if reason.startswith('market_closed')
-                       else 'No se pudo completar a tiempo.')
-        run.error = reason or 'slot_superseded'
-        run.save(update_fields=['status', 'message', 'error', 'updated_at'])
-        if reason and SmartAccountRuleRun.objects.filter(
-                pk=run.pk, notified_at__isnull=True).update(notified_at=now):
-            notifications.safe(notifications.rule_run, run)
+    tell, e.g. the market stayed closed; a slot told it would be retried
+    hears that it was not done), then the rule moves to the latest slot that
+    is due, which runs on its own: the current slot is never lost and the
+    old one never runs into it."""
+    tell = close = gave_up = False
+    payout = rule.kind == 'payout'
+    with transaction.atomic():
+        current, fresh = _lock_slot(rule, run)
+        if current.status in RUN_SENT or fresh.scheduled_for != run.scheduled_for:
+            return
+        slot = run.scheduled_for
+        while next_slot(rule.frequency, slot) <= now:
+            slot = next_slot(rule.frequency, slot)
+        if rule.next_run_at and slot < rule.next_run_at:
+            slot = rule.next_run_at
+        SmartAccountRule.all_objects.filter(pk=rule.pk, scheduled_for=run.scheduled_for).update(
+            scheduled_for=slot, updated_at=now)
+        rule.scheduled_for = slot
+        reached = payout and (slot_may_land(rule, run) or _left_the_account(run))
+        fresh.scheduled_for = slot
+        if reached:
+            # It may have left, and it never executed: not "not done" either.
+            run.status, run.message = 'failed', UNCONFIRMED
+            run.error = current.error or 'slot_superseded'
+            SmartAccountRuleRun.objects.filter(pk=run.pk).update(
+                status=run.status, message=run.message, error=run.error, notified_at=now, updated_at=now)
+        if current.status in ('pending', 'failed', 'skipped') and not reached:
+            reason = current.error or ''
+            retrying = current.status in ('failed', 'skipped')
+            run.status = 'skipped'
+            if payout or retrying:
+                run.message = _not_done_message(rule, NO_BALANCE_TEXT if reason == NO_BALANCE else (
+                    'El mercado estaba cerrado.' if reason.startswith('market_closed') else ''))
+            elif reason.startswith('market_closed'):
+                run.message = 'El mercado estaba cerrado.'
+            else:
+                run.message = 'No se pudo completar a tiempo.'
+            run.error = reason or 'slot_superseded'
+            SmartAccountRuleRun.objects.filter(pk=run.pk).update(
+                status=run.status, message=run.message, error=run.error, updated_at=now)
+            if reason:
+                tell = SmartAccountRuleRun.objects.filter(
+                    pk=run.pk, notified_at__isnull=True).update(notified_at=now) == 1
+            if retrying and not tell:
+                tell = SmartAccountRuleRun.objects.filter(pk=run.pk).update(notified_at=now) == 1
+            close = True
+            # Ops hear of a payment that could not be made, not of no balance.
+            gave_up = bool(payout and reason and (current.status != 'skipped' or reason.startswith(f'{NO_BALANCE}:')))
+    if reached:
+        notifications.safe(notifications.payout_unconfirmed, run)
+        _alert_unconfirmed(rule, run)
+    if tell:
+        _tell(fresh, run)
+    if close:
         _close_unsent_payout(rule, run)
-    slot = run.scheduled_for
-    while next_slot(rule.frequency, slot) <= now:
-        slot = next_slot(rule.frequency, slot)
-    if rule.next_run_at and slot < rule.next_run_at:
-        slot = rule.next_run_at
-    SmartAccountRule.all_objects.filter(pk=rule.pk, scheduled_for=run.scheduled_for).update(
-        scheduled_for=slot, updated_at=now)
-    rule.scheduled_for = slot
+    if gave_up:
+        _alert_not_paid(rule, run)
+
+
+def _rule_change_on_the_wire(account, rule) -> bool:
+    """An owner batch that updates or stops this rule is signed and not mined
+    yet. Asked under the sponsor nonce lock, which those batches are signed
+    under too: one signed later has a later nonce and lands after this call."""
+    from . import inflight
+    from .models import SmartAccountPreparedAction
+    actions = SmartAccountPreparedAction.objects.filter(
+        target_address=account.contract_address.lower(), consumed=True,
+        kind__in=('smart_rule', 'smart_rule_cancel'), sponsored_batch__status__in=inflight.ON_WIRE,
+        sponsored_batch__created_at__gte=timezone.now() - inflight.IN_FLIGHT_MAX_AGE)
+    return any(rule.pk in ((action.payload or {}).get('replaces_pk'), (action.payload or {}).get('cancel_rule_pk'))
+               for action in actions)
+
+
+def _update_unmirrored(account, rule) -> bool:
+    """The owner's update of this rule is on chain and the mirror has not
+    applied it: what would run is not what the mirror says. An update can
+    keep the amount, the recipient and nextRunAt (another authorization),
+    so the contract's storage alone does not show it."""
+    from . import payouts
+    from .models import SmartAccountPreparedAction
+    events = payouts._rule_settings(account.contract_address, rule.onchain_id)
+    if any(e.name == 'RuleUpdated' and e.applied_at is None for e in events):
+        return True
+    confirmed = set(SmartAccountPreparedAction.objects.filter(
+        target_address=account.contract_address.lower(), consumed=True, kind='smart_rule',
+        payload__replaces_pk=rule.pk, sponsored_batch__status='confirmed',
+    ).values_list('sponsored_batch__tx_hash', flat=True))
+    applied = {e.tx_hash.lower() for e in events if e.applied_at is not None}
+    return any(tx.lower() not in applied for tx in confirmed if tx)
+
+
+class _Send:
+    """The two checks of one executeRule send (relayer.send_relayer_call)."""
+
+    def __init__(self, rule, run, onchain: dict, calldata: str, message: str):
+        self.rule, self.run, self.onchain = rule, run, onchain
+        self.calldata, self.message = calldata, message
+        self.claimed = False
+
+    def before_sign(self) -> None:
+        """The contract pays what IT stores when mined: read it again now,
+        and sign nothing over a difference, nor for an owner held since the
+        call was built."""
+        account = self.rule.smart_account
+        seen = account.owner_user
+        owner = type(seen)._base_manager.filter(pk=seen.pk).first()     # as committed now
+        refusal = owner_refusal(owner) if owner is not None else None
+        if owner is None or refusal is not None:
+            raise relayer.RelayError('owner_held', refusal.code if refusal is not None else '')
+        try:
+            current = chain.account_rule(account.contract_address, int(self.rule.onchain_id))
+        except Exception as exc:  # noqa: BLE001 — unknown is never signed
+            raise relayer.RelayError('rule_unreadable', str(exc)[:300]) from exc
+        if (current != self.onchain or _rule_change_on_the_wire(account, self.rule)
+                or _update_unmirrored(account, self.rule)):
+            raise relayer.RelayError('rule_changed')
+
+    def claim(self, tx_hash: str) -> None:
+        """In the transaction that writes the relay row: this is still the
+        slot's call and (a payout) its order is still open. The run turns
+        'sent' with the hash there, so a closer, a finisher or a second
+        worker sees all of it or none."""
+        rule, run = self.rule, self.run
+        current, fresh = _lock_slot(rule, run)
+        wanted = lambda r: (r.standing_authorization_id, r.amount, (r.payout_ref or '').lower(),  # noqa: E731
+                            (r.payee_address or '').lower(), r.epoch, r.token_in.lower())
+        if current.status in RUN_SENT:
+            raise relayer.RelayError('order_closed', 'already sent')
+        if (fresh.deleted_at or not fresh.active or fresh.state != 'onchain'
+                or fresh.scheduled_for != run.scheduled_for or wanted(fresh) != wanted(rule)):
+            raise relayer.RelayError('rule_changed')
+        if fresh.standing_authorization is not None and fresh.standing_authorization.revoked_at is not None:
+            raise relayer.RelayError('rule_changed', 'revoked')
+        if rule.kind == 'payout':
+            from . import payouts
+            if not payouts.lock_sendable(fresh, current, self.calldata):
+                raise relayer.RelayError('order_closed')
+        SmartAccountRuleRun.objects.filter(pk=run.pk).update(
+            status='sent', tx_hash=tx_hash, message=self.message[:200], error=_sent_error(current.error),
+            updated_at=timezone.now())
+        self.claimed = True
+
+
+def _heal_sent_run(account, run) -> None:
+    """A run left 'sent' whose transaction finally did not land (the worker
+    that resolved it died before saying so)."""
+    row = SmartAccountRelayTx.objects.filter(
+        smart_account=account, kind='smart_execute_rule', signed_tx_hash__iexact=run.tx_hash,
+        status__in=('reverted', 'dropped', 'reorged')).first() if run.tx_hash else None
+    if row is not None:
+        on_relay_tx_final(row)
+
+
+def _wait_code(run, code: str) -> str:
+    """A wait keeps the deadline of what it follows: the days promised after
+    no balance, or a market wait's next slot. A market wait has its own,
+    also for a slot funded in time."""
+    return code if code in MARKET_WAITS else (_carried(run.error) or code)
+
+
+def _note_wait(rule, run, reason: str, now) -> None:
+    code = _code(reason)
+    kept = _wait_code(run, code)
+    values = dict(error=reason if kept == code else f'{kept}: {reason}'[:2000])
+    if code in MARKET_WAITS:
+        if run.status in ('skipped', 'failed'):
+            values['message'] = MARKET_WAIT if code == 'market_closed' else SESSION_UNKNOWN
+    elif kept == NO_BALANCE:
+        # The balance is there now (it is checked before anything that waits).
+        values['message'] = f'Ya hay saldo. Lo reintentamos hasta el {_until(rule, run.scheduled_for, NO_BALANCE)}.'
+    if all(getattr(run, name) == value for name, value in values.items()):
+        return
+    SmartAccountRuleRun.objects.filter(pk=run.pk).exclude(status__in=RUN_SENT).update(**values, updated_at=now)
 
 
 def _run_rule(rule, out: dict) -> None:
@@ -883,13 +1327,15 @@ def _run_rule(rule, out: dict) -> None:
         out['skipped'] += 1  # a rule of an earlier subscription never runs
         return
     slot = rule.scheduled_for
-    run, _ = SmartAccountRuleRun.objects.get_or_create(rule=rule, scheduled_for=slot)
+    run, first_look = SmartAccountRuleRun.objects.get_or_create(rule=rule, scheduled_for=slot)
     if run.status == 'ok':
         schedule_next(rule)
         out['skipped'] += 1
         return
     source_id = f'rule:{rule.pk}:{int(slot.timestamp())}'
     if run.status == 'sent' or relayer.live_tx(account, 'smart_execute_rule', source_id) is not None:
+        if run.status == 'sent':
+            _heal_sent_run(account, run)
         out['skipped'] += 1  # on the wire: its event (or its revert) decides
         return
     now = timezone.now()
@@ -900,9 +1346,10 @@ def _run_rule(rule, out: dict) -> None:
         _supersede_slot(rule, run, now)
         out['skipped'] += 1
         return
-    # Non-market skips and failures give the slot up after 24h; a closed
-    # session (QuoteUnavailable.retry_later) waits up to the next slot.
-    expired = now - slot > RULE_SLOT_GIVE_UP
+    # Skips, failures and waits give the slot up at retry_deadline (for a
+    # market wait, and what follows one, the next slot).
+    def expired(code: str) -> bool:
+        return now > retry_deadline(code, rule.frequency, slot)
     # Fresh state: the mirror can be behind.
     if (int(chain.account_view(account.contract_address, 'status')) not in (1, 2)
             or int(chain.account_view(account.contract_address, 'billingStatus')) != 0):
@@ -915,25 +1362,43 @@ def _run_rule(rule, out: dict) -> None:
     if onchain['next_run_at'] > int(timezone.now().timestamp()):
         out['waiting'] += 1
         return
+    if not first_look and expired(_code(run.error)):
+        # Asked before anything is built, whatever it was waiting for: never
+        # done after its deadline. A slot never looked at (Confío or billing
+        # paused through it) still gets its one attempt.
+        status = run.status if run.status in ('skipped', 'failed') else 'failed'
+        reason = NO_BALANCE_TEXT if run.error == NO_BALANCE else ''
+        _finish_run(rule, run, status, reason, run.error or 'slot_expired', final=True)
+        out['skipped'] += 1
+        return
+    if (run.status == 'failed' and _code(run.error) in LIMIT_RETRIES
+            and run.updated_at is not None and run.updated_at > now - LIMIT_RETRY_EVERY):
+        out['waiting'] += 1     # today's cost or rate: asked again an hour after the last attempt
+        return
+    if _update_unmirrored(account, rule):
+        _note_wait(rule, run, 'rule_mirror_behind', now)
+        out['waiting'] += 1
+        return
     try:
         calldata, gas, message = build_rule_call(rule, onchain)
     except RuleSkip as exc:
         if exc.deactivate:
             SmartAccountRule.objects.filter(pk=rule.pk).update(active=False, deactivated_reason=exc.deactivate)
-        _finish_run(rule, run, 'skipped', exc.message, exc.code, final=exc.final or expired or bool(exc.deactivate))
+        _finish_run(rule, run, 'skipped', exc.message, exc.code,
+                    final=exc.final or bool(exc.deactivate) or expired(exc.code))
         out['skipped'] += 1
         return
     except quotes.QuoteUnavailable as exc:
-        if exc.retry_later:
-            # Closed session (spec 7.5): runs at the next open one, as long as
-            # that comes before the next calendar slot (checked above). The
-            # reason is kept on the run, untold, for that skip's one message.
-            reason = str(exc)[:2000]
-            if run.error != reason:
-                SmartAccountRuleRun.objects.filter(pk=run.pk).update(error=reason, updated_at=now)
+        reason = str(exc)[:2000]
+        code = _code(reason)
+        if (exc.retry_later or code in MARKET_WAITS) and not expired(_wait_code(run, code)):
+            # A wait, untold: the reason is kept on the run for that skip's
+            # one message. A closed session (spec 7.5) runs at the next open
+            # one before the next calendar slot; any other ends at the deadline.
+            _note_wait(rule, run, reason, now)
             out['waiting'] += 1
             return
-        _finish_run(rule, run, 'failed', 'No pudimos obtener un precio.', str(exc), final=expired)
+        _finish_run(rule, run, 'failed', 'No pudimos obtener un precio.', str(exc), final=expired(_code(str(exc))))
         out['errors'] += 1
         return
     except Exception as exc:
@@ -944,23 +1409,53 @@ def _run_rule(rule, out: dict) -> None:
             # The Face authorization no longer matches what the rule pays:
             # stopped until the owner signs it again (spec 7.1).
             SmartAccountRule.objects.filter(pk=rule.pk).update(active=False, deactivated_reason=exc.deactivate)
+        late = expired(_wait_code(run, exc.code) if exc.wait else exc.code)
+        if exc.wait and not exc.deactivate and not late:
+            # An ordinary wait (the owner's own send holds the accounts):
+            # retried within the slot, and nobody is told unless it gives up.
+            _note_wait(rule, run, exc.code, now)
+            out['waiting'] += 1
+            return
         if getattr(exc, 'retry_later', False) and not exc.deactivate:
             # A passing refusal (e.g. an identical payout still open):
             # retried within the slot until it gives up.
-            _finish_run(rule, run, 'failed', exc.message, exc.code, final=expired)
+            _finish_run(rule, run, 'failed', exc.message, exc.code, final=late)
+            if exc.code in LIMIT_RETRIES and not late:
+                _close_unsent_payout(rule, run, quiet=True)
             out['errors'] += 1
             return
         _finish_run(rule, run, 'skipped', exc.message, exc.code, final=True)
         out['skipped'] += 1
         return
+    send = _Send(rule, run, onchain, calldata, message)
     try:
-        row, created = relayer.send_relayer_call(account, calldata, 'smart_execute_rule', source_id, gas=gas)
+        row, created = relayer.send_relayer_call(account, calldata, 'smart_execute_rule', source_id, gas=gas,
+                                                 before_sign=send.before_sign, claim=send.claim)
     except relayer.RelayError as exc:
-        _finish_run(rule, run, 'failed', 'No se pudo completar. Volveremos a intentarlo.', str(exc), final=expired)
+        waits = exc.code in RELAY_WAITS + INFRA_WAITS
+        late = expired(_wait_code(run, exc.code) if waits else exc.code)
+        if waits and not late:
+            # Nothing left: untold, asked again. A held owner's reason is kept for the give-up.
+            _note_wait(rule, run, str(exc) if exc.code == 'owner_held' else exc.code, now)
+            if exc.code in INFRA_WAITS:
+                logger.warning('rule %s waits: %s', rule.pk, exc)
+                _close_unsent_payout(rule, run, quiet=True)
+                out['errors'] += 1
+            else:
+                out['waiting'] += 1
+            return
+        _finish_run(rule, run, 'failed', NOT_COMPLETED, str(exc), final=late)
+        # The order was reserved before the simulation and nothing was
+        # broadcast: it stops holding the owner's accounts now. Refused under
+        # the order's lock while a recorded call may still land.
+        _close_unsent_payout(rule, run, quiet=True)
         out['errors'] += 1
         return
-    run.status, run.tx_hash, run.message, run.error = 'sent', row.signed_tx_hash, message, ''
-    run.save(update_fields=['status', 'tx_hash', 'message', 'error', 'updated_at'])
+    if not created or not send.claimed:
+        # Another worker's live transaction of this slot: record its hash.
+        SmartAccountRuleRun.objects.filter(pk=run.pk).exclude(status='ok').update(
+            status='sent', tx_hash=row.signed_tx_hash, message=message[:200], error=_sent_error(run.error),
+            updated_at=timezone.now())
     out['sent' if created else 'skipped'] += 1
 
 

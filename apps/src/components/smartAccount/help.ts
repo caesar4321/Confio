@@ -37,9 +37,9 @@ export const HELP_RULES: HelpContent = {
   paragraphs: [
     'Una regla repite una operación por ti: enviarle a alguien de Confío, pagar a una cuenta bancaria que ya guardaste o invertir.',
     'Tú firmas cada regla una vez, con su monto, su destino y su frecuencia. Confío solo puede ejecutar exactamente eso, y puedes detenerla cuando quieras.',
-    'Si un día no hay saldo suficiente en la cuenta, esa ejecución se omite y te avisamos. Nunca se toma dinero de tu billetera personal.',
+    'Si un día no hay saldo suficiente en la cuenta, te avisamos y lo reintentamos por un tiempo. Nunca se toma dinero de tu billetera personal.',
     'En los pagos a cuenta bancaria el monto en dólares es fijo. Lo que llega en moneda local depende del tipo de cambio de ese día.',
-    'Con Confío IA+ también puedes pedirlas por chat. El asistente te deja el cambio listo y tú lo revisas y lo firmas aquí. Detener una regla la borra; puedes crearla de nuevo cuando quieras.',
+    'Con Confío IA+ puedes pedir por chat reglas de inversión o detener una regla: el asistente te deja el cambio listo y tú lo revisas y lo firmas aquí. Las reglas de envío y de pago a cuenta bancaria se crean y se cambian aquí. Detener una regla la borra; puedes crearla de nuevo cuando quieras.',
   ],
 };
 

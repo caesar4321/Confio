@@ -681,12 +681,17 @@ def provision_payout_destination(destination):
     if destination.status == 'active':
         return destination
     result = get_provider(destination.provider).provision_destination(destination)
-    destination.provider_destination_id = result.resource_id or None
-    destination.status = result.status
-    destination.provider_data = result.raw
-    destination.save(
-        update_fields=['provider_destination_id', 'status', 'provider_data', 'updated_at']
-    )
+    with transaction.atomic():
+        # Merged with what is stored now, never replaced: method_id, the bank's
+        # check and a payment rule's signed holders and rejections live here.
+        stored = type(destination).objects.select_for_update().filter(pk=destination.pk).values_list(
+            'provider_data', flat=True).first()
+        destination.provider_destination_id = result.resource_id or None
+        destination.status = result.status
+        destination.provider_data = {**(stored or {}), **(result.raw or {})}
+        destination.save(
+            update_fields=['provider_destination_id', 'status', 'provider_data', 'updated_at']
+        )
     return destination
 
 

@@ -15,7 +15,7 @@ from smart_account.models import (
     SmartAccountRule, SmartAccountRuleRun,
 )
 
-from .base import CUSD, SWAP_ROUTER, USDT, VAULT, SmartAccountTestCase, WAD
+from .base import CUSD, SWAP_ROUTER, USDT, VAULT, SmartAccountTestCase, WAD, own_nonce_lock
 
 SPONSOR = '0x' + '5a' * 20
 
@@ -69,7 +69,7 @@ class RelayHarness(SmartAccountTestCase):
         for p in (
                 mock.patch('blockchain.evm_kms_signer.get_bsc_sponsor_signer_from_settings', return_value=signer),
                 mock.patch('smart_account.chain.rpc', side_effect=rpc),
-                mock.patch('cusd_plus.sponsor_7702.acquire_sponsor_nonce_lock', return_value='token'),
+                mock.patch('cusd_plus.sponsor_7702.acquire_sponsor_nonce_lock', side_effect=own_nonce_lock),
                 mock.patch('cusd_plus.sponsor_7702.release_sponsor_nonce_lock'),
                 mock.patch('smart_account.tasks.check_relay_tx.apply_async'),
                 mock.patch('smart_account.tasks.reconcile_events.apply_async')):

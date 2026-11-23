@@ -14,7 +14,8 @@ from smart_account.models import SmartAccountPagoMovilDestination, SmartAccountW
 from .base import SmartAccountTestCase
 
 VE_ON = dict(SMART_ACCOUNT_PAYOUT_RAILS='ve_pagomovil', SMART_ACCOUNT_PAYOUT_VERIFIED_ADAPTERS='pagoasap',
-             VE_PAGOMOVIL_SEND_ENABLED=True, PAGOASAP_DEPOSIT_ADDRESS_POLYGON='0x' + '9a' * 20)
+             VE_PAGOMOVIL_SEND_ENABLED=True, PAGOASAP_DEPOSIT_ADDRESS_POLYGON='0x' + '9a' * 20,
+             RELAY_API_KEY='fake-relay-key')
 
 
 def _resolve_info(field_name, ctx):
