@@ -57,8 +57,8 @@ it('draws one chip per purchase note, always in its own words', () => {
     { type: 'task', target: ID, label: 'otra vez' },
     { type: 'task', target: 'not-an-id' },
     { type: 'navigate', target: ID },
-  ])).toEqual([{ taskId: ID, label: 'Abrir la tienda' }]);
-  expect(taskActions([{ type: 'task', target: ID }])).toEqual([{ taskId: ID, label: 'Abrir la tienda' }]);
+  ])).toEqual([{ taskId: ID, label: 'Ver la compra' }]);
+  expect(taskActions([{ type: 'task', target: ID }])).toEqual([{ taskId: ID, label: 'Ver la compra' }]);
 });
 
 it('sends only a Brazilian store\'s unread code to the chat', () => {

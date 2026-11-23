@@ -26,7 +26,9 @@ MESSAGES = {
                 '(.mx, con transferencia SPEI). Escríbeme la dirección de la tienda.'),
     'store': 'No puedo trabajar en ese sitio.',
     'goal': 'Dime en una frase qué quieres comprar.',
-    'active_task': 'Estoy terminando de cerrar tu compra anterior. Pídemelo otra vez en un momento.',
+    'active_task': 'Acabo de empezar esa compra hace un momento.',
+    'checkout_open': ('Tu pedido en {site} sigue abierto. Termínalo o cancélalo en la pantalla de la tienda y '
+                      'después te ayudo con lo nuevo.'),
     'daily_limit': 'Llegaste al máximo de compras por hoy. Mañana seguimos.',
     'busy': 'Ahora hay muchas compras en curso. Inténtalo en unos minutos.',
     'not_found': 'No encontré esa compra.',
@@ -87,25 +89,39 @@ def require_payable(account, user, country, meta):
         raise TaskRefused('unavailable', str(exc) or None) from exc
 
 
-# The browser worker answers the sweep's heartbeat (tasks.heartbeat on its own
-# queue). With none seen lately, purchases are not offered nor started: a
-# queued one would wait forever and stand in the way of the next.
+# A browser worker leaves a mark that lasts a few minutes: when it answers the
+# sweep's heartbeat (tasks.heartbeat, on its own queue) and whenever it runs a
+# step. With no mark, purchases are not offered nor started: a queued one
+# would wait forever. The mark is the key's own lifetime, not a clock compared
+# across machines.
 WORKER_KEY = 'agent_tasks:worker_seen'
-WORKER_FRESH_SECONDS = 180
+HEARTBEAT_PENDING_KEY = 'agent_tasks:heartbeat_pending'
+WORKER_FRESH_SECONDS = 300
+
+
+def _shared_cache():
+    """A per-process cache (LocMem: testnet, local) cannot carry the worker's mark to the web."""
+    from django.conf import settings
+    return 'locmem' not in str(settings.CACHES.get('default', {}).get('BACKEND', '')).lower()
 
 
 def worker_seen():
     from django.core.cache import cache
-    cache.set(WORKER_KEY, timezone.now().timestamp(), WORKER_FRESH_SECONDS * 2)
+    try:
+        cache.set(WORKER_KEY, 1, WORKER_FRESH_SECONDS)
+        cache.delete(HEARTBEAT_PENDING_KEY)
+    except Exception:  # noqa: BLE001 - the next answer marks it
+        logger.warning('agent task worker mark not saved', exc_info=True)
 
 
 def worker_alive():
+    if not _shared_cache():
+        return True   # nothing to read here: never strand or refuse on a cache that cannot know
     from django.core.cache import cache
     try:
-        seen = cache.get(WORKER_KEY)
+        return cache.get(WORKER_KEY) is not None
     except Exception:  # noqa: BLE001 - unknown is not alive
         return False
-    return seen is not None and timezone.now().timestamp() - float(seen) < WORKER_FRESH_SECONDS
 
 
 def start(account, user, *, goal, site, meta=None):
@@ -128,31 +144,42 @@ def start(account, user, *, goal, site, meta=None):
     if country not in conf.get('AGENT_TASKS_COUNTRIES') or countries.rail(country) is None:
         raise TaskRefused('country')
     mine = AgentTask.objects.filter(user=user)
-    for earlier in mine.filter(state__in=AgentTask.ACTIVE):
-        # The new request is what they want now. Its note says so (and, after the
-        # hand-over, that an order they confirmed there still waits to be paid).
-        runner.end(earlier, 'cancelled', 'replaced')
-    # Set aside before its browser ever opened costs nothing, as below.
-    if (mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(state='cancelled', steps=0).count()
+    # An order they may have confirmed at the store is never set aside by a new request.
+    open_order = mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=False).first()
+    if open_order is not None:
+        raise TaskRefused('checkout_open', MESSAGES['checkout_open'].format(site=open_order.site))
+    # Cancelled before its browser ever opened (no provider yet) costs nothing.
+    free = Q(state='cancelled', provider='')
+    if (mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(free).count()
             >= conf.get('AGENT_TASKS_PER_DAY')):
         raise TaskRefused('daily_limit')
     require_payable(account, user, country, meta)
+    now = timezone.now()
     try:
         with transaction.atomic():
             with connection.cursor() as cursor:
                 cursor.execute('SELECT pg_advisory_xact_lock(%s)', [STARTS_LOCK])
             everyone = AgentTask.objects.all()
-            if (everyone.filter(state__in=AgentTask.ACTIVE).count() >= conf.get('AGENT_TASKS_MAX_CONCURRENT')
-                    # Cancelled before its browser ever opened costs nothing.
-                    or everyone.filter(created_at__gte=timezone.now() - timedelta(days=1))
-                    .exclude(state='cancelled', steps=0).count()
+            # Their own earlier one is about to be set aside: it does not count against the new one.
+            if (everyone.filter(state__in=AgentTask.ACTIVE).exclude(user=user).count()
+                    >= conf.get('AGENT_TASKS_MAX_CONCURRENT')
+                    or everyone.filter(created_at__gte=now - timedelta(days=1)).exclude(free).count()
                     >= conf.get('AGENT_TASKS_ALL_PER_DAY')):
                 raise TaskRefused('busy')
+            # Only now, with nothing left to refuse the new one: the earlier one is set aside
+            # (its step, if one runs, loses its lease and stops). The new request is what they want.
+            earlier = list(mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=True)
+                           .values_list('pk', flat=True))
+            mine.filter(pk__in=earlier, state__in=AgentTask.ACTIVE).update(
+                state='cancelled', reason='replaced', wait_until=None, lease=None, lease_until=None, updated_at=now)
             task = AgentTask.objects.create(account=account, user=user, goal=goal, site=store, country=country,
                                             app_version=str((meta or {}).get('HTTP_X_CONFIO_VERSION') or '')[:20])
             runner.kick(task.pk)
     except IntegrityError as exc:
         raise TaskRefused('active_task') from exc
+    for gone in AgentTask.objects.filter(pk__in=earlier):
+        runner.close_session(gone)
+        notes.post(gone, notes.stopped_text(gone, 'replaced'), 'end')
     notes.post(task, notes.say(notes.STARTED, task), 'start')
     return task
 
@@ -287,10 +314,14 @@ def _each(rows, work, what):
 
 
 def sweep():
+    from django.core.cache import cache
+
     from .tasks import heartbeat
     try:
-        # Answered only by a browser worker: worker_alive() reads its mark.
-        heartbeat.apply_async(queue=conf.get('AGENT_TASKS_QUEUE'), expires=120)
+        # Answered only by a browser worker (worker_alive() reads its mark). One at a
+        # time: with no worker, they would pile up in the queue.
+        if cache.add(HEARTBEAT_PENDING_KEY, 1, 120):
+            heartbeat.apply_async(queue=conf.get('AGENT_TASKS_QUEUE'), expires=120)
     except Exception:  # noqa: BLE001 - the sweep goes on
         logger.warning('agent task heartbeat not sent', exc_info=True)
     _sweep()
@@ -311,11 +342,11 @@ def _sweep():
     _each(active.filter(user__is_active=False), lambda task: runner.end(task, 'cancelled', 'cancelled'), 'deleted')
 
     if not worker_alive():
-        # No browser worker to run them: what waited for one is stopped and the person told,
-        # never left to stand in the way of the next request.
-        _each(active.filter(state__in=AgentTask.RUNNING, created_at__lt=now - timedelta(minutes=3))
-              .exclude(lease_until__gt=now),
-              lambda task: runner.end(task, 'stopped', 'unavailable', only={'state__in': AgentTask.RUNNING}),
+        # No browser worker: a purchase that never opened a browser (queued, no provider) is
+        # stopped and the person told. Anything a worker ever touched has its own timeouts.
+        _each(active.filter(state='queued', provider='', checkout_at__isnull=True,
+                            created_at__lt=now - timedelta(minutes=3)),
+              lambda task: runner.end(task, 'stopped', 'unavailable', only={'state': 'queued', 'provider': ''}),
               'stranded')
 
     def rerun(task):

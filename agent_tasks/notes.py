@@ -52,7 +52,7 @@ STOPPED = {
 }
 # After the hand-over, nothing may suggest there is no order.
 AFTER_CHECKOUT = (' Si ya confirmaste el pedido, sigue en tus compras de {site}: para pagarlo, {paste}.')
-TASK_ACTION = {'type': 'task', 'label': 'Abrir la tienda'}
+TASK_ACTION = {'type': 'task', 'label': 'Ver la compra'}
 PUSH = {'person': 'Te toca a ti', 'payment': 'Revisa tu pago', 'check': 'Revisa tu compra'}
 
 

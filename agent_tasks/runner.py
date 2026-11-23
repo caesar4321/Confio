@@ -148,6 +148,8 @@ def same_page(url):
 
 
 def run_step(task_id, turn=None):
+    from . import service
+    service.worker_seen()   # a worker is here: running this proves it
     now, lease = timezone.now(), uuid.uuid4()
     rows = AgentTask.objects.filter(pk=task_id, state__in=AgentTask.RUNNING)
     if turn is not None:

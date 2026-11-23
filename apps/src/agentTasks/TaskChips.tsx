@@ -1,4 +1,4 @@
-// "Abrir la tienda": the chip agent_tasks/notes.py puts on its chat notes
+// "Ver la compra": the chip agent_tasks/notes.py puts on its chat notes
 // ({type: 'task', target: <task id>}). It opens the task screen.
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -8,7 +8,7 @@ import { Text } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { taskIdOf } from './helpers';
 
-const CHIP_LABEL = 'Abrir la tienda';
+const CHIP_LABEL = 'Ver la compra';
 
 type Action = { type: string; target?: string | null; label?: string | null };
 

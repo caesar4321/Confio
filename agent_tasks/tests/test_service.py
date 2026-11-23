@@ -74,16 +74,35 @@ class StartTests(ServiceBase):
         earlier.refresh_from_db()
         self.assertEqual((earlier.state, earlier.reason), ('cancelled', 'replaced'))
         self.assertEqual(later.state, 'queued')
-        # Its note says so; it never says "tarea".
+        # Its note says so; nothing says "tarea".
         said = [call.args[1] for call in self.post.call_args_list]
         self.assertTrue(any('Dejé la compra en' in text for text in said), said)
         self.assertFalse(any('tarea' in text.lower() for text in said), said)
 
+    def test_nothing_is_set_aside_when_the_new_one_is_refused(self):
+        earlier = self.start()
+        self.payable.side_effect = service.TaskRefused('unavailable')
+        self.refused('unavailable', self.start, goal='otra cosa')
+        earlier.refresh_from_db()
+        self.assertEqual(earlier.state, 'queued')
+
+    def test_an_order_at_the_checkout_is_never_set_aside(self):
+        earlier = self.waiting(checkout_at=timezone.now())
+        with self.assertRaises(service.TaskRefused) as refused:
+            self.start(goal='un cargador')
+        self.assertEqual(refused.exception.code, 'checkout_open')
+        self.assertIn(earlier.site, str(refused.exception))
+        earlier.refresh_from_db()
+        self.assertEqual(earlier.state, 'needs_person')
+
     @override_settings(AGENT_TASKS_PER_DAY=2)
-    def test_one_set_aside_before_it_opened_does_not_count_toward_the_day(self):
+    def test_only_one_set_aside_before_its_browser_opened_is_free(self):
         self.start()
         self.start(goal='otro')
         self.start(goal='otro más')   # the two earlier ones never opened a browser
+        AgentTask.objects.filter(user=self.user).update(provider='fake')   # now they all did
+        AgentTask.objects.filter(user=self.user, state__in=AgentTask.ACTIVE).update(state='stopped')
+        self.refused('daily_limit', self.start, goal='y otra')
 
     def test_nothing_is_started_without_a_browser_worker(self):
         self.worker.return_value = False
@@ -286,33 +305,55 @@ class ToolTests(ServiceBase):
 
 
 class WorkerTests(ServiceBase):
-    def test_the_heartbeat_marks_a_worker_and_it_goes_stale(self):
+    def test_the_workers_mark_lasts_a_while_and_a_step_leaves_one_too(self):
         from django.core.cache import cache
-        cache.delete(service.WORKER_KEY)
-        self.assertFalse(REAL_WORKER_ALIVE())
-        service.worker_seen()
-        self.assertTrue(REAL_WORKER_ALIVE())
-        cache.set(service.WORKER_KEY, timezone.now().timestamp() - service.WORKER_FRESH_SECONDS - 1, 60)
-        self.assertFalse(REAL_WORKER_ALIVE())
+        with mock.patch.object(service, '_shared_cache', return_value=True):
+            cache.delete(service.WORKER_KEY)
+            self.assertFalse(REAL_WORKER_ALIVE())
+            service.worker_seen()
+            self.assertTrue(REAL_WORKER_ALIVE())
+            cache.delete(service.WORKER_KEY)
+            from agent_tasks import runner
+            runner.run_step(999999)   # no such purchase: still proof a worker runs
+            self.assertTrue(REAL_WORKER_ALIVE())
 
-    def test_the_sweep_asks_the_browser_queue_for_a_heartbeat(self):
+    def test_a_cache_only_this_process_sees_never_says_the_worker_is_gone(self):
+        with mock.patch.object(service, '_shared_cache', return_value=False):
+            self.assertTrue(REAL_WORKER_ALIVE())
+
+    def test_one_heartbeat_at_a_time(self):
+        from django.core.cache import cache
+        cache.delete(service.HEARTBEAT_PENDING_KEY)
         with mock.patch('agent_tasks.tasks.heartbeat.apply_async') as sent:
             service.sweep()
+            service.sweep()   # the first is unanswered: no second one piles up
+        self.assertEqual(sent.call_count, 1)
         self.assertEqual(sent.call_args.kwargs['queue'], 'browser')
+        service.worker_seen()   # answered
+        with mock.patch('agent_tasks.tasks.heartbeat.apply_async') as sent:
+            service.sweep()
+        self.assertEqual(sent.call_count, 1)
 
-    def test_with_no_worker_what_waits_for_one_is_stopped_and_told(self):
-        stuck = self.make_task(state='queued')
-        AgentTask.objects.filter(pk=stuck.pk).update(created_at=timezone.now() - timedelta(minutes=4))
-        fresh_user, fresh_account = self.person()
-        fresh = self.make_task(user=fresh_user, account=fresh_account, state='queued')
+    def test_with_no_worker_only_a_purchase_that_never_opened_is_stopped(self):
+        old = timezone.now() - timedelta(minutes=4)
+        never = dict(state='queued', provider='', session_id='', connect_url='', session_expires_at=None)
+        stuck = self.make_task(**never)
+        people = [self.person() for _ in range(3)]
+        opened = self.make_task(user=people[0][0], account=people[0][1], state='queued', provider='fake')
+        confirmed = self.make_task(user=people[1][0], account=people[1][1], state='awaiting_code',
+                                   checkout_at=timezone.now())
+        fresh = self.make_task(user=people[2][0], account=people[2][1], **never)
+        AgentTask.objects.exclude(pk=fresh.pk).update(created_at=old)
         self.worker.return_value = False
         with mock.patch('agent_tasks.tasks.heartbeat.apply_async'):
             service.sweep()
-        stuck.refresh_from_db()
-        fresh.refresh_from_db()
+        for row in (stuck, opened, confirmed, fresh):
+            row.refresh_from_db()
         self.assertEqual((stuck.state, stuck.reason), ('stopped', 'unavailable'))
-        self.assertEqual(fresh.state, 'queued')   # a moment old: the worker may still answer
-        self.assertIn('Ahora no puedo abrir el navegador', self.post.call_args.args[1])
+        # Anything a worker touched, an order after the checkout, or a moment-old one: untouched here.
+        self.assertEqual((opened.state, confirmed.state, fresh.state), ('queued', 'awaiting_code', 'queued'))
+        self.assertTrue(any('Ahora no puedo abrir el navegador' in call.args[1]
+                            for call in self.post.call_args_list))
 
     def test_the_chat_does_not_offer_purchases_without_a_worker(self):
         viewer = SimpleNamespace(user=self.user, account_type='personal', is_employee=False, request_meta=BUILD)
