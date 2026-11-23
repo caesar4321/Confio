@@ -383,9 +383,14 @@ class LocalMoneyQuery(graphene.ObjectType):
                                      for key, value in quote.items()})
 
     def resolve_local_payout_quote(self, info, destination_id, amount=None, bridge_id=None, exact_local=None):
-        owner = _owner(info, 'send_funds')
+        # An exact quote is the owner's, like every exact price (localExactSend, localPixCharge).
+        owner = _owner(info, 'send_funds', owner_only=exact_local is not None)
         try:
             destination = PayoutDestination.objects.get(internal_id=destination_id, confio_account=owner)
+            if exact_local is not None:
+                if destination.status not in ('pending', 'active'):
+                    raise PayoutDestination.DoesNotExist
+                local_money.require_unpaid_qr(destination)
             bridge = (PaymentBridgeTransfer.objects.select_related('quote__funding_instruction').get(
                 internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None)
             local_money.require_exact_for_fixed(destination, exact_local)   # before any provider is asked

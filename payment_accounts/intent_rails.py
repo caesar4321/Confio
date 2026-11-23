@@ -313,12 +313,15 @@ def exact_local(request, method=None):
         amount = Decimal(str(raw))
     except (InvalidOperation, TypeError, ValueError):
         amount = None
+    words = ('Escribe el monto en bolívares con hasta dos decimales.'
+             if str(request.get('method_id') or '') == VE_PAGOMOVIL
+             else 'Escribe el monto en moneda local con hasta dos decimales.')
     if amount is None or not amount.is_finite() or amount <= 0:
-        raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
+        raise _refuse('no_amount', words)
     if amount >= Decimal('1e9'):   # before quantizing: a huge exponent cannot be quantized
         raise _refuse('no_amount', 'Ese monto es demasiado alto para un envío.')
     if amount != amount.quantize(CENT):
-        raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
+        raise _refuse('no_amount', words)
     try:
         # The rail as resolved (it may come from the code, not the request).
         method = method or local_money.METHODS.get(str(request.get('method_id') or ''))

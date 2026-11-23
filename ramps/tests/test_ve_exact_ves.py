@@ -451,3 +451,24 @@ class ExactRound15Tests(TestCase):
     def test_a_recipient_name_keeps_only_printable_text(self):
         from ramps.ve_pagomovil_schema import _beneficiary
         self.assertEqual(_beneficiary('V12345678', '04141234567', '0102', 'Ana\x00 Pérez\n')['name'], 'Ana Pérez')
+
+
+class ExactRound18Tests(TestCase):
+    setUp = send_fixture.SendCoreTests.setUp
+    _ramp = send_fixture.SendCoreTests._ramp
+    _funded = send_fixture.SendCoreTests._funded
+    _pay = send_fixture.SendCoreTests._pay
+
+    def test_an_exact_send_needs_no_rate(self):
+        ramp = self._funded(estimate={'exact_ves': '15000.00'}, estimated_ves='15000.00')
+        client = pagoasap_client(rate='0')   # the rate endpoint answers nothing usable
+        client.preview.side_effect = lambda ves: {'total': str(Decimal(ves) / 1000)}
+        ramp = self._pay(ramp, client)
+        self.assertEqual(client.create_payout.call_args.kwargs['amount_ves'], Decimal('15000.00'))
+
+    def test_one_ceiling_for_exact_amounts_and_a_logged_bad_tolerance(self):
+        with self.assertRaises(ve_pagomovil.VePagoMovilError):
+            pagoasap_send.exact_ves_amount('1000000000')
+        with self.settings(VE_PAGOMOVIL_EXACT_PRICE_TOLERANCE_BPS='300'), \
+                self.assertLogs('ramps.pagoasap_send', level='WARNING'):
+            self.assertEqual(pagoasap_send._price_tolerance(), Decimal('0.005'))

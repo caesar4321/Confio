@@ -320,7 +320,8 @@ def exact_ves_amount(ves) -> Decimal:
     except (InvalidOperation, TypeError, ValueError):
         raise VePagoMovilError('Monto no válido.')
     # Bounds before quantizing: a huge exponent cannot be quantized.
-    if not ves.is_finite() or ves < MIN_PAYOUT_VES or ves >= Decimal('1e10') or ves != ves.quantize(ve_send.CENT):
+    # The same ceiling as every exact amount (intent_rails.exact_local).
+    if not ves.is_finite() or ves < MIN_PAYOUT_VES or ves >= Decimal('1e9') or ves != ves.quantize(ve_send.CENT):
         raise VePagoMovilError(f'Escribe un monto desde {MIN_PAYOUT_VES} bolívares, con hasta dos decimales.')
     return ves
 
@@ -331,6 +332,7 @@ def _price_tolerance() -> Decimal:
     except (InvalidOperation, TypeError, ValueError):
         bps = Decimal('50')
     if not bps.is_finite() or bps < 0 or bps > 200:
+        logger.warning('VE_PAGOMOVIL_EXACT_PRICE_TOLERANCE_BPS=%s is out of bounds (0–200); using 50', bps)
         bps = Decimal('50')
     return bps / 10_000
 
@@ -512,13 +514,12 @@ def payout_terms(ramp, inflight) -> dict | None:
         return {'review': ve_send.TERMS_CHANGED}
     client = _client()
     usd = _fee_free_usd(credited)
-    rate = client.rate('USD', 'VES')
-    if rate <= 0 or usd <= 0:
-        return None
     exact = exact_ves_of(ramp)
     if exact is UNREADABLE:
         return {'review': 'exact_ves_unreadable'}
-    if exact is not None:
+    if exact is not None and usd > 0:
+        # Priced from Pago ASAP's own cost for exactly these bolívares (no
+        # rate needed), so a missing rate cannot stall it without a clock.
         # An exact bolívar send pays exactly that; what the deposit bought
         # above it stays in Confío's Pago ASAP balance. Dollars that no longer
         # cover it go to review, never a smaller payout.
@@ -532,6 +533,9 @@ def payout_terms(ramp, inflight) -> dict | None:
             # back (ve_send's RATE_WAIT), then review. Never a smaller payout.
             return {'wait': 'exact_payout_short'}
         return _terms(client, section, exact, total, inflight)
+    rate = client.rate('USD', 'VES')
+    if rate <= 0 or usd <= 0:
+        return None
     floor = None
     if section.get('funding_sender'):
         from smart_account.payouts import ramp_fx_floor

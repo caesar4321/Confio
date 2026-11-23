@@ -1066,6 +1066,30 @@ class ExactLocalApiRound17Tests(ExactLocalApiTests):
             local_money.exact_qr_quote(row, dict(quote), '500.50')
 
 
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound18Tests(ExactLocalApiTests):
+    def test_the_held_exact_quote_is_the_owners_for_a_live_unpaid_recipient(self):
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        with mock.patch('payment_accounts.local_money_schema._owner', return_value=self.owner) as owner:
+            with mock.patch.object(local_money, 'qr_hold', return_value=local_money.PAID), \
+                    mock.patch.object(local_money, 'payout_quote') as quote, \
+                    self.assertRaisesRegex(Exception, 'ya tiene un pago'):
+                LocalMoneyQuery().resolve_local_payout_quote(self.info, fixed.internal_id, amount=Decimal('10'),
+                                                             exact_local=Decimal('25000'))
+            quote.assert_not_called()
+            self.assertTrue(owner.call_args.kwargs['owner_only'])
+            PayoutDestination.objects.filter(pk=fixed.pk).update(status='disabled')
+            with self.assertRaisesRegex(Exception, 'Destino no encontrado'):
+                LocalMoneyQuery().resolve_local_payout_quote(self.info, fixed.internal_id, amount=Decimal('10'),
+                                                             exact_local=Decimal('25000'))
+
+    def test_pago_movil_amount_words_say_bolivares(self):
+        from payment_accounts import intent_rails
+        with self.assertRaisesRegex(IntentRefused, 'bolívares'):
+            intent_rails.exact_local({'method_id': 've_pagomovil_send', 'amount_local': '10.001'})
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -1117,6 +1141,7 @@ only_own_tests(ExactLocalRound16JourneyTests, journey_fixture.JourneyTests, Exac
                ExactLocalRound12JourneyTests, ExactLocalRound15JourneyTests)
 only_own_tests(ExactLocalApiRound16Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound17Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalApiRound18Tests, ExactLocalApiTests)
 
 
 class TelegramGuardTests(intent_fixture.PaymentIntentBase):
