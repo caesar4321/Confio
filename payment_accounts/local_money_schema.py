@@ -389,6 +389,8 @@ class LocalMoneyQuery(graphene.ObjectType):
             bridge = (PaymentBridgeTransfer.objects.select_related('quote__funding_instruction').get(
                 internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None)
             local_money.require_exact_for_fixed(destination, exact_local)   # before any provider is asked
+            if exact_local is not None and not local_money.fixed_qr_build_supported(info.context.META):
+                raise PaymentAccountError('Actualiza la app para enviar un monto exacto.')
             quote = local_money.exact_qr_quote(
                 destination, local_money.payout_quote(owner, destination, amount=amount, bridge=bridge),
                 exact_local)

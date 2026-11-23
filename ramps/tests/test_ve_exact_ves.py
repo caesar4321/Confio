@@ -446,6 +446,7 @@ class ExactRound15Tests(TestCase):
             with self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'cambió'):
                 pagoasap_send.create(user, mock.Mock(), Decimal('101.00'), {}, exact_ves='90000.00')   # 1.3% below
         self.assertEqual(reserve.call_args.kwargs['gross_usd'], Decimal('100.00'))
+        self.assertEqual(reserve.call_args.kwargs['estimate']['rate'], '900.0000')   # bolívares per dollar charged
 
     def test_a_recipient_name_keeps_only_printable_text(self):
         from ramps.ve_pagomovil_schema import _beneficiary

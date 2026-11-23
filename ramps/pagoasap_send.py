@@ -434,7 +434,9 @@ def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
         estimate = {**estimate, 'usd_amount': format(amount, 'f'),
                     'usdt_amount': format(usdt.quantize(ve_send.MICRO), 'f'),
                     'confio_fee_usd': format(max(amount - usdt, Decimal('0')).quantize(ve_send.CENT), 'f'),
-                    'processor_fee_usd': format(max(processor, Decimal('0')).quantize(ve_send.CENT), 'f')}
+                    'processor_fee_usd': format(max(processor, Decimal('0')).quantize(ve_send.CENT), 'f'),
+                    'rate': format((Decimal(estimate['exact_ves']) / amount).quantize(Decimal('0.0001'),
+                                                                                     rounding=ROUND_DOWN), 'f')}
     else:
         estimate = quote(amount)
     gross_wei, deposit_wei = ve_send.confio_amounts(amount)

@@ -298,7 +298,7 @@ SPEI_REFERENCE_MAX = 40
 _PRICE_TRIES = 5
 
 
-def exact_local(request):
+def exact_local(request, method=None):
     """The exact local amount a person typed for a key, an account or an open
     QR ('' when none). A store's order reference never rides along: that is
     only read off a checkout (store_order_terms)."""
@@ -320,7 +320,8 @@ def exact_local(request):
     if amount != amount.quantize(CENT):
         raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
     try:
-        method = local_money.METHODS.get(str(request.get('method_id') or ''))
+        # The rail as resolved (it may come from the code, not the request).
+        method = method or local_money.METHODS.get(str(request.get('method_id') or ''))
         local_money.require_whole_units(method.asset if method else '', amount)
     except PaymentAccountError as exc:
         raise _refuse('no_amount', str(exc)) from exc
@@ -492,7 +493,7 @@ def read_transfer(owner, user, method_id, request, *, client=None):
         # An older build would show this card without saying where the spare
         # goes, and pay it as its own: told to update, as on Pagar.
         raise _refuse('rail', local_money.UPDATE_FOR_FIXED_QR)
-    typed = '' if exact else exact_local(request)
+    typed = '' if exact else exact_local(request, method)
     if typed and request.get('amount_usd') not in (None, ''):
         # Dollars or the local amount, never both: one would silently lose.
         raise _refuse('no_amount', 'Escribe el monto en dólares o en moneda local, no los dos.')

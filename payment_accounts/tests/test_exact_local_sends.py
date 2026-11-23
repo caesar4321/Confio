@@ -429,7 +429,7 @@ class ExactLocalRound3Tests(ExactLocalJourneyTests):
 
     def test_the_real_mutation_pays_a_typed_amount_and_ends_a_paid_qrs_card(self):
         from payment_accounts.journey_schema import CreateInfiniaJourney
-        info = mock.Mock(context=mock.Mock(user=self.owner.user, META={}))
+        info = mock.Mock(context=mock.Mock(user=self.owner.user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
         def mutate(destination, **kwargs):
             with mock.patch('payment_accounts.schema._active_account', return_value=self.owner), \
                     mock.patch('payment_accounts.schema._require_adult'), \
@@ -518,7 +518,7 @@ class ExactLocalApiRound3Tests(ExactLocalApiTests):
 class ExactLocalRound4JourneyTests(ExactLocalRound3Tests):
     def mutate(self, destination, bridge=None, **kwargs):
         from payment_accounts.journey_schema import CreateInfiniaJourney
-        info = mock.Mock(context=mock.Mock(user=self.owner.user, META={}))
+        info = mock.Mock(context=mock.Mock(user=self.owner.user, META={'HTTP_X_CONFIO_VERSION': '5.4.1'}))
         with mock.patch('payment_accounts.schema._active_account', return_value=self.owner), \
                 mock.patch('payment_accounts.schema._require_adult'), \
                 mock.patch('payment_accounts.breb_location.require_for_country'):
@@ -989,6 +989,56 @@ class ExactLocalApiRound15Tests(ExactLocalApiTests):
         self.assertIn(one.pk, set(local_money.same_qr_rows(two).values_list('pk', flat=True)))
 
 
+class ExactLocalRound16JourneyTests(ExactLocalRound15JourneyTests):
+    def test_a_colombian_journey_refuses_centavos(self):
+        from payment_accounts.models import FinancialAccount
+        FinancialAccount.objects.filter(pk=self.local.pk).update(country='COL', asset='COP')
+        self.local.refresh_from_db()
+        row = self.destination()
+        PayoutDestination.objects.filter(pk=row.pk).update(country='COL', asset='COP')
+        row.refresh_from_db()
+        with self.assertRaisesRegex(PaymentAccountError, 'sin centavos'):
+            create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                           request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                           destination=row, minimum_fx_output='1000.50', exact_payout=Decimal('1000.50'))
+
+    def test_two_amounts_of_one_key_are_two_recipients_each_paid_its_own(self):
+        first = local_money.resolve_destination(self.owner, 'co_qr', breb('1000'))
+        second = local_money.resolve_destination(self.owner, 'co_qr', breb('2000'))
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual((local_money.store_order_snapshot(first)['amount'],
+                          local_money.store_order_snapshot(second)['amount']), ('1000.00', '2000.00'))
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound16Tests(ExactLocalApiTests):
+    def test_centavos_are_refused_up_front_when_the_rail_comes_from_the_code(self):
+        with self.assertRaises(IntentRefused) as refused:
+            payment_intents.prepare(self.owner, self.user, breb(), created_by='assistant', source='pasted_code',
+                                    request={'amount_local': '1000.50'})
+        self.assertEqual(refused.exception.code, 'no_amount')
+        self.assertIn('centavos', str(refused.exception))
+
+    def test_a_typed_amount_on_pagar_needs_the_build_and_a_payable_recipient(self):
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        local_money.fixed_qr_build_supported.return_value = False
+        with self.assertRaisesRegex(Exception, 'Actualiza la app'):
+            LocalMoneyQuery().resolve_local_payout_quote(self.info, row.internal_id, amount=Decimal('100'),
+                                                         exact_local=Decimal('500'))
+        result, create = self.journey(row, exact_local_amount=Decimal('500'))
+        self.assertFalse(result.success)
+        create.assert_not_called()
+        local_money.fixed_qr_build_supported.return_value = True
+        row.provider_data = dict(row.provider_data, validation={'status': 'NOT_FOUND'})
+        row.save()
+        with mock.patch.object(local_money, 'verification_state', return_value=local_money.NOT_FOUND), \
+                mock.patch.object(local_money, 'payout_quote') as quote, \
+                self.assertRaisesRegex(PaymentAccountError, 'No encontramos'):
+            local_money.exact_send_quote(self.owner, row, '500')
+        quote.assert_not_called()
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -1034,6 +1084,11 @@ only_own_tests(ExactLocalRound15JourneyTests, journey_fixture.JourneyTests, Exac
                ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests,
                ExactLocalRound12JourneyTests)
 only_own_tests(ExactLocalApiRound15Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound16JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
+               ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests,
+               ExactLocalRound12JourneyTests, ExactLocalRound15JourneyTests)
+only_own_tests(ExactLocalApiRound16Tests, ExactLocalApiTests)
 
 
 class TelegramGuardTests(intent_fixture.PaymentIntentBase):

@@ -238,6 +238,10 @@ class CreateInfiniaJourney(graphene.Mutation):
                         # card ends (charge_changed), never offered again.
                         raise payment_intents._refuse('charge_changed')
                     exact = shown or None
+                elif exact is not None and is_new_send:
+                    from .local_money import fixed_qr_build_supported
+                    if not fixed_qr_build_supported(info.context.META):
+                        raise PaymentAccountError('Actualiza la app para enviar un monto exacto.')
                 elif exact is None and fixed and is_new_send:
                     # A fixed-amount QR is paid only by a build that shows it
                     # as one (a retry of an existing journey returns it as is);

@@ -1609,7 +1609,7 @@ def held_message(state, what='QR'):
     if state == SIGNING:
         return f'Hay un pago de este {what} esperando firma. Espera unos minutos y vuelve a intentarlo.'
     if state == REVIEW:
-        return f'Un pago anterior de este {what} está en revisión. Escríbenos si necesitas pagarlo.'
+        return f'Un pago anterior de este {what} está en revisión; mientras tanto no se puede pagar otra vez.'
     # PAID ends the card for good: say so plainly.
     return f'Este {what} ya tiene un pago en Confío y no se puede pagar otra vez.'
 
@@ -1730,6 +1730,10 @@ def exact_send_quote(owner, destination, exact, *, client=None):
         raise PaymentAccountError('Este QR ya trae su monto.')
     if (destination.provider_data or {}).get('store_order'):
         raise PaymentAccountError('Este pedido ya trae su monto.')
+    # Never priced for a recipient that cannot be paid (the providers are asked several times).
+    if verification_state((destination.provider_data or {}).get('validation')) == NOT_FOUND:
+        raise PaymentAccountError('No encontramos a quien recibe. Revisa los datos.')
+    require_current_destination(destination)
     exact = _exact_amount(exact)
     require_whole_units(destination.asset, exact)
     price = _order_price(owner, destination, exact, client=client)   # paced on a provider ask
