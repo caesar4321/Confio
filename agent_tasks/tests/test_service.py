@@ -1,4 +1,5 @@
 """Who may start, watch and forget."""
+from types import SimpleNamespace
 from unittest import mock
 from datetime import timedelta
 
@@ -92,7 +93,7 @@ class PersonsTurnTests(ServiceBase):
     def test_the_live_view(self):
         task = self.waiting()
         self.vendor.live_view.return_value = ('https://live.invalid/x', f'{BASE}/login', 'tab-7')
-        url, seconds, showing = service.live_view(self.account, self.user, task.internal_id)
+        url, seconds, showing, _view = service.live_view(self.account, self.user, task.internal_id)
         self.assertEqual((url, showing), ('https://live.invalid/x', f'www.{SITE}'))
         self.assertLessEqual(seconds, 240)
         with override_settings(AGENT_TASKS_ENABLED=False):
@@ -120,6 +121,36 @@ class PersonsTurnTests(ServiceBase):
         self.assertTrue(service.live_view(self.account, self.user, task.internal_id))
         self.vendor.live_view.return_value = ('https://live.invalid/x', 'https://3ds.banco.example/auth', 't')
         self.assertEqual(service.live_view(self.account, self.user, task.internal_id)[2], '3ds.banco.example')
+
+    def test_the_tab_read_is_the_one_on_the_persons_screen(self):
+        task = self.waiting(checkout_at=timezone.now())
+        self.vendor.live_view.return_value = ('https://live.invalid/x', f'{BASE}/pedido', 'tab-1')
+        shown = service.live_view(self.account, self.user, task.internal_id)[3]
+        # A later open whose answer the phone never got recorded another tab...
+        self.vendor.live_view.return_value = ('https://live.invalid/y', f'{BASE}/pago', 'tab-2')
+        service.live_view(self.account, self.user, task.internal_id)
+        task.refresh_from_db()
+        self.assertEqual(task.shown_target, 'tab-2')
+        # ...but "Ya terminé" names the screen they saw: that tab is read.
+        self.assertEqual(service.resume(self.account, self.user, task.internal_id, view=shown).state, 'awaiting_code')
+        task.refresh_from_db()
+        self.assertEqual(task.shown_target, 'tab-1')
+
+    def test_a_view_not_signed_for_this_task_is_refused_and_nothing_moves(self):
+        task = self.waiting(checkout_at=timezone.now())
+        forged = [
+            'tab-1',                                                  # unsigned
+            service.view_token(SimpleNamespace(internal_id='00000000-0000-0000-0000-000000000000'), 'tab-1'),
+            service.view_token(task, 'tab-1')[:-2] + 'xx',            # tampered
+            service.view_token(task, ''),                             # no tab
+        ]
+        for view in forged:
+            with self.subTest(view=view):
+                self.refused('view', service.resume, self.account, self.user, task.internal_id, view)
+                task.refresh_from_db()
+                self.assertEqual(task.state, 'needs_person')
+        # An older app sends none: the tab the last open recorded.
+        self.assertEqual(service.resume(self.account, self.user, task.internal_id).state, 'awaiting_code')
 
     def test_resume_before_the_checkout_works_again(self):
         task = self.waiting()

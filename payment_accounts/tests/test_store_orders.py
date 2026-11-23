@@ -59,6 +59,57 @@ class StoreOrderCardTests(PaymentIntentBase):
         # Never a saved recipient, never "Confio" as the order's reference.
         self.assertEqual(local_money.saved_destinations(self.owner, 'mx_clabe'), [])
 
+    def short_wallet(self, held):
+        """Pricing against a wallet that holds `held` dollars, as quote_funding does."""
+        from payment_accounts import intent_rails
+        from payment_accounts.shortfall import short_of_dollars
+        real = intent_rails._transfer_price
+
+        def price(owner, destination, dollars, **kw):
+            if dollars > held:
+                raise short_of_dollars(owner, dollars)
+            return real(owner, destination, dollars, **kw)
+        mock.patch.object(intent_rails, '_transfer_price', side_effect=price).start()
+        return mock.patch('payment_accounts.shortfall.dollars_held', return_value=held)
+
+    def test_a_small_order_is_priced_with_what_they_hold_not_the_probe(self):
+        # US$5 held, an order worth about US$3: the US$10 probe must not refuse it.
+        with self.short_wallet(Decimal('5')):
+            intent = self.order(amount_local='50.00')
+        self.assertLess(intent.total_usd, Decimal('5'))
+
+    def test_an_order_they_cannot_cover_is_refused_with_what_is_missing(self):
+        with self.short_wallet(Decimal('20')), self.assertRaises(PaymentAccountError) as refused:
+            self.order()
+        self.assertTrue(str(refused.exception).startswith('No tienes saldo suficiente para este pago: te faltan US$'),
+                        str(refused.exception))
+        from payment_accounts.shortfall import is_short_of_dollars
+        self.assertTrue(is_short_of_dollars(refused.exception))
+
+    def test_an_empty_wallet_is_never_told_the_probes_figure(self):
+        for held in (Decimal('0'), Decimal('0.50'), None):
+            with self.subTest(held=held), self.short_wallet(held if held is not None else Decimal('0')), \
+                    mock.patch('payment_accounts.shortfall.dollars_held', return_value=held), \
+                    self.assertRaises(PaymentAccountError) as refused:
+                self.order(amount_local='50.00')
+            self.assertEqual(str(refused.exception), 'No tienes saldo suficiente para este pago. Recarga y vuelve a '
+                                                     'prepararlo.')
+
+    def test_what_they_hold_too_little_for_the_fee_is_short_with_no_figure(self):
+        from payment_accounts import intent_rails
+        from payment_accounts.shortfall import short_of_dollars
+
+        def price(owner, destination, dollars, **kw):
+            if dollars > Decimal('1.20'):
+                raise short_of_dollars(owner, dollars)
+            raise PaymentAccountError('El monto no alcanza para la comisión del procesador de pagos (US$1.25). '
+                                      'Ingresa un monto mayor.')
+        mock.patch.object(intent_rails, '_transfer_price', side_effect=price).start()
+        with mock.patch('payment_accounts.shortfall.dollars_held', return_value=Decimal('1.20')), \
+                self.assertRaises(PaymentAccountError) as refused:
+            self.order(amount_local='50.00')
+        self.assertTrue(str(refused.exception).startswith('No tienes saldo suficiente para este pago.'))
+
     def test_only_the_checkout_screen_makes_one(self):
         for source in ('pasted_code', 'form', 'owner_words'):
             with self.subTest(source=source), self.assertRaises(IntentRefused) as refused:

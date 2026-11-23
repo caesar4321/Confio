@@ -1373,6 +1373,10 @@ def _bridge_estimate(owner, crypto, total, fee):
         except FeePricingError as exc:
             if 'too small' in str(exc):
                 raise PaymentAccountError(fee_exceeds_amount_message(fee)) from exc
+            from .shortfall import TOO_FEW_DOLLARS, short_of_dollars
+            if str(exc) in TOO_FEW_DOLLARS:
+                # Priced against the wallet: too few dollars is said with what is missing.
+                raise short_of_dollars(owner, total) from exc
             raise
     else:
         units = net_funding_units(owner, int(to_units(total, 'BSC:USDT')))

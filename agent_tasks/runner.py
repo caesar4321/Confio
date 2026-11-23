@@ -278,17 +278,21 @@ class Step:
             vendor.close(session.id)
             raise
 
-    def hand_over(self, kind, body=None, **fields):
+    def hand_over(self, kind, body=None, push_text=None, **fields):
         task = self.task
         seconds = conf.get('AGENT_TASKS_PERSON_WAIT_SECONDS' if kind in BACK_TO_AGENT
                            else 'AGENT_TASKS_CHECKOUT_WAIT_SECONDS')
+        # Before they confirm an order at the store: what they have to pay it with. Read
+        # before their clock is set. In the chat only: a push shows on the lock screen.
+        extra = notes.balance_line(task) if kind == 'checkout' else ''
         now = timezone.now()
         until = min(now + timedelta(seconds=seconds), task.session_expires_at - SESSION_MARGIN)
         # Said before they order, not while they are ordering.
         if until < now + (CHECKOUT_TURN_MIN if 'checkout_at' in fields else PERSON_TURN_MIN):
             return self.stop('session_expired')  # a turn too short to open is not handed over
         self.remember(f'{ASKED}{kind}', 'waiting', state='needs_person', reason=kind, wait_until=until, **fields)
-        notes.post(task, body or notes.say(notes.NEEDS_PERSON[kind], task), f'person:{task.steps}', push='person')
+        text = body or notes.say(notes.NEEDS_PERSON[kind], task)
+        notes.post(task, text + extra, f'person:{task.steps}', push='person', push_body=push_text or text)
 
     # ----------------------------------------------------- before the checkout
 
@@ -465,9 +469,10 @@ class Step:
         except PaymentAccountError as exc:
             # Nobody vouched for that code, so it is not handed on as this order's.
             why = guard.clean(str(exc), 200)
-            body = f"{notes.say(notes.NEEDS_PERSON['code_refused'], task)} {why}".strip()
+            plain = notes.say(notes.NEEDS_PERSON['code_refused'], task)
             # The screen stays: many refusals pass, and it may be the only place that code is.
-            return self.hand_over('code_refused', body=body)
+            # A balance or what is missing stays in the chat, off the lock screen.
+            return self.hand_over('code_refused', body=f'{plain} {why}'.strip(), push_text=plain)
         if (intent.currency != rail.currency or not intent.amount_exact or intent.rail_method_id != rail.method_id
                 or ('amount_local' in extra and intent.amount_local != Decimal(extra['amount_local']))):
             payment_intents.cancel(task.account, intent.internal_id)
@@ -488,6 +493,9 @@ class Step:
 def post_payment(task, intent):
     """Idempotent: the sweep calls it again if the worker died before it."""
     from payment_accounts import payment_intents
-    message_id = notes.post(task, notes.say(notes.PAYMENT_READY, task), 'payment', intent=intent, push='payment')
+    text = notes.say(notes.PAYMENT_READY, task)
+    # What is missing is said in the chat, never on the lock screen.
+    message_id = notes.post(task, text + notes.shortfall_line(task, intent), 'payment', intent=intent,
+                            push='payment', push_body=text)
     if message_id:
         payment_intents.attach_message(intent.internal_id, message_id)

@@ -31,6 +31,7 @@ MESSAGES = {
     'busy': 'Ahora hay muchas compras en curso. Inténtalo en unos minutos.',
     'not_found': 'No encontré esa tarea.',
     'not_open': 'Esto ya no está esperando tu respuesta.',
+    'view': 'No reconozco esa pantalla. Ábrela de nuevo.',
     'left_store': 'El navegador salió de la tienda. Por seguridad no te muestro esa página.',
 }
 
@@ -149,8 +150,10 @@ def active(account, user):
     return AgentTask.objects.filter(account=account, user=user, state__in=AgentTask.ACTIVE).first()
 
 
-def resume(account, user, task_id):
-    """The person finished in the live view."""
+def resume(account, user, task_id, view=None):
+    """The person finished in the live view. With `view` (the token of the
+    screen they were looking at) that tab is the one read; without it (an
+    older app), the one the last open recorded."""
     if not conf.get('AGENT_TASKS_ENABLED'):
         raise TaskRefused('unavailable')
     task = get(account, user, task_id)
@@ -159,11 +162,12 @@ def resume(account, user, task_id):
     if not task.wait_until or task.wait_until <= timezone.now():
         runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
         raise TaskRefused('not_open')
+    shown = {'shown_target': viewed_target(task, view)} if view else {}
     history = [*(task.history or []), {'did': runner.RESUMED, 'result': 'they say it is done'}]
     with transaction.atomic():
         if not AgentTask.objects.filter(pk=task.pk, state='needs_person', steps=task.steps).update(
                 state='awaiting_code' if task.checkout_at else 'working', reason='', wait_until=None,
-                history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now()):
+                history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now(), **shown):
             raise TaskRefused('not_open')
         runner.kick(task.pk)
     task.refresh_from_db()
@@ -178,8 +182,32 @@ def cancel(account, user, task_id):
     return task
 
 
+# The tab a live view showed, signed for this task: "Ya terminé" sends it back
+# and the code is read off that tab, the one the person was looking at, even
+# if a later open (whose answer the phone never got) recorded another.
+_VIEW_SALT = 'agent_tasks.view'
+
+
+def view_token(task, target):
+    from django.core import signing
+    return signing.Signer(salt=_VIEW_SALT).sign(f'{task.internal_id}|{target[:64]}')
+
+
+def viewed_target(task, view):
+    """The tab a token names, if it was signed for this task; else TaskRefused('view')."""
+    from django.core import signing
+    try:
+        task_id, _, target = signing.Signer(salt=_VIEW_SALT).unsign(str(view or '')).partition('|')
+    except signing.BadSignature as exc:
+        raise TaskRefused('view') from exc
+    if task_id != str(task.internal_id) or not target:
+        raise TaskRefused('view')
+    return target
+
+
 def live_view(account, user, task_id):
-    """(url, seconds): a short-lived screen of that one browser, only while it is the person's turn."""
+    """(url, seconds, host, view): a short-lived screen of that one browser, only
+    while it is the person's turn; `view` names the tab it shows (view_token)."""
     if not conf.get('AGENT_TASKS_ENABLED'):
         raise TaskRefused('unavailable')
     task = get(account, user, task_id)
@@ -200,7 +228,7 @@ def live_view(account, user, task_id):
         raise TaskRefused('left_store')
     # What is read later is this tab and no other: the one they are looking at.
     AgentTask.objects.filter(pk=task.pk, state='needs_person').update(shown_target=target[:64])
-    return url, seconds, sites.host_of(showing)
+    return url, seconds, sites.host_of(showing), view_token(task, target)
 
 
 def stores(account, user):

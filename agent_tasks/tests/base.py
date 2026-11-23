@@ -57,6 +57,8 @@ class RowsBase(TestCase):
         self.vendor = self.patch('agent_tasks.browsers.provider').return_value
         self.vendor.name = 'fake'
         self.qr = self.patch('agent_tasks.qr.available', return_value=True)
+        # No balance read reaches the chain: unknown unless a test says otherwise.
+        self.held = self.patch('payment_accounts.shortfall.dollars_held', return_value=None)
 
     def patch(self, target, **kwargs):
         patcher = mock.patch(target, **kwargs)

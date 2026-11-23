@@ -1176,6 +1176,10 @@ def _expire(intent, reason):
     _track(intent, 'expired', reason=reason)
 
 
+# Funding refusals (bridge_execution) already written for the person: passed on as they are.
+PERSONS_FUNDING_WORDS = ('Ya tienes un envío en curso', 'Tu envío anterior sigue reservado')
+
+
 def confirm(owner, user, intent_id, shown_hash, *, client=None, bridge_client=None, intents=None, meta=None):
     """The person tapped "Revisar y pagar" and saw this intent's figures
     (Infinia families: an exact charge or a dollar transfer; the others go
@@ -1265,8 +1269,25 @@ def confirm(owner, user, intent_id, shown_hash, *, client=None, bridge_client=No
         if PaymentIntent.objects.filter(pk=intent.pk, state='quoted').update(
                 state='expired', state_reason='bridge_failed', updated_at=timezone.now()):
             _track(intent, 'expired', reason='bridge_failed')
-        if isinstance(exc, (PaymentAccountError, NextError)):
+        if str(exc) == 'Savings redemption is below its minimum':
+            # The redemption could not be priced to cover it (an edge of rounding): nothing personal to fix.
+            raise IntentRefused('bridge', 'No pude preparar este pago ahora. Vuelve a prepararlo en un momento.') from exc
+        from .shortfall import TOO_FEW_DOLLARS, short_of_dollars
+        if str(exc) in TOO_FEW_DOLLARS:
+            # Said in the person's words, with what is missing when it is known.
+            raise IntentRefused('bridge', str(short_of_dollars(owner, intent.total_usd))) from exc
+        if isinstance(exc, PaymentAccountError):
             raise IntentRefused('bridge', str(exc)) from exc
+        from .infinia_fees import FeePricingError
+        if isinstance(exc, NextError) and str(exc).startswith(PERSONS_FUNDING_WORDS):
+            raise IntentRefused('bridge', str(exc)) from exc   # already written for the person, with when
+        if isinstance(exc, (NextError, FeePricingError)):
+            # The funding's own words are for us (the log). Only a moved price is said as one.
+            logger.warning('payment intent funding refused: %s', exc)
+            moved = any(word in str(exc) for word in ('fresh quote', 'new quote', 'price changed', 'fee changed',
+                                                      'balance changed', 'Quote expired'))
+            raise IntentRefused('bridge', 'El precio cambió mientras lo preparábamos. Vuelve a prepararlo.' if moved
+                                else 'No pude preparar este pago ahora. Inténtalo más tarde.') from exc
         raise
     if intent.family == 'local_transfer':
         # With the bridge prepared the exact figure is known. It is never

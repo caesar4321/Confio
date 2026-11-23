@@ -15,6 +15,9 @@ from . import bridge_chain as chain
 from .models import PaymentBridgeQuote, PaymentBridgeTransfer
 from .services import PaymentAccountError, _require_provider_enabled
 
+# Matched by payment_intents.confirm to say it in the person's words.
+INSUFFICIENT_DOLLARS = 'Insufficient dollar balance'
+
 
 def execution_enabled(source_token):
     flag = 'PAYMENT_BRIDGE_BSC_ENABLED' if source_token == 'BSC:USDT' else 'PAYMENT_BRIDGE_POLYGON_ENABLED'
@@ -103,7 +106,7 @@ def funding_calls(owner, amount, *, max_spend=None):
         if output < max(needed, vault.ONDO_MIN_REDEEM_WEI):
             raise NextError('Savings redemption is below its minimum')
         if shares > vault.erc20_balance_raw(plus, owner.bsc_address):
-            raise NextError('Insufficient dollar balance')
+            raise NextError(INSUFFICIENT_DOLLARS)
         calls.append({'to': plus, 'value': '0', 'data': '0x' + SEL_UNWRAP_TO_CUSD
                       + _word(shares) + _word(needed) + recipient})
     calls.append({'to': cusd, 'value': '0', 'data': '0x' + SEL_CUSD_REDEEM

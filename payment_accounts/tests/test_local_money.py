@@ -913,9 +913,10 @@ class LocalMoneyTests(TestCase):
             funding.side_effect = FeePricingError('Amount is too small after fees')
             with self.assertRaisesRegex(PaymentAccountError, 'Ingresa un monto mayor'):
                 local_money.payout_quote(self.owner, destination, amount='1.26', client=self.client_api)
-            # Not having the dollars is a different problem and keeps its own error.
+            # Not having the dollars is a different problem with its own words: what is missing.
             funding.side_effect = FeePricingError('Insufficient dollars for transfer and fees')
-            with self.assertRaisesRegex(FeePricingError, 'Insufficient dollars'):
+            with mock.patch('payment_accounts.shortfall.dollars_held', return_value=Decimal('2')), \
+                    self.assertRaisesRegex(PaymentAccountError, r'^No tienes saldo suficiente para este pago: te faltan US\$3\.00'):
                 local_money.payout_quote(self.owner, destination, amount='5', client=self.client_api)
         self.client_api.create_transfer_quote.assert_not_called()
 

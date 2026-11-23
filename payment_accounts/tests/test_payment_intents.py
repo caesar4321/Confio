@@ -371,6 +371,50 @@ class ConfirmTests(PaymentIntentBase):
             intent.refresh_from_db()
             self.assertEqual((intent.state, intent.state_reason), ('expired', 'bridge_failed'))
 
+    def test_too_few_dollars_is_said_in_the_persons_words_with_what_is_missing(self):
+        from payment_accounts.allbridge_next import NextError
+        from payment_accounts.bridge_execution import INSUFFICIENT_DOLLARS
+        from payment_accounts.infinia_fee_funding import FeePricingError
+        from payment_accounts.shortfall import TOO_FEW_DOLLARS
+        self.assertIn(INSUFFICIENT_DOLLARS, TOO_FEW_DOLLARS)
+        cases = ((NextError(INSUFFICIENT_DOLLARS), Decimal('1.00'), ': te faltan US$'),
+                 (NextError(INSUFFICIENT_DOLLARS), None, '. Recarga y vuelve a prepararlo.'),
+                 (FeePricingError('Insufficient dollars for transfer and fees'), Decimal('1.00'), ': te faltan US$'),
+                 (FeePricingError('Insufficient cUSD for transfer and fees'), None, '. Recarga'))
+        for error, held, ending in cases:
+            intent = self.prepare()
+            with self.subTest(error=str(error), held=held), \
+                    mock.patch('payment_accounts.bridge.quote_provider_funding'), \
+                    mock.patch('payment_accounts.bridge_execution.prepare_bridge', side_effect=error), \
+                    mock.patch('payment_accounts.shortfall.dollars_held', return_value=held), \
+                    self.assertRaises(IntentRefused) as refused:
+                payment_intents.confirm(self.owner, self.user, intent.internal_id, intent.display_hash)
+            message = str(refused.exception)
+            self.assertTrue(message.startswith('No tienes saldo suficiente para este pago'), message)
+            self.assertIn(ending, message)
+            self.assertNotIn('Insufficient', message)
+
+    def test_other_funding_refusals_are_said_in_spanish_and_what_is_for_the_person_passes(self):
+        from payment_accounts.allbridge_next import NextError
+        from payment_accounts.infinia_fee_funding import FeePricingError
+        cases = ((NextError('Bridge price changed; request a fresh quote'), 'El precio cambió'),
+                 (FeePricingError('Wallet balance changed; request a new quote'), 'El precio cambió'),
+                 # What lasts is not a moved price: no "vuelve a prepararlo" loop.
+                 (NextError('This bridge messenger is not enabled for execution'), 'No pude preparar este pago'),
+                 (FeePricingError('Amount is too small after fees'), 'No pude preparar este pago'),
+                 (NextError('Ya tienes un envío en curso; revisa su estado primero.'), 'Ya tienes un envío en curso'),
+                 (NextError('Tu envío anterior sigue reservado. Vuelve a intentarlo en 4 min.'),
+                  'Tu envío anterior sigue reservado. Vuelve a intentarlo en 4 min.'))
+        for error, start in cases:
+            intent = self.prepare()
+            with self.subTest(error=str(error)), \
+                    mock.patch('payment_accounts.bridge.quote_provider_funding'), \
+                    mock.patch('payment_accounts.bridge_execution.prepare_bridge', side_effect=error), \
+                    self.assertRaises(IntentRefused) as refused:
+                payment_intents.confirm(self.owner, self.user, intent.internal_id, intent.display_hash)
+            self.assertEqual(refused.exception.code, 'bridge')
+            self.assertTrue(str(refused.exception).startswith(start), str(refused.exception))
+
     def test_a_higher_fee_inside_the_same_total_is_not_signed(self):
         intent = self.prepare()
         self.target_quote(source='45.00')

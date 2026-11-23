@@ -179,6 +179,19 @@ class HandOverTests(StepBase):
         task = self.step(self.make_task(), snap())
         self.assertEqual((task.state, task.reason), ('needs_person', 'checkout'))
 
+    def test_the_checkout_says_what_they_have_to_pay_with(self):
+        self.held.return_value = Decimal('12.3')
+        self.step(self.make_task(), snap(url=f'{BASE}/checkout'))
+        text = self.post.call_args.args[1]
+        self.assertIn('Tienes US$12.30 en dólares', text)
+        # The lock screen never shows a balance.
+        self.assertNotIn('US$', self.post.call_args.kwargs['push_body'])
+        AgentTask.objects.filter(user=self.user).update(state='cancelled')
+        # Unknown: no figure at all, never a confident zero.
+        self.held.return_value = None
+        self.step(self.make_task(), snap(url=f'{BASE}/checkout'))
+        self.assertNotIn('Tienes', self.post.call_args.args[1])
+
     def test_nobody_is_asked_to_confirm_what_they_could_not_pay(self):
         self.payable.side_effect = service.TaskRefused('unavailable')
         task = self.step(self.make_task(), snap(url=f'{BASE}/checkout'))
@@ -225,6 +238,18 @@ class AfterCheckoutTests(StepBase):
         self.assertEqual(self.prepare.call_args.args[:3], (self.account, self.user, CODE))
         self.assertEqual(self.prepare.call_args.kwargs['request'], {'method_id': 'br_qr', 'meta': {}})
         self.decide.assert_not_called()
+
+    def test_a_card_the_balance_does_not_cover_says_what_is_missing(self):
+        intent = SimpleNamespace(total_usd=Decimal('20.00'), internal_id='intent-1')
+        self.held.return_value = Decimal('15.501')
+        runner.post_payment(self.task, intent)
+        text = self.post.call_args.args[1]
+        self.assertIn('te faltan US$4.50', text)
+        self.assertNotIn('faltan', self.post.call_args.kwargs['push_body'])
+        self.assertEqual(self.post.call_args.kwargs['intent'], intent)  # the card is still there
+        self.held.return_value = Decimal('25')
+        runner.post_payment(self.task, intent)
+        self.assertNotIn('faltan', self.post.call_args.args[1])
 
     def test_no_page_is_ever_read_for_a_code(self):
         self.step(self.task, snap(f'{CODE_TEXT}\n{CODE}', f'{BASE}/pedido/1'))

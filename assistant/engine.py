@@ -129,6 +129,9 @@ def third_party_text(value, limit=THIRD_PARTY_MAX_CHARS):
 
 # The one action of a reply that carries a prepared payment. Builds that draw
 # the card key on `target`; `destination` is only the key every build knows.
+# The top-up form left beside a payment the dollars held do not cover. `why`
+# marks it as that one: the only action allowed to stand beside a card.
+SHORT_TOPUP_FORM = {'type': 'form', 'target': 'topup', 'why': 'shortfall'}
 PAYMENT_CHIP = {'type': 'navigate', 'destination': 'pay_qr', 'target': 'payment_intent', 'label': 'Revisar y pagar'}
 PAYMENT_CODE_WINDOW = timedelta(minutes=15)
 PAYMENT_PREPARED_REPLY = ('Preparé el pago. Revisa el comercio, el monto y el total en la tarjeta de abajo; '
@@ -1912,13 +1915,15 @@ class Toolbelt:
             if isinstance(intent, dict):
                 return intent           # asked: prepared only on their yes (confirm.py)
         except payment_intents.IntentRefused as exc:
+            # A refusal for too few dollars arrives re-raised as this (prepare wraps every rail refusal).
             self.result.payment_refusal = str(exc)
-            return {'ok': False, 'motivo': str(exc),
-                    '_denied': exc.code in ('no_code', 'several_codes', 'not_asked', 'cut_off', 'not_said',
-                                            'no_amount', 'no_saved_payee')}
+            return self._short_refusal(exc, {
+                'ok': False, 'motivo': str(exc),
+                '_denied': exc.code in ('no_code', 'several_codes', 'not_asked', 'cut_off', 'not_said',
+                                        'no_amount', 'no_saved_payee')})
         except PaymentAccountError as exc:
             self.result.payment_refusal = str(exc)
-            return {'ok': False, 'motivo': str(exc)}
+            return self._short_refusal(exc, {'ok': False, 'motivo': str(exc)})
         except Exception:  # noqa: BLE001 — a provider outage must not sink the answer
             logger.exception('Confio Assistant: preparing a payment failed')
             self.result.payment_refusal = 'No pude preparar el pago ahora. Puedes intentarlo de nuevo o usar Pagar.'
@@ -1950,6 +1955,51 @@ class Toolbelt:
             'instruccion': ('Todavía NO se pagó nada. Di en una o dos frases que preparaste el pago y que lo revise '
                             'en la tarjeta de abajo: ahí están a quién se paga, el monto y el total, y se confirma '
                             'con Confío Face. No repitas otras cifras ni calcules nada. Nunca digas que ya se pagó.'),
+            **self._payment_shortfall(intent),
+        }
+
+    def _topup_form(self):
+        """Leave the top-up form under the answer where this person tops up
+        from the chat (one form per answer). True if it is there."""
+        try:
+            from . import here, topup_limits
+            if (topup_limits.offered(self) and 'topup' in here.forms_for(self.viewer, self)
+                    and not any(a.get('type') == 'form' for a in self.result.actions)):
+                self.result.actions.append(dict(SHORT_TOPUP_FORM, label=here.FORMS['topup'][0]))
+                return True
+        except Exception:  # noqa: BLE001 - the words stand without the form
+            logger.warning('Confio Assistant: top-up form for a short payment failed', exc_info=True)
+        return False
+
+    def _short_refusal(self, exc, refusal):
+        """A payment refused for too few dollars: the top-up form under the
+        answer where this person tops up from the chat, and a word for the model."""
+        from payment_accounts.shortfall import is_short_of_dollars, missing_of
+        if is_short_of_dollars(exc) and self._topup_form():
+            said = ('díselo con la cifra del motivo tal cual' if missing_of(exc) is not None
+                    else 'díselo sin dar ninguna cifra (no se sabe cuánto falta)')
+            refusal['nota'] = (f'Le faltan dólares para este pago: {said} y que recargue con el formulario de '
+                               'recarga que quedó abajo; después puede pedirlo de nuevo.')
+        return refusal
+
+    def _payment_shortfall(self, intent):
+        """When the dollars held do not cover the card: how much is missing,
+        and the top-up form under the answer where this person tops up from
+        the chat. Advisory: the card stays and the rail decides at signing."""
+        from payment_accounts.shortfall import shortfall, usd
+        total = getattr(intent, 'total_usd', None)
+        missing = shortfall(getattr(self.viewer, 'account', None), total) if total is not None else None
+        if missing is None:
+            return {}
+        form = self._topup_form()
+        how = ' con el formulario de recarga que quedó abajo' if form else ''
+        return {
+            'saldo_no_alcanza': True,
+            'te_faltan_usd': usd(missing),
+            'nota_saldo': (f'Su saldo en dólares no alcanza para este pago: le faltan {usd(missing)}. Dilo en una '
+                           f'frase con esa cifra tal cual y que recargue{how} antes de confirmar; la tarjeta queda '
+                           'lista para cuando tenga el saldo. No nombres un medio de recarga que no esté en las '
+                           'respuestas aprobadas de su país. No digas que el pago falló.'),
         }
 
     # ── Confío IA+: the assistant operates the Cuenta inteligente ──────────

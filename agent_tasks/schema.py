@@ -137,13 +137,17 @@ class _ById(_Result):
             return _failure(cls, exc)
 
 
-class ResumeAgentTask(_ById):
+class ResumeAgentTask(_Result):
     class Arguments:
         id = graphene.UUID(required=True)
+        view = graphene.String(description='The `view` of the screen the person was looking at (openAgentLiveView)')
 
     @classmethod
-    def apply(cls, *args):
-        return service.resume(*args)
+    def mutate(cls, root, info, id, view=None):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.resume(*_owner(info), id, view=view)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
 
 
 class CancelAgentTask(_ById):
@@ -168,14 +172,15 @@ class OpenAgentLiveView(graphene.Mutation):
     site = graphene.String(description='The store of the task')
     page_host = graphene.String(description='Show it above the screen: the host that was showing when it opened')
     host = graphene.String(description="The live view's own host, for the WebView's allow-list")
+    view = graphene.String(description='Names the tab this screen shows: send it back with resumeAgentTask')
 
     @classmethod
     def mutate(cls, root, info, id):
         try:
             owner = _owner(info)
-            url, seconds, showing = service.live_view(*owner, id)
+            url, seconds, showing, view = service.live_view(*owner, id)
             return cls(success=True, errors=[], url=url, expires_in=seconds, site=service.get(*owner, id).site,
-                       page_host=showing,
+                       page_host=showing, view=view,
                        host=urlsplit(url).hostname)
         except Exception as exc:  # noqa: BLE001
             return _failure(cls, exc)

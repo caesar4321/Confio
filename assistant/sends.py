@@ -156,10 +156,50 @@ def confirmed(belt, data, lang):
         intent = intents.prepare(belt.viewer.account, belt.viewer.user, created_by='assistant', source=data['source'],
                                  request=request, retire_earlier=False)
     except PaymentAccountError as exc:
-        return False, str(exc), {}
+        # Too few dollars: the top-up form under the refusal where they top up from the chat.
+        from payment_accounts.shortfall import is_short_of_dollars
+        actions = []
+        if is_short_of_dollars(exc):
+            _topup_form(belt, actions)
+        return False, str(exc), ({'actions': actions} if actions else {})
     reply = {'es': PAYMENT_PREPARED_REPLY,
              'pt': 'Preparei o pagamento. Confira quem recebe, o valor e o total no cartão abaixo; só é pago quando '
                    'você confirmar com Confío Face.',
              'en': 'I prepared the payment. Check who receives it, the amount and the total on the card below; it is '
                    'paid only when you confirm with Confío Face.'}[lang]
-    return True, reply, {'actions': [dict(PAYMENT_CHIP)], 'payment_intent': {'id': str(intent.internal_id)}}
+    actions = [dict(PAYMENT_CHIP)]
+    return True, reply + _short_note(belt, intent, lang, actions), {
+        'actions': actions, 'payment_intent': {'id': str(intent.internal_id)}}
+
+
+def _topup_form(belt, actions):
+    """Add the top-up form where this person tops up from the chat. True if added."""
+    try:
+        from . import here, topup_limits
+        from .engine import SHORT_TOPUP_FORM
+        if topup_limits.offered(belt) and 'topup' in here.forms_for(belt.viewer, belt):
+            actions.append(dict(SHORT_TOPUP_FORM, label=here.FORMS['topup'][0]))
+            return True
+    except Exception:  # noqa: BLE001 - the words stand without the form
+        logger.warning('Confio Assistant: top-up form for a short payment failed', exc_info=True)
+    return False
+
+
+def _short_note(belt, intent, lang, actions):
+    """' Te faltan US$…' when the dollars held do not cover the card, with the
+    top-up form beside it where this person tops up from the chat. Advisory."""
+    from payment_accounts.shortfall import shortfall, usd
+    total = getattr(intent, 'total_usd', None)
+    missing = shortfall(getattr(belt.viewer, 'account', None), total) if total is not None else None
+    if missing is None:
+        return ''
+    form = _topup_form(belt, actions)
+    amount = usd(missing)
+    return {
+        'es': f' Tu saldo en dólares no alcanza: te faltan {amount}.' + (
+            ' Recarga con el formulario de abajo y después confirma.' if form else ' Recarga antes de confirmar.'),
+        'pt': f' Seu saldo em dólares não é suficiente: faltam {amount}.' + (
+            ' Recarregue com o formulário abaixo e depois confirme.' if form else ' Recarregue antes de confirmar.'),
+        'en': f' Your dollar balance is not enough: {amount} is missing.' + (
+            ' Top up with the form below, then confirm.' if form else ' Top up before you confirm.'),
+    }[lang]

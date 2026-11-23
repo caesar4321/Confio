@@ -306,6 +306,14 @@ def _route_to_team(message):
     transaction.on_commit(push)
 
 
+def card_actions(actions):
+    """What may stand in a reply that carries a payment card: the card, and the
+    top-up form left for a balance that does not cover it (engine.SHORT_TOPUP_FORM)."""
+    from .engine import SHORT_TOPUP_FORM
+    return [a for a in actions if a.get('target') == 'payment_intent'
+            or all(a.get(key) == value for key, value in SHORT_TOPUP_FORM.items())]
+
+
 def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='', tz_name=None,
         can_navigate=True, request_meta=None, guide_step='', pending_message=None, photo=None):
     """Answer `body` (or a voice note: audio=(base64, mime, duration_ms)) in
@@ -568,7 +576,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         result.reply = result.pending_action['question']
     if result.payment_intent:
         # The card is the reply's one action (see engine.PAYMENT_CHIP).
-        result.actions = [a for a in result.actions if a.get('target') == 'payment_intent']
+        result.actions = card_actions(result.actions)
         # One thing to sign per reply: the card.
         result.rule_proposal = None
         if PAID_CLAIM.search(result.reply or ''):
@@ -667,7 +675,8 @@ def _answer_to_question(conversation, viewer, user_message, turn, pending, answe
         metadata['payment_intent'] = extra['payment_intent']
     with transaction.atomic():
         lock_user(viewer.user)
-        if actions and any(
+        # Only a card made on their yes is withdrawn (a refusal's top-up form is not a card).
+        if done and actions and any(
                 not confirm.is_yes(body, pending)      # the same "sí", sent twice, is no second thought
                 for body in conversation.messages.filter(sender_type='USER', created_at__gt=user_message.created_at)
                 .values_list('body', flat=True)):

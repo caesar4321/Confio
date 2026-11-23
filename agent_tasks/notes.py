@@ -54,6 +54,28 @@ TASK_ACTION = {'type': 'task', 'label': 'Ver la tarea'}
 PUSH = {'person': 'Te toca a ti', 'payment': 'Revisa tu pago', 'check': 'Revisa tu compra'}
 
 
+def balance_line(task):
+    """' Tienes US$… en dólares para pagarlo.' at the checkout, or '' when unknown."""
+    from payment_accounts.shortfall import dollars_held, usd
+    held = dollars_held(task.account)
+    if held is None:
+        return ''
+    return (f' Tienes {usd(held, down=True)} en dólares. El pago se cobra en dólares con su comisión: si no '
+            'te alcanza, te lo diré antes de pagar.')
+
+
+def shortfall_line(task, intent):
+    """' Te faltan US$…: recarga…' when the dollars held do not cover the card,
+    or ''. Advisory: the card stays, the order stays open at the store."""
+    from payment_accounts.shortfall import shortfall, usd
+    total = getattr(intent, 'total_usd', None)
+    missing = shortfall(task.account, total) if total is not None else None
+    if missing is None:
+        return ''
+    return (f' Tu saldo en dólares no alcanza: te faltan {usd(missing)}. Recarga y vuelve a «Revisar y pagar» '
+            'antes de que venza el pago en la tienda.')
+
+
 def stopped_text(task, reason):
     text = STOPPED.get(reason, STOPPED['error'])
     # Also when they only took the screen to sign in: they may have bought then.
@@ -72,9 +94,10 @@ def say(text, task):
                        vouches=rail.vouches if rail else '')
 
 
-def post(task, body, tag, *, intent=None, push=None):
+def post(task, body, tag, *, intent=None, push=None, push_body=None):
     """A system line that carries the task (or the payment card). Returns the
-    message id, or None: a note never breaks a task."""
+    message id, or None: a note never breaks a task. `push_body` is what the
+    lock screen may show when it must say less than the chat (a balance)."""
     try:
         from assistant.service import post_system_note
         if intent is not None:
@@ -86,7 +109,7 @@ def post(task, body, tag, *, intent=None, push=None):
             task.user, body, f'agent_task:{task.internal_id}:{tag}'[:120], actions=actions,
             payment_intent={'id': str(intent.internal_id)} if intent is not None else None)
         if created and push:
-            _push(task, body, push)
+            _push(task, push_body if push_body is not None else body, push)
         return message.pk if message is not None else None
     except Exception as exc:  # noqa: BLE001
         logger.error('agent task note was not posted: %s', type(exc).__name__)

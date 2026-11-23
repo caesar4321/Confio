@@ -422,9 +422,36 @@ def _order_price(owner, destination, exact, *, client=None):
 
 
 def _search_order_price(owner, destination, exact, *, client=None):
-    dollars = Decimal('10.00')
-    for _ in range(_PRICE_TRIES):
-        price = _transfer_price(owner, destination, dollars, client=client)
+    from .shortfall import dollars_held, is_short_of_dollars, short_of_dollars
+    probe = dollars = Decimal('10.00')
+    reprobed = False
+    for _ in range(_PRICE_TRIES + 1):   # the one re-probe does not count as a try
+        try:
+            price = _transfer_price(owner, destination, dollars, client=client)
+        except PaymentAccountError as exc:
+            if dollars != probe:
+                raise   # what the order itself needs: refused with its own figure
+            if reprobed:
+                # Even what they hold does not price (too few dollars, or too little for
+                # the fee): short, with no figure, as the order's own was never known.
+                if is_short_of_dollars(exc) or str(exc).startswith('El monto no alcanza para la comisión'):
+                    raise short_of_dollars(owner, None) from exc
+                raise
+            if not is_short_of_dollars(exc):
+                raise
+            # Only the first probe may ask for more than they hold: it is then made
+            # with what they hold, so a small order is not refused for the probe's size.
+            held = dollars_held(owner)
+            if held is None:
+                # Not read: no claim. Probe small instead; the order's own price decides.
+                held = Decimal('2.00')
+            held = held.quantize(CENT, rounding=ROUND_DOWN)
+            if not Decimal('1') <= held < probe:
+                # The probe's figure is not the order's: never "te faltan US$10".
+                raise short_of_dollars(owner, None) from exc
+            dollars = probe = held
+            reprobed = True
+            continue
         # Scaled both ways from the probe: an amount under the probe is not
         # charged the probe's dollars.
         needed = (dollars * exact / price['minimum_local']).quantize(CENT, rounding=ROUND_UP) + CENT
