@@ -199,9 +199,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
                 else 'el monto' if str(order['key']).startswith('exact:') else 'el cobro del QR')
         if minimum < Decimal(order['amount']):
             raise PaymentAccountError(f'El monto autorizado no cubre {what}. Revisa el pago de nuevo.')
-        if order.get('once', True) and InfiniaJourney.objects.filter(
-                direction='to_bank', destination_snapshot__store_order__key=order['key']) \
-                .exclude(request_id=request_id).exclude(stage='failed').exists():
+        from .local_money import holding_payments
+        if order.get('once', True) and holding_payments(order['key'], exclude_request_id=request_id).exists():
             raise PaymentAccountError(
                 'Este pedido ya tiene un pago en Confío y no se puede pagar otra vez.' if what == 'el pedido'
                 else 'Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')

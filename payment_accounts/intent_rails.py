@@ -303,8 +303,12 @@ def exact_local(request):
     QR ('' when none). A store's order reference never rides along: that is
     only read off a checkout (store_order_terms)."""
     raw = request.get('amount_local')
-    if raw in (None, '') or request.get('reference') not in (None, ''):
+    if raw in (None, ''):
         return ''
+    if request.get('reference') not in (None, ''):
+        # Never silently a dollar send instead: the amount and its reference
+        # belong to a store's checkout, and this is not one.
+        raise _refuse('no_amount', 'Este monto con referencia solo se paga desde el pago de una tienda.')
     try:
         amount = Decimal(str(raw))
     except (InvalidOperation, TypeError, ValueError):
@@ -344,7 +348,7 @@ def _order_price(owner, destination, exact, *, client=None):
         if price['minimum_local'] >= exact and dollars <= needed:
             return price
         dollars = needed
-    raise _refuse('rail', 'No pudimos cotizar este pedido. Intenta de nuevo.')
+    raise _refuse('rail', 'No pudimos cotizar este pago. Intenta de nuevo.')
 
 
 # The bank a CLABE belongs to is its first three digits (Banxico's institution codes).

@@ -12,10 +12,11 @@ from payment_accounts import intent_rails, local_money, payment_intents
 from payment_accounts.infinia_journeys import advance_journey, create_journey
 from payment_accounts.models import InfiniaJourney, PayoutDestination
 from payment_accounts.services import PaymentAccountError
-from .test_infinia_journeys import DEST_HASH, JourneyTests, reconcile_provider_credit
+# Fixture classes by module, so the loader does not run their tests here again.
+from . import test_infinia_journeys as journey_fixture, test_payment_intents as intent_fixture
+from .test_infinia_journeys import reconcile_provider_credit
 from .test_local_money import qr, tlv
 from .test_payment_intent_rails import EVERY_LEVEL
-from .test_payment_intents import PaymentIntentBase
 
 
 def argentina(amount=None, dynamic=True, name='KIOSCO'):
@@ -31,7 +32,7 @@ def breb(amount=None, dynamic=True, key='@tienda', name='TIENDA'):
     return qr(*fields, ('58', 'CO'), ('59', name))
 
 
-class FixedBrebDestinationTests(JourneyTests):
+class FixedBrebDestinationTests(journey_fixture.JourneyTests):
     def destination(self, payload):
         return PayoutDestination.objects.create(
             confio_account=self.owner, provider='infinia', kind='breb_key', country='PER', asset='PEN',
@@ -113,7 +114,7 @@ class FixedBrebDestinationTests(JourneyTests):
 
 
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
-class FixedBrebCardTests(PaymentIntentBase):
+class FixedBrebCardTests(intent_fixture.PaymentIntentBase):
     def setUp(self):
         super().setUp()
         self.rate = Decimal('4100.00')
@@ -196,7 +197,7 @@ class FixedBrebCardTests(PaymentIntentBase):
 
 
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
-class FixedArgentineQrTests(PaymentIntentBase):
+class FixedArgentineQrTests(intent_fixture.PaymentIntentBase):
     """Argentina's interoperable QR with a fixed amount: the same exact payout."""
 
     def setUp(self):
@@ -231,3 +232,30 @@ class FixedArgentineQrTests(PaymentIntentBase):
         row =local_money.resolve_destination(self.owner, 'ar_qr', argentina())
         self.assertFalse(local_money.is_fixed_amount_qr(row))
         self.assertIsNone(local_money.store_order_snapshot(row))
+
+
+for _name in dir(journey_fixture.JourneyTests):   # run only this module's own journey tests here
+    if _name.startswith('test') and _name not in FixedBrebDestinationTests.__dict__:
+        setattr(FixedBrebDestinationTests, _name, None)
+
+
+@override_settings(INFINIA_ACCOUNT_VALIDATION_ENABLED=False, INFINIA_PAYMENT_ACCOUNTS_ENABLED=True)
+class PaymentRuleFixedQrTests(intent_fixture.PaymentIntentBase):
+    def test_a_rule_to_a_fixed_amount_qr_is_refused_before_signing_and_stops_if_old(self):
+        from smart_account import infinia_payouts, payouts
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        with mock.patch.object(payouts, 'key_rejected', return_value=False), \
+                mock.patch('payment_accounts.contract_funding.check_route') as route, \
+                self.assertRaises(payouts.PayoutSkip) as skipped:
+            infinia_payouts.preflight(self.owner, '0x' + '1' * 40, fixed, 'co_qr', Decimal('10'), 'cusd')
+        self.assertEqual(skipped.exception.code, 'payout_fixed_amount_qr')
+        route.assert_not_called()
+        # A rule signed before: its run stops it, and its owner is told.
+        terms = {'owner': self.owner, 'destination': fixed, 'amount': Decimal('10'), 'authorization': 'a',
+                 'rail': 'co_qr', 'contract': '0x' + '1' * 40, 'fee_ceiling': None}
+        rule = mock.Mock(amount=Decimal('10'), standing_authorization=mock.Mock(internal_id='a'))
+        with mock.patch('payment_accounts.contract_funding.ContractFunding.for_run') as funding, \
+                self.assertRaises(payouts.PayoutSkip) as stopped:
+            funding.return_value.terms.return_value = terms
+            infinia_payouts._open(rule, mock.Mock(pk=1), None, None)
+        self.assertEqual(stopped.exception.code, 'payout_fixed_amount_qr')

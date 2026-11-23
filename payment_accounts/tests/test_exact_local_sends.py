@@ -14,13 +14,14 @@ from payment_accounts.models import InfiniaJourney, PayoutDestination
 from payment_accounts.payment_intents import IntentRefused
 from payment_accounts.services import PaymentAccountError
 from .test_breb_fixed_qr import breb
-from .test_infinia_journeys import DEST_HASH, JourneyTests, reconcile_provider_credit
+# Fixture classes by module, so the loader does not run their tests here again.
+from . import test_infinia_journeys as journey_fixture, test_payment_intents as intent_fixture
+from .test_infinia_journeys import reconcile_provider_credit
 from .test_payment_intent_rails import EVERY_LEVEL
-from .test_payment_intents import PaymentIntentBase
 
 
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
-class ExactLocalCardTests(PaymentIntentBase):
+class ExactLocalCardTests(intent_fixture.PaymentIntentBase):
     def setUp(self):
         super().setUp()
         self.rate = Decimal('5.40')
@@ -83,7 +84,7 @@ class ExactLocalCardTests(PaymentIntentBase):
             local_money.exact_send_quote(self.owner, fixed, '1000')
 
 
-class ExactLocalJourneyTests(JourneyTests):
+class ExactLocalJourneyTests(journey_fixture.JourneyTests):
     def destination(self):
         return PayoutDestination.objects.create(
             confio_account=self.owner, provider='infinia', kind='bank_account', country='PER', asset='PEN',
@@ -153,7 +154,7 @@ class ExactLocalJourneyTests(JourneyTests):
 
 
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL)
-class PagoMovilExactCardTests(PaymentIntentBase):
+class PagoMovilExactCardTests(intent_fixture.PaymentIntentBase):
     """Pago Móvil in exact bolívares, on the provider that can price them."""
 
     def setUp(self):
@@ -181,6 +182,25 @@ class PagoMovilExactCardTests(PaymentIntentBase):
         from payment_accounts.intent_rails import PagoMovilRail
         self.assertEqual(PagoMovilRail().request_of(intent)['amount_local'], '15000.00')
 
+    def test_the_order_is_made_with_the_cards_bolivares(self):
+        from payment_accounts.intent_rails import PagoMovilRail
+        intent = self.send()
+        with mock.patch('ramps.ve_pagomovil_schema.CreateVePagoMovilSend.mutate') as mutate:
+            PagoMovilRail().create(self.info if hasattr(self, 'info') else mock.Mock(), intent)
+        self.assertEqual(mutate.call_args.kwargs['ves_amount'], '15000.00')
+        self.assertEqual(mutate.call_args.kwargs['usd_amount'], '16.40')
+
+    def test_confirmation_binds_the_total_not_the_moving_fee_line(self):
+        from payment_accounts import intent_rails
+        intent = self.send()
+        base = self.adapter.quote_exact.side_effect
+        self.adapter.quote_exact.side_effect = lambda ves: {**base(ves), 'processor_fee_usd': '0.45'}
+        intent_rails.reread_order(self.owner, self.user, intent)          # same total: still the card
+        self.adapter.quote_exact.side_effect = lambda ves: {**base(ves), 'usd_amount': '16.41'}
+        with self.assertRaises(IntentRefused) as refused:
+            intent_rails.reread_order(self.owner, self.user, intent)
+        self.assertEqual(refused.exception.code, 'quote_changed')
+
     def test_a_provider_that_cannot_price_bolivares_refuses(self):
         self.adapter = mock.Mock(spec=['quote'])
         mock.patch('ramps.ve_pagomovil.send_adapter', return_value=self.adapter).start()
@@ -190,7 +210,7 @@ class PagoMovilExactCardTests(PaymentIntentBase):
 
 
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
-class ExactLocalApiTests(PaymentIntentBase):
+class ExactLocalApiTests(intent_fixture.PaymentIntentBase):
     """The GraphQL edges: the card's amount wins, and older builds never pay a
     fixed-amount QR without being told it is one."""
 
@@ -272,3 +292,85 @@ class ExactLocalApiTests(PaymentIntentBase):
             local_money.normalize_value(local_money.METHODS['ar_qr'], dollars)
         row = local_money.resolve_destination(self.owner, 'ar_qr', argentina('15000.00'))
         self.assertEqual(local_money.destination_view(row)['qr_amount'], '15000.00')
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiEdgeTests(ExactLocalApiTests):
+    """Cards and retries through the journey mutation."""
+
+    def test_a_qr_card_pays_the_qrs_own_amount(self):
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        card = mock.Mock(params={}, amount_exact=True)
+        result, create = self.journey(fixed, intent=card)
+        self.assertTrue(result.success, result.errors)
+        self.assertIsNone(create.call_args.kwargs['exact_payout'])   # the QR's own order is used
+        # A dollar card shown before fixed-amount QRs were paid exactly is over.
+        result, create = self.journey(fixed, intent=mock.Mock(params={}, amount_exact=False))
+        self.assertFalse(result.success)
+        create.assert_not_called()
+
+    def test_an_older_builds_retry_returns_its_journey(self):
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        with mock.patch('payment_accounts.journey_schema.InfiniaJourney') as journeys:
+            journeys.objects.filter.return_value.exists.return_value = True   # the same request was made before
+            result, create = self.journey(fixed)
+        self.assertTrue(result.success, result.errors)
+        create.assert_called_once()
+
+    def test_a_clients_exact_amount_is_checked(self):
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        for bad in (Decimal('12.345'), Decimal('0'), Decimal('-1')):
+            with self.subTest(exact=bad):
+                result, create = self.journey(row, exact_local_amount=bad)
+                self.assertFalse(result.success)
+                create.assert_not_called()
+
+    def test_an_unreadable_stored_qr_is_never_an_open_one(self):
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        fixed.provider_data = dict(fixed.provider_data, breb_qr=dict(fixed.provider_data['breb_qr'], payload='garbage'))
+        fixed.save()
+        self.assertTrue(local_money.is_fixed_amount_qr(fixed))
+        with self.assertRaises(PaymentAccountError):
+            local_money.store_order_snapshot(fixed)
+        self.assertNotIn(fixed.pk, [r.pk for r in local_money.saved_destinations(self.owner, 'co_qr')])
+
+    def test_a_reference_outside_a_checkout_is_refused_not_ignored(self):
+        with self.assertRaises(IntentRefused) as refused:
+            payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request={
+                'method_id': 'br_pix', 'value': 'ana@example.com', 'amount_local': '500', 'reference': 'X',
+                'amount_usd': '100'})
+        self.assertEqual(refused.exception.code, 'no_amount')
+
+
+class HoldingPaymentsTests(ExactLocalJourneyTests):
+    """Who holds a paid-once QR: never someone who only opened a payment."""
+
+    def test_an_unsigned_expired_payment_does_not_hold_a_qr(self):
+        fixed = self.destination()
+        fixed.provider_data = {'method_id': 'co_qr', 'breb_qr': local_money.decode_breb_qr(breb('1249'))}
+        fixed.save()
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        key = first.destination_snapshot['store_order']['key']
+        first.bridge.status = 'prepared'; first.bridge.save(update_fields=['status'])
+        self.assertTrue(local_money.holding_payments(key).exists())          # can still be signed
+        first.bridge.deadline = 1; first.bridge.save(update_fields=['deadline'])
+        self.assertFalse(local_money.holding_payments(key).exists())         # never signed, now cannot be
+        first.bridge.status = 'submitted'; first.bridge.save(update_fields=['status'])
+        self.assertTrue(local_money.holding_payments(key).exists())          # signed: it holds
+
+
+def only_own_tests(cls, *bases):
+    """Run only the tests a class defines itself, not the ones its fixture
+    base classes bring along (they run in their own modules)."""
+    for base in bases:
+        for name in dir(base):
+            if name.startswith('test') and name not in cls.__dict__:
+                setattr(cls, name, None)
+    return cls
+
+
+only_own_tests(ExactLocalJourneyTests, journey_fixture.JourneyTests)
+only_own_tests(HoldingPaymentsTests, journey_fixture.JourneyTests, ExactLocalJourneyTests)
+only_own_tests(ExactLocalApiEdgeTests, ExactLocalApiTests)

@@ -9,7 +9,9 @@ from django.test import TestCase
 from django.utils import timezone
 
 from ramps import pagoasap_send, ve_pagomovil, ve_send
-from .test_ve_send import WALLET, SendCoreTests, pagoasap_client
+# The send fixtures by module, so the loader does not run send_fixture.SendCoreTests here again.
+from . import test_ve_send as send_fixture
+from .test_ve_send import WALLET, pagoasap_client
 
 
 def relay_delivering(ratio=Decimal('0.98')):
@@ -60,11 +62,11 @@ class ExactQuoteTests(TestCase):
 
 
 class ExactPayoutTests(TestCase):
-    """SendCoreTests' fixtures, without running its tests again."""
-    setUp = SendCoreTests.setUp
-    _ramp = SendCoreTests._ramp
-    _funded = SendCoreTests._funded
-    _pay = SendCoreTests._pay
+    """send_fixture.SendCoreTests' fixtures, without running its tests again."""
+    setUp = send_fixture.SendCoreTests.setUp
+    _ramp = send_fixture.SendCoreTests._ramp
+    _funded = send_fixture.SendCoreTests._funded
+    _pay = send_fixture.SendCoreTests._pay
 
     def test_pays_exactly_the_bolivares_and_the_rest_stays_with_the_provider(self):
         ramp = self._funded(estimate={'exact_ves': '15000.00'}, estimated_ves='15000.00')
@@ -136,3 +138,36 @@ class ExactSchemaTests(TestCase):
             result = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
         self.assertTrue(result.success)
         self.assertEqual((result.usd_amount, result.estimated_ves), ('16.40', '15000.00'))
+
+
+class ExactPayoutBalanceTests(TestCase):
+    setUp = send_fixture.SendCoreTests.setUp
+    _ramp = send_fixture.SendCoreTests._ramp
+    _funded = send_fixture.SendCoreTests._funded
+    _pay = send_fixture.SendCoreTests._pay
+
+    def test_waits_for_balance_and_for_a_price(self):
+        ramp = self._funded(estimate={'exact_ves': '15000.00'}, estimated_ves='15000.00')
+        low = pagoasap_client(balance='10')            # 15 USD needed, 10 in the balance
+        ramp = self._pay(ramp, low)
+        self.assertEqual(ramp.status_detail, 'waiting_balance')
+        low.create_payout.assert_not_called()
+        unpriced = pagoasap_client(total='0')          # no preview cost: not payable yet, never guessed
+        ramp = self._pay(ramp, unpriced)
+        unpriced.create_payout.assert_not_called()
+        self.assertNotEqual(ve_send._phase(ramp), 'payout_review')
+
+
+class ExactCreateSchemaTests(TestCase):
+    def test_a_provider_without_exact_bolivares_refuses_the_order(self):
+        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend
+        user, account = mock.Mock(), mock.Mock()
+        info = mock.Mock(context=mock.Mock(user=user, META={}))
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(user, account)), \
+                mock.patch('security.face_step_up.missing_face_step_up', return_value=None), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=mock.Mock(spec=['quote', 'create'])) as adapter:
+            result = CreateVePagoMovilSend().mutate(info, usd_amount='16.40', cedula='V12345678',
+                                                    phone='04141234567', bank_code='0102', ves_amount='15000')
+        self.assertFalse(result.success)
+        self.assertIn('dólares', result.error)
+        adapter.return_value.create.assert_not_called()

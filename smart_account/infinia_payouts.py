@@ -151,6 +151,11 @@ def preflight(owner, contract: str, destination, rail: str, amount: Decimal, tok
     if payouts.key_rejected(destination):
         # Including a rejection since rewritten DISABLED: such a rule never runs.
         raise payouts.PayoutSkip('payout_method_rejected', services.MESSAGES['payout_method_rejected'])
+    from payment_accounts.local_money import is_fixed_amount_qr
+    if destination is not None and is_fixed_amount_qr(destination):
+        # A rule pays its own signed dollars; a QR with its own amount is paid
+        # exactly, once (create_journey refuses it too): never a rule.
+        raise payouts.PayoutSkip('payout_fixed_amount_qr', 'Los pagos automáticos no pueden pagar un QR con monto fijo.')
     try:
         route = contract_funding.check_route(owner, destination, rail, amount)
         exit_ = payouts.payout_exit(SimpleNamespace(pk=None, amount=amount, token_in=token_in),
@@ -252,6 +257,12 @@ def _open(rule, run, exit_, window, replaces=None):
             or terms['authorization'] != rule.standing_authorization.internal_id):
         # Signed again since the worker read it: the next pass uses the new terms.
         raise contract_funding.Refused('authorization_changed', payouts.RULE_CHANGED, retry=True)
+    from payment_accounts.local_money import is_fixed_amount_qr
+    if destination is not None and is_fixed_amount_qr(destination):
+        # Signed before fixed-amount QRs were paid exactly: the rule stops and
+        # its owner is told, rather than failing every run.
+        raise payouts.PayoutSkip('payout_fixed_amount_qr', 'Los pagos automáticos no pueden pagar un QR con monto fijo.',
+                                 deactivate='payout_fixed_amount_qr')
     route = contract_funding.check_route(owner, destination, terms['rail'], terms['amount'])
     contract_funding.require_free(owner, route[0], route[1])
     exit_ = exit_ or payouts.exit_or_wait(rule, window=window)

@@ -64,6 +64,7 @@ import {
 } from '../services/localMoney';
 import { sanitizeAmountInput } from '../utils/numberLocale';
 import { fixedQrAmountHint, pixChargeHint } from '../utils/localPaymentQr';
+import { isUnsupportedMode, reviewStillMatches } from '../utils/localSendReview';
 import {
   heavyFeeNote,
   LocalTransferFee,
@@ -563,7 +564,10 @@ function InfiniaLocalSendScreen() {
         setExactSend(next);
         setAmount(next.totalUsd);
       } catch (error: any) {
-        if (!cancelled) setExactError(error?.message || 'No pudimos cotizar este monto.');
+        if (!cancelled) {
+          setExactError(isUnsupportedMode(error) ? 'Por ahora solo puedes enviar un monto en dólares.'
+            : error?.message || 'No pudimos cotizar este monto.');
+        }
       } finally {
         if (!cancelled) setExactLoading(false);
       }
@@ -580,7 +584,9 @@ function InfiniaLocalSendScreen() {
     setFee(undefined);
     setQuoteError('');
     setQuoteLoading(false); // a cancelled estimate cannot clear its own spinner
-    if (!destination || destination.verification === 'not_found' || !pairReady || !amountNumber || amountError) {
+    // A fixed-amount QR is estimated only with its own amount, once its price is in.
+    if (!destination || destination.verification === 'not_found' || !pairReady || !amountNumber || amountError
+      || (chargeExpected && !pixCharge)) {
       return;
     }
     let cancelled = false;
@@ -695,8 +701,7 @@ function InfiniaLocalSendScreen() {
       return;
     }
     // Sign only what was reviewed: same amount, same recipient.
-    if (!reviewedFor || reviewedFor.amount !== normalizedAmount || reviewedFor.destinationId !== destination.id
-      || reviewedFor.exactLocal !== sentExact) {
+    if (!reviewedFor || !reviewStillMatches(reviewedFor, { amount: normalizedAmount, destinationId: destination.id, exactLocal: sentExact })) {
       resetReview();
       setFlowError('El envío cambió. Revísalo de nuevo.');
       return;
@@ -844,7 +849,10 @@ function InfiniaLocalSendScreen() {
   }, [agendaDestinationId]);
 
   const unavailable = methodsQuery.data && (!method || method.status !== 'live');
-  const quoteHeadline = quote ? `≈ ${formatRampMoney(quote.targetAmount, quote.asset)}` : '';
+  // Exact sends land exactly the amount: no "≈", and the rate is what each dollar sent buys.
+  const quoteHeadline = quote ? `${exactShown ? '' : '≈ '}${formatRampMoney(quote.targetAmount, quote.asset)}` : '';
+  const shownRate = quote && exactShown && amountNumber > 0
+    ? String(Number(quote.targetAmount) / amountNumber) : quote?.rate || '';
   const currency = method ? currencyName(method.asset) : 'moneda local';
 
   const recipientCard = useMemo(() => {
@@ -1191,7 +1199,7 @@ function InfiniaLocalSendScreen() {
                           }}
                         >
                           <Text style={[modeStyles.chipText, localMode === local && modeStyles.chipTextActive]}>
-                            {local ? `En ${method.asset}` : 'En USD'}
+                            {local ? `En ${currency}` : 'En dólares'}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -1295,7 +1303,9 @@ function InfiniaLocalSendScreen() {
                     <>
                       <Text style={styles.quoteEyebrow}>{pixCharge ? 'El comercio recibe exactamente' : exactShown ? 'Recibe exactamente' : 'Estimado que recibe'}</Text>
                       <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
-                      <Text style={styles.quoteRate}>{`1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · estimado neto de conversión`}</Text>
+                      <Text style={styles.quoteRate}>{exactShown
+                        ? `1 USD = ${formatRampRate(shownRate)} ${quote.asset} · con comisiones y margen incluidos`
+                        : `1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · estimado neto de conversión`}</Text>
                       <View style={styles.quoteDivider} />
                       <View style={styles.quoteRow}>
                         <Text style={styles.quoteLabel}>Envías</Text>
@@ -1303,7 +1313,7 @@ function InfiniaLocalSendScreen() {
                       </View>
                       <View style={styles.quoteRow}>
                         <Text style={styles.quoteLabel}>Tipo de cambio</Text>
-                        <Text style={styles.quoteValue}>{`${formatRampRate(quote.rate)} ${quote.asset}/USD`}</Text>
+                        <Text style={styles.quoteValue}>{`${formatRampRate(shownRate)} ${quote.asset}/USD`}</Text>
                       </View>
                       {feeView ? (
                         <>

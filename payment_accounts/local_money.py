@@ -196,20 +196,32 @@ def _qr_payload(destination):
 
 
 def fixed_qr_amount(destination):
-    """What a fixed-amount QR recipient must receive, exactly, or ''."""
+    """What a fixed-amount QR recipient must receive, exactly, or '' for an
+    open one. Read straight from the stored payload's amount field (not by
+    validating the key again): a payload that cannot be read, or an amount in
+    another currency, is refused, never taken for an open QR."""
     method, payload = _qr_payload(destination)
     if method is None or not payload:
         return ''
-    try:
-        return qr_amount(method, payload)
-    except PaymentAccountError:
-        return ''
+    fields = emv_fields(payload) if len(payload) <= 4096 else None
+    if fields is None:
+        raise PaymentAccountError('No pudimos leer este QR. Escanéalo de nuevo.')
+    amount = fields.get('54', '')
+    if amount and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount) or Decimal(amount) <= 0):
+        raise PaymentAccountError('El monto del QR no es válido.')
+    if amount and fields.get('53') != ISO_NUMERIC.get(method.asset):
+        raise PaymentAccountError('El monto de este QR no está en la moneda del país.')
+    return amount
 
 
 def is_fixed_amount_qr(destination):
     """A QR recipient that asks for an exact local amount: paid exactly
-    (store_order_snapshot), never offered again as a saved recipient."""
-    return bool(fixed_qr_amount(destination))
+    (store_order_snapshot), never offered again as a saved recipient. One
+    that cannot be read counts as fixed: whatever pays it then refuses."""
+    try:
+        return bool(fixed_qr_amount(destination))
+    except PaymentAccountError:
+        return True
 
 
 def _pix_key(value):
@@ -269,6 +281,8 @@ def normalize_value(method, raw):
         if amount is not None and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount)
                                    or Decimal(amount) <= 0):
             raise PaymentAccountError('El monto del QR no es válido.')
+        if amount is not None and not fields.get('53'):
+            raise PaymentAccountError('Este QR no indica su moneda. Pide uno nuevo.')
         if amount is not None and fields.get('53') != ISO_NUMERIC.get(method.asset):
             # An amount in another currency is never paid as local pesos.
             raise PaymentAccountError('El monto de este QR no está en la moneda del país.')
@@ -990,6 +1004,13 @@ def _destination_value(destination, method):
     return destination.details.get(method.field, '')
 
 
+def _shown_qr_amount(destination):
+    try:
+        return fixed_qr_amount(destination)
+    except PaymentAccountError:
+        return ''
+
+
 def destination_view(destination):
     data = destination.provider_data or {}
     validation = data.get('validation') or {}
@@ -1008,7 +1029,7 @@ def destination_view(destination):
         'holder_document': validation.get('holder_document', '') if state == VERIFIED else '',
         'institution': validation.get('institution', ''), 'verification': state,
         'country': iso_alpha2(destination.country), 'asset': destination.asset,
-        'qr_amount': fixed_qr_amount(destination), 'qr_merchant_name': qr_data.get('merchant_name', ''),
+        'qr_amount': _shown_qr_amount(destination), 'qr_merchant_name': qr_data.get('merchant_name', ''),
         'qr_merchant_city': qr_data.get('merchant_city', ''),
     }
 
@@ -1435,10 +1456,19 @@ def require_unpaid_qr(destination):
     order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
     if order is None or not order.get('once'):
         return
-    from .models import InfiniaJourney
-    if InfiniaJourney.objects.filter(direction='to_bank', destination_snapshot__store_order__key=order['key']) \
-            .exclude(stage='failed').exists():
+    if holding_payments(order['key']).exists():
         raise PaymentAccountError('Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')
+
+
+def holding_payments(key, exclude_request_id=None):
+    """The payments that hold a paid-once order or QR: any that is not
+    failed, except one whose bridge was never signed and can no longer be
+    (someone who only opened a payment does not block everyone else)."""
+    import time
+    from .models import InfiniaJourney
+    rows = InfiniaJourney.objects.filter(direction='to_bank', destination_snapshot__store_order__key=key) \
+        .exclude(stage='failed').exclude(bridge__status='prepared', bridge__deadline__lt=int(time.time()))
+    return rows.exclude(request_id=exclude_request_id) if exclude_request_id else rows
 
 
 def exact_qr_quote(destination, quote, exact=None):

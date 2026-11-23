@@ -208,17 +208,24 @@ class CreateInfiniaJourney(graphene.Mutation):
                     from .local_money import require_current_destination
                     require_current_destination(destination)
                 # A prepared card's exact amount is the card's, never the client's.
+                from .local_money import UPDATE_FOR_FIXED_QR, _exact_amount, is_fixed_amount_qr
                 exact = kwargs.pop('exact_local_amount', None)
+                if exact is not None:
+                    exact = _exact_amount(exact)
+                fixed = destination is not None and is_fixed_amount_qr(destination)
                 if intent is not None:
                     shown = (intent.params or {}).get('exact_local')
-                    if exact is not None and (not shown or Decimal(str(exact)) != Decimal(shown)):
+                    if exact is not None and (not shown or exact != Decimal(shown)):
+                        raise payment_intents._refuse('changed')
+                    if fixed and not intent.amount_exact and is_new_send:
+                        # A dollar card shown before fixed-amount QRs were paid
+                        # exactly: what it said is not what would be paid.
                         raise payment_intents._refuse('changed')
                     exact = shown or None
-                elif exact is None and destination is not None:
-                    # A fixed-amount QR is paid only by a build that shows it as one.
-                    from .local_money import UPDATE_FOR_FIXED_QR, is_fixed_amount_qr
-                    if is_fixed_amount_qr(destination):
-                        raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
+                elif exact is None and fixed and is_new_send:
+                    # A fixed-amount QR is paid only by a build that shows it
+                    # as one (a retry of an existing journey returns it as is).
+                    raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
                 # The monthly allowance is checked inside create_journey, under the owner lock.
                 row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
                                      bridge=bridge, credit=credit, destination=destination,

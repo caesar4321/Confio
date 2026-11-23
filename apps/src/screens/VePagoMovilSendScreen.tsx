@@ -112,6 +112,8 @@ export default function VePagoMovilSendScreen() {
   const [vesMode, setVesMode] = useState(false);
   const [vesAmount, setVesAmount] = useState('');
   const [quote, setQuote] = useState<VeSendQuote | null>(null);
+  // Bumped when the server says the price moved: the quote is read again.
+  const [quoteRetry, setQuoteRetry] = useState(0);
   const [cedula, setCedula] = useState('');
   const [phone, setPhone] = useState('');
   const [bank, setBank] = useState<Bank | null>(null);
@@ -172,7 +174,7 @@ export default function VePagoMovilSendScreen() {
       }
     }, 450);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [amount, vesAmount, vesMode, client, order]);
+  }, [amount, vesAmount, vesMode, client, order, quoteRetry]);
 
   const refreshOrder = useCallback(async (orderId: string) => {
     const issued = generation.current;
@@ -314,6 +316,8 @@ export default function VePagoMovilSendScreen() {
       }
       if (!result?.success || !result.orderId) {
         setError(result?.error || GENERIC);
+        // A moved price is shown again at once (bolívar mode re-prices it).
+        if (/precio cambió/i.test(result?.error || '')) setQuoteRetry(n => n + 1);
         void boot(true);
         return;
       }
