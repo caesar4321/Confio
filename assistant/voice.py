@@ -74,7 +74,10 @@ def minutes_left(user):
 TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions', 'prepare_payment', 'act_here',
                    'propose_username', 'notification_settings', 'ask_details', 'customize_pet',
                    'privacy_settings', 'propose_referrer', 'propose_stock_trade', 'propose_topup',
-                   'note_first_use'}
+                   'note_first_use',
+                   # Code asks their amount or their "sí" in the chat: a call has nowhere to show it.
+                   'propose_smart_account_rule', 'propose_target_allocation', 'smart_account_alerts',
+                   'withdraw_payment_card'}
 
 # A store task starts from typed words and continues on cards.
 TEXT_ONLY_TOOLS |= {'start_store_task'}

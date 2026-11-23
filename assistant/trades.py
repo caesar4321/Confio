@@ -1,8 +1,9 @@
 """A stock or ETF bought or sold from a card in the chat.
 
 The assistant only proposes. Code asks "¿Quieres vender toda tu posición en
-Tesla (TSLA)?" or "¿Quieres comprar US$20 (dólares) de Apple (AAPL)?", and
-the exact yes to that message (confirm.py) leaves the card:
+Tesla (TSLA)?" (a yes or no) or "¿Cuántos dólares de Apple Inc. (AAPL) quieres
+comprar? Escribe solo el número", and the exact answer to that message
+(confirm.py: the yes, or the number typed alone) leaves the card:
 `{'type': 'trade', 'ticker': ..., 'target': 'buy:20.00' | 'sell:20.00' |
 'sell:all', 'label': ...}`. The phone shows the price and the fee, and the
 person approves there; the trade then runs through the same code as the stock
@@ -10,10 +11,9 @@ screens (a binding quote, the wallet's own signature, the sponsored batch),
 with every server gate those have.
 
 Consent is never read out of a sentence: a word list took "la mitad", "no"
-and "¿es todo?" for "sell all" (2026-11-22). The proposal is only kept
-honest: the asset is one the person named, and an amount one they wrote as
-dollars (payment_accounts/dollars.py). What was asked is checked again when
-they say yes.
+and "¿es todo?" for "sell all" (2026-11-22), and how many dollars is never
+read from their words either. The proposal is only kept honest: the asset is
+one the person named. What was asked is checked again on the answer.
 
 A card is one trade. The phone does not invent the request it signs: it
 asks for it here (`claim`), and while one request of a card is out, or one
@@ -23,7 +23,7 @@ import logging
 import re
 import secrets
 from datetime import timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from django.conf import settings
 
@@ -39,23 +39,19 @@ CARD_HOURS = 24
 # Longer than the 10 minutes a signed request stays valid (sponsored7702):
 # after it, a request that left no batch on record can no longer execute.
 CLAIM_SECONDS = 11 * 60
-# Beside a trade card the reply may never say the trade happened.
-DONE_CLAIM = re.compile(
-    r'\b(ya\s+(se\s+|lo\s+|la\s+|las\s+|está\s+|quedó\s+|fue\s+)?(compr|vend)'
-    r'|(compra|venta)\s+(fue\s+|está\s+|quedó\s+)?(realizad|hech|completad|exitos|confirmad|list)'
-    r'|he\s+(comprado|vendido)|compré|vendí|se\s+(compró|vendió))', re.IGNORECASE)
+
 PREPARED_REPLY = 'Te dejé la tarjeta: revisa el precio y la comisión y toca Aprobar ahí. Todavía no se hizo nada.'
 
 SPEC = {
     'type': 'function',
     'name': TOOL,
-    'description': ('Para comprar o vender una acción o ETF aquí mismo. Llámala en cuanto sepas las tres cosas por '
-                    'lo que dijo la persona, aunque sea en varios mensajes: comprar o vender, qué acción y cuántos '
-                    'dólares (o que vende todo lo que tiene de esa acción). El servidor le hace la pregunta exacta '
-                    'y, si responde que sí, deja la tarjeta con el precio para aprobar: no preguntes tú si confirma, '
-                    'llama la herramienta. Nunca elijas tú la acción ni el monto, ni conviertas de otra moneda; si '
-                    'falta uno, pregunta solo eso. Busca en la lista de Confío, que incluye acciones tokenizadas de '
-                    'empresas privadas (Anthropic, SpaceX…): con los tres datos úsala en vez de `navigate`. Se opera '
+    'description': ('Para comprar o vender una acción o ETF aquí mismo. Llámala en cuanto sepas por lo que dijo la '
+                    'persona, aunque sea en varios mensajes, si compra o vende y qué acción. amount_usd siempre '
+                    'null: el servidor le pregunta cuántos dólares (o, en una venta, si vende todo) y con el número '
+                    'que escriba deja la tarjeta con el precio para aprobar. No preguntes tú el monto ni si confirma: '
+                    'llama la herramienta. sell_all solo si dijo que vende todo lo que tiene de esa acción. Nunca '
+                    'elijas tú la acción; si falta, pregunta solo eso. Busca en la lista de Confío, que incluye acciones tokenizadas de '
+                    'empresas privadas (Anthropic, SpaceX…): con esos datos úsala en vez de `navigate`. Se opera '
                     'por monto en dólares, no por número de acciones. La compra sale de su Confío Dollar+ y la venta '
                     'vuelve a su Confío Dollar+.'),
     'parameters': {
@@ -63,7 +59,7 @@ SPEC = {
         'properties': {
             'side': {'type': 'string', 'enum': ['buy', 'sell']},
             'asset': {'type': 'string', 'description': 'El ticker o el nombre que la persona escribió.'},
-            'amount_usd': {'type': ['number', 'null'], 'description': 'Dólares, como los escribió. null si vende todo.'},
+            'amount_usd': {'type': ['number', 'null'], 'description': 'Siempre null: el servidor pregunta el monto.'},
             'sell_all': {'type': 'boolean', 'description': 'Solo en una venta: vende todo lo que tiene de esa acción.'},
         },
         'required': ['side', 'asset', 'amount_usd', 'sell_all'],
@@ -123,9 +119,11 @@ general digital resources partners series innovator equity income growth value d
 
 
 # What people call a few of them.
-_CALLED = {'SPY': ('s&p', 's&p 500', 'sp500', 'sp 500'), 'QQQ': ('nasdaq',), 'GLD': ('oro', 'gold'),
-           'IAU': ('oro', 'gold'), 'MMM': ('3m',), 'MCD': ('mcdonalds', "mcdonald's"), 'KO': ('cocacola', 'coca cola'),
-           'TSM': ('tsmc',), 'JNJ': ('j&j',)}
+_CALLED = {'SPY': ('s&p', 's&p 500', 's&p500', 'sp500', 'sp 500'), 'QQQ': ('nasdaq', 'nasdaq 100'),
+           'GLD': ('oro', 'gold'), 'IAU': ('oro', 'gold'), 'MMM': ('3m',), 'MCD': ('mcdonalds', "mcdonald's"),
+           'KO': ('cocacola', 'coca cola', 'coca-cola'), 'TSM': ('tsmc',), 'JNJ': ('j&j',),
+           'MSTR': ('microstrategy', 'micro strategy'), 'MELI': ('mercado libre', 'mercadolibre'),
+           'JPM': ('jp morgan', 'jpmorgan')}
 
 
 def _named(texts, ticker, name):
@@ -139,11 +137,15 @@ def _named(texts, ticker, name):
     if len(full) >= 2 and not (full[0] in _GENERIC and full[1] in _GENERIC and len(full) > 2):
         brands.add(' '.join(full[:2]))      # "Capital One", "General Electric"
     own = {word for word in re.findall(r'[a-z0-9&]+', _fold(name or '')) if len(word) >= 4 and word not in _GENERIC}
+    joined = ({brand.replace(' ', '') for brand in brands if ' ' in brand}
+              | ({''.join(full[:2])} if len(full) >= 2 else set()))
     for text in texts:
         said = _fold(text)
         words = set(re.findall(r'[a-z0-9&]+', said))
         if any(re.search(rf'(?<![\w]){re.escape(brand)}(?![\w])', said) for brand in brands if brand) or words & own:
             return True
+        if words & joined:
+            return True                 # "mercadolibre" (no typo or plural is guessed: "moderno" is not Moderna)
         if (folded in words or (not folded.isalnum() and re.search(rf'(?<![\w]){re.escape(folded)}(?![\w])', said))
                 ) and (len(folded) > 2 or re.search(rf'(?<![\w]){re.escape(ticker)}(?![\w])', text)):
             return True                 # one or two letters: only as the ticker's own capitals
@@ -151,24 +153,31 @@ def _named(texts, ticker, name):
 
 
 def money(amount, lang='es'):
-    """US$20 or US$20,50 (US$20.50 in English)."""
+    """US$20, US$20,50, US$1500 (US$20.50 in English). No thousands mark: "1.500" is a decimal point in Mexico."""
     text = f'{Decimal(amount):.2f}'
     text = text[:-3] if text.endswith('.00') else text
     return 'US$' + (text if lang == 'en' else text.replace('.', ','))
 
 
-def question(side, ticker, name, amount, sell_all, lang):
-    """The question code writes: the ticker and the dollars are always in it."""
+_OR_ALL = {'es': ' O escribe "toda" para vender toda tu posición.', 'pt': ' Ou escreva "tudo" para vender tudo.',
+           'en': ' Or type "all" to sell your whole position.'}
+
+
+def how_many(side, ticker, name, lang):
+    """Code's "how many dollars": the ticker is always in it."""
     asset = f'{name} ({ticker})' if name and name != ticker else ticker
-    if sell_all:
-        return {'es': f'¿Quieres vender toda tu posición en {asset}?',
-                'pt': f'Você quer vender toda a sua posição em {asset}?',
-                'en': f'Do you want to sell your whole position in {asset}?'}[lang]
-    verbs = {'es': ('comprar', 'vender'), 'pt': ('comprar', 'vender'), 'en': ('buy', 'sell')}[lang]
-    verb, dollars = verbs[side == 'sell'], money(amount, lang)
-    return {'es': f'¿Quieres {verb} {dollars} (dólares) de {asset}?',
-            'pt': f'Você quer {verb} {dollars} (dólares) de {asset}?',
-            'en': f'Do you want to {verb} {dollars} (US dollars) of {asset}?'}[lang]
+    verb = {'es': ('comprar', 'vender'), 'pt': ('comprar', 'vender'), 'en': ('buy', 'sell')}[lang][side == 'sell']
+    return {'es': f'¿Cuántos dólares de {asset} quieres {verb}?',
+            'pt': f'Quantos dólares de {asset} você quer {verb}?',
+            'en': f'How many dollars of {asset} do you want to {verb}?'}[lang]
+
+
+def sell_all_question(ticker, name, lang):
+    """The yes/no for selling a whole position: the ticker is always in it."""
+    asset = f'{name} ({ticker})' if name and name != ticker else ticker
+    return {'es': f'¿Quieres vender toda tu posición en {asset}?',
+            'pt': f'Você quer vender toda a sua posição em {asset}?',
+            'en': f'Do you want to sell your whole position in {asset}?'}[lang]
 
 
 def _held(viewer):
@@ -191,8 +200,8 @@ def _cannot(belt, side, ticker, name, amount, sell_all, rows):
             return 'Esta persona no puede comprar acciones desde su país o su cuenta.'
     elif isinstance(rows, list) and not any(row['ticker'] == ticker for row in rows):
         return f'No tiene {name or ticker}: no hay nada que vender.'
-    if sell_all:
-        return ''
+    if sell_all or amount is None:
+        return ''          # the amount is checked when they type it
     floor = MIN_BUY_USD if side == 'buy' else MIN_SELL_USD
     if amount < floor:
         return f'El mínimo es {money(floor)}.'
@@ -202,7 +211,8 @@ def _cannot(belt, side, ticker, name, amount, sell_all, rows):
 
 
 def propose(belt, side, asset, amount_usd=None, sell_all=False):
-    """Check the proposal and have code ask it. No card here: see confirmed()."""
+    """Check the proposal and have code ask it. No card here: see confirmed(). `amount_usd` is never used: code
+    asks how many dollars."""
     from . import confirm
 
     if confirm.busy(belt.result):
@@ -210,8 +220,7 @@ def propose(belt, side, asset, amount_usd=None, sell_all=False):
     texts = confirm.recent_texts(belt)
     if not texts:
         # A call or a tapped suggestion: nothing the person typed to read from.
-        return _refuse('Para comprar o vender desde el chat, la persona debe escribir en un mensaje qué acción y '
-                       'cuántos dólares.')
+        return _refuse('Para comprar o vender desde el chat, la persona debe escribir en un mensaje qué acción.')
     if belt.saw_web:
         return _refuse('No preparo una compra o venta en el mismo mensaje en que busqué en internet: que lo pida en '
                        'un mensaje aparte.')
@@ -222,41 +231,48 @@ def propose(belt, side, asset, amount_usd=None, sell_all=False):
     texts = [text for text in texts if len(' '.join(text.split())) <= MAX_REQUEST_CHARS]
     if side not in ('buy', 'sell'):
         return _refuse('Operación desconocida.')
-    found = market.listed_asset(asset)
-    if found is None:
-        # "S&P 500" is SPY: only a name that one of them goes by ("oro" is two funds: ask).
-        tickers = [ticker for ticker, names in _CALLED.items() if _fold(str(asset or '')).strip() in names]
-        found = market.listed_asset(tickers[0]) if len(tickers) == 1 else None
+    # What people call it comes first: "nasdaq" is QQQ, not Nasdaq, Inc.; "oro" is two funds: ask which.
+    called = [ticker for ticker, names in _CALLED.items() if _fold(str(asset or '')).strip() in names]
+    if len(called) > 1:
+        return _refuse('Hay más de una opción para eso en Confío (' + ', '.join(called) + '): pregúntale cuál quiere.')
+    found = market.listed_asset(called[0]) if called else market.listed_asset(asset)
     if found is None:
         return _refuse('No encontré esa acción o ETF entre las que muestra Confío.')
     ticker, name = found
     sell_all = bool(sell_all) and side == 'sell'
 
     rows = _held(belt.viewer) if side == 'sell' else None
-    only_one = isinstance(rows, list) and len(rows) == 1 and rows[0]['ticker'] == ticker
+    # The one thing they hold needs no name, for a sale they asked for in these words.
+    only_one = (isinstance(rows, list) and len(rows) == 1 and rows[0]['ticker'] == ticker
+                and any(re.search(r'\b(vend|sell|liquid)', _fold(text)) for text in texts))
     if not only_one and not _named(texts, ticker, name):
         return _refuse(f'La persona no nombró {name or ticker}: pregúntale cuál quiere, no la elijas tú.')
 
-    amount = None
-    if not sell_all:
-        if amount_usd is None:
-            return _refuse('Falta el monto en dólares: pregúntaselo.')
-        try:
-            amount = Decimal(str(amount_usd)).quantize(Decimal('0.01'))
-        except (InvalidOperation, TypeError, ValueError):
-            return _refuse('Falta el monto en dólares: pregúntaselo.')
-        from payment_accounts.dollars import said_dollars
-        # A question may name the asset; how much is never read out of one ("¿cuánto serían 100 de Apple?").
-        if not said_dollars(_requests(confirm.requests(texts)), amount, around=confirm.all_said(belt)):
-            return _refuse('Ese monto no está escrito como dólares (puede ser otra moneda o un número de acciones): '
-                           'pregúntale cuántos dólares, por ejemplo "20 dólares". No lo calcules ni lo conviertas.')
-    why = _cannot(belt, side, ticker, name, amount, sell_all, rows)
+    why = _cannot(belt, side, ticker, name, None, sell_all, rows)
     if why:
         return _refuse(why)
     lang = confirm.language(texts)
-    return confirm.ask(belt.result, 'trade', question(side, ticker, name, amount, sell_all, lang),
-                       {'side': side, 'ticker': ticker, 'sell_all': sell_all,
-                        'amount': f'{amount:.2f}' if amount is not None else None}, lang)
+    data = {'side': side, 'ticker': ticker, 'sell_all': sell_all, 'amount': None}
+    if sell_all:
+        return confirm.ask(belt.result, 'trade', sell_all_question(ticker, name, lang), data, lang)
+    # How many dollars is never the model's nor read from their words: code asks, and the number is it.
+    return confirm.ask_amount(belt.result, 'trade', how_many(side, ticker, name, lang), data, lang,
+                              extra=_OR_ALL[lang] if side == 'sell' else '')
+
+
+def _to_them(why, lang, name):
+    """_cannot's reason, said to the person in their language."""
+    if why.startswith('Esta persona no puede'):
+        return {'es': 'No puedes comprar acciones desde tu país o tu cuenta.',
+                'pt': 'Você não pode comprar ações do seu país ou da sua conta.',
+                'en': "You can't buy stocks from your country or account."}[lang]
+    if why.startswith('No tiene '):
+        return {'es': f'No tienes {name}: no hay nada que vender.', 'pt': f'Você não tem {name}: não há nada para vender.',
+                'en': f"You don't hold {name}: there is nothing to sell."}[lang]
+    if lang == 'es':
+        return why
+    return {'pt': 'Esse valor está fora do mínimo ou do máximo por operação.',
+            'en': 'That amount is outside the minimum or maximum per trade.'}[lang]
 
 
 def confirmed(belt, data, lang='es'):
@@ -264,13 +280,14 @@ def confirmed(belt, data, lang='es'):
     side, ticker, sell_all = data.get('side'), data.get('ticker'), bool(data.get('sell_all'))
     found = market.listed_asset(ticker)
     if side not in ('buy', 'sell') or found is None or found[0] != ticker or not offered(belt):
-        return False, 'No puedo dejarte esa tarjeta ahora. Puedes hacerlo en Invertir.', {}
+        return False, {'es': 'No puedo dejarte esa tarjeta ahora. Puedes hacerlo en Invertir.',
+                       'pt': 'Não consigo deixar esse cartão agora. Você pode fazer isso em Invertir.',
+                       'en': "I can't leave that card right now. You can do it in Invertir."}[lang], {}
     name = found[1]
     amount = None if sell_all else Decimal(data['amount'])
     why = _cannot(belt, side, ticker, name, amount, sell_all, _held(belt.viewer) if side == 'sell' else None)
     if why:
-        return False, why.replace('Esta persona no puede', 'No puedes').replace(
-            'desde su país o su cuenta', 'desde tu país o tu cuenta').replace('No tiene ', 'No tienes '), {}
+        return False, _to_them(why, lang, name or ticker), {}
     short = name if name and len(name) <= 18 else ticker
     if sell_all:
         target, label = 'sell:all', f'Vender todo {short}'

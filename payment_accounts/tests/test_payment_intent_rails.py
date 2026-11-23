@@ -748,14 +748,13 @@ class OwnerWordsTests(PaymentIntentBase):
         intent = self.ask('mándale 15 dólares a @ana.silva', rail='confio_send', recipient='ana.silva', amount_usd=15)
         self.assertEqual((intent.rail_method_id, intent.total_usd, intent.source, intent.created_by),
                          ('confio_send', Decimal('15.00'), 'owner_words', 'assistant'))
-        intent = self.ask('envía 20 a la llave pix Ana@Example.com', rail='br_pix', recipient='ana@example.com',
+        intent = self.ask('envía 20 dólares a la llave pix Ana@Example.com', rail='br_pix', recipient='ana@example.com',
                           amount_usd=20)
         self.assertEqual((intent.rail_method_id, intent.payee_account), ('br_pix', 'ana@example.com'))
 
-    def test_a_recipient_or_an_amount_the_owner_did_not_write_is_refused(self):
+    def test_a_recipient_the_owner_did_not_write_is_refused(self):
         cases = [
             ('mándale 15 dólares a @ana.silva', dict(rail='confio_send', recipient='otra.persona', amount_usd=15)),
-            ('mándale 15 dólares a @ana.silva', dict(rail='confio_send', recipient='ana.silva', amount_usd=150)),
             ('mándale plata a mi hermana', dict(rail='confio_send', recipient='ana.silva', amount_usd=15)),
             ('envía 20 a la llave ana@example.com', dict(rail='br_pix', recipient='ana@evil.example', amount_usd=20)),
         ]
@@ -1034,16 +1033,15 @@ class OwnerWordsTests(PaymentIntentBase):
             self.ask('envíale a @ana.silva', rail='confio_send', recipient='ana.silva')
         self.assertEqual(refused.exception.code, 'no_amount')
         with self.assertRaises(IntentRefused) as refused:
-            self.ask('paga 10 con qr bolivia', rail='bo_qr', recipient='x', amount_usd=10)
+            self.ask('paga 10 dólares con qr bolivia', rail='bo_qr', recipient='x', amount_usd=10)
         self.assertEqual(refused.exception.code, 'no_code')
 
-    def test_an_open_code_takes_the_amount_from_the_owners_words(self):
-        intent = self.ask(f'paga 20 dólares a este pix {OPEN_PIX}', amount_usd=20)
+    def test_an_open_code_takes_the_amount_code_was_given(self):
+        intent = self.ask(f'paga este pix {OPEN_PIX}', amount_usd=20)
         self.assertEqual((intent.family, intent.total_usd, intent.source), ('local_transfer', Decimal('20.00'),
                                                                              'pasted_code'))
-        with self.assertRaises(IntentRefused) as refused:
-            self.ask(f'paga este pix {OPEN_PIX}', amount_usd=20)
-        self.assertEqual(refused.exception.code, 'not_said')
+        request, _source = payment_intents.request_from_words(self.owner, self.user, [f'paga 20 dólares {OPEN_PIX}'])
+        self.assertIsNone(request['amount_usd'])        # never read from their words
 
     def test_pago_movil_from_the_chat_only_to_a_saved_recipient(self):
         from payment_accounts.models import AgendaEntry
@@ -1054,13 +1052,13 @@ class OwnerWordsTests(PaymentIntentBase):
                                       'rate': '128'}
         mock.patch('ramps.ve_pagomovil.send_adapter', return_value=adapter).start()
         with self.assertRaises(IntentRefused) as refused:
-            self.ask('mándale 20 a mamá por pago móvil', rail='ve_pagomovil_send', recipient='mamá', amount_usd=20)
+            self.ask('mándale 20 dólares a mamá por pago móvil', rail='ve_pagomovil_send', recipient='mamá', amount_usd=20)
         self.assertEqual(refused.exception.code, 'no_saved_payee')
         AgendaEntry.objects.create(confio_account=self.owner, rail='ve_pagomovil', label='Mamá', relationship='third_party',
                                    holder_name='María Pérez',
                                    details={'cedula': 'V12345678', 'phone': '584141234567', 'bank_code': '0102'})
         with override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=''):
-            intent = self.ask('mándale 20 a mamá por pago móvil', rail='ve_pagomovil_send', recipient='Mama',
+            intent = self.ask('mándale 20 dólares a mamá por pago móvil', rail='ve_pagomovil_send', recipient='Mama',
                               amount_usd=20)
         self.assertEqual((intent.payee_level, intent.source, intent.params['phone']),
                          ('saved_payee', 'saved_payee', '584141234567'))
@@ -1072,31 +1070,31 @@ class OwnerWordsTests(PaymentIntentBase):
                                    relationship='third_party',
                                    details={'cedula': 'V222222', 'phone': '584142222222', 'bank_code': '0102'})
         with self.assertRaises(IntentRefused) as refused:
-            self.ask('mándale 20 a Ana María por pago móvil', rail='ve_pagomovil_send', recipient='Ana', amount_usd=20)
+            self.ask('mándale 20 dólares a Ana María por pago móvil', rail='ve_pagomovil_send', recipient='Ana', amount_usd=20)
         self.assertEqual(refused.exception.code, 'no_saved_payee')
-        intent = self.ask('mándale 20 a Ana María por pago móvil', rail='ve_pagomovil_send', recipient='ana maria',
+        intent = self.ask('mándale 20 dólares a Ana María por pago móvil', rail='ve_pagomovil_send', recipient='ana maria',
                           amount_usd=20)
         self.assertEqual(intent.params['phone'], '584142222222')
-        self.assertEqual(self.ask('mándale 20 a Ana por pago móvil', rail='ve_pagomovil_send', recipient='Ana',
+        self.assertEqual(self.ask('mándale 20 dólares a Ana por pago móvil', rail='ve_pagomovil_send', recipient='Ana',
                                   amount_usd=20).params['phone'], '584141111111')
         # A second payment right after another one: each message speaks for itself.
         intent = payment_intents.prepare_from_request(
-            self.owner, self.user, ['ahora 10 a Ana por pago móvil', 'mándale 20 a mamá por pago móvil'],
+            self.owner, self.user, ['ahora 10 dólares a Ana por pago móvil', 'mándale 20 dólares a mamá por pago móvil'],
             rail='ve_pagomovil_send', recipient='Ana', amount_usd=10)
         self.assertEqual(intent.params['phone'], '584141111111')
         # Two saved people in one sentence, or a name inside an e-mail: nobody is chosen.
-        for words, pointer in (('mándale 20 a Ana y a mamá', 'Ana'), ('mándale 20 a ana@x.com', 'ana')):
+        for words, pointer in (('mándale 20 dólares a Ana y a mamá', 'Ana'), ('mándale 20 dólares a ana@x.com', 'ana')):
             with self.subTest(words=words), self.assertRaises(IntentRefused):
                 self.ask(words, rail='ve_pagomovil_send', recipient=pointer, amount_usd=20)
         AgendaEntry.objects.filter(label__in=['Ana', 'Ana María']).delete()
         # A name the owner did not write, or two saved recipients with it: never a guess.
         with self.assertRaises(IntentRefused) as refused:
-            self.ask('mándale 20 por pago móvil', rail='ve_pagomovil_send', recipient='mamá', amount_usd=20)
+            self.ask('mándale 20 dólares por pago móvil', rail='ve_pagomovil_send', recipient='mamá', amount_usd=20)
         self.assertEqual(refused.exception.code, 'not_said')
         AgendaEntry.objects.create(confio_account=self.owner, rail='ve_pagomovil', label='mama', relationship='third_party',
                                    details={'cedula': 'V1234567', 'phone': '584241234567', 'bank_code': '0102'})
         with self.assertRaises(IntentRefused) as refused:
-            self.ask('mándale 20 a mamá por pago móvil', rail='ve_pagomovil_send', recipient='mamá', amount_usd=20)
+            self.ask('mándale 20 dólares a mamá por pago móvil', rail='ve_pagomovil_send', recipient='mamá', amount_usd=20)
         self.assertEqual(refused.exception.code, 'no_saved_payee')
 
     def _pago_movil_on(self):
@@ -1115,72 +1113,58 @@ class OwnerWordsTests(PaymentIntentBase):
         AgendaEntry.objects.create(confio_account=self.owner, rail='ve_pagomovil', label='Ana',
                                    relationship='third_party',
                                    details={'cedula': 'V111111', 'phone': '584141111111', 'bank_code': '0102'})
-        for words in ('envia 20 a Ana Gómez por pago movil', 'paga a Santa Ana 20', 'envia 20 a doña Ana',
-                      'no le envies a Ana, envia 20 a otra', 'no quiero mandarle a Ana 20'):
+        for words in ('envia 20 dólares a Ana Gómez por pago movil', 'paga a Santa Ana 20 dólares', 'envia 20 dólares a doña Ana',
+                      'no le envies a Ana, envia 20 dólares a otra', 'no quiero mandarle a Ana 20 dólares'):
             with self.subTest(words=words), self.assertRaises(IntentRefused) as refused:
                 self.ask(words, rail='ve_pagomovil_send', recipient='Ana', amount_usd=20)
             self.assertEqual(refused.exception.code, 'no_saved_payee')
-        for words in ('envia 20 a Ana por pago movil', 'mándale a Ana 20 dólares', 'a Ana, 20', 'Ana: 20 dólares hoy',
-                      '20 para mi Ana'):
+        for words in ('envia 20 dólares a Ana por pago movil', 'mándale a Ana 20 dólares', 'a Ana, 20 dólares', 'Ana: 20 dólares hoy',
+                      '20 dólares para mi Ana'):
             with self.subTest(words=words):
                 self.assertEqual(self.ask(words, rail='ve_pagomovil_send', recipient='Ana',
                                           amount_usd=20).params['phone'], '584141111111')
 
-    def test_a_number_written_in_another_unit_is_not_dollars(self):
-        """The model saying amount_usd=500 does not make "500 bolívares"
-        five hundred dollars."""
+    def test_the_amount_is_only_the_number_code_was_given(self):
+        """How much is never read from words: `amount_usd` is the number the
+        person typed answering code's "¿Cuántos dólares?" (assistant/confirm.py).
+        While it is asked, the request carries none."""
         from payment_accounts.models import AgendaEntry
         self._pago_movil_on()
         AgendaEntry.objects.create(confio_account=self.owner, rail='ve_pagomovil', label='Mamá',
                                    relationship='third_party',
                                    details={'cedula': 'V12345678', 'phone': '584141234567', 'bank_code': '0102'})
-        for words, amount in (('envíale 500 bolívares a mamá por pago móvil', 500), ('mándale Bs 500 a mamá', 500),
-                              ('mándale 50 reais a mamá', 50), ('mándale R$50 a mamá', 50),
-                              ('mándale 20 mil a mamá', 20), ('mándale 2 lucas a mamá', 2),
-                              ('mándale 100.000 pesos a mamá', 100000)):
-            with self.subTest(words=words), self.assertRaises(IntentRefused) as refused:
-                self.ask(words, rail='ve_pagomovil_send', recipient='mamá', amount_usd=amount)
-            self.assertEqual(refused.exception.code, 'not_said')
-        self.assertIn('en dólares', str(refused.exception))
-        # Dollars, or no unit at all (the card then says US$ for the owner to check).
-        for words in ('mándale 20 dólares a mamá', 'mándale $20 a mamá', 'mándale 20 usd a mamá', 'mándale 20 a mamá'):
+        for words in ('envíale 500 bolívares a mamá por pago móvil', 'mándale Bs 500 a mamá', 'mándale a mamá'):
             with self.subTest(words=words):
+                request, _source = payment_intents.request_from_words(self.owner, self.user, [words],
+                                                                      rail='ve_pagomovil_send', recipient='mamá')
+                self.assertIsNone(request['amount_usd'])
                 self.assertEqual(self.ask(words, rail='ve_pagomovil_send', recipient='mamá', amount_usd=20).total_usd,
                                  Decimal('20'))
-        # Written both ways in one message: the dollar writing stands.
-        self.assertEqual(self.ask('mándale 20 dólares a mamá, no 20 bolívares', rail='ve_pagomovil_send',
-                                  recipient='mamá', amount_usd=20).total_usd, Decimal('20'))
+        with self.assertRaises(IntentRefused):
+            payment_intents.request_from_words(self.owner, self.user, ['mándale a mamá'], rail='ve_pagomovil_send',
+                                               recipient='mamá', amount_usd='abc')
 
-    def test_what_the_owner_denied_or_only_asked_about_is_never_paid(self):
+    def test_who_the_owner_denied_or_only_asked_about_is_never_paid(self):
         """The security review's cases for a send to an @usuario: a handle
-        or an amount the owner ruled out, and two questions that together
-        name a person and a number."""
+        the owner ruled out, and a question that names a person."""
         from users.models import User
         User.objects.create_user(username='pedro', firebase_uid='pedro')
         # Named to rule him out: with no "no" before it the same handle is accepted, so this is the denial.
         self.assertEqual(payment_intents.owner_recipient('mándale 20 dólares a @pedro', '@pedro', 'confio_send'), 'pedro')
         self.assertIsNone(payment_intents.owner_recipient(
             'no le envíes a @pedro, mándale 20 dólares a @ana.silva', '@pedro', 'confio_send'))
-        for words, recipient, amount in (
-                ('no le envíes a @pedro, mándale 20 dólares a @ana.silva', '@pedro', 20),
-                ('envía 20 dólares a @ana.silva, no 500', 'ana.silva', 500),
-                ('envía 500 en vez de 20 a @ana.silva', 'ana.silva', 20)):
-            with self.subTest(words=words), self.assertRaises(IntentRefused):
-                self.ask(words, rail='confio_send', recipient=recipient, amount_usd=amount)
+        with self.assertRaises(IntentRefused):
+            self.ask('no le envíes a @pedro, mándale 20 dólares a @ana.silva', rail='confio_send', recipient='@pedro',
+                     amount_usd=20)
         with self.assertRaises(IntentRefused):
             payment_intents.prepare_from_request(
                 self.owner, self.user, ['¿quién es @ana.silva? me escribió', '¿cuánto es 500 dólares en bolívares?'],
                 rail='confio_send', recipient='ana.silva', amount_usd=500)
-        # A number that is part of something else is not an amount.
-        for words, amount in (('envía a @ana.silva el 20 de noviembre', 20), ('mándale a @ana.silva al 04141234567', 4141234567),
-                              ('envía a @ana.silva2 por favor', 2)):
-            with self.subTest(words=words), self.assertRaises(IntentRefused):
-                self.ask(words, rail='confio_send', recipient='ana.silva', amount_usd=amount)
         # Stated plainly, in one message or as an answer to "¿a quién?", it is prepared.
-        self.assertEqual(self.ask('mándale 15 dólares a @ana.silva', rail='confio_send', recipient='ana.silva',
+        self.assertEqual(self.ask('mándale a @ana.silva', rail='confio_send', recipient='ana.silva',
                                   amount_usd=15).total_usd, Decimal('15'))
         intent = payment_intents.prepare_from_request(
-            self.owner, self.user, ['a @ana.silva', 'mándale 15 dólares'], rail='confio_send', recipient='ana.silva',
+            self.owner, self.user, ['a @ana.silva', 'quiero mandarle plata'], rail='confio_send', recipient='ana.silva',
             amount_usd=15)
         self.assertEqual(intent.total_usd, Decimal('15'))
 
@@ -1205,12 +1189,15 @@ class OwnerWordsTests(PaymentIntentBase):
             belt.payment_texts = ['mándale 15 dólares a @ana.silva']
             out = belt.call('prepare_payment', {'rail': 'confio_send', 'recipient': 'ana.silva', 'amount_usd': 15})
             self.assertTrue(out['ok'], out)
-            # A typed amount is asked first, by code; only their yes makes the card.
+            # How many dollars is asked by code; only their typed number makes the card.
             self.assertIsNone(belt.result.payment_intent)
             pending = belt.result.pending_action
-            self.assertIn('US$15 (dólares) a @ana.silva', pending['question'])
+            self.assertEqual(pending['question'], '¿Cuántos dólares quieres enviar a @ana.silva? Escribe solo el número.')
+            self.assertIsNone(pending['data']['request']['amount_usd'])      # the model's 15 is not used
             from assistant import sends
-            done, _reply, extra = sends.confirmed(belt, pending['data'], 'es')
+            # Their typed number (confirm.answer) is the amount.
+            answered = {**pending['data'], 'request': {**pending['data']['request'], 'amount_usd': '15.00'}}
+            done, _reply, extra = sends.confirmed(belt, answered, 'es')
             self.assertTrue(done)
             from payment_accounts.models import PaymentIntent
             made = PaymentIntent.objects.get(internal_id=extra['payment_intent']['id'])
@@ -1221,32 +1208,6 @@ class OwnerWordsTests(PaymentIntentBase):
             denied = other.call('prepare_payment', {'rail': 'confio_send', 'recipient': 'ana.silva', 'amount_usd': 15})
             self.assertEqual((denied['ok'], denied['_denied']), (False, True))
             self.assertIsNone(other.result.payment_intent)
-
-
-class AmountUnitTests(SimpleTestCase):
-    """A number the owner wrote in another currency, or with a multiplier, is
-    not that many dollars, however the model reads it."""
-
-    def test_other_money_and_multipliers_are_not_dollars(self):
-        cases = [('envíale 500 bolívares a mamá por pago móvil', 500), ('pásale 500 bs a mamá', 500),
-                 ('manda 500 bolos a mamá', 500), ('manda S/ 500 a mamá', 500), ('envía 50 reais a @ana', 50),
-                 ('manda 500 de los bolívares a mamá', 500), ('manda 500 en pesos a mamá', 500),
-                 ('envía 20 mil a mamá', 20), ('envia 20 k a mama', 20), ('envia 20k a mama', 20),
-                 ('manda 2 lucas a mamá', 2), ('envía 100.000 pesos a mamá', 100),
-                 ('envía 100.000 pesos a mamá', 100000), ('envía 500 bolivares, o sea 5 dólares, a mamá', 500)]
-        for words, amount in cases:
-            with self.subTest(words=words, amount=amount):
-                self.assertTrue(payment_intents._other_unit(words, amount))
-
-    def test_dollars_and_bare_numbers_stay_dollars(self):
-        cases = [('mándale 20 dólares a mamá', 20), ('mándale 20 a mamá', 20), ('mándale $20 a mamá', 20),
-                 ('mándale 20 usd a mamá', 20), ('mándale 20usd a mamá', 20), ('manda 20 a mamá en dólares', 20),
-                 ('manda 20 dólares en pago móvil', 20), ('mándale 15 a @ana.silva', 15),
-                 ('envía 500 bolivares, o sea 5 dólares, a mamá', 5),
-                 ('manda 20 a mi mamá que vive en Los Teques', 20)]
-        for words, amount in cases:
-            with self.subTest(words=words, amount=amount):
-                self.assertFalse(payment_intents._other_unit(words, amount))
 
 
 class SavedNameTests(SimpleTestCase):

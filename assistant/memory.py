@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -538,23 +539,69 @@ NOTE_NOT_FORGOT = ('\nCon este mensaje NO se borró nada de memoria. Si pidió b
                    'borraste ni que lo olvidaste.\n')
 
 
+# What happened, in code's words: for a reply code wrote (a confirmation question, a prepared card, a refusal,
+# an outage), which the model's words never reach. Definite only where something was done; conditional where it
+# is not known that they asked; nothing where the message was read and was no memory request ("olvida eso, mejor
+# dime la tasa"). Never what was asked to be forgotten.
+_LINES = {
+    # The items are named as they are kept (in Spanish): quoted in another language.
+    'saved': {'es': 'Guardé en tu memoria: {items}.', 'pt': 'Salvei na sua memória: “{items}”.',
+              'en': 'I saved to your memory: “{items}”.'},
+    'forgot': {'es': 'Listo, ya no voy a tener en cuenta lo que hablamos hasta aquí.',
+               'pt': 'Pronto, não vou mais levar em conta o que conversamos até aqui.',
+               'en': "Done, I won't take into account what we talked about until now."},
+    'maybe_not_saved': {'es': 'Si querías que lo guarde en tu memoria: no guardé nada.',
+                        'pt': 'Se você queria que eu salvasse na sua memória: não salvei nada.',
+                        'en': "If you wanted me to save it to your memory: I didn't save anything."},
+    'maybe_not_forgot': {'es': 'Si querías que olvide algo: no borré nada. Puedes hacerlo en ✨ Tu asistente → Memoria.',
+                         'pt': 'Se você queria que eu esquecesse algo: não apaguei nada. Você pode fazer isso em '
+                               '✨ Tu asistente → Memoria.',
+                         'en': "If you wanted me to forget something: I didn't delete anything. You can do it in "
+                               '✨ Tu asistente → Memoria.'},
+    'not_forgot_yet': {'es': 'Si querías que olvide algo: no pude borrarlo ahora. Inténtalo de nuevo o bórralo en '
+                             '✨ Tu asistente → Memoria.',
+                       'pt': 'Se você queria que eu esquecesse algo: não consegui apagar agora. Tente de novo ou '
+                             'apague em ✨ Tu asistente → Memoria.',
+                       'en': "If you wanted me to forget something: I couldn't delete it now. Try again or delete "
+                             'it in ✨ Tu asistente → Memoria.'},
+}
+# Read as no memory request, but it names memory: still told.
+_NAMES_MEMORY = re.compile(r'(?<!\w)(?:memoria|memory|memorizes?|memorize|memorizar)(?!\w)')
+
+
+def said_by_code(remembered, lang='es') -> str:
+    """The line for a memory request answered beside something else; '' when there is none to say."""
+    if remembered is None or remembered.reply or not remembered.line:
+        return ''
+    lines = _LINES[remembered.line]
+    return (lines.get(lang) or lines['es']).format(items=', '.join(remembered.saved))
+
+
 @dataclass
 class MemoryTurn:
     usage: object
     reply: str | None = None
     note: str = ''
+    # What said_by_code says (a key of _LINES), and what was saved.
+    line: str = ''
+    saved: list = field(default_factory=list)
 
 
 def asks_to_forget(conversation, text) -> bool:
     return switched_on(conversation.user_id) and rules.command(text) in ('forget', 'wipe')
 
 
-def _confirm(conversation, body, message_id):
+def _confirm(conversation, body, message_id, kind='forget'):
     """A line of code's in the thread: the assistant is not the one answering."""
     from .service import _append
-    tag = f'memory-forget:{message_id}'
+    tag = f'memory-{kind}:{message_id}'
     if not conversation.messages.filter(metadata__notice=tag).exists():
         _append(conversation, sender_type='SYSTEM', body=body, metadata={'notice': tag, 'system_note': True})
+
+
+def note_to_thread(conversation, body, message_id):
+    """Code's own line about memory in the thread, once per message: nobody else is answering."""
+    _confirm(conversation, body, message_id, kind='note')
 
 
 def forget_unanswered(conversation, message, text):
@@ -588,8 +635,9 @@ def handle_message(conversation, message, text):
         return None
     turn = MemoryTurn(usage=TurnResult(reply=''))
     forgetting = asked != 'remember'
+    unknown = 'maybe_not_forgot' if forgetting else 'maybe_not_saved'
     if not _own_words(message, user_id, forgetting=forgetting, request=True):
-        turn.note = NOTE_NOT_FORGOT if forgetting else NOTE_NOT_SAVED
+        turn.note, turn.line = (NOTE_NOT_FORGOT if forgetting else NOTE_NOT_SAVED), unknown
         return turn
     scope = Scope.of(conversation)
     try:
@@ -599,40 +647,45 @@ def handle_message(conversation, message, text):
             return turn
         if asked == 'remember':
             if not facts_allowed(user_id) or not facts_enabled(scope.row()):
+                turn.line = unknown
                 return turn  # the standing note already says nothing is saved
             if rules.never_kept(text):
-                turn.note = NOTE_NOT_SAVED  # not even sent to be classified
+                turn.note, turn.line = NOTE_NOT_SAVED, unknown  # not even sent to be classified
                 return turn
         try:
             action, items, also_asks = read_command(text, turn.usage)
         except Exception as exc:  # noqa: BLE001 - see below for each request
             logger.warning('assistant memory: request not read (%s)', type(exc).__name__)
             turn.note = NOTE_NOT_FORGOT_YET if forgetting else NOTE_NOT_SAVED
+            turn.line = 'not_forgot_yet' if forgetting else unknown
             return turn
         if forgetting:
             if action != 'forget':
                 turn.note = NOTE_NOT_FORGOT
+                turn.line = unknown if _NAMES_MEMORY.search(rules.fold(text)) else ''
                 return turn
             removed = forget(scope, items, message.id)
             if also_asks:
-                turn.note = NOTE_FORGOT
+                turn.note, turn.line = NOTE_FORGOT, 'forgot'
             else:
                 turn.reply = FORGOT_REPLY if removed else FORGOT_CONTEXT_REPLY
             return turn
         saved = remember(scope, items, message) if action == 'remember' else []
         if saved and also_asks:
-            turn.note = NOTE_SAVED
+            turn.note, turn.line, turn.saved = NOTE_SAVED, 'saved', list(saved)
         elif saved:
             turn.reply = SAVED_REPLY.format(items='\n'.join(f'• {item}' for item in saved))
         else:
             turn.note = NOTE_NOT_SAVED
+            # Read and not saved: said only when they asked (the reader said remember) or named memory.
+            turn.line = unknown if action == 'remember' or _NAMES_MEMORY.search(rules.fold(text)) else ''
         return turn
     except Exception as exc:  # noqa: BLE001 - never a failed turn, never a false "lo borré"
         logger.warning('assistant memory: request failed (%s)', type(exc).__name__)
         if forgetting:
             turn.reply = FAILED_REPLY
         else:
-            turn.note = NOTE_NOT_SAVED
+            turn.note, turn.line = NOTE_NOT_SAVED, unknown
         return turn
 
 

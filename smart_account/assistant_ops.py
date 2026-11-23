@@ -8,9 +8,10 @@
   prefilled. Nothing is prepared, signed or stored on chain here; the change
   exists only after the owner reviews it on that screen and signs it through
   the normal prepare -> sign flow, whose server side re-validates everything.
-- It never chooses what to buy, how much, or a target split: every asset,
-  amount and percentage must be in the owner's own words (the caller passes
-  them in `said`). Re-splitting the next buys toward a target the owner set
+- It never chooses what to buy, how much, or a target split: every asset
+  and percentage must be in the owner's own words (the caller passes them in
+  `said`), and an amount is only the number the owner typed answering the
+  server's "¿Cuántos dólares?" (`amount_given`, assistant/asked.py). Re-splitting the next buys toward a target the owner set
   is computed here from that target, never invented by the model.
 - It never sells. A target allocation is kept by new buys only.
 
@@ -40,9 +41,8 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 OPERABLE = ('active', 'cancel_pending')
-# Who gets money every month, and how much, read out of a sentence: paused
-# with the chat's typed payments (assistant/engine.py, 2026-11-22). Stopping
-# a rule, and the buy rules, still work from the chat.
+# Who gets money every month, read out of a sentence: paused (founder, 2026-11-22).
+# Stopping a rule, and the buy rules, still work from the chat. Lifting it is the founder's call.
 PAYING_RULES_PAUSED = True
 PAYING_RULES_REFUSAL = ('Por ahora no creo ni cambio desde el chat reglas que envían o pagan a alguien. Hazlo en tu '
                         'Cuenta inteligente, en Reglas: ahí escribes el monto y lo ves antes de firmar.')
@@ -108,15 +108,14 @@ _NUMBER = re.compile(r'\d[\d.,]*')
 
 
 def numbers_in(text: str) -> set[Decimal]:
-    """Every number written in `text`, read both ways (1.000,50 / 1,000.50)."""
+    """Every number written in `text`, by what it means: "1.02" is never 102, "2,5" never 25."""
+    from payment_accounts.payment_intents import _amount_values
     out = set()
     for raw in _NUMBER.findall(text or ''):
-        raw = raw.rstrip('.,')
-        for candidate in {raw, raw.replace('.', '').replace(',', '.'), raw.replace(',', '')}:
-            try:
-                out.add(Decimal(candidate))
-            except Exception:  # noqa: BLE001
-                continue
+        try:
+            out |= _amount_values(raw.rstrip('.,'))
+        except ArithmeticError:
+            continue
     return out
 
 
@@ -127,10 +126,14 @@ def said_number(said: str, value) -> bool:
         return False
 
 
-def said_usd(said: str, value, *, level=None) -> bool:
-    """They wrote this as that many dollars. `said`: their messages joined by ' · ', oldest first."""
-    from payment_accounts.dollars import said_dollars
-    return said_dollars(list(reversed(str(said or '').split(' · '))), value, level=level)
+def said_percent(said: str, value) -> bool:
+    """They wrote this as a percentage ("5%", "5 por ciento"), not as money."""
+    found = re.findall(r'([0-9]+(?:[.,][0-9]+)?) ?(?:%|por ?ciento\b|por ?cento\b|percent\b)',
+                       _norm(said))
+    try:
+        return any(Decimal(str(value)) == Decimal(number.replace(',', '.')) for number in found)
+    except ArithmeticError:
+        return False
 
 
 def _norm(text: str) -> str:
@@ -489,15 +492,15 @@ def _schedule_text(frequency, when, tz):
     return f'{FREQUENCY_ES[frequency]}, desde el {local:%d/%m}'
 
 
-def _amount(value, said, *, required: bool) -> Decimal | None:
+def _amount(value, *, required: bool, given: bool) -> Decimal | None:
+    """The amount, only the number the person typed answering code's "¿Cuántos dólares?" (`given`: the
+    assistant's confirm.answer). Never one the model passed: it is not read out of their words."""
     if value in (None, ''):
         if required:
-            raise OpsRefused('Dime el monto en dólares, en números.')
+            raise OpsRefused('El servidor le pregunta cuántos dólares: no se lo preguntes tú.', 'not_said')
         return None
-    if not said_usd(said, value):
-        # The amount must be the owner's, and in dollars: never one the assistant picked or converted.
-        raise OpsRefused('Dime tú el monto en dólares, en números (por ejemplo "20 dólares"): yo no elijo ni '
-                         'convierto cuánto mover.', 'not_said')
+    if not given:
+        raise OpsRefused('El monto no se pone aquí: el servidor le pregunta cuántos dólares.', 'not_said')
     try:
         return services._parse_usd(Decimal(str(value)).quantize(CENT))
     except services.PrepareError as exc:
@@ -593,8 +596,10 @@ def _step(action, kind, *, rule_id=None, amount=None, frequency=None, first_run_
 
 def propose_rule(user, *, said: str, action: str, kind: str | None = None, rule_id=None, payee=None,
                  payout_method_id=None, asset=None, amount_usd=None, frequency=None, weekday=None,
-                 day_of_month=None, start_date=None, meta=None, tz=None, now=None) -> dict:
-    """One rule change, validated like the prepare it leads to. Returns the
+                 day_of_month=None, start_date=None, meta=None, tz=None, now=None, amount_given=False,
+                 probe=False) -> dict:
+    """One rule change, validated like the prepare it leads to. `probe`: everything but the amount, before
+    code asks it ({'probe': True, 'asset': name}). Returns the
     proposal (steps the app opens prefilled). Raises OpsRefused."""
     tz = tz or timezone.get_current_timezone()
     own = operable_account(user)
@@ -625,7 +630,10 @@ def propose_rule(user, *, said: str, action: str, kind: str | None = None, rule_
     frequency = frequency or (existing.frequency if existing else None)
     if frequency not in FREQUENCIES:
         raise OpsRefused('¿Cada cuánto? Puede ser cada día, cada semana, cada dos semanas o cada mes.')
-    amount = _amount(amount_usd, said, required=existing is None) or existing.amount
+    if probe and kind != 'buy':
+        raise OpsRefused('El monto de esa regla se cambia en tu Cuenta inteligente, en Reglas.')
+    amount = None if probe else (_amount(amount_usd, required=existing is None, given=amount_given)
+                                 or existing.amount)
     when = first_run(frequency, tz=tz, weekday=weekday, day_of_month=day_of_month, start_date=start_date, now=now)
     viewer = _viewer(user, meta)
     schedule = _schedule_text(frequency, when, tz)
@@ -693,6 +701,8 @@ def propose_rule(user, *, said: str, action: str, kind: str | None = None, rule_
                   'name': _rule_target(existing)['inversion']}
     else:
         raise OpsRefused('¿En qué quieres invertir? Dime el nombre o el símbolo.')
+    if probe:
+        return {'probe': True, 'asset': _clean(picked['name']), 'frequency': frequency}
     _check_buy_amount(picked['asset_key'], amount, picked['name'])
     sentence = f'{verb} invierte {_usd(amount)} en {picked["name"]} {schedule}. Compra, nunca vende.'
     return {'steps': [_step(action, 'buy', rule_id=rid, amount=amount, frequency=frequency, first_run_at=when,
@@ -866,8 +876,9 @@ def _allocation_steps(own, weights, amounts, frequency, when, tz, *, why: str) -
 
 def propose_target_allocation(user, *, said: str, action: str, assets=None, total_usd=None, frequency=None,
                               weekday=None, day_of_month=None, start_date=None, meta=None, tz=None,
-                              now=None) -> dict:
-    """`set`: save the owner's own split and propose one Buy rule per asset
+                              now=None, amount_given=False, probe=False) -> dict:
+    """`probe` (set only): everything but the total, before code asks it ({'probe': True, 'split': text}).
+    `set`: save the owner's own split and propose one Buy rule per asset
     (amount = total x weight). `next_split`: from the saved target and the
     account's holdings, propose the next buys re-split toward it (same
     total, new money only). `delete`: forget the target (rules stay)."""
@@ -890,9 +901,13 @@ def propose_target_allocation(user, *, said: str, action: str, assets=None, tota
         weights = _parse_weights(viewer, assets, said)
         if frequency not in FREQUENCIES:
             raise OpsRefused('¿Cada cuánto quieres comprar? Cada día, semana, dos semanas o mes.')
-        total = _amount(total_usd, said, required=True)
-        amounts = split_amounts(total, weights)
-        for key, amount in amounts.items():
+        if probe:
+            first_run(frequency, tz=tz, weekday=weekday, day_of_month=day_of_month, start_date=start_date, now=now)
+            return {'probe': True, 'frequency': FREQUENCY_ES[frequency],
+                    'split': ', '.join(f'{Decimal(w) / 100}% {_asset_label(k)}' for k, w in weights.items())}
+        total = _amount(total_usd, required=True, given=amount_given)
+        split = split_amounts(total, weights)
+        for key, amount in split.items():
             _check_buy_amount(key, amount, _asset_label(key))
         when = first_run(frequency, tz=tz, weekday=weekday, day_of_month=day_of_month, start_date=start_date, now=now)
         with transaction.atomic():
@@ -901,9 +916,10 @@ def propose_target_allocation(user, *, said: str, action: str, assets=None, tota
             SmartAccountTargetAllocation.objects.create(
                 smart_account=own, weights=[{'asset_key': k, 'weight_bps': w} for k, w in weights.items()],
                 total_usd=total, frequency=frequency)
-        steps = _allocation_steps(own, weights, amounts, frequency, when, tz, why='Tu objetivo')
+        steps = _allocation_steps(own, weights, split, frequency, when, tz, why='Tu objetivo')
         split = ', '.join(f'{Decimal(w) / 100}% {_asset_label(k)}' for k, w in weights.items())
-        return {'steps': steps, 'texto': (f'Guardé tu objetivo: {split}, con {_usd(total)} '
+        return {'steps': steps, 'split': split, 'total_text': _usd(total), 'frequency': frequency,
+                'texto': (f'Guardé tu objetivo: {split}, con {_usd(total)} '
                                           f'{FREQUENCY_ES[frequency]} en total. Se mantiene solo con compras nuevas: '
                                           'nunca vendo nada. Cada regla se activa cuando la firmas.')}
 

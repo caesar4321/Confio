@@ -183,7 +183,7 @@ def load(conversation, history, memory_note='', answering=None, *, remembering=F
             state = memory.state_for_turn(conversation, history, remembering=remembering)
 
             def shown(message):
-                if str((message.metadata or {}).get('notice') or '').startswith('memory-forget:'):
+                if str((message.metadata or {}).get('notice') or '').startswith(('memory-forget:', 'memory-note:')):
                     return False  # code's receipt to the person, never a turn of the conversation
                 # Always the message being answered, and the team's: the record of the case.
                 return message is latest or is_team(message) or not state.hidden(message.id)

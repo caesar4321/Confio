@@ -3,10 +3,11 @@ Confío IA+ (spec decision 34): "avísame si TSLA baja 5% y prepárame una
 compra de 100".
 
 - The owner names the asset or currency, the threshold and any attached
-  action. The assistant never suggests any of them (no advice): every value
-  must be in the owner's own words, and the watch is saved only on the
-  owner's explicit "sí" to a question written by code (the categorizing
-  pattern in assistant/service.py).
+  action. The assistant never suggests any of them (no advice): the asset
+  and the threshold must be in the owner's own words, and the watch is saved
+  only on the owner's answer to a question written by code: "sí" (the
+  categorizing pattern in assistant/service.py), or, for an attached buy, the
+  number of dollars typed alone (assistant/asked.py), never read from words.
 - Prices come from the sources the app already shows: Ondo GM market data
   for stocks, the crypto snapshot prices for bitcoin and gold, and the
   reference exchange rate Home shows for local currencies.
@@ -29,7 +30,7 @@ from . import assets as assets_mod, chain
 from .assistant_ops import (
     OpsRefused, _asset_label, _check_buy_amount, _resolve_asset, _usd, _viewer, operable_account, rule_chip,
     said_number,
-    said_usd,
+    said_percent,
 )
 from .models import SmartAccountWatch
 
@@ -131,7 +132,47 @@ def describe(kind, *, asset_key='', currency='', threshold: Decimal, action=None
     return out + '.'
 
 
+_TERMS = {
+    'pt': {'asset_price_drop_pct': 'se {t} cair {n}% a partir de hoje',
+           'asset_price_rise_pct': 'se {t} subir {n}% a partir de hoje',
+           'asset_price_below': 'se {t} cair para {u} ou menos', 'asset_price_above': 'se {t} subir para {u} ou mais',
+           'fx_rate_below': 'se {t} cair para {n} {c} ou menos', 'fx_rate_above': 'se {t} subir para {n} {c} ou mais',
+           'dollar': 'o dólar em {c}', 'lead': 'Eu te aviso {x}',
+           'buy': ', e deixo pronta uma compra de {u} em {a} para você revisar e assinar'},
+    'en': {'asset_price_drop_pct': 'if {t} falls {n}% from today', 'asset_price_rise_pct': 'if {t} rises {n}% from today',
+           'asset_price_below': 'if {t} falls to {u} or less', 'asset_price_above': 'if {t} rises to {u} or more',
+           'fx_rate_below': 'if {t} falls to {n} {c} or less', 'fx_rate_above': 'if {t} rises to {n} {c} or more',
+           'dollar': 'the dollar in {c}', 'lead': "I'll let you know {x}",
+           'buy': ', and I leave a {u} buy of {a} ready for you to review and sign'},
+}
+
+
+def describe_in(lang, kind, *, asset_key='', currency='', threshold, action=None) -> str:
+    """describe() in the person's language: the terms they agree to are always the ones they read."""
+    if lang not in _TERMS:
+        return describe(kind, asset_key=asset_key, currency=currency, threshold=threshold, action=action)
+    words = _TERMS[lang]
+    target = _asset_label(asset_key) if asset_key else words['dollar'].format(c=currency)
+    text = words[kind].format(t=target, n=_num(threshold), u=_usd(threshold), c=currency)
+    out = words['lead'].format(x=text)
+    if action:
+        out += words['buy'].format(u=_usd(action['amount_usd']), a=_asset_label(action['asset_key']))
+    return out + '.'
+
+
 # ── proposing (no write) and saving (on the owner's "sí") ──────────────
+
+def _level(value):
+    """The level as the model passed it, as a plain number: "5%", " 5 % ", "US$200", "200 USD", "5,5%" -> "5", "200",
+    "5.5". Whether the person said it is still checked against their own words."""
+    if not isinstance(value, str):
+        return value
+    text = re.sub(r'(?i)^\s*(?:us\s?\$|usd|\$)\s*|\s*(?:%|usd|d[oó]lares?)\s*$', '', value.strip())
+    text = text.strip()
+    if re.fullmatch(r'[0-9]+,[0-9]+', text):
+        text = text.replace(',', '.')
+    return text or None
+
 
 def _decimal(value, what):
     try:
@@ -144,7 +185,7 @@ def _decimal(value, what):
 
 
 def propose(user, *, said: str, kind: str, asset=None, currency=None, threshold=None, action_asset=None,
-            action_amount_usd=None, meta=None) -> dict:
+            action_amount_usd=None, meta=None, amount_given=False) -> dict:
     """Validate a watch the owner asked for; returns the draft to confirm."""
     own = operable_account(user)
     if own is None:
@@ -153,9 +194,19 @@ def propose(user, *, said: str, kind: str, asset=None, currency=None, threshold=
         raise OpsRefused('Puedo avisarte cuando un precio o el tipo de cambio sube o baja.')
     if SmartAccountWatch.objects.filter(smart_account=own, active=True).count() >= MAX_ACTIVE:
         raise OpsRefused(f'Ya tienes {MAX_ACTIVE} alertas activas. Borra alguna para crear otra.')
+    if not kind.endswith('_pct') and ((isinstance(threshold, str) and '%' in threshold)
+                                       or said_percent(said, _level(threshold))):
+        # "5%" filed as a price would be an alert at US$5: never guessed, asked.
+        raise OpsRefused('¿El aviso es por un porcentaje o por un precio? Dímelo, por ejemplo "baja 5%" o '
+                         '"baja a 200 dólares".', 'not_said')
+    threshold = _level(threshold)
     if threshold is None or not said_number(said, threshold):
         # The level is always the owner's: the assistant never suggests one.
         raise OpsRefused('Dime tú el nivel exacto del aviso: yo no elijo cuándo avisarte.', 'not_said')
+    # A price level is shown as dollars in the question that saves the alert ("¿Guardo esta alerta? … US$200"),
+    # and an alert only tells: the person's yes there is what makes it theirs.
+    if kind.endswith('_pct') and not said_percent(said, threshold):
+        raise OpsRefused('¿Qué porcentaje? Escríbelo con el signo, por ejemplo "5%".', 'not_said')
     threshold = _decimal(threshold, 'el nivel del aviso')
     if kind.endswith('_pct') and threshold >= 100:
         raise OpsRefused('El porcentaje tiene que ser menor que 100.')
@@ -178,9 +229,9 @@ def propose(user, *, said: str, kind: str, asset=None, currency=None, threshold=
     if action_asset or action_amount_usd:
         if not (action_asset and action_amount_usd):
             raise OpsRefused('Para dejarte una compra lista dime en qué y cuánto.')
-        if not said_usd(said, action_amount_usd, level=threshold):
-            raise OpsRefused('Dime tú el monto de la compra en dólares, en números: yo no elijo ni convierto cuánto '
-                             'invertir.', 'not_said')
+        if not amount_given:
+            # How many dollars to buy is only the number typed answering code's question (assistant/asked.py).
+            raise OpsRefused('El servidor le pregunta de cuántos dólares es la compra.', 'not_said')
         buy = _resolve_asset(viewer, action_asset, said)
         amount = _decimal(action_amount_usd, 'el monto').quantize(Decimal('0.01'))
         _check_buy_amount(buy['asset_key'], amount, buy['name'])

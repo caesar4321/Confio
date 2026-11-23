@@ -94,8 +94,8 @@ MESSAGES = {
     'not_asked': ('El código viene dentro de un texto largo. Si quieres pagarlo, envíame solo el código '
                   'y dime que lo pague.'),
     'cut_off': 'Tu mensaje llegó recortado y el código quedó incompleto. Envíame solo el código.',
-    'not_said': ('Para preparar un pago necesito que escribas tú, en tu mensaje, a quién y cuánto '
-                 '(por ejemplo: "envía 20 dólares a @ana").'),
+    'not_said': ('Para preparar un pago necesito que escribas tú, en tu mensaje, a quién '
+                 '(por ejemplo: "envíale a @ana"). Cuántos dólares te lo pregunto después.'),
     'no_saved_payee': ('Desde el chat solo preparo Pago Móvil a un destinatario que ya tengas guardado. '
                        'Dime su nombre como lo guardaste, o envíale desde Pagar.'),
     'no_amount': 'Este código no trae un monto. Ábrelo en Pagar para escribir cuánto quieres enviar.',
@@ -419,7 +419,9 @@ def prepare(owner, user, raw_code=None, *, created_by, source, request=None, mes
         family, method_id, provider = intent_rails.route(request)
         window = timezone.now() - timedelta(hours=1)
         limit = int(getattr(settings, 'PAYMENT_INTENTS_PER_HOUR', 12))
-        if PaymentIntent.objects.filter(confio_account=owner, created_at__gte=window).count() >= limit:
+        # A card made in the chat and dropped before anyone saw it (assistant.service._retire_unshown) is no card.
+        if PaymentIntent.objects.filter(confio_account=owner, created_at__gte=window).exclude(
+                state_reason='dropped_in_chat').count() >= limit:
             raise _refuse('rate_limited')
         if family == 'local_charge':
             try:
@@ -481,6 +483,10 @@ def prepare(owner, user, raw_code=None, *, created_by, source, request=None, mes
         _track(None, 'refused', user=user, reason='changed', **refusal_source)
         raise _refuse('changed')
     with transaction.atomic():
+        # A card on a chat message (a re-quote) takes that message's row lock, as the chat's withdrawal does
+        # (assistant.sends.withdraw_cards): a message withdrawn meanwhile gets no new card.
+        if message_id is not None and _withdrawn_message(message_id, lock=True):
+            raise _refuse('not_open')
         intent = PaymentIntent(
             confio_account=owner, user=user, created_by=created_by, source=source, rail_method_id=method_id,
             expires_at=expires, message_id=message_id, supersedes=supersedes, **facts)
@@ -490,20 +496,6 @@ def prepare(owner, user, raw_code=None, *, created_by, source, request=None, mes
             _retire_earlier(intent)
     _track(intent, 'prepared')
     return intent
-
-
-def prepare_from_words(owner, user, *texts, client=None):
-    """The assistant's path: the code must be in the person's own messages."""
-    try:
-        code = code_in_words(*texts)
-    except IntentRefused as exc:
-        _track(None, 'refused', user=user, reason=exc.code, created_by='assistant')
-        raise
-    # The earlier card is retired only once this one is on a message the
-    # person can see (attach_message): a reply that is dropped (team takeover,
-    # a failed generation) must not leave them with no card at all.
-    return prepare(owner, user, code, created_by='assistant', source='pasted_code', client=client,
-                   retire_earlier=False)
 
 
 # The rails the assistant may be asked for by name. A code names its own
@@ -856,23 +848,6 @@ def _saved_pagomovil_by_name(owner, messages, name):
             'holder_name': entry.holder_name}
 
 
-_DOLLAR_WORDS = frozenset({'dolares', 'dolar', 'usd', 'usdc', 'usdt', 'cusd', 'us', 'u$s', 'dolaritos', 'verdes'})
-# Other money and multipliers, beyond _CURRENCY_WORDS: slang, signs written
-# apart from the number, and "k".
-_OTHER_UNITS = frozenset({
-    'bolos', 'bolo', 'bolivar', 'bolivares', 'bolivas', 'bss', 'vef', 'ves', 'cops', 'sol', 'soles', 'guaranies',
-    'quetzales', 'colones', 'lempiras', 'cordobas', 'euros', 'euro', 'eur', 'libras', 'k', 'luca', 'lucas', 'palo',
-    'palos', 'millon', 'millones', 'mil', 'miles', 'cien', 'cientos', 's/', '€', 'r', 'mxn', 'ars', 'brl', 'cop',
-    'bob', 'pen', 'clp', 'pesos', 'peso', 'pesitos', 'reales', 'real', 'reais', 'bs', 'bolivianos', 'varos', 'lana',
-    'plata'})
-_UNIT_BRIDGES = frozenset({'de', 'del', 'los', 'las', 'en', 'unos', 'unas', 'como', 'aprox', 'casi'})
-_AMOUNT_TOKEN = re.compile(r'(?P<unit>r\$|bs\.?|s/\.?|€)?\$?(?P<number>\d+(?:[.,]\d+)*)(?P<suffix>[a-z$€/]+)?')
-
-
-_MONTHS = frozenset({'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre',
-                     'setiembre', 'octubre', 'noviembre', 'diciembre'})
-
-
 def _amount_values(number):
     """What a written amount means. A mark before one or two last digits is
     the decimal ("1.02" is never 102, "1.500,50" never 150050); marks between
@@ -895,77 +870,6 @@ def _amount_values(number):
     return set()
 
 
-def _amount_written(message, amount):
-    """The owner wrote this amount in THIS message, as a number of its own,
-    meaning dollars. Read here, strictly, and not from any other module:
-    never part of an account, a phone, a date or an @usuario (the token must
-    be a number and nothing else), never one they denied ("no 500", "en vez
-    de 500"), never in another unit (_other_unit says that one), never a day
-    of the month ("el 20 de noviembre")."""
-    others = frozenset(_fold(word) for word in _CURRENCY_WORDS) - _DOLLAR_WORDS
-    words = _fold(_normalized(message)).split()
-    target = Decimal(str(amount))
-    for index, raw in enumerate(words):
-        match = _AMOUNT_TOKEN.fullmatch(raw.strip(_EDGE_PUNCTUATION))
-        if not match or match.group('unit'):
-            continue
-        try:
-            if target not in _amount_values(match.group('number')):
-                continue
-        except ArithmeticError:
-            continue
-        before = [word.strip(_EDGE_PUNCTUATION) for word in words[max(0, index - 3):index]]
-        after = [word.strip(_EDGE_PUNCTUATION + '$') for word in words[index + 1:index + 3]]
-        if 'no' in before or before[-3:] == ['en', 'vez', 'de'] or before[-2:] == ['vez', 'de']:
-            continue
-        if after[:1] == ['de'] and after[1:2] and after[1] in _MONTHS:
-            continue
-        near = set(before[-1:] + after)
-        if near & others and not near & _DOLLAR_WORDS:
-            continue
-        return True
-    return False
-
-
-def _other_unit(said, amount):
-    """Every place the owner wrote this number says something that is not
-    dollars: another currency ("500 bolívares", "500 bolos", "R$50", "Bs 500",
-    "S/ 500", "500 de los bolívares") or a multiplier ("20 mil", "20k",
-    "2 lucas"). The model saying amount_usd=500 does not make "500 bolívares"
-    five hundred dollars. A bare number, or one written with dollars, is not
-    this."""
-    others = (frozenset(_fold(word) for word in _CURRENCY_WORDS) | _OTHER_UNITS) - _DOLLAR_WORDS
-    words = _fold(_normalized(said)).split()
-    seen = other = 0
-    for index, raw in enumerate(words):
-        match = _AMOUNT_TOKEN.fullmatch(raw.strip(_EDGE_PUNCTUATION))
-        if not match:
-            continue
-        number = match.group('number')
-        try:
-            # Only ever used to say why it was refused, so a misreading counts
-            # here too: "100.000 pesos" taken as 100 is still pesos.
-            readings = _amount_values(number) | {Decimal(re.sub(r'[.,]', '', number))}
-            if number.count('.') + number.count(',') == 1:
-                readings.add(Decimal(number.replace(',', '.')))
-            if Decimal(str(amount)) not in readings:
-                continue
-        except ArithmeticError:
-            continue
-        seen += 1
-        clean = [word.strip(_EDGE_PUNCTUATION + '$') or word.strip(_EDGE_PUNCTUATION) for word in words]
-        # The unit may stand one word before ("Bs 500", "S/ 500") or after,
-        # past a small bridge ("500 de los bolívares", "500 en pesos").
-        following = [word for word in clean[index + 1:index + 5] if word not in _UNIT_BRIDGES][:2]
-        near = set(clean[max(0, index - 1):index] + following)
-        suffix = (match.group('suffix') or '').strip('$')
-        if suffix:
-            near.add(suffix)
-        if match.group('unit') or (near & others and not near & _DOLLAR_WORDS):
-            other += 1
-    return seen > 0 and other == seen
-
-
 def prepare_from_request(owner, user, texts, *, rail=None, recipient=None, amount_usd=None, meta=None,
                          client=None):
     """request_from_words, priced into a card."""
@@ -975,11 +879,11 @@ def prepare_from_request(owner, user, texts, *, rail=None, recipient=None, amoun
                    retire_earlier=False)
 
 
-def request_from_words(owner, user, texts, *, rail=None, recipient=None, amount_usd=None, meta=None, around=None):
-    """The assistant's path for any payment; nothing is prepared or saved. Everything that decides where
-    money goes comes from the owner's own typed words (`texts`): the code, or
-    the recipient and the amount. The model only says which of them to use;
-    a recipient or an amount that is not in those words is refused."""
+def request_from_words(owner, user, texts, *, rail=None, recipient=None, amount_usd=None, meta=None):
+    """The assistant's path for any payment; nothing is prepared or saved. Where money goes comes from the
+    owner's own typed words (`texts`): the code, or the recipient. The model only says which of them to use; a
+    recipient not in those words is refused. How much is never read from words: `amount_usd` is only the number
+    the person typed answering code's "¿Cuántos dólares?" (assistant/confirm.py), or None while it is asked."""
     # Only a short message is a request to pay. A long one is material the
     # person pasted (to translate, to ask whether it is a scam): a recipient
     # and an amount inside it are not theirs to act on.
@@ -995,38 +899,21 @@ def request_from_words(owner, user, texts, *, rail=None, recipient=None, amount_
             # The latest message is the request. A long one is not one, and an
             # earlier short message does not speak for it.
             raise _refuse('not_asked', 'Tu mensaje es muy largo para tomarlo como un pedido de pago. '
-                                       'Escríbeme en una frase a quién y cuánto.')
+                                       'Escríbeme en una frase a quién le pagas o le envías.')
         messages = [text for text in worded if len(' '.join(text.split())) <= MAX_REQUEST_CHARS]
-        amount = None
-        if amount_usd not in (None, ''):
-            amount = intent_rails.usd_amount(amount_usd)
-            if rail is not None:
-                # A question is not a request to pay: "¿cuánto es 500 dólares
-                # en bolívares?" and "¿quién es @pedro?" must never add up to
-                # 500 for @pedro. Who and how much come from what the owner
-                # stated ("mándale 20 dólares", then "la llave es …").
-                messages = [text for text in messages if '?' not in text and '¿' not in text]
-            from .dollars import other_money, said_dollars
-            # As dollars, or plain with no other money in play ("500 a @ana en bolívares" is not US$500), in
-            # anything they said: questions, voice, captions and long pastes too. A code's own text is not theirs.
-            named = [str(text or '').replace(code, ' ') if code else str(text or '')
-                     for text in [*(around or ()), *worded]]
-            if amount is None or not said_dollars(messages, amount, around=named):
-                if amount is not None and any(other_money(text) for text in named):
-                    raise _refuse('not_said', 'Dime el monto en dólares y escríbelo con la palabra (por ejemplo: '
-                                              '"20 dólares"). No lo convierto yo de otra moneda.')
-                if amount is not None and _other_unit(' · '.join(messages), amount):
-                    raise _refuse('not_said', 'Dime el monto en dólares (por ejemplo: "20 dólares"). Desde el chat '
-                                              'los envíos se preparan en dólares.')
-                raise _refuse('not_said')
+        if rail is not None:
+            # A question is not a request: "¿quién es @pedro?" never names who gets the money. Who comes from
+            # what the owner stated ("mándale a @pedro", then "la llave es …").
+            messages = [text for text in messages if '?' not in text and '¿' not in text]
+        amount = intent_rails.usd_amount(amount_usd) if amount_usd not in (None, '') else None
+        if amount_usd not in (None, '') and amount is None:
+            raise _refuse('not_said', 'Ese monto no es válido. Escribe solo el número de dólares.')
         if rail is None:
             # A code the person pasted names its own rail; an open one also needs the amount.
             request = {'code': code, 'amount_usd': amount, 'meta': meta}
             source = 'pasted_code'
         elif rail not in word_rails():
             raise _refuse('no_code', 'Ese medio de pago no se puede preparar desde el chat. Ábrelo en Pagar.')
-        elif amount is None:
-            raise _refuse('no_amount', 'Dime cuántos dólares quieres enviar.')
         elif rail == intent_rails.VE_PAGOMOVIL:
             request = {'method_id': rail, 'amount_usd': amount, 'meta': meta,
                        **_saved_pagomovil_by_name(owner, messages, recipient)}
@@ -1065,6 +952,9 @@ def requote(owner, user, intent_id, *, client=None, meta=None):
     """New figures for the same payment: a new row, a new card, a new signature."""
     _require_owner(owner, user)
     old = _owned(owner, intent_id)
+    if old.state_reason == 'declined_in_chat' or _withdrawn_message(old.message_id):
+        # Withdrawn in the chat ("no lo pagues", "es estafa"): never revived as a new card, from any of its ids.
+        raise _refuse('not_open')
     if old.family in ('ramp_order', 'confio_send'):
         current, _ = status(old)
         if old.state == 'awaiting_signature' and not old.order_ref and not _claim_is_stale(old):
@@ -1105,6 +995,18 @@ def requote(owner, user, intent_id, *, client=None, meta=None):
         state='expired', state_reason='requoted', updated_at=timezone.now())
     return prepare(owner, user, created_by=old.created_by, source=old.source, request=_request_of(old, meta),
                    message_id=old.message_id, supersedes=old, client=client)
+
+
+def _withdrawn_message(message_id, lock=False):
+    """The person withdrew the card on this chat message ("no lo pagues", "es estafa")."""
+    if not message_id:
+        return False
+    from inbox.models import SupportMessage
+    found = SupportMessage.objects.filter(pk=message_id)
+    if lock:
+        found = found.select_for_update()
+    metadata = found.values_list('metadata', flat=True).first()
+    return bool((metadata or {}).get('withdrawn'))
 
 
 def _request_of(intent, meta=None):

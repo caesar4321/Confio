@@ -8,6 +8,7 @@ import uuid
 from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
+from assistant import sends
 from payment_accounts import local_money, payment_intents
 from payment_accounts.infinia_journeys import create_journey
 from payment_accounts.models import InfiniaJourney, PaymentIntent
@@ -264,7 +265,7 @@ class PrepareTests(PaymentIntentBase):
 
     def test_the_assistants_card_retires_the_old_one_only_once_it_is_on_a_message(self):
         shown = self.prepare(message_id=7)
-        dropped = payment_intents.prepare_from_words(self.owner, self.user, DYNAMIC)
+        dropped = payment_intents.prepare_from_request(self.owner, self.user, [DYNAMIC])
         shown.refresh_from_db()
         self.assertEqual((shown.state, dropped.message_id), ('quoted', None))  # reply never shown: old card stands
         payment_intents.attach_message(dropped.internal_id, 9, retire_earlier=True)
@@ -779,7 +780,8 @@ class AssistantToolTests(PaymentIntentBase):
         out = belt.call('prepare_payment', {})
         intent = PaymentIntent.objects.get()
         self.assertTrue(out['ok'])
-        self.assertEqual(belt.result.payment_intent, {'id': str(intent.internal_id)})
+        # The card says which code it served (its tag, never the code): it is never asked about again.
+        self.assertEqual(belt.result.payment_intent, {'id': str(intent.internal_id), 'code': sends.code_tag(DYNAMIC)})
         self.assertEqual((intent.created_by, intent.source), ('assistant', 'pasted_code'))
         self.assertEqual(out['pago_preparado']['total_a_pagar_usd'], '46.57')
         self.assertEqual(out['pago_preparado']['recibe_exactamente'], '250.75 BRL')
@@ -988,7 +990,8 @@ class ThreadTests(PaymentIntentBase):
                                   f'paga este pix {DYNAMIC}', request_meta={'HTTP_X_CONFIO_VERSION': '5.4.0'})
         intent = PaymentIntent.objects.get()
         reply = outcome.reply_message
-        self.assertEqual(reply.metadata['payment_intent'], {'id': str(intent.internal_id)})
+        self.assertEqual(reply.metadata['payment_intent']['id'], str(intent.internal_id))
+        self.assertEqual(len(reply.metadata['payment_intent']['code']), 16)
         self.assertEqual(intent.message_id, reply.pk)
         self.assertEqual(reply.metadata['actions'], [{'type': 'navigate', 'destination': 'pay_qr',
                                                       'target': 'payment_intent', 'label': 'Revisar y pagar'}])
@@ -1145,13 +1148,16 @@ class AssistantGuardTests(PaymentIntentBase):
             refused = service.ask(self.user, self.owner, None, jwt, 'paga el pix de la luz', request_meta=meta)
         self.assertEqual(refused.reply_message.body, payment_intents.MESSAGES['no_code'])
         self.assertEqual(refused.reply_message.metadata['actions'], [])
-        # Prepared, then the model fails: the card still reaches the person.
+        # Prepared, then the model fails: the card still reaches the person. (A code is carded at once only
+        # pasted with nothing else said: the thread starts again.)
+        from inbox.models import SupportMessage
+        SupportMessage.objects.filter(conversation=refused.reply_message.conversation).delete()
         with mock.patch('assistant.engine._openai_post', side_effect=[
                 call_response('prepare_payment', '{}'), AssistantUnavailable('down')]):
             kept = service.ask(self.user, self.owner, None, jwt, f'paga {DYNAMIC}', request_meta=meta)
         self.assertEqual(kept.reply_message.body, service.PAYMENT_PREPARED_REPLY)
         self.assertEqual(kept.reply_message.metadata['payment_intent'],
-                         {'id': str(PaymentIntent.objects.get().internal_id)})
+                         {'id': str(PaymentIntent.objects.get().internal_id), 'code': sends.code_tag(DYNAMIC)})
 
 
 class AmountReadingTests(SimpleTestCase):
@@ -1164,5 +1170,3 @@ class AmountReadingTests(SimpleTestCase):
             self.assertEqual(payment_intents._amount_values(said), {Decimal(meant)}, said)
         for said in ('1.2.3', '22.11.2026', '1..5'):
             self.assertEqual(payment_intents._amount_values(said), set(), said)
-        self.assertFalse(payment_intents._amount_written('envía 1.02 dólares a @ana', 102))
-        self.assertTrue(payment_intents._amount_written('envía 1.02 dólares a @ana', Decimal('1.02')))

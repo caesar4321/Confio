@@ -123,7 +123,7 @@ class ShortRefusalTests(SimpleTestCase):
         with mock.patch('payment_accounts.payment_intents.prepare', side_effect=self.refusal()), \
                 mock.patch('assistant.topup_limits.offered', return_value=True), \
                 mock.patch('assistant.here.forms_for', return_value=['topup']):
-            done, text, extra = sends.confirmed(fake, {'request': {}, 'source': 'assistant'}, 'es')
+            done, text, extra = sends.confirmed(fake, {'request': {'amount_usd': '5'}, 'source': 'assistant'}, 'es')
         self.assertFalse(done)
         self.assertTrue(text.startswith('No tienes saldo suficiente para este pago: te faltan US$3.00'), text)
         self.assertEqual(extra, {'actions': [{'type': 'form', 'target': 'topup', 'why': 'shortfall', 'label': 'Recargar'}]})

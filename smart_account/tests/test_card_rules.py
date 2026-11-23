@@ -375,12 +375,12 @@ class CardReadTests(CardTestCase):
         self.assertEqual((card['tarjeta'], card['usado_este_periodo_usd'], card['disponible_este_periodo_usd']),
                          ('Tarjeta Confío', '10.00', '90.00'))
         with self.assertRaises(assistant_ops.OpsRefused):
-            assistant_ops.propose_rule(self.owner, said='sube mi tarjeta a 200', action='update',
+            assistant_ops.propose_rule(self.owner, amount_given=True, said='sube mi tarjeta a 200', action='update',
                                        rule_id=str(rule.internal_id), amount_usd='200')
         with self.assertRaises(assistant_ops.OpsRefused):
-            assistant_ops.propose_rule(self.owner, said='tarjeta de 50 cada semana', action='create', kind='card',
+            assistant_ops.propose_rule(self.owner, amount_given=True, said='tarjeta de 50 cada semana', action='create', kind='card',
                                        amount_usd='50', frequency='weekly')
-        stop = assistant_ops.propose_rule(self.owner, said='detén mi tarjeta', action='cancel',
+        stop = assistant_ops.propose_rule(self.owner, amount_given=True, said='detén mi tarjeta', action='cancel',
                                           rule_id=str(rule.internal_id))
         self.assertEqual(stop['steps'][0]['kind'], 'card')
         self.assertIn('Tarjeta Confío', stop['steps'][0]['sentence'])

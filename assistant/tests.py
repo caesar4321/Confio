@@ -1002,6 +1002,28 @@ class ThirteenthPassTests(TestCase):
                       'ok, wait', 'yes but only May', 'clasifica también lo de mayo', '', 'sí ' + 'x' * 80]:
             self.assertFalse(service.is_affirmative(other), other)
 
+    def test_a_yes_with_anything_else_in_it_saves_nothing(self):
+        for said in ('sí, mañana', 'ok lo pienso', 'sí ❌', 'dale, pero solo la de mayo', 'sí, la mitad',
+                     'perfecto, déjalo', '¿sí?', 'sí, si sube', 'claro que no'):
+            self._propose()
+            with override_settings(OPENAI_API_KEY='k'), \
+                    patch('assistant.engine._openai_post', return_value=text_response('No lo guardo.')), \
+                    patch('assistant.service.categorize_movements') as write:
+                service.ask(self.user, self.account, None, self.jwt, said)
+            write.assert_not_called()
+
+    def test_the_ways_people_say_yes_to_saving(self):
+        for said in ('guárdala', 'Sí, guárdalo', 'perfecto', 'está bien', 'sí, clasifícalos', 'sim, pode salvar',
+                     'sí 👍', 'listo', 'sí, es correcto', 'dale, guárdala porfa'):
+            self.assertTrue(service.is_affirmative(said, 'category'), said)
+        for said in ('guárdala', 'sí, actívala', 'ok gracias', 'yes, save it', 'por favor, sí', 'que sí',
+                     'sí, lo quiero', 'está bien la alerta', 'go ahead'):
+            self.assertTrue(service.is_affirmative(said, 'alert'), said)
+        for said in ('véndela', 'envíalo', 'toda', 'salve', 'sí salve', 'por favor', 'si es así', 'sí, mañana'):
+            self.assertFalse(service.is_affirmative(said, 'category'), said)    # another question, or not a yes
+        self.assertFalse(service.is_affirmative('sí, clasifícalos', 'alert'))   # an alert is not classified
+        self.assertFalse(service.is_affirmative('sí, actívala', 'category'))
+
     def test_a_reply_after_the_proposal_voids_it(self):
         outcome = self._propose()
         # Another assistant message lands after the proposing one (e.g. a
@@ -4343,34 +4365,37 @@ class StockTradeCardTests(TestCase):
         out = self._propose(belt)
         self.assertTrue(out['ok'], out)
         self.assertEqual(belt.result.actions, [])
+        # How many dollars is asked by code, whatever the model passed.
         self.assertEqual(belt.result.pending_action['question'],
-                         '¿Quieres comprar US$20 (dólares) de Apple Inc. (AAPL)? Responde sí o no.')
+                         '¿Cuántos dólares de Apple Inc. (AAPL) quieres comprar? Escribe solo el número.')
+        self.assertEqual(belt.result.pending_action['step'], 'amount')
         self.assertEqual(belt.result.pending_action['data'],
-                         {'side': 'buy', 'ticker': 'AAPL', 'sell_all': False, 'amount': '20.00'})
+                         {'side': 'buy', 'ticker': 'AAPL', 'sell_all': False, 'amount': None})
         # One thing to answer per reply.
         self.assertFalse(self._propose(belt)['ok'])
 
     def test_the_question_keeps_the_assistant_from_choosing(self):
-        for said, amount in (
-                ('qué me recomiendas', 20), ('compra 20 de Tesla', 20), ('compra Apple', 20),
-                ('compra 20 de Apple', 200), ('compra Apple por 1.02 dólares', 102),
-                ('compra 500 de Apple en pesos', 500), ('compra 500 de Apple, en bolívares', 500),
-                ('compra 20 acciones de Apple', 20), ('compra 20 euros de Apple', 20),
-                ('¿cuánto serían 100 de Apple?', 100), ('Apple ' + 'texto pegado ' * 80 + ' 20', 20),
-        ):
+        # The asset is theirs to name; how many dollars is asked by code whatever they wrote.
+        for said in ('qué me recomiendas', 'compra 20 de Tesla', 'Apple ' + 'texto pegado ' * 80 + ' 20'):
             belt = self._belt(said)
-            self.assertFalse(self._propose(belt, amount_usd=amount)['ok'], said)
+            self.assertFalse(self._propose(belt, amount_usd=20)['ok'], said)
             self.assertIsNone(belt.result.pending_action, said)
             self.assertEqual(belt.result.actions, [], said)
+        for said in ('compra Apple', 'compra 500 de Apple en pesos', 'compra 20 euros de Apple',
+                     '¿cuánto serían 100 de Apple?'):
+            belt = self._belt(said)
+            self.assertTrue(self._propose(belt, amount_usd=500)['ok'], said)
+            self.assertNotIn('500', belt.result.pending_action['question'], said)
+            self.assertIsNone(belt.result.pending_action['data']['amount'], said)
 
     def test_said_over_several_messages_is_asked(self):
         for lines, side, amount, sell_all in (
-                (('compra Apple', '20'), 'buy', 20, False),
+                (('compra Apple', '20 dólares'), 'buy', 20, False),
                 (('¿cómo compro acciones de Apple?', 'por 1.02 dólares'), 'buy', 1.02, False),
                 (('quiero vender', 'Apple', 'toda'), 'sell', None, True),
                 (('quiero salir de Apple', 'el 100%'), 'sell', None, True),
                 (('vende todo lo que tengo de apple',), 'sell', None, True),
-                (('mi apple la quiero vender', 'solo una parte', '3'), 'sell', 3, False),
+                (('mi apple la quiero vender', 'solo una parte', '3 dólares'), 'sell', 3, False),
         ):
             belt = self._belt(*reversed(lines))
             with patch('assistant.trades._held', return_value='desconocido'):
@@ -4414,7 +4439,7 @@ class StockTradeCardTests(TestCase):
 
     def test_a_sale_needs_the_holding(self):
         with patch('assistant.trades._held', return_value=[]):
-            out = self._propose(self._belt('vende 10 de Apple'), side='sell', amount_usd=10)
+            out = self._propose(self._belt('vende 10 dólares de Apple'), side='sell', amount_usd=10)
             self.assertIn('no hay nada que vender', out['motivo'])
         # The only thing they hold needs no name; with two, it does.
         with patch('assistant.trades._held', return_value=[{'ticker': 'AAPL'}]):
@@ -4422,7 +4447,7 @@ class StockTradeCardTests(TestCase):
         with patch('assistant.trades._held', return_value=[{'ticker': 'AAPL'}, {'ticker': 'TSLA'}]):
             self.assertFalse(self._propose(self._belt('vende todo'), side='sell', amount_usd=None, sell_all=True)['ok'])
         # A buy never sells all, whatever the model sent.
-        belt = self._belt('compra 20 de Apple todo')
+        belt = self._belt('compra 20 dólares de Apple todo')
         self._propose(belt, sell_all=True)
         self.assertFalse(belt.result.pending_action['data']['sell_all'])
 
@@ -4440,14 +4465,6 @@ class StockTradeCardTests(TestCase):
         self.assertTrue(done)
         self.assertEqual(extra['actions'], [{'type': 'trade', 'ticker': 'AAPL', 'target': 'sell:all',
                                              'label': 'Vender todo Apple Inc.'}])
-
-    def test_a_reply_beside_a_card_never_says_the_trade_happened(self):
-        from . import trades
-
-        for said in ('Listo, ya compré tus acciones.', 'La compra fue realizada.', 'Ya se vendió todo.', 'Ya está comprado.'):
-            self.assertTrue(trades.DONE_CLAIM.search(said), said)
-        for said in ('Revisa la tarjeta y toca Aprobar.', 'Puedes comprar desde la tarjeta.'):
-            self.assertFalse(trades.DONE_CLAIM.search(said), said)
 
     def _card_message(self, user=None, actions=None, hours_ago=0):
         from inbox.models import SupportConversation, SupportMessage

@@ -245,6 +245,68 @@ def send_team_notice(conversation, body, tag, *, user_id, hand_back=True):
     return message, True
 
 
+def _withdraw_while_human(user, account, conversation, clean, user_message):
+    from types import SimpleNamespace
+
+    from . import sends
+    try:
+        withdrawn = sends.withdraw_declined(conversation, SimpleNamespace(account=account), clean, user_message)
+        if withdrawn is not None:
+            _note_in_thread(conversation, withdrawn[1], f'withdrawn:{user_message.pk}', answered=withdrawn[2])
+    except Exception:  # noqa: BLE001 - the team has the message either way
+        logger.exception('Confio Assistant: a card could not be withdrawn while the team has the thread')
+
+
+_DONE = {'alert_deleted': {'es': 'borré la alerta', 'pt': 'apaguei o alerta', 'en': 'I deleted the alert'},
+         'target_allocation': {'es': 'olvidé tu objetivo de reparto', 'pt': 'esqueci seu objetivo de divisão',
+                               'en': 'I forgot your target split'}}
+
+
+def _done_already(result, lang):
+    """What this reply already did (a card withdrawn, result.writes), said when its words are replaced."""
+    refused = f' {result.payment_refusal}' if result.declined and result.payment_refusal else ''
+    return refused + _writes_said(result, lang)
+
+
+def _writes_said(result, lang):
+    """What this reply already changed (result.writes), as one sentence, or ''."""
+    lang = lang if lang in ('es', 'pt', 'en') else 'es'
+    done = [(_DONE.get(write) or {}).get(lang) for write in (result.writes or [])]
+    done = [d for d in dict.fromkeys(done) if d]
+    if not done:
+        return ''
+    return {'es': ' Además, {}.', 'pt': ' Além disso, {}.', 'en': ' Also, {}.'}[lang].format(', '.join(done))
+
+
+def _say_anyway(conversation, result, lang, user_message):
+    """The team has the thread and the assistant stays quiet: what code already did is still a server line."""
+    said = _done_already(result, lang).strip()
+    if said:
+        try:
+            # A card withdrawn or a code refused in that reply: the line is code's answer to that code too.
+            answered = {'declined': True, 'refused_code': getattr(result, 'refused_code', '')} if getattr(
+                result, 'declined', False) else None
+            _note_in_thread(conversation, said, f'done:{user_message.pk}', answered=answered)
+        except Exception:  # noqa: BLE001 - the team has the message either way
+            logger.exception('Confio Assistant: what was already done could not be said')
+
+
+def _note_in_thread(conversation, body, tag, answered=None):
+    """A server line in this very thread (the one the card is in), once per tag. `answered`: a withdrawal's
+    extra, so the line counts as code's answer to that code (sends._warned, confirm._ends)."""
+    answered = answered or {}
+    said = {key: answered[key] for key in ('declined', 'refused_code') if answered.get(key)}
+    with transaction.atomic():
+        lock_user(conversation.user)
+        if conversation.messages.filter(metadata__notice=tag).exists():
+            return
+        message = SupportMessage.objects.create(conversation=conversation, sender_type='SYSTEM', message_type='TEXT',
+                                                body=body, metadata={'notice': tag, 'system_note': True,
+                                                                     'actions': [], **said})
+        conversation.last_message_at = message.created_at
+        conversation.save(update_fields=['last_message_at', 'updated_at'])
+
+
 def post_system_note(user, body, tag, *, actions=None, rule_proposal=None, payment_intent=None):
     """A server-side notice in the user's PERSONAL assistant thread (the
     support thread Confio Assistant answers), e.g. a claim on their Cuenta
@@ -438,11 +500,20 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             memory.forget_unanswered(conversation, user_message, clean)
         if human:
             _route_to_team(user_message)
+            # "No lo pagues" under a card is still honoured while the team has the thread, also inside a how-to
+            # question answered meanwhile ("¿cómo sé si un pix es golpe?"): the card is withdrawn (after this lock
+            # is let go) and a server line says so; the message is the team's.
+            transaction.on_commit(lambda: _withdraw_while_human(user, account, conversation, clean,
+                                                                user_message))
             if not waiting:
                 return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
                                   transcript=transcript)
         if turn is None:
             remaining = remaining_turns(user)
+            if remaining <= 0 and not human:
+                # No turn left: "no lo pagues" under a card is still honoured (no model is needed for it).
+                transaction.on_commit(lambda: _withdraw_while_human(user, account, conversation, clean,
+                                                                    user_message))
             if remaining <= 0 and waiting:
                 # Out of turns while waiting: the team answers, no limit notice.
                 return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
@@ -464,21 +535,43 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     viewer = _viewer(user, account, business, jwt_context, screen=screen, tz_name=tz_name,
                      request_meta=request_meta)
     if remembering and memory.asks_to_forget(conversation, clean):
-        proposal = pending_watch = pending_action = None  # "ok olvida todo" is not the yes to a pending question
+        # "ok olvida todo" is not the yes to a pending question; "olvídalo" to code's question is its no.
+        proposal = pending_watch = None
+        if not (pending_action and confirm.is_no(clean)):
+            pending_action = None
     if pending_action and not waiting and not photo_url:
         answered = confirm.answer(conversation, viewer, clean, pending_action, user_message,
                                   can_navigate=can_navigate)
         if answered is not None:
             return _answer_to_question(conversation, viewer, user_message, turn, pending_action, answered,
                                        remaining=remaining - 1, transcript=transcript)
-    confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
-    confirmed_tool = 'categorize_transactions:confirmed'
-    if confirmed is None:
-        confirmed = confirm_pending_watch(conversation, viewer, clean, pending_watch, user_message)
-        confirmed_tool = 'smart_account_alerts:confirmed'
+    if not waiting:          # a photo's caption ("no lo pagues, es estafa") withdraws too
+        from . import sends
+        withdrawn = sends.withdraw_declined(conversation, viewer, clean, user_message)
+        if withdrawn is not None:
+            return _answer_to_question(conversation, viewer, user_message, turn, {'kind': 'payment', 'lang': (
+                confirm.language([clean])), 'withdrawal': True}, withdrawn, remaining=remaining - 1,
+                transcript=transcript)
+    confirmed = None
+    if proposal is not None or pending_watch is not None:
+        # The "sí" that saves a category or an alert: under the person's lock, and never once the team took the
+        # thread or anyone wrote after it (a reply from the team, their own "no, cancela").
+        with transaction.atomic():
+            lock_user(user)
+            taken = is_human_mode(conversation, thread_state(conversation)) or any(
+                not (m.sender_type == 'USER' and confirm.plain(m.body) == confirm.plain(clean))   # a "sí" sent twice
+                for m in conversation.messages.filter(created_at__gt=user_message.created_at).exclude(
+                    sender_type='SYSTEM'))
+            if not taken:
+                confirmed = confirm_pending_categorization(conversation, viewer, clean, proposal, user_message)
+                confirmed_tool = 'categorize_transactions:confirmed'
+                if confirmed is None:
+                    confirmed = confirm_pending_watch(conversation, viewer, clean, pending_watch, user_message)
+                    confirmed_tool = 'smart_account_alerts:confirmed'
+                if confirmed is not None:
+                    applied, reply_text = confirmed
+                    reply = _append(conversation, sender_type='AGENT', body=reply_text, metadata={'ai': True})
     if confirmed is not None:
-        applied, reply_text = confirmed
-        reply = _append(conversation, sender_type='AGENT', body=reply_text, metadata={'ai': True})
         turn.reply_message = reply
         turn.tools = [{'name': confirmed_tool, 'ok': applied > 0}]
         turn.error = ''
@@ -530,13 +623,35 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         if remembered is not None:
             metered = _meter_partial(turn, remembered.usage) or metered
         if waiting or _team_took_over(user, conversation, user_message):
+            if getattr(exc, 'partial', None) is not None:
+                _say_anyway(conversation, exc.partial, confirm.language([clean]), user_message)
+            if remembered is not None and memory.said_by_code(remembered):
+                memory.note_to_thread(conversation, memory.said_by_code(remembered, confirm.language([clean])),
+                                      user_message.id)
             turn.error = (f'unavailable while waiting for the team ({str(exc)[:200]})' if waiting
                           else f'superseded by human handoff ({str(exc)[:200]})')
             turn.latency_ms = int((time.monotonic() - started) * 1000)
             turn.save(update_fields=['error', 'latency_ms', *metered])
             return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
                               remaining_turns=remaining - 1, transcript=transcript)
-        reply = _append(conversation, sender_type='AGENT', body=UNAVAILABLE_REPLY, metadata={'ai': True, 'error': True})
+        # What they asked of memory already happened, or didn't: said whether or not the model can answer.
+        lang = confirm.language([clean])
+        line = memory.said_by_code(remembered, lang) if remembered is not None else ''
+        unavailable = {'pt': 'Agora não consigo responder. Tente de novo em um momento. Se faltar dinheiro, não pague '
+                             'de novo e guarde o comprovante.',
+                       'en': "I can't answer right now. Try again in a moment. If money is missing, don't pay again "
+                             'and keep the receipt.'}.get(lang, UNAVAILABLE_REPLY)
+        partial = getattr(exc, 'partial', None)
+        if getattr(partial, 'declined', False) and partial.payment_refusal:
+            unavailable = partial.payment_refusal     # why the code was refused is the reply: it needs no model
+        reply = _append(conversation, sender_type='AGENT',
+                        body=f'{line}\n\n{unavailable}' if line else unavailable,
+                        # A code they said not to pay stays refused: pasted again alone, it gets its card.
+                        metadata={'ai': True, 'error': True,
+                                  **({'declined': True} if getattr(partial, 'declined', False) else {}),
+                                  **({'refused_code': partial.refused_code}
+                                     if getattr(partial, 'declined', False) and getattr(partial, 'refused_code', '')
+                                     else {})})
         turn.refresh_from_db(fields=['tools'])
         turn.error = str(exc)[:280]
         turn.reply_message = reply
@@ -552,6 +667,12 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     # the AI stays quiet (no reply, no screen actions) and the message waits
     # for people. The turn is still metered.
     if not waiting and _team_took_over(user, conversation, user_message):
+        _retire_unshown(result.payment_intent)
+        _say_anyway(conversation, result, confirm.language([clean]), user_message)
+        if remembered is not None and memory.said_by_code(remembered):
+            # The team has the thread and the assistant stays quiet: what happened to their memory is code's note.
+            memory.note_to_thread(conversation, memory.said_by_code(remembered, confirm.language([clean])),
+                                  user_message.id)
         turn.models_used = result.models_used
         turn.input_tokens = result.input_tokens
         turn.cached_input_tokens = result.cached_input_tokens
@@ -569,6 +690,25 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     paid_chip = None
     if result.payment_intent or waiting:
         result.pending_action = None
+    if result.payment_intent:
+        result.pending_categorization = result.pending_watch = None     # the card is the one thing in it
+    elif result.declined and result.payment_refusal:
+        # They said not to pay it: code says so, and the message ends what a later payment reads; what else this
+        # reply already changed (an alert deleted, a split forgotten) is said beside it. Nothing to fill, pay or
+        # sign stays beside the "no".
+        result.reply = result.payment_refusal + _writes_said(result, confirm.language([clean]))
+        if getattr(result, 'store_task_started', False) and not getattr(result, 'store_task_said', False):
+            result.reply += {'pt': ' A compra na loja que comecei nesta mensagem continua em andamento: confira ou '
+                                   'cancele lá.',
+                             'en': ' The store purchase I started in this message is still going: check or cancel '
+                                   'it there.'}.get(confirm.language([clean]),
+                                                    ' La compra en la tienda que empecé en este mensaje sigue en '
+                                                    'curso: revísala o cancélala ahí.')
+        result.rule_proposal = result.pending_action = None
+        result.pending_watch = result.pending_categorization = None
+        result.actions = [a for a in result.actions if a.get('type') not in ('trade', 'form', 'payment')
+                          and a.get('target') not in ('payment_intent', 'smart_account_rule', 'ia_plus',
+                                                      'cuenta_inteligente')]
     if result.pending_action:
         # The question is written by code and is the whole reply: nothing beside it to answer, open or sign.
         result.actions, result.rule_proposal = [], None
@@ -587,14 +727,6 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         # No payment was prepared: a reply that points at a card or claims a
         # payment is replaced by the reason the server gave.
         result.reply = result.payment_refusal
-    if any(a.get('type') == 'trade' for a in result.actions):
-        from . import trades
-        if result.rule_proposal:
-            # One thing to approve per reply: the Cuenta inteligente proposal stays.
-            result.actions = [a for a in result.actions if a.get('type') != 'trade']
-        elif trades.DONE_CLAIM.search(result.reply or ''):
-            # Nothing is bought or sold until the person approves on the card.
-            result.reply = trades.PREPARED_REPLY
     from_memory = bool(turn_context is not None and turn_context.used_data)
     if waiting or from_memory or result.rule_proposal or result.payment_intent:
         # No offers while a person is handling their case, and none beside a
@@ -605,18 +737,29 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         from . import paid_chips
         from .engine import allowed_destinations
         if (not waiting and not from_memory and not result.rule_proposal and not result.payment_intent
-                and not result.pending_action):
+                and not result.pending_action and not result.declined):
             earlier = ' · '.join(m.body or '' for m in [m for m in history if m.sender_type == 'USER'][-3:-1])
             paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)), earlier)
     except Exception:  # noqa: BLE001 - a probe must never break the answer
         logger.exception('Confio Assistant: paid chip selection failed')
         result.actions = [a for a in result.actions if a.get('target') not in ('ia_plus', 'cuenta_inteligente')]
     body = result.reply
+    # What happened to their memory, in code's words: said whenever the reply is code's (the model's words,
+    # and with them what a note asked it to say, are not in it).
+    line = ''
+    if remembered is not None:
+        # In the language of the reply it goes beside: code's own lines are Spanish, a question is in theirs.
+        line = memory.said_by_code(remembered, (result.pending_action or {}).get('lang') or confirm.language(
+            [result.reply if _written_by_code(result) else clean]))
+    if line and _written_by_code(result):
+        body = f'{line}\n\n{body}'
     if result.pending_categorization:
         # The question the user answers is written by code from the stored
-        # proposal, never by the model.
+        # proposal, never by the model, in the language they wrote in.
+        result.pending_categorization['lang'] = confirm.language([clean])
         body = f'{body}\n\n{confirmation_question(result.pending_categorization)}'
     elif result.pending_watch:
+        result.pending_watch['lang'] = confirm.language([clean])
         body = f'{body}\n\n{watch_confirmation_question(result.pending_watch)}'
     metadata = {'ai': True, 'actions': result.actions}
     if result.rule_proposal:
@@ -627,22 +770,97 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         metadata['payment_intent'] = {'id': result.payment_intent['id']}
     if turn_context is not None and turn_context.used_data:
         metadata['recalled'] = True
-    reply = _append(conversation, sender_type='AGENT', body=body, metadata=metadata)
+    if result.declined and not result.payment_intent:
+        metadata['declined'] = True
+        if getattr(result, 'refused_code', ''):
+            metadata['refused_code'] = result.refused_code     # the code this answered (sends._warned)
+    if result.payment_intent and result.payment_intent.get('code'):
+        metadata['payment_intent']['code'] = result.payment_intent['code']
+    with transaction.atomic():
+        lock_user(user)
+        reply = None
+        if not waiting and is_human_mode(conversation, thread_state(conversation)):
+            # The team took the thread after the last look: nothing from the assistant, the message is theirs.
+            _retire_unshown(result.payment_intent)
+            transaction.on_commit(lambda: _say_anyway(conversation, result, confirm.language([clean]), user_message))
+            _route_to_team(user_message)
+        else:
+            later = list(conversation.messages.filter(created_at__gt=user_message.created_at)
+                         .exclude(sender_type='SYSTEM'))
+            if (result.payment_intent or result.rule_proposal) and not any(m.sender_type == 'USER' for m in later) and any(
+                    m.sender_type == 'AGENT' and not (m.metadata or {}).get('ai') for m in later):
+                # The team spoke while this was being thought ("no pagues nada ahora"): no card under their words.
+                said = confirm.language([clean])
+                body = _with_line(line, ({
+                    'pt': 'Não preparei o cartão: chegou uma mensagem da equipe nesse meio-tempo. Se ainda quiser, '
+                          'cole o código de novo.',
+                    'en': "I didn't prepare the card: a message from the team arrived meanwhile. If you still want "
+                          'it, paste the code again.'} if result.payment_intent else {
+                    'pt': 'Não preparei a proposta: chegou uma mensagem da equipe nesse meio-tempo. Se ainda quiser, '
+                          'me peça de novo.',
+                    'en': "I didn't prepare the proposal: a message from the team arrived meanwhile. If you still "
+                          'want it, ask me again.'}).get(said,
+                    'No preparé la tarjeta: llegó un mensaje del equipo mientras tanto. Si todavía lo quieres, pega '
+                    'el código de nuevo.' if result.payment_intent else
+                    'No preparé la propuesta: llegó un mensaje del equipo mientras tanto. Si todavía la quieres, '
+                    'pídemela de nuevo.') + _writes_said(result, said))
+                _retire_unshown(result.payment_intent)
+                result.pending_action = result.payment_intent = result.rule_proposal = None
+                metadata.pop('payment_intent', None)
+                metadata.pop('rule_proposal', None)
+                result.actions = metadata['actions'] = []
+            elif (result.pending_action or result.payment_intent or result.pending_watch
+                  or result.pending_categorization or result.rule_proposal) and any(
+                    m.sender_type == 'USER' for m in later):
+                # They wrote while this was being thought ("no lo pagues", "no espera, mejor a 150"): no question,
+                # no card and nothing to save about the older message. (The team writing puts the thread in their
+                # hands: checked just above.)
+                said = (result.pending_action or {}).get('lang') or confirm.language([clean])
+                body = _with_line(line, {'pt': 'Vi sua mensagem nova: me diga de novo o que você quer fazer.',
+                                         'en': 'I saw your new message: tell me again what you want to do.'}.get(
+                    said, 'Vi tu mensaje nuevo: dime de nuevo qué quieres hacer.') + _done_already(result, said))
+                _retire_unshown(result.payment_intent)
+                result.pending_action = result.payment_intent = None     # an unattached card is unreachable
+                result.pending_watch = result.pending_categorization = None     # their questions are not stored
+                result.rule_proposal = None
+                metadata.pop('payment_intent', None)
+                metadata.pop('rule_proposal', None)
+                result.actions = metadata['actions'] = []
+            reply = _append(conversation, sender_type='AGENT', body=body, metadata=metadata)
+            if result.pending_action:
+                try:
+                    confirm.store(conversation, viewer, result.pending_action, reply)
+                except Exception:  # noqa: BLE001 - a question nobody can answer is not left in the thread
+                    logger.exception('Confio Assistant: a question could not be kept')
+                    lost_lang = (result.pending_action or {}).get('lang')
+                    result.pending_action = None
+                    reply.body = _with_line(line, _COULD_NOT_KEEP_QUESTION.get(
+                        lost_lang, _COULD_NOT_KEEP_QUESTION['es']))
+                    reply.save(update_fields=['body'])
+    if reply is None:
+        if line:
+            memory.note_to_thread(conversation, line, user_message.id)   # it happened: said all the same
+        turn.models_used = result.models_used
+        turn.input_tokens = result.input_tokens
+        turn.cached_input_tokens = result.cached_input_tokens
+        turn.output_tokens = result.output_tokens
+        turn.cost_usd = result.cost_usd + transcription_cost(audio_seconds)
+        turn.tools = result.tools
+        turn.error = 'superseded by human handoff'
+        turn.latency_ms = int((time.monotonic() - started) * 1000)
+        turn.save()
+        return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN',
+                          remaining_turns=remaining - 1, transcript=transcript, data_changed=bool(result.writes))
     if turn_context is not None:
         memory.after_reply(conversation, turn_context.forgot, reply)
-    if result.payment_intent:
-        try:
-            from payment_accounts import payment_intents
-            payment_intents.attach_message(result.payment_intent['id'], reply.pk, retire_earlier=True)
-        except Exception:  # noqa: BLE001 - the reply stands; the card stays unreachable (fails closed)
-            logger.exception('Confio Assistant: payment intent not attached to its message')
+    if result.payment_intent and not _attach(result.payment_intent['id'], reply, line, confirm.language([clean]),
+                                             also=_writes_said(result, confirm.language([clean]))):
+        result.actions = []
     if paid_chip is not None:
         try:
             paid_chips.log_shown(viewer, paid_chip)
         except Exception:  # noqa: BLE001 - analytics never break the reply
             logger.exception('Confio Assistant: paid chip logging failed')
-    if result.pending_action:
-        confirm.store(conversation, viewer, result.pending_action, reply)
     if result.pending_categorization:
         _store_pending_categorization(conversation, viewer, result.pending_categorization, reply)
     elif result.pending_watch:
@@ -666,41 +884,157 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                       remaining_turns=remaining - 1, transcript=transcript, data_changed=bool(result.writes))
 
 
+def _by_team(message):
+    """A person of the team wrote it. Never the assistant, never a notice: the server's (a SYSTEM line) nor the
+    team's (send_team_notice, which hands the thread back to the assistant)."""
+    return (message.sender_type == 'AGENT' and getattr(message, 'sender_user_id', None) is not None
+            and not (message.metadata or {}).get('ai'))
+
+
+def _with_line(line, text):
+    return f'{line}\n\n{text}' if line else text
+
+
+_COULD_NOT_KEEP_QUESTION = {
+    'es': 'No pude dejarte la pregunta ahora. Pídemelo de nuevo en un momento.',
+    'pt': 'Não consegui deixar a pergunta agora. Me peça de novo em um momento.',
+    'en': "I couldn't keep the question now. Ask me again in a moment."}
+
+
+def _retire_unshown(intent):
+    """A card made for this answer and then dropped (the team spoke, they wrote again): nobody can reach it, and
+    it is closed so it never counts as one of the hour's cards."""
+    intent_id = (intent or {}).get('id') if isinstance(intent, dict) else None
+    if not intent_id:
+        return
+    try:
+        from django.utils import timezone as tz
+
+        from payment_accounts.models import PaymentIntent
+        with transaction.atomic():     # a savepoint: a failure here never breaks the reply around it
+            PaymentIntent.objects.filter(internal_id=intent_id, state__in=('quoted', 'awaiting_signature')).update(
+                state='expired', state_reason='dropped_in_chat', updated_at=tz.now())
+    except Exception:  # noqa: BLE001 - it stays unreachable all the same
+        logger.warning('Confio Assistant: a dropped card could not be closed', exc_info=True)
+
+
+def _attach(intent_id, reply, line='', lang='es', also=''):
+    """The card is on this message. If it can't be, the message says so and offers no button."""
+    try:
+        from payment_accounts import payment_intents
+        payment_intents.attach_message(intent_id, reply.pk, retire_earlier=True)
+        return True
+    except Exception:  # noqa: BLE001 - the card stays unreachable (fails closed)
+        logger.exception('Confio Assistant: payment intent not attached to its message')
+        _retire_unshown({'id': intent_id})
+        lines = {'es': 'No pude dejarte la tarjeta del pago. Pídemelo de nuevo en un momento.',
+                 'pt': 'Não consegui deixar o cartão do pagamento. Me peça de novo em um momento.',
+                 'en': "I couldn't leave the payment card. Ask me again in a moment."}
+        reply.body = _with_line(line, lines.get(lang, lines['es']) + also)
+        reply.metadata = {**(reply.metadata or {}), 'actions': [], 'payment_intent': None}
+        reply.save(update_fields=['body', 'metadata'])
+        return False
+
+
+def _written_by_code(result):
+    """The reply holds none of the model's words (so none of what a note asked it to say)."""
+    from .engine import CUT_EMPTY, DONE_REPLY, PAYMENT_PREPARED_REPLY, SAVED_CHANGES_REPLY
+    return bool(result.pending_action) or result.reply in {
+        PAYMENT_PREPARED_REPLY, DONE_REPLY, SAVED_CHANGES_REPLY, CUT_EMPTY,
+        *([result.payment_refusal] if result.payment_refusal else [])}
+
+
 def _answer_to_question(conversation, viewer, user_message, turn, pending, answered, *, remaining, transcript):
-    """The reply to a yes or a no to code's question (confirm.py): written by code, never the model."""
+    """The reply to an answer to code's question (confirm.py): written by code, never the model.
+
+    Under the person's lock: if the team took the thread (or a person of the team wrote) meanwhile, the
+    assistant says nothing and the answer goes to them; if they wrote something else after it, no card is left
+    and nothing is saved (a save waits for these checks: `deferred`, assistant/asked.py)."""
     done, text, extra = answered
-    actions = list(extra.get('actions') or [])
-    metadata = {'ai': True, 'actions': actions}
-    if extra.get('payment_intent'):
-        metadata['payment_intent'] = extra['payment_intent']
+    lang = pending.get('lang') if pending.get('lang') in ('es', 'pt', 'en') else 'es'
+    made = extra.get('payment_intent')
     with transaction.atomic():
         lock_user(viewer.user)
-        # Only a card made on their yes is withdrawn (a refusal's top-up form is not a card).
-        if done and actions and any(
-                not confirm.is_yes(body, pending)      # the same "sí", sent twice, is no second thought
-                for body in conversation.messages.filter(sender_type='USER', created_at__gt=user_message.created_at)
-                .values_list('body', flat=True)):
-            # They wrote again while it was being prepared ("no, cancela"): no card.
-            done, actions, extra = False, [], {}
-            text = {'pt': 'Não deixei o cartão: você escreveu depois. Se ainda quiser, me peça de novo.',
-                    'en': "I didn't leave the card: you wrote after that. If you still want it, ask me again."}.get(
-                pending.get('lang'), 'No dejé la tarjeta: escribiste algo después. Si todavía lo quieres, pídemelo '
-                                     'de nuevo.')
-            metadata = {'ai': True, 'actions': []}
-        reply = _append(conversation, sender_type='AGENT', body=text, metadata=metadata)
-    if extra.get('payment_intent'):
-        try:
-            from payment_accounts import payment_intents
-            payment_intents.attach_message(extra['payment_intent']['id'], reply.pk, retire_earlier=True)
-        except Exception:  # noqa: BLE001 - the reply stands; the card stays unreachable (fails closed)
-            logger.exception('Confio Assistant: payment intent not attached to its message')
+        later = list(conversation.messages.filter(created_at__gt=user_message.created_at))
+        reply = None
+        if is_human_mode(conversation, thread_state(conversation)) or any(_by_team(m) for m in later):
+            if pending.get('withdrawal') and text:
+                # The card was withdrawn already: that is said, as a server line, while the team has the thread.
+                said = dict(extra)
+                transaction.on_commit(lambda: _note_in_thread(conversation, text, f'withdrawn:{user_message.pk}',
+                                                              answered=said))
+            done, extra = False, {}
+            _route_to_team(user_message)
+        else:
+            wrote_again = any(m.sender_type == 'USER' and not confirm.same_answer(m.body, user_message.body, pending)
+                              for m in later)
+            # A team notice (send_team_notice: the team's words, no staff user) after the answer ends it too.
+            team_spoke = any(m.sender_type == 'AGENT' and not (m.metadata or {}).get('ai') for m in later)
+            # Asking again is preparing too: once the team spoke or they wrote again, the question stays closed.
+            # (A refusal's top-up form is not something prepared.)
+            preparing = ((done and extra.get('actions')) or extra.get('deferred') or extra.get('rule_proposal')
+                         or extra.get('ask_again'))
+            if preparing and team_spoke and not wrote_again:
+                done, extra = False, {}
+                text = {'es': 'No preparé nada: llegó un mensaje del equipo mientras tanto. Si todavía lo quieres, '
+                              'pídemelo de nuevo.',
+                        'pt': 'Não preparei nada: chegou uma mensagem da equipe nesse meio-tempo. Se ainda quiser, '
+                              'me peça de novo.',
+                        'en': "I didn't prepare anything: a message from the team arrived meanwhile. If you still "
+                              'want it, ask me again.'}[lang]
+            elif preparing and wrote_again:
+                # They wrote again while it was being prepared ("no, cancela"): no card, nothing saved.
+                done, extra = False, {}
+                text = {'es': 'No preparé nada: escribiste algo después. Si todavía lo quieres, pídemelo de nuevo.',
+                        'pt': 'Não preparei nada: você escreveu depois. Se ainda quiser, me peça de novo.',
+                        'en': "I didn't prepare anything: you wrote after that. If you still want it, ask me "
+                              'again.'}[lang]
+            elif extra.get('deferred'):
+                try:
+                    with transaction.atomic():      # a failed save leaves nothing half-saved, and the reply goes out
+                        done, text, extra = extra['deferred']()
+                except Exception:  # noqa: BLE001 - nothing saved is said as such
+                    logger.exception('Confio Assistant: an answered change could not be saved')
+                    done, extra = False, {}
+                    text = {'es': 'No pude guardarlo ahora. Inténtalo de nuevo.',
+                            'pt': 'Não consegui salvar agora. Tente de novo.',
+                            'en': "I couldn't save it now. Please try again."}[lang]
+            actions = list(extra.get('actions') or [])
+            metadata = {'ai': True, 'actions': actions}
+            if extra.get('payment_intent'):
+                metadata['payment_intent'] = extra['payment_intent']
+            if extra.get('declined'):
+                metadata['declined'] = True     # answered: never asked again (confirm.recent_texts)
+            if extra.get('refused_code'):
+                metadata['refused_code'] = extra['refused_code']     # the code this answered (sends._warned)
+            if extra.get('rule_proposal'):
+                metadata['rule_proposal'] = extra['rule_proposal']     # the proposal they review and sign
+            reply = _append(conversation, sender_type='AGENT', body=text, metadata=metadata)
+        if made and not extra.get('payment_intent'):
+            _retire_unshown(made)
+        if reply is not None and extra.get('ask_again'):
+            try:
+                confirm.store(conversation, viewer, pending, reply)
+            except Exception:  # noqa: BLE001 - a question nobody can answer is not left in the thread
+                logger.exception('Confio Assistant: a question could not be kept')
+                reply.body = _COULD_NOT_KEEP_QUESTION[lang]
+                reply.save(update_fields=['body'])
+    if reply is None:
+        turn.tools = [{'name': f"{pending.get('kind')}:answered", 'ok': False}]
+        turn.error = 'superseded by human handoff'
+        turn.save(update_fields=['tools', 'error'])
+        return AskOutcome(user_message=user_message, reply_message=None, mode='HUMAN', remaining_turns=remaining,
+                          transcript=transcript)
+    actions = list(extra.get('actions') or [])
+    if extra.get('payment_intent') and not _attach(extra['payment_intent']['id'], reply, lang=lang):
+        actions = []
     turn.reply_message = reply
     turn.tools = [{'name': f"{pending.get('kind')}:answered", 'ok': bool(done)}]
     turn.actions = actions
     turn.error = ''
     turn.save(update_fields=['reply_message', 'tools', 'actions', 'error'])
     return AskOutcome(user_message=user_message, reply_message=reply, actions=actions, remaining_turns=remaining,
-                      mode='AI', transcript=transcript)
+                      mode='AI', transcript=transcript, data_changed=bool(extra.get('writes')))
 
 
 # --------------------------------------------------------------------------- #
@@ -708,17 +1042,18 @@ def _answer_to_question(conversation, viewer, user_message, turn, pending, answe
 # --------------------------------------------------------------------------- #
 
 PENDING_CATEGORIZATION_SECONDS = 15 * 60
-# "sí" (accented) or a bare "si" on its own: "si quieres…" means "if".
-_YES = re.compile(r'^\s*(?:(?:s[íÍ]+|sip|dale|ok(?:ay|ey)?|okey|confirmo|confirmado|de acuerdo|claro|hazlo|'
-                  r'adelante|perfecto|correcto|yes|yep|yeah|sure|sim|pode|isso)\b|si(?:\s*[.!]*\s*$|\s*,))',
-                  re.IGNORECASE)
-_NOT_YES = re.compile(r'\b(no|nop|nunca|pero|espera|cancela|cancelar|not|wait|cancel|stop|but|n[aã]o|mas)\b',
-                      re.IGNORECASE)
 
 
-def is_affirmative(text):
-    text = (text or '').strip()
-    return len(text) <= 60 and bool(_YES.match(text)) and not _NOT_YES.search(text)
+def is_affirmative(text, kind='alert'):
+    """The yes that saves an alert or a category: a whole answer of yes and courtesy words (confirm.is_save_yes).
+    "sí, mañana", "ok lo pienso" and "sí ❌" are none."""
+    return confirm.is_save_yes(text, kind)
+
+
+def _not_typed(message):
+    """A photo's caption, a voice note, or a line a client relayed, answers no question (as for a card)."""
+    metadata = message.metadata or {}
+    return bool(metadata.get('client_reported')) or str(metadata.get('modality') or 'TEXT').upper() != 'TEXT'
 
 
 def _pending_key(conversation):
@@ -730,6 +1065,15 @@ def confirmation_question(proposal):
     noun = 'movimiento' if count == 1 else 'movimientos'
     who = f' ({", ".join(proposal["contacts"])})' if proposal.get('contacts') else ''
     scope = ', también los pagos futuros a esos contactos' if proposal['apply_to'] == 'counterparty' else ''
+    lang = proposal.get('lang')
+    if lang == 'pt':
+        noun = 'movimento' if count == 1 else 'movimentos'
+        scope = ', também os pagamentos futuros a esses contatos' if proposal['apply_to'] == 'counterparty' else ''
+        return f'Confirma classificar {count} {noun}{who} como {proposal["label"]}{scope}? Responda "sim" para salvar.'
+    if lang == 'en':
+        noun = 'movement' if count == 1 else 'movements'
+        scope = ', and future payments to those contacts too' if proposal['apply_to'] == 'counterparty' else ''
+        return f'Shall I classify {count} {noun}{who} as {proposal["label"]}{scope}? Reply "yes" to save it.'
     return f'¿Confirmas clasificar {count} {noun}{who} como {proposal["label"]}{scope}? Responde "sí" para guardarlo.'
 
 
@@ -747,6 +1091,9 @@ def take_pending_categorization(conversation):
     return proposal
 
 
+_SAVED_NOTHING = {'es': 'Listo, no guardé nada.', 'pt': 'Certo, não salvei nada.', 'en': 'OK, I saved nothing.'}
+
+
 def confirm_pending_categorization(conversation, viewer, text, proposal, user_message):
     """Apply `proposal` if this message is the user's yes to it.
 
@@ -754,18 +1101,34 @@ def confirm_pending_categorization(conversation, viewer, text, proposal, user_me
     people wrote, like a sender's name); the write happens here, in code, on
     the user's own reply — and only as the answer to the very message that
     showed the code-written question. Returns (applied_count, reply) or None."""
-    if proposal is None or proposal.get('account_id') != viewer.account.id or not is_affirmative(text):
+    if proposal is None or proposal.get('account_id') != viewer.account.id or _not_typed(user_message):
         return None
-    previous = (conversation.messages.filter(sender_type='AGENT', created_at__lte=user_message.created_at)
-                .exclude(pk=user_message.pk).order_by('-created_at', '-pk').values_list('pk', flat=True).first())
+    yes, no = is_affirmative(text, 'category'), confirm.is_no(text)
+    if not yes and not no:
+        return None
+    previous = confirm.previous_message(conversation, user_message)     # a server notice is nobody's words
     if previous != proposal.get('reply_id'):
         return None
+    if no:
+        return 0, _SAVED_NOTHING.get(proposal.get('lang'), _SAVED_NOTHING['es'])
     result = categorize_movements(viewer, proposal['ids'], proposal['category'], proposal['apply_to'])
     count = int(result.get('clasificados') or 0)
+    lang = proposal.get('lang')
+    future = proposal['apply_to'] == 'counterparty'
     if not result.get('ok'):
-        return 0, 'No pude guardar esa clasificación; puede que esos movimientos ya no estén disponibles.'
+        return 0, {'pt': 'Não consegui salvar essa classificação; talvez esses movimentos não estejam mais disponíveis.',
+                   'en': "I couldn't save that classification; those movements may no longer be available."}.get(
+            lang, 'No pude guardar esa clasificación; puede que esos movimientos ya no estén disponibles.')
+    if lang == 'pt':
+        noun = 'movimento' if count == 1 else 'movimentos'
+        scope = ' Também vale para os pagamentos futuros a esses contatos.' if future else ''
+        return count, f'Pronto, classifiquei {count} {noun} como {result["categoria"]}.{scope} Você vê em Tu mes.'
+    if lang == 'en':
+        noun = 'movement' if count == 1 else 'movements'
+        scope = ' It also applies to future payments to those contacts.' if future else ''
+        return count, f'Done, I classified {count} {noun} as {result["categoria"]}.{scope} You can see it in Tu mes.'
     noun = 'movimiento' if count == 1 else 'movimientos'
-    scope = ' También aplica a los pagos futuros a esos contactos.' if proposal['apply_to'] == 'counterparty' else ''
+    scope = ' También aplica a los pagos futuros a esos contactos.' if future else ''
     return count, f'Listo, clasifiqué {count} {noun} como {result["categoria"]}.{scope} Puedes verlo en Tu mes.'
 
 
@@ -777,8 +1140,26 @@ def _pending_watch_key(conversation):
     return f'assistant:pending-watch:{conversation.id}'
 
 
+def _watch_terms(draft):
+    """The alert's terms in the language of the question (describe() is Spanish)."""
+    from decimal import Decimal
+
+    from smart_account import watches
+    lang = draft.get('lang')
+    if lang not in ('pt', 'en'):
+        return draft['texto']
+    return watches.describe_in(lang, draft['kind'], asset_key=draft.get('asset_key') or '',
+                               currency=draft.get('currency') or '', threshold=Decimal(draft['threshold']),
+                               action=draft.get('action') or None)
+
+
 def watch_confirmation_question(draft):
-    return f'¿Guardo esta alerta? {draft["texto"]} Responde "sí" para guardarla.'
+    terms = _watch_terms(draft)
+    if draft.get('lang') == 'pt':
+        return f'Salvo este alerta? {terms} Responda "sim" para salvar.'
+    if draft.get('lang') == 'en':
+        return f'Shall I save this alert? {terms} Reply "yes" to save it.'
+    return f'¿Guardo esta alerta? {terms} Responde "sí" para guardarla.'
 
 
 def _store_pending_watch(conversation, viewer, draft, reply):
@@ -797,19 +1178,30 @@ def take_pending_watch(conversation):
 def confirm_pending_watch(conversation, viewer, text, draft, user_message):
     """Save the drafted alert if this message is the yes to it. Returns
     (saved, reply) or None."""
-    if draft is None or draft.get('user_id') != viewer.user.pk or not is_affirmative(text):
+    if draft is None or draft.get('user_id') != viewer.user.pk or _not_typed(user_message):
         return None
-    previous = (conversation.messages.filter(sender_type='AGENT', created_at__lte=user_message.created_at)
-                .exclude(pk=user_message.pk).order_by('-created_at', '-pk').values_list('pk', flat=True).first())
+    yes, no = is_affirmative(text, 'alert'), confirm.is_no(text)
+    if not yes and not no:
+        return None
+    previous = confirm.previous_message(conversation, user_message)     # a server notice is nobody's words
     if previous != draft.get('reply_id'):
         return None
+    if no:
+        return 0, _SAVED_NOTHING.get(draft.get('lang'), _SAVED_NOTHING['es'])
     from smart_account import watches
     from smart_account.assistant_ops import OpsRefused
     try:
         watches.save(viewer.user, draft)
     except OpsRefused as exc:
         return 0, exc.message
-    return 1, (f'Listo, guardé tu alerta. {draft["texto"]} Solo te aviso: nada se compra ni se vende sin tu firma. '
+    terms = _watch_terms(draft)
+    if draft.get('lang') == 'pt':
+        return 1, (f'Pronto, salvei seu alerta. {terms} Só aviso: nada é comprado nem vendido sem sua assinatura. '
+                   'Você o vê na sua Cuenta inteligente → Alertas.')
+    if draft.get('lang') == 'en':
+        return 1, (f"Done, I saved your alert. {terms} I only let you know: nothing is bought or sold without your "
+                   'signature. You can see it in your Cuenta inteligente → Alertas.')
+    return 1, (f'Listo, guardé tu alerta. {terms} Solo te aviso: nada se compra ni se vende sin tu firma. '
                'La ves en tu Cuenta inteligente → Alertas.')
 
 
@@ -858,6 +1250,8 @@ def _memory_reply(user, conversation, user_message, turn, remembered, remaining,
     turn.tools = [{'name': 'memory', 'ok': True}]
     turn.latency_ms = int((time.monotonic() - started) * 1000)
     taken = _team_took_over(user, conversation, user_message)
+    if taken:
+        memory.note_to_thread(conversation, remembered.reply, user_message.id)   # it happened: said all the same
     reply = None if taken else _append(conversation, sender_type='AGENT', body=remembered.reply,
                                        metadata={'ai': True, 'memory': True})
     turn.reply_message = reply

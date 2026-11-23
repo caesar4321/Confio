@@ -3025,17 +3025,23 @@ class PortalSendSupportReply(graphene.Mutation):
         if conversation is None:
             raise GraphQLError('Support conversation not found')
 
-        reply = SupportMessage.objects.create(
-            conversation=conversation,
-            sender_type='AGENT',
-            sender_user=staff_user,
-            message_type='TEXT',
-            body=clean_body,
-            metadata={},
-        )
-        conversation.assigned_to = staff_user
-        conversation.last_message_at = timezone.now()
-        conversation.save(update_fields=['assigned_to', 'last_message_at', 'updated_at'])
+        # Under the person's lock (assistant.service.lock_user): a chat answer being saved for them (a
+        # confirmed alert, a target split) checks for the team's reply under the same lock, so it either sees
+        # this reply and stops, or finishes before it is written.
+        from assistant.service import lock_user
+        with transaction.atomic():
+            lock_user(conversation.user)
+            reply = SupportMessage.objects.create(
+                conversation=conversation,
+                sender_type='AGENT',
+                sender_user=staff_user,
+                message_type='TEXT',
+                body=clean_body,
+                metadata={},
+            )
+            conversation.assigned_to = staff_user
+            conversation.last_message_at = timezone.now()
+            conversation.save(update_fields=['assigned_to', 'last_message_at', 'updated_at'])
         try:
             send_support_reply_push(reply.id)
         except Exception:
