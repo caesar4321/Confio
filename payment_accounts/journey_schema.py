@@ -30,6 +30,14 @@ class InfiniaJourneyType(DjangoObjectType):
         return str(entry.amount) if entry else None
 
     stage = graphene.String(required=True)
+    # What an exact send pays (a typed amount, a fixed QR, a store order):
+    # what lands, not a minimum. Asked for in its own query (older servers).
+    exact_amount = graphene.String()
+
+    def resolve_exact_amount(self, info):
+        order = (self.destination_snapshot or {}).get('store_order') if self.direction == 'to_bank' else None
+        return str(order['amount']) if order and order.get('amount') else None
+
     wallet_mint_units = graphene.String()
     wallet_mint_request_id = graphene.String()
     wallet_fee_units = graphene.String()

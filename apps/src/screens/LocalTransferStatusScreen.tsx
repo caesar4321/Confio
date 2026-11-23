@@ -29,6 +29,7 @@ import {
   journeySteps,
   LOCAL_JOURNEY,
   LOCAL_JOURNEY_BRIDGE,
+  LOCAL_JOURNEY_EXACT,
   LOCAL_JOURNEYS,
   LOCAL_TRANSFER_FEE,
   LocalJourney,
@@ -90,6 +91,11 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
   const journey: LocalJourney | undefined = (query.data ?? query.previousData)?.infiniaJourney;
   // A bank send whose bridge is still 'prepared' is not funded: it needs the
   // owner's confirmation, not patience. Its own query (older servers).
+  // An exact send's amount (typed, a fixed QR, a store order): its own query.
+  const exactQuery = useQuery(LOCAL_JOURNEY_EXACT, {
+    variables: { id: journeyId }, fetchPolicy: 'network-only', errorPolicy: 'all',
+  });
+  const exactAmount: string | null = exactQuery.data?.infiniaJourney?.exactAmount || null;
   const bridgeQuery = useQuery(LOCAL_JOURNEY_BRIDGE, {
     variables: { id: journeyId }, fetchPolicy: 'network-only', errorPolicy: 'all', pollInterval: 10000,
   });
@@ -285,9 +291,9 @@ function JourneyDetail({ journeyId }: { journeyId: string }) {
                       <Text style={styles.reviewValue}>{journey.destinationSummary}</Text>
                     </View>
                     <View style={styles.reviewRow}>
-                      <Text style={styles.reviewLabel}>{journey.payoutAmount ? (journey.stage === 'completed' ? 'Enviado' : 'Importe a enviar') : 'Recibe al menos'}</Text>
+                      <Text style={styles.reviewLabel}>{journey.payoutAmount ? (journey.stage === 'completed' ? 'Enviado' : 'Importe a enviar') : exactAmount ? 'Recibe exactamente' : 'Recibe al menos'}</Text>
                       <Text style={styles.reviewValueHighlight}>
-                        {formatRampMoney(journey.payoutAmount || journey.minimumFxOutput, journey.localAsset)}
+                        {formatRampMoney(journey.payoutAmount || exactAmount || journey.minimumFxOutput, journey.localAsset)}
                       </Text>
                     </View>
                   </>

@@ -120,6 +120,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
             # stays in their own local account, as for a store order. Carried by
             # this payment, not by the recipient, so it is never "paid once".
             exact = positive(exact_payout)
+            from .local_money import require_whole_units
+            require_whole_units(destination.asset, exact)
             if exact != exact.quantize(Decimal('0.01')) or charge is not None or (
                     order is not None and Decimal(order['amount']) != exact):
                 raise PaymentAccountError('El monto exacto no coincide con este destino. Revisa el envío.')

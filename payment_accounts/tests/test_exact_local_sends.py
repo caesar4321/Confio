@@ -671,6 +671,8 @@ class ExactLocalRound6JourneyTests(ExactLocalRound4JourneyTests):
         flow = old.bridge.quote.money_flow
         flow.metadata = dict(flow.metadata or {}, local_destination_id=str(fixed.internal_id))
         flow.save(update_fields=['metadata'])
+        from datetime import datetime, timezone as tz
+        type(flow).objects.filter(pk=flow.pk).update(created_at=datetime(2026, 10, 1, tzinfo=tz.utc))   # September–November
         other = self.fixed(breb('1249'))
         PayoutDestination.objects.filter(pk__in=[fixed.pk, other.pk]).update(country='COL')
         other.refresh_from_db()
@@ -938,6 +940,55 @@ class ExactLocalApiRound13Tests(ExactLocalApiTests):
             intent_rails.reread_transfer(self.owner, intent, {'HTTP_X_CONFIO_VERSION': '5.4.1'})
 
 
+class ExactLocalRound15JourneyTests(ExactLocalRound12JourneyTests):
+    def test_flows_after_the_cutover_are_not_legacy(self):
+        fixed = self.fixed(breb('1249'))
+        flow = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                              request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                              destination=fixed, minimum_fx_output='1249.00').bridge.quote.money_flow
+        flow.metadata = dict(flow.metadata or {}, local_destination_id=str(fixed.internal_id))
+        flow.save(update_fields=['metadata'])
+        with self.settings(LOCAL_MONEY_EXACT_QR_SINCE='2026-01-01T00:00:00+00:00'):
+            self.assertFalse(local_money.legacy_flows([str(fixed.internal_id)]).exists())
+        with self.settings(LOCAL_MONEY_EXACT_QR_SINCE='2999-01-01T00:00:00+00:00'):
+            self.assertTrue(local_money.legacy_flows([str(fixed.internal_id)]).exists())
+
+    def test_the_journey_says_what_an_exact_send_pays(self):
+        from payment_accounts.journey_schema import InfiniaJourneyType
+        j = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                           request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                           destination=self.destination(), minimum_fx_output='1249.00', exact_payout=Decimal('1249'))
+        self.assertEqual(InfiniaJourneyType.resolve_exact_amount(j, None), '1249.00')
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound15Tests(ExactLocalApiTests):
+    def test_colombian_exact_amounts_are_whole_pesos(self):
+        with self.assertRaisesRegex(PaymentAccountError, 'sin centavos'):
+            local_money.normalize_value(local_money.METHODS['co_qr'], breb('25000.50'))
+        self.assertTrue(local_money.normalize_value(local_money.METHODS['co_qr'], breb('25000.00')))
+        with self.assertRaises(IntentRefused) as typed:
+            payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request={
+                'method_id': 'co_breb', 'value': '@tienda', 'amount_local': '1000.50'})
+        self.assertEqual(typed.exception.code, 'no_amount')
+        local_money.require_whole_units('BRL', '10.50')   # reais keep their centavos
+
+    def test_a_pix_charge_refuses_another_amount(self):
+        from .test_pix_charges import DYNAMIC
+        with self.assertRaises(IntentRefused) as refused:
+            payment_intents.prepare(self.owner, self.user, DYNAMIC, created_by='assistant', source='pasted_code',
+                                    request={'amount_local': '1.00'})
+        self.assertEqual(refused.exception.code, 'no_amount')
+
+    def test_every_case_of_an_argentine_crc_is_the_same_qr(self):
+        from .test_breb_fixed_qr import argentina
+        ar = argentina('1500.00')
+        mixed = ar[:-4] + ''.join(c.lower() if i % 2 else c for i, c in enumerate(ar[-4:]))
+        one = local_money.resolve_destination(self.owner, 'ar_qr', ar)
+        two = local_money.resolve_destination(self.owner, 'ar_qr', mixed)
+        self.assertIn(one.pk, set(local_money.same_qr_rows(two).values_list('pk', flat=True)))
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -978,6 +1029,11 @@ only_own_tests(ExactLocalRound12JourneyTests, journey_fixture.JourneyTests, Exac
                ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests)
 only_own_tests(ExactLocalApiRound12Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound13Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound15JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
+               ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests,
+               ExactLocalRound12JourneyTests)
+only_own_tests(ExactLocalApiRound15Tests, ExactLocalApiTests)
 
 
 class TelegramGuardTests(intent_fixture.PaymentIntentBase):

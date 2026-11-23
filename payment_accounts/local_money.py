@@ -261,7 +261,7 @@ def normalize_value(method, raw):
     if method.id == 'co_qr':
         # A fixed amount is paid exactly: the dollars are priced to cover it
         # and the payout is the QR's pesos (store_order_snapshot).
-        decode_breb_qr(value)
+        require_whole_units('COP', decode_breb_qr(value)['amount'])
         # One text per QR: the CRC is checked case-blind, so it is stored in
         # capitals (the paid-once key and the same-QR lookup compare text).
         value = value[:-4] + value[-4:].upper()
@@ -1456,6 +1456,20 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
 
 
 UPDATE_FOR_FIXED_QR = 'Este QR cobra un monto exacto. Actualiza la app para pagarlo.'
+WHOLE_UNIT_ASSETS = ('COP',)   # Bre-B pays whole pesos: an exact amount with centavos is refused up front
+
+
+def require_whole_units(asset, amount):
+    """An exact amount in a currency paid without cents (COP) must be whole,
+    refused before any conversion rather than after it."""
+    if amount in (None, '') or asset not in WHOLE_UNIT_ASSETS:
+        return
+    try:
+        value = Decimal(str(amount))
+    except (InvalidOperation, TypeError, ValueError):
+        return
+    if value.is_finite() and value != value.to_integral_value():
+        raise PaymentAccountError('Los pesos colombianos se pagan sin centavos. Escribe un monto entero.')
 
 
 def _exact_amount(value):
@@ -1535,7 +1549,9 @@ def same_qr_rows(destination):
         return rows.filter(provider_data__breb_qr__payload=payload)   # stored in capitals
     # An Argentine QR is kept as scanned (it is the payout's destination): its
     # case variants of the CRC are the same QR.
-    variants = {payload, qr_identity(payload), payload[:-4] + payload[-4:].lower()}
+    from itertools import product
+    variants = {payload[:-4] + ''.join(chars)
+                for chars in product(*[(c.lower(), c.upper()) for c in payload[-4:]])}   # at most 16
     return rows.filter(**{f'details__{method.field}__in': sorted(variants)})
 
 
@@ -1621,10 +1637,18 @@ def holding_payments(key, exclude_request_id=None, owner=None):
                  exclude_request_id, owner)
 
 
+EXACT_QR_SINCE = '2026-11-24T00:00:00+00:00'
+
+
 def legacy_flows(destination_ids):
-    """The money flows whose bridge quote named one of these recipients."""
+    """The money flows whose bridge quote named one of these recipients, from
+    before fixed-amount QRs carried their order key (LOCAL_MONEY_EXACT_QR_SINCE):
+    later ones are keyed, and counting them would let attempts pile up."""
+    from django.utils.dateparse import parse_datetime
     from .models import MoneyFlow
-    return MoneyFlow.objects.filter(metadata__local_destination_id__in=destination_ids)
+    since = parse_datetime(str(getattr(settings, 'LOCAL_MONEY_EXACT_QR_SINCE', EXACT_QR_SINCE))) \
+        or parse_datetime(EXACT_QR_SINCE)
+    return MoneyFlow.objects.filter(metadata__local_destination_id__in=destination_ids, created_at__lt=since)
 
 
 def legacy_payments(destination_ids, exclude_request_id=None, owner=None):
@@ -1707,6 +1731,7 @@ def exact_send_quote(owner, destination, exact, *, client=None):
     if (destination.provider_data or {}).get('store_order'):
         raise PaymentAccountError('Este pedido ya trae su monto.')
     exact = _exact_amount(exact)
+    require_whole_units(destination.asset, exact)
     price = _order_price(owner, destination, exact, client=client)   # paced on a provider ask
     return {'amount': exact, 'asset': price['currency'], 'total_usd': price['total_usd'],
             'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),

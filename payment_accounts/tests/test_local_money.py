@@ -31,11 +31,11 @@ def qr(*fields):
 class IdentifierTests(SimpleTestCase):
     def test_breb_qr_decodes_key_and_retains_requested_amount_and_merchant(self):
         payload = qr(('01', '12'), ('26', tlv('00', 'CO.COM.RBM.LLA') + tlv('04', '@tienda')),
-                     ('53', '170'), ('54', '15000.50'), ('58', 'CO'), ('59', 'Tienda'), ('60', 'Bogota'))
+                     ('53', '170'), ('54', '15000.00'), ('58', 'CO'), ('59', 'Tienda'), ('60', 'Bogota'))
         method = local_money.METHODS['co_qr']
         self.assertEqual(local_money.normalize_value(method, payload), payload)
         self.assertEqual(local_money.decode_breb_qr(payload), {
-            'payload': payload, 'key': '@tienda', 'amount': '15000.50',
+            'payload': payload, 'key': '@tienda', 'amount': '15000.00',
             'merchant_name': 'Tienda', 'merchant_city': 'Bogota'})
         self.assertEqual(local_money._validation_request(method, payload),
                          {'country': 'CO', 'account': {'dataType': 'BREB_KEY', 'brebKey': '@tienda'}})

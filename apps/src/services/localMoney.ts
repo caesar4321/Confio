@@ -443,6 +443,16 @@ export const LOCAL_JOURNEY_BRIDGE = gql`
   }
 `;
 
+// What an exact send pays: its own query, so an older server fails only this line.
+export const LOCAL_JOURNEY_EXACT = gql`
+  query LocalJourneyExact($id: UUID!) {
+    infiniaJourney(internalId: $id) {
+      internalId
+      exactAmount
+    }
+  }
+`;
+
 export const LOCAL_JOURNEYS = gql`
   query LocalJourneys($offset: Int!, $limit: Int!) {
     myInfiniaJourneys(offset: $offset, limit: $limit) {

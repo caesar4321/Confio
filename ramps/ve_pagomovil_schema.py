@@ -262,7 +262,8 @@ def _beneficiary(cedula, phone, bank_code, name=None) -> dict:
         'bank_code': ve_pagomovil.normalize_bank(bank_code),
     }
     # Some send providers (Dinaria) need the recipient's full name.
-    cleaned = ' '.join(str(name or '').split())[:120]
+    # Printable text only (a control character would break the stored order).
+    cleaned = ' '.join(''.join(ch for ch in str(name or '') if ch.isprintable()).split())[:120]
     if cleaned:
         beneficiary['name'] = cleaned
     return beneficiary

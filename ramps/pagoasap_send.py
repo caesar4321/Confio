@@ -296,6 +296,7 @@ def quote_exact(ves, on_miss=None) -> dict:
     `on_miss` (the caller's pace) runs right before the providers are asked,
     and only then."""
     from django.core.cache import cache
+    exact_ves_amount(ves)   # refused before any memory or pace: never an answer for another amount
     try:
         key = _exact_cache_key(ves)
     except (InvalidOperation, TypeError, ValueError):
@@ -303,7 +304,6 @@ def quote_exact(ves, on_miss=None) -> dict:
     cached = cache.get(key) if key else None
     if cached is not None:
         return dict(cached)
-    exact_ves_amount(ves)   # an amount refused anyway costs no pace
     if on_miss is not None:
         on_miss()
     quote = quote_exact_now(ves)
@@ -323,6 +323,16 @@ def exact_ves_amount(ves) -> Decimal:
     if not ves.is_finite() or ves < MIN_PAYOUT_VES or ves >= Decimal('1e10') or ves != ves.quantize(ve_send.CENT):
         raise VePagoMovilError(f'Escribe un monto desde {MIN_PAYOUT_VES} bolívares, con hasta dos decimales.')
     return ves
+
+
+def _price_tolerance() -> Decimal:
+    try:
+        bps = ve_pagomovil.setting_decimal('VE_PAGOMOVIL_EXACT_PRICE_TOLERANCE_BPS', '50')
+    except (InvalidOperation, TypeError, ValueError):
+        bps = Decimal('50')
+    if not bps.is_finite() or bps < 0 or bps > 200:
+        bps = Decimal('50')
+    return bps / 10_000
 
 
 def _exact_margin() -> Decimal:
@@ -405,13 +415,18 @@ def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
         # never more than the fresh price either (a stale screen does not
         # overpay): the send is the fresh price, its lines as quoted.
         fresh = Decimal(estimate['usd_amount'])
-        if fresh > amount or fresh < amount - ve_send.CENT:
+        # Relay's estimate wobbles a little between calls: a fresh price up
+        # to VE_PAGOMOVIL_EXACT_PRICE_TOLERANCE_BPS (50, at most 200) below
+        # what the person approved is still their price; anything above it,
+        # or further below, is a moved price.
+        tolerance = max(ve_send.CENT, (amount * _price_tolerance()).quantize(ve_send.CENT, rounding=ROUND_DOWN))
+        if fresh > amount or fresh < amount - tolerance:
             # Either way the person would pay other dollars than they saw: the
             # screen (or card) asks again, priced fresh, not from memory.
             from django.core.cache import cache
             cache.delete(_exact_cache_key(exact_ves))
             raise VePagoMovilError(PRICE_MOVED)
-        # What they saw (at most a cent above the fresh price): what is
+        # What they saw (within the tolerance of the fresh price): what is
         # charged, with the lines re-derived for it so they still add up.
         _, deposit_wei = ve_send.confio_amounts(amount)
         usdt = Decimal(deposit_wei) / Decimal(10 ** 18)

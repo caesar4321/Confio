@@ -319,6 +319,11 @@ def exact_local(request):
         raise _refuse('no_amount', 'Ese monto es demasiado alto para un envío.')
     if amount != amount.quantize(CENT):
         raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
+    try:
+        method = local_money.METHODS.get(str(request.get('method_id') or ''))
+        local_money.require_whole_units(method.asset if method else '', amount)
+    except PaymentAccountError as exc:
+        raise _refuse('no_amount', str(exc)) from exc
     return str(amount.quantize(CENT))
 
 

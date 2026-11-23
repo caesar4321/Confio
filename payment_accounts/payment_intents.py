@@ -428,6 +428,16 @@ def prepare(owner, user, raw_code=None, *, created_by, source, request=None, mes
             except PaymentAccountError as exc:
                 raise _refuse('no_code', str(exc)) from exc
             facts = _read_pix_charge(owner, value, client=client)
+            asked = request.get('amount_local')
+            if asked not in (None, ''):
+                # The charge's own amount is paid: another one asked for is
+                # refused, never silently replaced.
+                try:
+                    differs = Decimal(str(asked)) != Decimal(str(facts['amount_local']))
+                except (ArithmeticError, TypeError, ValueError):
+                    differs = True
+                if differs:
+                    raise _refuse('no_amount', 'Este QR ya trae su monto. Paga ese monto o pide otro QR.')
         else:
             facts = intent_rails.read(owner, user, family, method_id, provider, request, client=client)
     except IntentRefused as exc:

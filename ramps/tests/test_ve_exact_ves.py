@@ -423,3 +423,30 @@ class ExactRound14Tests(TestCase):
             with self.subTest(ves=bad), self.assertRaises(ve_pagomovil.VePagoMovilError):
                 pagoasap_send.quote_exact(bad, on_miss=lambda: paced.append(1))
         self.assertEqual(paced, [])
+
+
+class ExactRound15Tests(TestCase):
+    def test_an_amount_it_would_refuse_never_gets_a_remembered_price(self):
+        from django.core.cache import cache
+        cache.clear()
+        cache.set(pagoasap_send._exact_cache_key('1500'), {'usd_amount': '1.50'})
+        with self.assertRaises(ve_pagomovil.VePagoMovilError):
+            pagoasap_send.quote_exact('1500.004')
+
+    def test_a_small_wobble_below_what_was_approved_is_still_their_price(self):
+        from django.contrib.auth import get_user_model
+        user = get_user_model().objects.create(username='ve-exact-15', firebase_uid='ve-exact-15')
+        quote = {'usd_amount': '99.70', 'usdt_amount': '99.00', 'confio_fee_usd': '0.70',
+                 'processor_fee_usd': '0.40', 'estimated_ves': '90000.00', 'exact_ves': '90000.00', 'rate': '1'}
+        with mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
+                mock.patch.object(pagoasap_send, 'quote_exact_now', return_value=quote), \
+                mock.patch.object(ve_send, 'current_block', return_value=1000), \
+                mock.patch.object(ve_send, 'reserve') as reserve, mock.patch.object(ve_send, 'prepare'):
+            pagoasap_send.create(user, mock.Mock(), Decimal('100.00'), {}, exact_ves='90000.00')   # 0.3% below
+            with self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'cambió'):
+                pagoasap_send.create(user, mock.Mock(), Decimal('101.00'), {}, exact_ves='90000.00')   # 1.3% below
+        self.assertEqual(reserve.call_args.kwargs['gross_usd'], Decimal('100.00'))
+
+    def test_a_recipient_name_keeps_only_printable_text(self):
+        from ramps.ve_pagomovil_schema import _beneficiary
+        self.assertEqual(_beneficiary('V12345678', '04141234567', '0102', 'Ana\x00 Pérez\n')['name'], 'Ana Pérez')
