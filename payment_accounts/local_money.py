@@ -1541,38 +1541,10 @@ def qr_hold(destination):
     return held(order['key'], destination=destination)
 
 
-SAME_QR_LIMIT = 500
-
-
 def qr_identity(payload):
     """One text per QR: its CRC is checked case-blind, so two copies that
     differ only there are the same QR."""
     return payload[:-4] + payload[-4:].upper() if len(payload) >= 4 else payload
-
-
-def same_qr_rows(destination):
-    """The recipient rows (any account) that hold this very QR, or None."""
-    method, payload = _qr_payload(destination)
-    if method is None or not payload:
-        return None
-    rows = PayoutDestination.objects.filter(provider='infinia', country=method.country)
-    if method.id == 'co_qr':
-        return rows.filter(provider_data__breb_qr__payload=payload)   # stored in capitals
-    # An Argentine QR is kept as scanned (it is the payout's destination): its
-    # case variants of the CRC are the same QR.
-    from itertools import product
-    variants = {payload[:-4] + ''.join(chars)
-                for chars in product(*[(c.lower(), c.upper()) for c in payload[-4:]])}   # at most 16
-    return rows.filter(**{f'details__{method.field}__in': sorted(variants)})
-
-
-def _same_qr_destinations(destination):
-    """Their ids, at most SAME_QR_LIMIT + 1 (held() counts more as held)."""
-    rows = same_qr_rows(destination)
-    if rows is None:
-        return []
-    # No ordering: the cap only counts, and an ORDER BY could steer the plan off the hash index.
-    return [str(value) for value in rows.values_list('internal_id', flat=True)[:SAME_QR_LIMIT + 1]]
 
 
 PAID = 'paid'
@@ -1583,20 +1555,12 @@ REVIEW = 'review'
 def held(key, exclude_request_id=None, destination=None, owner=None):
     """Whether a paid-once order or QR is held, and how: PAID (a payment of
     it was signed, runs or is done), SIGNING (only an unsigned one that can
-    still be signed), or '' (free). Fails closed: more rows holding the same
-    QR than can be checked count as PAID. Each lookup is its own indexed
-    query (migration 0036): the order key first, a QR's older payments
-    (paid in dollars, with no key) only when needed."""
+    still be signed), REVIEW (only one in review that paid no one), or ''
+    (free). Found by the order key alone (indexed, migration 0036): no
+    fixed-amount QR was ever paid before QRs carried their key (prod checked
+    2026-11-23), so there are no older keyless payments to look for.
+    `destination` is accepted for callers' symmetry and not needed."""
     sets = [holding_payments(key, exclude_request_id=exclude_request_id, owner=owner)]
-    if destination is not None and ':qr:' in str(key):
-        same = _same_qr_destinations(destination)
-        if len(same) > SAME_QR_LIMIT:
-            return PAID
-        if same:
-            legacy = legacy_payments(same, exclude_request_id=exclude_request_id, owner=owner)
-            if legacy is None:
-                return PAID
-            sets += legacy
     state = ''
     for rows in sets:
         signed = rows.exclude(bridge__status='prepared')
@@ -1654,37 +1618,6 @@ def holding_payments(key, exclude_request_id=None, owner=None):
     from .models import InfiniaJourney
     return _live(InfiniaJourney.objects.filter(direction='to_bank', destination_snapshot__store_order__key=key),
                  exclude_request_id, owner)
-
-
-EXACT_QR_SINCE = '2026-11-24T00:00:00+00:00'
-
-
-def legacy_flows(destination_ids):
-    """The money flows whose bridge quote named one of these recipients, from
-    before fixed-amount QRs carried their order key (LOCAL_MONEY_EXACT_QR_SINCE):
-    later ones are keyed, and counting them would let attempts pile up."""
-    from django.utils.dateparse import parse_datetime
-    from .models import MoneyFlow
-    since = parse_datetime(str(getattr(settings, 'LOCAL_MONEY_EXACT_QR_SINCE', EXACT_QR_SINCE))) \
-        or parse_datetime(EXACT_QR_SINCE)
-    return MoneyFlow.objects.filter(metadata__local_destination_id__in=destination_ids, created_at__lt=since)
-
-
-def legacy_payments(destination_ids, exclude_request_id=None, owner=None):
-    """Live payments of a QR made before QRs carried their amount (paid in
-    dollars, no order key): named in the snapshot since 2026-11-21, and in the
-    bridge quote's money flow since 2026-09-24. Each lookup indexed; None (held,
-    fail closed) when more flows name the QR than can be checked."""
-    from .models import InfiniaJourney
-    flows = list(legacy_flows(destination_ids).values_list('pk', flat=True)[:SAME_QR_LIMIT + 1])
-    if len(flows) > SAME_QR_LIMIT:
-        return None
-    base = InfiniaJourney.objects.filter(direction='to_bank').exclude(destination_snapshot__has_key='store_order')
-    sets = [_live(base.filter(destination_snapshot__destination_internal_id__in=destination_ids),
-                  exclude_request_id, owner)]
-    if flows:
-        sets.append(_live(base.filter(bridge__quote__money_flow_id__in=flows), exclude_request_id, owner))
-    return sets
 
 
 def exact_qr_quote(destination, quote, exact=None):

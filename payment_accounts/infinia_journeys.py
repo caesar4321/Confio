@@ -171,13 +171,7 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     _require_capability(source, 'convert')
     _require_capability(target, 'send_third_party')
     existing = InfiniaJourney.objects.filter(confio_account=owner, request_id=request_id).first()
-    compared = snapshot
-    if existing and ':qr:' in str((snapshot.get('store_order') or {}).get('key', '')) \
-            and 'store_order' not in (existing.destination_snapshot or {}):
-        # A journey made before this recipient was paid exactly (a fixed-
-        # amount QR then paid in dollars): its retry returns it as it was.
-        compared = {key: value for key, value in snapshot.items() if key != 'store_order'}
-    expected = (direction, local_account.pk, crypto_account.pk, minimum, compared, wallet, wallet_minimum)
+    expected = (direction, local_account.pk, crypto_account.pk, minimum, snapshot, wallet, wallet_minimum)
     if existing:
         actual = (existing.direction, existing.local_account_id, existing.crypto_account_id,
                   existing.minimum_fx_output, existing.destination_snapshot, existing.wallet_address, existing.minimum_wallet_output)

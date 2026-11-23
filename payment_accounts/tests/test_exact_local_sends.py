@@ -404,15 +404,6 @@ class ExactLocalRound3Tests(ExactLocalJourneyTests):
         row.save()
         return row
 
-    def test_a_retry_of_a_journey_made_before_returns_it(self):
-        row, t, request = self.fixed(breb('1249')), self.bridge(), uuid.uuid4()
-        args = dict(owner=self.owner, local_account=self.local, crypto_account=self.crypto, request_id=request,
-                    direction='to_bank', bridge=t, destination=row, minimum_fx_output='1249.00')
-        first = create_journey(**args)
-        snapshot = dict(first.destination_snapshot); snapshot.pop('store_order')   # as made before this change
-        InfiniaJourney.objects.filter(pk=first.pk).update(destination_snapshot=snapshot)
-        self.assertEqual(create_journey(**args).pk, first.pk)
-
     def test_an_exact_amount_is_only_for_a_send_to_an_account(self):
         with self.assertRaisesRegex(PaymentAccountError, 'monto exacto'):
             create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
@@ -536,20 +527,6 @@ class ExactLocalRound4JourneyTests(ExactLocalRound3Tests):
         self.assertTrue(right.success, right.errors)
         self.assertEqual(right.journey.destination_snapshot['store_order']['amount'], '1249.00')
 
-    def test_a_dynamic_qr_paid_in_dollars_before_still_holds_it(self):
-        fixed = self.fixed(breb('1249'))
-        old = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
-                             request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
-                             destination=fixed, minimum_fx_output='1249.00')
-        snapshot = dict(old.destination_snapshot); snapshot.pop('store_order')   # as paid before this change
-        InfiniaJourney.objects.filter(pk=old.pk).update(destination_snapshot=snapshot, stage='completed')
-        other = self.fixed(breb('1249'))   # the same QR, scanned again (any account)
-        # Real Bre-B recipients are Colombian (the fixture's journeys need PER to run).
-        PayoutDestination.objects.filter(pk__in=[fixed.pk, other.pk]).update(country='COL')
-        other.refresh_from_db()
-        with self.assertRaisesRegex(PaymentAccountError, 'QR ya tiene un pago'):
-            local_money.require_unpaid_qr(other)
-
     def test_the_retry_exception_is_only_for_qrs(self):
         row, t, request = self.destination(), self.bridge(), uuid.uuid4()
         args = dict(owner=self.owner, local_account=self.local, crypto_account=self.crypto, request_id=request,
@@ -644,13 +621,6 @@ class ExactLocalApiRound5Tests(ExactLocalApiTests):
             intent_rails.reread_transfer(self.owner, intent)
         self.assertIsNone(cache.get(key))
 
-    def test_more_copies_of_a_qr_than_can_be_checked_count_as_held(self):
-        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
-        key = local_money.store_order_snapshot(fixed)['key']
-        self.assertFalse(bool(local_money.held(key, destination=fixed)))
-        with mock.patch.object(local_money, 'SAME_QR_LIMIT', 0):
-            self.assertTrue(bool(local_money.held(key, destination=fixed)))
-
     def test_a_rail_less_argentine_row_gets_its_rail(self):
         from .test_breb_fixed_qr import argentina
         row = local_money.resolve_destination(self.owner, 'ar_qr', argentina('15000.00'))
@@ -660,25 +630,6 @@ class ExactLocalApiRound5Tests(ExactLocalApiTests):
 
 
 class ExactLocalRound6JourneyTests(ExactLocalRound4JourneyTests):
-    def test_a_qr_paid_in_dollars_before_snapshots_named_recipients_still_holds_it(self):
-        fixed = self.fixed(breb('1249'))
-        old = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
-                             request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
-                             destination=fixed, minimum_fx_output='1249.00')
-        snapshot = dict(old.destination_snapshot)
-        snapshot.pop('store_order'); snapshot.pop('destination_internal_id')   # as in September
-        InfiniaJourney.objects.filter(pk=old.pk).update(destination_snapshot=snapshot, stage='completed')
-        flow = old.bridge.quote.money_flow
-        flow.metadata = dict(flow.metadata or {}, local_destination_id=str(fixed.internal_id))
-        flow.save(update_fields=['metadata'])
-        from datetime import datetime, timezone as tz
-        type(flow).objects.filter(pk=flow.pk).update(created_at=datetime(2026, 10, 1, tzinfo=tz.utc))   # September–November
-        other = self.fixed(breb('1249'))
-        PayoutDestination.objects.filter(pk__in=[fixed.pk, other.pk]).update(country='COL')
-        other.refresh_from_db()
-        with self.assertRaisesRegex(PaymentAccountError, 'QR ya tiene un pago'):
-            local_money.require_unpaid_qr(other)
-
     def test_another_accounts_request_id_is_not_its_own_retry(self):
         fixed = self.fixed(breb('1249'))
         first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
@@ -691,29 +642,14 @@ class ExactLocalRound6JourneyTests(ExactLocalRound4JourneyTests):
         self.assertFalse(bool(local_money.held(key, exclude_request_id=first.request_id, destination=fixed,
                                              owner=self.owner)))
 
-    def test_the_paid_once_lookups_use_their_indexes(self):
+    def test_the_paid_once_lookup_uses_its_index(self):
         from django.db import connection
-        # The very querysets held() runs, not look-alikes.
-        fixed = self.fixed(breb('1249'))
-        argentine = self.destination()
-        argentine.provider_data = {'method_id': 'ar_qr'}
-        argentine.details = {'type': 'QR_CODE', 'qrCode': qr(('01', '12'), ('53', '032'), ('54', '1500.00'), ('58', 'AR'))}
-        argentine.save()
-        lookups = (local_money.holding_payments('co_qr:qr:k'),
-                   local_money.legacy_payments(['a'])[0],
-                   local_money.legacy_flows(['a']),
-                   local_money.same_qr_rows(fixed),
-                   local_money.same_qr_rows(argentine))
+        # The very queryset held() runs, not a look-alike.
         with connection.cursor() as cursor:
             cursor.execute('SET LOCAL enable_seqscan = off')
-            for qs, index in zip(lookups, ('infinia_journey_order_key_idx', 'infinia_journey_destination_id_idx',
-                                           'money_flow_local_destination_idx',
-                                           'payout_destination_breb_qr_idx', 'payout_destination_qr_code_idx')):
-                sql, params = qs.query.sql_with_params()
-                cursor.execute('EXPLAIN ' + sql, params)
-                with self.subTest(index=index):
-                    self.assertIn(index, ' '.join(row[0] for row in cursor.fetchall()))
-
+            sql, params = local_money.holding_payments('co_qr:qr:k').query.sql_with_params()
+            cursor.execute('EXPLAIN ' + sql, params)
+            self.assertIn('infinia_journey_order_key_idx', ' '.join(row[0] for row in cursor.fetchall()))
 
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
 class ExactLocalApiRound6Tests(ExactLocalApiTests):
@@ -883,7 +819,6 @@ class ExactLocalApiRound10Tests(ExactLocalApiTests):
         one = local_money.resolve_destination(self.owner, 'ar_qr', ar)
         two = local_money.resolve_destination(self.owner, 'ar_qr', lower)
         self.assertEqual(local_money.store_order_snapshot(one)['key'], local_money.store_order_snapshot(two)['key'])
-        self.assertEqual(set(local_money.same_qr_rows(two).values_list('pk', flat=True)), {one.pk, two.pk})
 
     def test_a_fixed_qrs_mismatch_is_refused_before_a_provider(self):
         from payment_accounts.local_money_schema import LocalMoneyQuery
@@ -941,18 +876,6 @@ class ExactLocalApiRound13Tests(ExactLocalApiTests):
 
 
 class ExactLocalRound15JourneyTests(ExactLocalRound12JourneyTests):
-    def test_flows_after_the_cutover_are_not_legacy(self):
-        fixed = self.fixed(breb('1249'))
-        flow = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
-                              request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
-                              destination=fixed, minimum_fx_output='1249.00').bridge.quote.money_flow
-        flow.metadata = dict(flow.metadata or {}, local_destination_id=str(fixed.internal_id))
-        flow.save(update_fields=['metadata'])
-        with self.settings(LOCAL_MONEY_EXACT_QR_SINCE='2026-01-01T00:00:00+00:00'):
-            self.assertFalse(local_money.legacy_flows([str(fixed.internal_id)]).exists())
-        with self.settings(LOCAL_MONEY_EXACT_QR_SINCE='2999-01-01T00:00:00+00:00'):
-            self.assertTrue(local_money.legacy_flows([str(fixed.internal_id)]).exists())
-
     def test_the_journey_says_what_an_exact_send_pays(self):
         from payment_accounts.journey_schema import InfiniaJourneyType
         j = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
@@ -986,7 +909,7 @@ class ExactLocalApiRound15Tests(ExactLocalApiTests):
         mixed = ar[:-4] + ''.join(c.lower() if i % 2 else c for i, c in enumerate(ar[-4:]))
         one = local_money.resolve_destination(self.owner, 'ar_qr', ar)
         two = local_money.resolve_destination(self.owner, 'ar_qr', mixed)
-        self.assertIn(one.pk, set(local_money.same_qr_rows(two).values_list('pk', flat=True)))
+        self.assertEqual(local_money.store_order_snapshot(one)['key'], local_money.store_order_snapshot(two)['key'])
 
 
 class ExactLocalRound16JourneyTests(ExactLocalRound15JourneyTests):
