@@ -15,6 +15,8 @@ from payment_accounts.payment_intents import IntentRefused
 from payment_accounts.services import PaymentAccountError
 from .test_breb_fixed_qr import breb
 from .test_local_money import qr
+
+REAL_BUILD_SUPPORTED = local_money.fixed_qr_build_supported   # before any test patches it
 # Fixture classes by module, so the loader does not run their tests here again.
 from . import test_infinia_journeys as journey_fixture, test_payment_intents as intent_fixture
 from .test_infinia_journeys import reconcile_provider_credit
@@ -217,6 +219,7 @@ class ExactLocalApiTests(intent_fixture.PaymentIntentBase):
 
     def setUp(self):
         super().setUp()
+        mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=True).start()   # a 5.4.0 build
         self.rate = Decimal('5.40')
 
         def quote(owner, destination, *, amount=None, **kw):
@@ -437,6 +440,7 @@ class ExactLocalRound3Tests(ExactLocalJourneyTests):
 class ExactLocalApiRound3Tests(ExactLocalApiTests):
     def test_an_older_build_is_told_before_any_recipient_or_quote(self):
         from payment_accounts.local_money_schema import ResolveLocalDestination, LocalMoneyQuery
+        local_money.fixed_qr_build_supported.side_effect = REAL_BUILD_SUPPORTED   # the real version check
         def resolve(version):
             info = mock.Mock(context=mock.Mock(user=self.user, META={'HTTP_X_CONFIO_VERSION': version}))
             with mock.patch('payment_accounts.local_money_schema._identity'), \
@@ -510,6 +514,9 @@ class ExactLocalRound4JourneyTests(ExactLocalRound3Tests):
         snapshot = dict(old.destination_snapshot); snapshot.pop('store_order')   # as paid before this change
         InfiniaJourney.objects.filter(pk=old.pk).update(destination_snapshot=snapshot, stage='completed')
         other = self.fixed(breb('1249'))   # the same QR, scanned again (any account)
+        # Real Bre-B recipients are Colombian (the fixture's journeys need PER to run).
+        PayoutDestination.objects.filter(pk__in=[fixed.pk, other.pk]).update(country='COL')
+        other.refresh_from_db()
         with self.assertRaisesRegex(PaymentAccountError, 'QR ya tiene un pago'):
             local_money.require_unpaid_qr(other)
 
@@ -574,6 +581,54 @@ class ExactLocalApiRound4Tests(ExactLocalApiTests):
         self.assertIsNone(cache.get(key))
 
 
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound5Tests(ExactLocalApiTests):
+    def test_an_older_build_gets_no_card_for_a_fixed_qr(self):
+        local_money.fixed_qr_build_supported.return_value = False
+        with self.assertRaises(IntentRefused) as refused:
+            self.prepare(breb('25000'))
+        self.assertIn('Actualiza la app', str(refused.exception))
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        result, create = self.journey(fixed, intent=mock.Mock(params={}, amount_exact=True))
+        self.assertFalse(result.success)
+        self.assertIn('Actualiza la app', result.errors[0])
+        create.assert_not_called()
+
+    def test_a_charge_never_takes_a_typed_amount(self):
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        with mock.patch.object(local_money, 'charge_snapshot', return_value={'amount': '10'}), \
+                self.assertRaisesRegex(PaymentAccountError, 'cobro ya trae'):
+            local_money.exact_qr_quote(row, {'minimum_target': '1000'}, '500')
+
+    def test_a_refused_exact_card_is_priced_fresh_next_time(self):
+        from django.core.cache import cache
+        from payment_accounts import intent_rails
+        cache.clear()
+        intent = ExactLocalCardTests.send(self)
+        key = intent_rails._order_price_key(self.owner.pk, intent.destination.pk, intent.minimum_local)
+        self.assertIsNotNone(cache.get(key))
+        with mock.patch.object(intent_rails, '_transfer_price',
+                               return_value={'minimum_local': Decimal('1'), 'fee_usd': intent.fee_usd,
+                                             'currency': intent.currency}), \
+                self.assertRaises(IntentRefused):
+            intent_rails.reread_transfer(self.owner, intent)
+        self.assertIsNone(cache.get(key))
+
+    def test_more_copies_of_a_qr_than_can_be_checked_count_as_held(self):
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        key = local_money.store_order_snapshot(fixed)['key']
+        self.assertFalse(local_money.is_held(key, destination=fixed))
+        with mock.patch.object(local_money, 'SAME_QR_LIMIT', 0):
+            self.assertTrue(local_money.is_held(key, destination=fixed))
+
+    def test_a_rail_less_argentine_row_gets_its_rail(self):
+        from .test_breb_fixed_qr import argentina
+        row = local_money.resolve_destination(self.owner, 'ar_qr', argentina('15000.00'))
+        row.provider_data = {}
+        row.save()
+        self.assertEqual(local_money.method_of(row).id, 'ar_qr')
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -591,3 +646,4 @@ only_own_tests(ExactLocalRound3Tests, journey_fixture.JourneyTests, ExactLocalJo
 only_own_tests(ExactLocalApiRound3Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalRound4JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests)
 only_own_tests(ExactLocalApiRound4Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalApiRound5Tests, ExactLocalApiTests)

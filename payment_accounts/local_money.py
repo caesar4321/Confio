@@ -187,6 +187,13 @@ def qr_amount(method, value):
     return ''
 
 
+def method_of(destination):
+    """A recipient's rail: the one its check wrote, or for a QR whose check
+    has not written it yet, the QR it holds (_qr_payload)."""
+    method = METHODS.get(((destination.provider_data or {}) if destination is not None else {}).get('method_id'))
+    return method or _qr_payload(destination)[0]
+
+
 def _qr_payload(destination):
     data = (destination.provider_data or {}) if destination is not None else {}
     method = METHODS.get(data.get('method_id'))
@@ -1487,19 +1494,31 @@ def require_unpaid_qr(destination):
     order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
     if order is None or not order.get('once'):
         return
-    if holding_payments(order['key'], destination=destination).exists():
+    if is_held(order['key'], destination=destination):
         raise PaymentAccountError('Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')
 
 
+SAME_QR_LIMIT = 500
+
+
 def _same_qr_destinations(destination):
-    """Every recipient row (any account) that holds this very QR."""
+    """Every recipient row (any account) that holds this very QR, at most
+    SAME_QR_LIMIT + 1 (is_held counts more than the limit as held)."""
     method, payload = _qr_payload(destination)
     if method is None or not payload:
         return []
-    rows = PayoutDestination.objects.filter(provider='infinia')
+    rows = PayoutDestination.objects.filter(provider='infinia', country=method.country)
     rows = (rows.filter(provider_data__breb_qr__payload=payload) if method.id == 'co_qr'
-            else rows.filter(country='ARG', **{f'details__{method.field}': payload}))
-    return [str(value) for value in rows.values_list('internal_id', flat=True)[:500]]
+            else rows.filter(**{f'details__{method.field}': payload}))
+    return [str(value) for value in rows.order_by('pk').values_list('internal_id', flat=True)[:SAME_QR_LIMIT + 1]]
+
+
+def is_held(key, exclude_request_id=None, destination=None):
+    """Whether a paid-once order or QR is held (holding_payments). Fails
+    closed: more rows holding the same QR than can be checked count as held."""
+    if destination is not None and ':qr:' in str(key) and len(_same_qr_destinations(destination)) > SAME_QR_LIMIT:
+        return True
+    return holding_payments(key, exclude_request_id=exclude_request_id, destination=destination).exists()
 
 
 def holding_payments(key, exclude_request_id=None, destination=None):
@@ -1526,6 +1545,9 @@ def exact_qr_quote(destination, quote, exact=None):
     amount the person typed (`exact`): the recipient receives exactly that, so
     it is what is shown and authorized as the journey's minimum. Refused when
     the dollars no longer cover it (the screen prices it again)."""
+    if exact is not None and charge_snapshot(destination) is not None:
+        # A Pix charge has its own amount and path: never a typed one.
+        raise PaymentAccountError('Este cobro ya trae su monto.')
     order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
     if order is not None:
         # A fixed-amount QR is paid only by a build that shows it as one (it

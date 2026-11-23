@@ -368,7 +368,9 @@ class LocalMoneyQuery(graphene.ObjectType):
             raise GraphQLError('Destino no encontrado')
         from . import breb_location
         try:
-            method = local_money.METHODS[(row.provider_data or {}).get('method_id')]
+            method = local_money.method_of(row)
+            if method is None:
+                raise PaymentAccountError('Destino no encontrado')
             local_money.require_rail(owner, _identity(owner, required=False), method)
             breb_location.require_for_country(owner, row.country, info.context.META)
             quote = local_money.exact_send_quote(owner, row, amount_local)
@@ -418,7 +420,7 @@ class LocalMoneyQuery(graphene.ObjectType):
             # screen shows the computed dollars and the exact amount, as for a Pix charge.
             from . import breb_location
             try:
-                method = local_money.METHODS[row.provider_data['method_id']]
+                method = local_money.method_of(row)
                 local_money.require_rail(owner, _identity(owner, required=False), method)
                 breb_location.require_for_country(owner, row.country, info.context.META)
                 quote = local_money.fixed_qr_charge_quote(owner, row)

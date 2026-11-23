@@ -50,6 +50,8 @@ INFINIA = 'infinia'
 INFINIA_RAILS = ('mx_clabe', 'br_pix')
 # One true sentence per authorization_problem code.
 AUTHORIZATION_MESSAGES = {
+    'payout_fixed_amount_qr':
+        'Esta regla paga un QR con monto fijo, y los pagos automáticos no pueden pagarlo. Elige otra cuenta y firma la regla de nuevo.',
     'no_standing_authorization':
         'Esta regla no tiene una autorización vigente. Fírmala de nuevo para reactivarla.',
     'destination_deleted': 'La cuenta guardada de esta regla ya no existe. Elige otra y firma la regla de nuevo.',

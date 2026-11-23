@@ -155,6 +155,8 @@ def _parse_usd(value) -> Decimal | None:
 
 
 EXACT_UNAVAILABLE = 'Por ahora solo puedes enviar un monto en dólares.'
+EXACT_QUOTES_PER_WINDOW = 20
+EXACT_QUOTE_WINDOW_SECONDS = 60
 
 
 def _exact_adapter():
@@ -500,10 +502,16 @@ class Query(graphene.ObjectType):
 
     def resolve_ve_pagomovil_send_exact_quote(self, info, ves_amount):
         def run():
-            if not _user(info):
-                raise VePagoMovilError('Authentication required')
-            if not ve_pagomovil.enabled(SEND):
-                raise VePagoMovilError(SEND_UNAVAILABLE)
+            # The same rules as the order itself (an exact quote asks the
+            # provider and the bridge several times: only for those who can
+            # send), and a per-person pace: Pago ASAP's limits are shared
+            # with real payouts.
+            user, _ = _preflight(info, SEND)
+            from django.core.cache import cache
+            key = f've_exact_quote:{user.pk}'
+            cache.add(key, 0, EXACT_QUOTE_WINDOW_SECONDS)
+            if cache.incr(key) > EXACT_QUOTES_PER_WINDOW:
+                raise VePagoMovilError('Espera un momento antes de cotizar otro monto.')
             quote = _exact_adapter().quote_exact(ves_amount)
             quote.pop('exact_ves', None)
             for key, name in (('min_usd', 'VE_PAGOMOVIL_SEND_MIN_USD'), ('max_usd', 'VE_PAGOMOVIL_SEND_MAX_USD')):

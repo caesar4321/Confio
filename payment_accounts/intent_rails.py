@@ -440,6 +440,10 @@ def read_transfer(owner, user, method_id, request, *, client=None):
     except PaymentAccountError as exc:
         raise _refuse('no_code', str(exc)) from exc
     exact = local_money.qr_amount(method, value)
+    if exact and not local_money.fixed_qr_build_supported(request.get('meta')):
+        # An older build would show this card without saying where the spare
+        # goes, and pay it as its own: told to update, as on Pagar.
+        raise _refuse('rail', local_money.UPDATE_FOR_FIXED_QR)
     typed = '' if exact else exact_local(request)
     amount = usd_amount(request.get('amount_usd'))
     if amount is None and not exact and not typed:
@@ -499,6 +503,9 @@ def reread_transfer(owner, intent, request_meta=None, *, client=None):
     price = _transfer_price(owner, destination, intent.total_usd, client=client)
     if price['minimum_local'] < intent.minimum_local or price['fee_usd'] > intent.fee_usd \
             or price['currency'] != intent.currency:
+        if intent.amount_exact:
+            # The new card is priced fresh, not from the few seconds' memory.
+            forget_order_price(destination, intent.minimum_local)
         raise _refuse('quote_changed')
     return destination
 
@@ -507,7 +514,10 @@ def bridged_minimum_ok(owner, intent, transfer, *, client=None):
     """With the bridge prepared, what will land is known: never below the
     minimum the card showed."""
     final = local_money.payout_quote(owner, intent.destination, bridge=transfer, client=client)
-    return Decimal(final['minimum_target']) >= intent.minimum_local
+    enough = Decimal(final['minimum_target']) >= intent.minimum_local
+    if not enough and intent.amount_exact:
+        forget_order_price(intent.destination, intent.minimum_local)
+    return enough
 
 
 # ------------------------------------------------- provider orders (ramps.ve_send)

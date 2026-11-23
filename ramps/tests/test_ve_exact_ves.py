@@ -121,7 +121,7 @@ class ExactSchemaTests(TestCase):
 
     def test_a_provider_without_exact_bolivares_refuses_in_words(self):
         from ramps.ve_pagomovil_schema import Query
-        with mock.patch.object(ve_pagomovil, 'enabled', return_value=True), \
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock())), \
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=mock.Mock(spec=['quote'])):
             result = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
         self.assertFalse(result.success)
@@ -133,7 +133,7 @@ class ExactSchemaTests(TestCase):
         adapter.quote_exact.return_value = {'usd_amount': '16.40', 'usdt_amount': '16.20', 'confio_fee_usd': '0.20',
                                             'processor_fee_usd': '0.30', 'estimated_ves': '15000.00',
                                             'exact_ves': '15000.00', 'rate': '914.6341'}
-        with mock.patch.object(ve_pagomovil, 'enabled', return_value=True), \
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock())), \
                 mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
             result = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
         self.assertTrue(result.success)
@@ -222,3 +222,29 @@ class ExactRound4Tests(TestCase):
                 self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'cambió'):
             pagoasap_send.create(self.user, mock.Mock(), Decimal('20.00'), {}, exact_ves='19800.00')
         self.assertIsNone(cache.get(pagoasap_send._exact_cache_key('19800')))
+
+
+class ExactRound5Tests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        cache.clear()
+        self.user = get_user_model().objects.create(username='ve-exact-5', firebase_uid='ve-exact-5')
+        self.info = mock.Mock(context=mock.Mock(user=self.user, META={}))
+
+    def test_the_exact_quote_is_for_those_who_can_send_and_paced(self):
+        from ramps.ve_pagomovil_schema import Query
+        with mock.patch('ramps.ve_pagomovil_schema._preflight',
+                        side_effect=ve_pagomovil.VePagoMovilError('Verifica tu identidad para usar Pago Móvil.')):
+            refused = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
+        self.assertFalse(refused.success)
+        adapter = mock.Mock()
+        adapter.quote_exact.return_value = {'usd_amount': '16.40', 'estimated_ves': '15000.00', 'exact_ves': '15000.00'}
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(self.user, mock.Mock())), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
+            from ramps.ve_pagomovil_schema import EXACT_QUOTES_PER_WINDOW
+            answers = [Query().resolve_ve_pagomovil_send_exact_quote(self.info, str(15000 + n))
+                       for n in range(EXACT_QUOTES_PER_WINDOW + 1)]
+        self.assertTrue(all(a.success for a in answers[:-1]))
+        self.assertFalse(answers[-1].success)
+        self.assertIn('Espera', answers[-1].error)
