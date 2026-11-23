@@ -10,7 +10,7 @@ from django.test import override_settings
 
 from payment_accounts import local_money, payment_intents
 from payment_accounts.infinia_journeys import advance_journey, create_journey
-from payment_accounts.models import PayoutDestination
+from payment_accounts.models import InfiniaJourney, PayoutDestination
 from payment_accounts.payment_intents import IntentRefused
 from payment_accounts.services import PaymentAccountError
 from .test_breb_fixed_qr import breb
@@ -91,9 +91,18 @@ class ExactLocalJourneyTests(JourneyTests):
             provider_data={'method_id': 'br_pix'})
 
     def bridge(self):
-        t, _ = self.prepared(); t.status = 'delivered'; t.destination_tx_hash = DEST_HASH; t.save()
+        # A new request id and transaction each time: a separately funded bridge.
+        self.request_id = uuid.uuid4()
+        tx = '0x' + uuid.uuid4().hex + uuid.uuid4().hex
+        from . import test_bridge_execution as bridge_fixture
+        deposit = '0x' + (uuid.uuid4().hex + uuid.uuid4().hex)[:40]   # each bridge its own address
+        bound = bridge_fixture.binding
+        with mock.patch.object(bridge_fixture, 'DEPOSIT', deposit), \
+                mock.patch.object(bridge_fixture, 'binding', lambda q, deposit=deposit: bound(q, deposit)):
+            t, _ = self.prepared()
+        t.status = 'delivered'; t.destination_tx_hash = tx; t.save()
         self.credit(self.crypto, amount='10.008795', provider_data={'third_party': {
-            'type': 'CRYPTO', 'crypto_network': 'POLYGON', 'transaction_hash': DEST_HASH}})
+            'type': 'CRYPTO', 'crypto_network': 'POLYGON', 'transaction_hash': tx}})
         reconcile_provider_credit(t)
         return t
 
@@ -118,13 +127,18 @@ class ExactLocalJourneyTests(JourneyTests):
             self.journey(self.destination(), Decimal('1249.00'), minimum='1200.00')
 
     def test_the_same_recipient_can_be_paid_again(self):
-        t = self.bridge()
         destination = self.destination()
-        self.journey(destination, Decimal('1249.00'), bridge=t)
-        try:   # a reused bridge may be refused for its own reasons, never as "paid once"
-            self.journey(destination, Decimal('1249.00'), bridge=t)
-        except PaymentAccountError as exc:
-            self.assertNotIn('otra vez', str(exc))
+        done = lambda j: InfiniaJourney.objects.filter(pk=j.pk).update(stage='completed')   # one at a time
+        one = self.journey(destination, Decimal('1249.00'))
+        done(one)
+        two = self.journey(destination, Decimal('1249.00'))   # separately funded
+        done(two)
+        self.assertNotEqual(one.pk, two.pk)
+        self.assertNotEqual(one.destination_snapshot['store_order']['key'],
+                            two.destination_snapshot['store_order']['key'])
+        # A typed "500" is stored as the card shows it.
+        self.assertEqual(self.journey(destination, Decimal('1249'))
+                         .destination_snapshot['store_order']['amount'], '1249.00')
 
     def test_an_amount_that_disagrees_with_the_recipient_is_refused(self):
         t = self.bridge()   # one funded bridge per test (the fixture)
@@ -173,3 +187,88 @@ class PagoMovilExactCardTests(PaymentIntentBase):
         with self.assertRaises(IntentRefused) as refused:
             self.send()
         self.assertEqual(refused.exception.code, 'rail')
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiTests(PaymentIntentBase):
+    """The GraphQL edges: the card's amount wins, and older builds never pay a
+    fixed-amount QR without being told it is one."""
+
+    def setUp(self):
+        super().setUp()
+        self.rate = Decimal('5.40')
+
+        def quote(owner, destination, *, amount=None, **kw):
+            expected = (Decimal(str(amount)) * self.rate).quantize(Decimal('0.01'))
+            return {'minimum_target': (expected * Decimal('0.99')).quantize(Decimal('0.01')),
+                    'expected_target': expected, 'target_amount': expected, 'rate': self.rate, 'asset': 'BRL',
+                    'expires_at': '', 'source_amount': amount, 'expected_source_amount': amount,
+                    'total_cost_percent': Decimal('1')}
+        mock.patch.object(local_money, 'payout_quote', side_effect=quote).start()
+        mock.patch.object(local_money, 'payout_fee', return_value={'total_usd': '0.30'}).start()
+        mock.patch('payment_accounts.breb_location.require_for_country').start()
+        self.info = mock.Mock(context=mock.Mock(user=self.user, META={}))
+        mock.patch('payment_accounts.local_money_schema._owner', return_value=self.owner).start()
+
+    def journey(self, destination, intent=None, **kwargs):
+        from payment_accounts.journey_schema import CreateInfiniaJourney
+        with mock.patch('payment_accounts.schema._active_account', return_value=self.owner), \
+                mock.patch('payment_accounts.schema._require_adult'), \
+                mock.patch('payment_accounts.breb_location.require_for_country'), \
+                mock.patch.object(payment_intents, 'journey_guard', return_value=intent), \
+                mock.patch.object(payment_intents, 'journey_created'), \
+                mock.patch('payment_accounts.local_money.require_current_destination'), \
+                mock.patch('payment_accounts.journey_schema.create_journey') as create:
+            result = CreateInfiniaJourney.mutate(
+                None, self.info, local_account_id=self.local.internal_id, crypto_account_id=self.crypto.internal_id,
+                destination_id=destination.internal_id, direction='to_bank', request_id=uuid.uuid4(),
+                minimum_fx_output=Decimal('500.00'), **kwargs)
+        return result, create
+
+    def test_a_cards_exact_amount_wins_over_the_client(self):
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        card = mock.Mock(params={'exact_local': '500.00'})
+        result, create = self.journey(row, intent=card)
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(create.call_args.kwargs['exact_payout'], '500.00')
+        result, create = self.journey(row, intent=card, exact_local_amount=Decimal('400'))
+        self.assertFalse(result.success)
+        create.assert_not_called()
+        # Without a card the typed amount is the client's own choice, passed on as given.
+        result, create = self.journey(row, exact_local_amount=Decimal('500'))
+        self.assertEqual(create.call_args.kwargs['exact_payout'], Decimal('500'))
+
+    def test_an_older_build_never_pays_a_fixed_amount_qr(self):
+        fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
+        result, create = self.journey(fixed)
+        self.assertFalse(result.success)
+        self.assertIn('Actualiza la app', result.errors[0])
+        create.assert_not_called()
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        with self.assertRaisesRegex(Exception, 'Actualiza la app'):
+            LocalMoneyQuery().resolve_local_payout_quote(self.info, fixed.internal_id, amount=Decimal('50'))
+        with self.assertRaisesRegex(Exception, 'no coincide'):
+            LocalMoneyQuery().resolve_local_payout_quote(self.info, fixed.internal_id, amount=Decimal('50'),
+                                                         exact_local=Decimal('1000'))
+
+    def test_the_exact_send_query_and_its_held_quote(self):
+        from payment_accounts.local_money_schema import LocalMoneyQuery
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        view = LocalMoneyQuery().resolve_local_exact_send(self.info, row.internal_id, Decimal('500'))
+        self.assertEqual((view.amount, view.asset, view.merchant_source), ('500.00', 'BRL', 'typed'))
+        held = LocalMoneyQuery().resolve_local_payout_quote(self.info, row.internal_id, amount=view.total_usd,
+                                                            exact_local=Decimal('500'))
+        self.assertEqual((held.minimum_target, held.target_amount), ('500.00', '500.00'))
+        for bad in (Decimal('0'), Decimal('-1'), Decimal('1.001')):
+            with self.subTest(exact=bad), self.assertRaises(Exception):
+                LocalMoneyQuery().resolve_local_payout_quote(self.info, row.internal_id, amount=view.total_usd,
+                                                             exact_local=bad)
+
+    def test_argentine_amounts_must_be_in_pesos(self):
+        from .test_breb_fixed_qr import argentina
+        from .test_local_money import qr
+        dollars = qr(('01', '12'), ('43', 'com.mercadolibre'), ('53', '840'), ('54', '15.00'), ('58', 'AR'))
+        with self.assertRaisesRegex(PaymentAccountError, 'moneda'):
+            local_money.normalize_value(local_money.METHODS['ar_qr'], dollars)
+        row = local_money.resolve_destination(self.owner, 'ar_qr', argentina('15000.00'))
+        self.assertEqual(local_money.destination_view(row)['qr_amount'], '15000.00')

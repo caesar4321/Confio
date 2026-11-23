@@ -1,10 +1,12 @@
 """Pago Móvil in exact bolívares: priced in dollars from Pago ASAP's own cost
 for that payout (plus a margin); the payout is exactly that amount and what
 the deposit buys above it stays in Confío's Pago ASAP balance."""
+from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
 
 from django.test import TestCase
+from django.utils import timezone
 
 from ramps import pagoasap_send, ve_pagomovil, ve_send
 from .test_ve_send import WALLET, SendCoreTests, pagoasap_client
@@ -36,6 +38,17 @@ class ExactQuoteTests(TestCase):
         # ...and not much more than that.
         self.assertLess(usd, Decimal('22.00'))
 
+    def test_the_lines_add_up_and_the_rates_are_read_once(self):
+        client = pagoasap_client()
+        quote = self.quote('19800.00', client=client)
+        usd, ves = Decimal(quote['usd_amount']), Decimal('19800.00')
+        self.assertEqual(Decimal(quote['rate']), (ves / usd).quantize(Decimal('0.0001'), rounding='ROUND_DOWN'))
+        self.assertEqual(client.rate.call_count, 1)
+        self.assertEqual(client.reference_rate.call_count, 1)
+        # Confío's fee and the processor's share (cost, bridge and the margin) are all of it.
+        self.assertGreaterEqual(Decimal(quote['confio_fee_usd']) + Decimal(quote['processor_fee_usd']),
+                                usd - ves / Decimal('1010') - Decimal('0.01'))
+
     def test_refusals(self):
         for bad in ('0', '9.99', '12.345', 'abc', '1e12'):
             with self.subTest(ves=bad), self.assertRaises(ve_pagomovil.VePagoMovilError):
@@ -46,8 +59,12 @@ class ExactQuoteTests(TestCase):
             self.quote('19800.00', client=broken)
 
 
-class ExactPayoutTests(SendCoreTests):
-    """Runs SendCoreTests' fixtures; only the tests below are new."""
+class ExactPayoutTests(TestCase):
+    """SendCoreTests' fixtures, without running its tests again."""
+    setUp = SendCoreTests.setUp
+    _ramp = SendCoreTests._ramp
+    _funded = SendCoreTests._funded
+    _pay = SendCoreTests._pay
 
     def test_pays_exactly_the_bolivares_and_the_rest_stays_with_the_provider(self):
         ramp = self._funded(estimate={'exact_ves': '15000.00'}, estimated_ves='15000.00')
@@ -56,13 +73,35 @@ class ExactPayoutTests(SendCoreTests):
         self.assertEqual(ve_send._phase(ramp), 'payout_pending')
         self.assertEqual(client.create_payout.call_args.kwargs['amount_ves'], Decimal('15000.00'))
 
-    def test_a_deposit_that_no_longer_covers_them_goes_to_review(self):
+    def test_a_deposit_that_no_longer_covers_them_waits_then_goes_to_review(self):
         ramp = self._funded(estimate={'exact_ves': '25000.00'}, estimated_ves='25000.00')
         client = pagoasap_client()
+        ramp = self._pay(ramp, client)
+        self.assertEqual(ramp.status_detail, 'waiting_rate')   # the rate may come back
+        section = ve_send._section(ramp)
+        section['payout_wait_since'] = (timezone.now() - ve_send.RATE_WAIT - timedelta(minutes=1)).isoformat()
+        ramp.metadata = {**ramp.metadata, ve_send.SECTION: section}
+        ramp.save(update_fields=['metadata'])
         ramp = self._pay(ramp, client)
         self.assertEqual((ve_send._phase(ramp), ramp.status_detail),
                          ('payout_review', 'needs_review:exact_payout_short'))
         client.create_payout.assert_not_called()
+
+    def test_create_charges_the_fresh_price_and_stores_the_exact_bolivares(self):
+        quote = {'usd_amount': '19.50', 'usdt_amount': '19.30', 'confio_fee_usd': '0.20',
+                 'processor_fee_usd': '0.40', 'estimated_ves': '18000.00', 'exact_ves': '18000.00', 'rate': '923.0769'}
+        with mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
+                mock.patch.object(pagoasap_send, 'quote_exact', return_value=quote), \
+                mock.patch.object(ve_send, 'current_block', return_value=1000), \
+                mock.patch.object(ve_send, 'reserve') as reserve, mock.patch.object(ve_send, 'prepare') as prepare:
+            pagoasap_send.create(self.user, mock.Mock(), Decimal('25.00'), {'phone': '584141234567'},
+                                 exact_ves='18000.00')
+        kwargs = reserve.call_args.kwargs
+        # A stale screen that approved $25 pays the fresh $19.50, never more.
+        self.assertEqual(kwargs['gross_usd'], Decimal('19.50'))
+        self.assertEqual(kwargs['estimate']['exact_ves'], '18000.00')
+        self.assertEqual(kwargs['gross_wei'], ve_send.confio_amounts(Decimal('19.50'))[0])
+        prepare.assert_called_once()
 
     def test_create_never_charges_more_than_approved(self):
         quote = {'usd_amount': '25.00', 'estimated_ves': '19800.00', 'exact_ves': '19800.00'}
@@ -70,3 +109,30 @@ class ExactPayoutTests(SendCoreTests):
                 mock.patch.object(pagoasap_send, 'quote_exact', return_value=quote), \
                 self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'cambió'):
             pagoasap_send.create(self.user, mock.Mock(), Decimal('20.00'), {}, exact_ves='19800.00')
+
+
+class ExactSchemaTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        self.user = get_user_model().objects.create(username='ve-exact', firebase_uid='ve-exact')
+        self.info = mock.Mock(context=mock.Mock(user=self.user, META={}))
+
+    def test_a_provider_without_exact_bolivares_refuses_in_words(self):
+        from ramps.ve_pagomovil_schema import Query
+        with mock.patch.object(ve_pagomovil, 'enabled', return_value=True), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=mock.Mock(spec=['quote'])):
+            result = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
+        self.assertFalse(result.success)
+        self.assertIn('dólares', result.error)
+
+    def test_the_exact_quote_answers_without_its_internal_key(self):
+        from ramps.ve_pagomovil_schema import Query
+        adapter = mock.Mock()
+        adapter.quote_exact.return_value = {'usd_amount': '16.40', 'usdt_amount': '16.20', 'confio_fee_usd': '0.20',
+                                            'processor_fee_usd': '0.30', 'estimated_ves': '15000.00',
+                                            'exact_ves': '15000.00', 'rate': '914.6341'}
+        with mock.patch.object(ve_pagomovil, 'enabled', return_value=True), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
+            result = Query().resolve_ve_pagomovil_send_exact_quote(self.info, '15000')
+        self.assertTrue(result.success)
+        self.assertEqual((result.usd_amount, result.estimated_ves), ('16.40', '15000.00'))

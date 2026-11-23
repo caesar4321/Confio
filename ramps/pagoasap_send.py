@@ -227,14 +227,8 @@ def quote(amount: Decimal) -> dict:
     return _priced(amount)[0]
 
 
-def _priced(amount: Decimal, client=None) -> tuple[dict, Decimal]:
-    """(the quote for `amount` gross dollars, the dollars Relay delivers)."""
-    client = client or _client()
-    _, deposit_wei = ve_send.confio_amounts(amount)
-    usdt = Decimal(deposit_wei) / Decimal(10 ** 18)
-    recipient = _polygon_address()
-    if not recipient:
-        raise VePagoMovilError(UNAVAILABLE)
+def _rates(client) -> tuple[Decimal, Decimal]:
+    """(Pago ASAP's USD→VES rate, the market reference or 0)."""
     try:
         rate = client.rate('USD', 'VES')
     except PagoAsapError as exc:
@@ -249,6 +243,18 @@ def _priced(amount: Decimal, client=None) -> tuple[dict, Decimal]:
         reference = Decimal('0')
     if rate <= 0:
         raise VePagoMovilError(GENERIC_ERROR)
+    return rate, reference
+
+
+def _priced(amount: Decimal, client=None, rates=None) -> tuple[dict, Decimal]:
+    """(the quote for `amount` gross dollars, the dollars Relay delivers)."""
+    client = client or _client()
+    _, deposit_wei = ve_send.confio_amounts(amount)
+    usdt = Decimal(deposit_wei) / Decimal(10 ** 18)
+    recipient = _polygon_address()
+    if not recipient:
+        raise VePagoMovilError(UNAVAILABLE)
+    rate, reference = rates or _rates(client)
     # The bridge's own estimate (no deposit address is made for a quote).
     from payment_accounts.allbridge_next import NextError, TOKENS
     from payment_accounts.relay import RelayClient
@@ -300,16 +306,26 @@ def quote_exact(ves) -> dict:
         raise VePagoMovilError(GENERIC_ERROR)
     margin = ve_pagomovil.setting_decimal('VE_PAGOMOVIL_EXACT_MARGIN_BPS', '100') / 10_000
     needed = (cost * (1 + margin)).quantize(ve_send.CENT, rounding=ROUND_UP)
+    rates = _rates(client)   # once per quote: each try only asks Relay again
     amount = needed
     for _ in range(EXACT_PRICE_TRIES):
-        priced, delivered = _priced(amount, client)
+        priced, delivered = _priced(amount, client, rates)
         have = _fee_free_usd(delivered)
         if have <= 0:
             raise VePagoMovilError(GENERIC_ERROR)
         # Scaled both ways: never charged far above what the payout needs.
         target = (amount * needed / have).quantize(ve_send.CENT, rounding=ROUND_UP) + ve_send.CENT
         if have >= needed and amount <= target:
-            return {**priced, 'estimated_ves': format(ves, 'f'), 'exact_ves': format(ves, 'f')}
+            # The lines add up to what the person pays for exactly these
+            # bolívares: Confío's fee, then everything else (Pago ASAP's cost,
+            # the bridge and the margin, which is not returned) as the
+            # processor's share; the rate is bolívares per dollar sent.
+            usdt = Decimal(priced['usdt_amount'])
+            reference = rates[1]
+            processor = max(usdt - ves / reference, Decimal('0')) if reference > 0 else max(usdt - cost, Decimal('0'))
+            return {**priced, 'estimated_ves': format(ves, 'f'), 'exact_ves': format(ves, 'f'),
+                    'processor_fee_usd': format(processor.quantize(ve_send.CENT, rounding=ROUND_UP), 'f'),
+                    'rate': format((ves / amount).quantize(Decimal('0.0001'), rounding=ROUND_DOWN), 'f')}
         amount = target
     raise VePagoMovilError(GENERIC_ERROR)
 
@@ -328,10 +344,13 @@ def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
         raise VePagoMovilError(UNAVAILABLE)
     if exact_ves is not None:
         estimate = quote_exact(exact_ves)
-        # Priced again now: never more dollars than the person approved.
-        if Decimal(estimate['usd_amount']) > amount:
+        # Priced again now: never more dollars than the person approved, and
+        # never more than the fresh price either (a stale screen does not
+        # overpay): the send is the fresh price, its lines as quoted.
+        fresh = Decimal(estimate['usd_amount'])
+        if fresh > amount:
             raise VePagoMovilError(PRICE_MOVED)
-        estimate = {**estimate, 'usd_amount': format(amount, 'f')}
+        amount = fresh
     else:
         estimate = quote(amount)
     gross_wei, deposit_wei = ve_send.confio_amounts(amount)
@@ -418,7 +437,9 @@ def payout_terms(ramp, inflight) -> dict | None:
         if total <= 0:
             return None
         if total > usd:
-            return {'review': 'exact_payout_short'}
+            # The rate moved against it since funding: wait for it to come
+            # back (ve_send's RATE_WAIT), then review. Never a smaller payout.
+            return {'wait': 'exact_payout_short'}
         return _terms(client, section, exact, total, inflight)
     floor = None
     if section.get('funding_sender'):

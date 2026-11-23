@@ -172,6 +172,7 @@ def decode_breb_qr(value):
             'merchant_name': fields.get('59', ''), 'merchant_city': fields.get('60', '')}
 
 
+ISO_NUMERIC = {'ARS': '032', 'BRL': '986', 'COP': '170'}   # EMV tag 53 (ISO 4217)
 FIXED_QR_METHODS = ('co_qr', 'ar_qr')   # Bre-B and Argentina's interoperable QR
 
 
@@ -180,7 +181,9 @@ def qr_amount(method, value):
     if method.id == 'co_qr':
         return decode_breb_qr(value)['amount']
     if method.id == 'ar_qr':
-        return (emv_fields(value) or {}).get('54', '')
+        fields = emv_fields(value) or {}
+        # Only an amount in Argentine pesos is an amount we pay (normalize_value).
+        return fields.get('54', '') if fields.get('53') == '032' else ''
     return ''
 
 
@@ -266,6 +269,9 @@ def normalize_value(method, raw):
         if amount is not None and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount)
                                    or Decimal(amount) <= 0):
             raise PaymentAccountError('El monto del QR no es válido.')
+        if amount is not None and fields.get('53') != ISO_NUMERIC.get(method.asset):
+            # An amount in another currency is never paid as local pesos.
+            raise PaymentAccountError('El monto de este QR no está en la moneda del país.')
     return value
 
 
@@ -1002,7 +1008,7 @@ def destination_view(destination):
         'holder_document': validation.get('holder_document', '') if state == VERIFIED else '',
         'institution': validation.get('institution', ''), 'verification': state,
         'country': iso_alpha2(destination.country), 'asset': destination.asset,
-        'qr_amount': qr_data.get('amount', ''), 'qr_merchant_name': qr_data.get('merchant_name', ''),
+        'qr_amount': fixed_qr_amount(destination), 'qr_merchant_name': qr_data.get('merchant_name', ''),
         'qr_merchant_city': qr_data.get('merchant_city', ''),
     }
 
@@ -1408,6 +1414,33 @@ def payout_quote(owner, destination, *, amount=None, bridge=None, client=None):
             'asset': local.asset, 'expires_at': expires}
 
 
+UPDATE_FOR_FIXED_QR = 'Este QR cobra un monto exacto. Actualiza la app para pagarlo.'
+
+
+def _exact_amount(value):
+    """A local amount to pay exactly: positive, whole cents, below 1e9."""
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        amount = None
+    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(FIAT_CENT) \
+            or amount >= Decimal('1e9'):
+        raise PaymentAccountError('Escribe el monto en moneda local con hasta dos decimales.')
+    return amount.quantize(FIAT_CENT)
+
+
+def require_unpaid_qr(destination):
+    """A dynamic fixed-amount QR is one charge: refused once a payment of it
+    is running or has paid it, before any bridge is prepared."""
+    order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
+    if order is None or not order.get('once'):
+        return
+    from .models import InfiniaJourney
+    if InfiniaJourney.objects.filter(direction='to_bank', destination_snapshot__store_order__key=order['key']) \
+            .exclude(stage='failed').exists():
+        raise PaymentAccountError('Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')
+
+
 def exact_qr_quote(destination, quote, exact=None):
     """The Pagar screen's quote for a fixed-amount QR, or for an exact local
     amount the person typed (`exact`): the recipient receives exactly that, so
@@ -1415,12 +1448,18 @@ def exact_qr_quote(destination, quote, exact=None):
     the dollars no longer cover it (the screen prices it again)."""
     order = store_order_snapshot(destination) if is_fixed_amount_qr(destination) else None
     if order is not None:
-        exact = Decimal(order['amount'])
+        # A fixed-amount QR is paid only by a build that shows it as one (it
+        # asks with the QR's own amount); an older build would type dollars
+        # and never be told the QR is paid exactly.
+        if exact is None:
+            raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
+        if _exact_amount(exact) != Decimal(order['amount']):
+            raise PaymentAccountError('El monto no coincide con el del QR. Revisa el pago de nuevo.')
     if exact is None:
         return quote
-    exact = Decimal(str(exact))
+    exact = _exact_amount(exact)
     if Decimal(quote['minimum_target']) < exact:
-        raise PaymentAccountError('El precio del QR cambió. Revisa el pago de nuevo.')
+        raise PaymentAccountError('El precio cambió. Revisa el envío de nuevo.')
     return {**quote, 'target_amount': exact, 'minimum_target': exact, 'expected_target': exact}
 
 
@@ -1431,9 +1470,7 @@ def exact_send_quote(owner, destination, exact, *, client=None):
     from .intent_rails import _order_price
     if charge_snapshot(destination) is not None or is_fixed_amount_qr(destination):
         raise PaymentAccountError('Este QR ya trae su monto.')
-    exact = Decimal(str(exact))
-    if not exact.is_finite() or exact <= 0 or exact != exact.quantize(FIAT_CENT) or exact >= Decimal('1e9'):
-        raise PaymentAccountError('Escribe el monto en moneda local con hasta dos decimales.')
+    exact = _exact_amount(exact)
     price = _order_price(owner, destination, exact, client=client)
     return {'amount': exact, 'asset': price['currency'], 'total_usd': price['total_usd'],
             'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),
@@ -1449,6 +1486,7 @@ def fixed_qr_charge_quote(owner, destination, *, client=None):
     payout is exactly those pesos and the rest stays in the person's own
     peso account."""
     from .intent_rails import _order_price
+    require_unpaid_qr(destination)
     order = store_order_snapshot(destination)
     exact = Decimal(order['amount'])
     price = _order_price(owner, destination, exact, client=client)

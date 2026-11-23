@@ -269,7 +269,7 @@ function InfiniaLocalSendScreen() {
   // exact local amount, computed dollars.
   const chargeExpected = (scannedQr?.methodId === 'br_qr' && pixChargeHint(scannedQr.payload))
     || ((scannedQr?.methodId === 'co_qr' || scannedQr?.methodId === 'ar_qr') && fixedQrAmountHint(scannedQr.payload))
-    || (destination?.methodId === 'co_qr' && Boolean(destination.qrAmount));
+    || ((destination?.methodId === 'co_qr' || destination?.methodId === 'ar_qr') && Boolean(destination.qrAmount));
   // What a fixed-amount Bre-B or Argentine QR's conversion lands above it stays
   // in the person's peso account (Infinia payout); a Pix charge returns it to the wallet.
   const brebCharge = Boolean(pixCharge) && pixCharge!.asset !== 'BRL';
@@ -324,6 +324,11 @@ function InfiniaLocalSendScreen() {
   const exactLocal = localMode && !chargeExpected && AMOUNT_PATTERN.test(localAmount) && Number(normalizedLocal) > 0
     ? normalizedLocal : '';
   const exactShown = Boolean(pixCharge) || (Boolean(exactLocal) && Boolean(exactSend));
+  // The exact local amount this send asks the server to pay: the one typed,
+  // or a fixed-amount QR's own (Bre-B, Argentina; a Pix charge has its own path).
+  const sentExact = exactLocal || (brebCharge ? pixCharge!.amount : '');
+  const destinationId = destination?.id;
+  const destinationState = destination?.verification;
   const available = limits?.known && limits.available != null ? Number(limits.available) : null;
   const perTransferMax = limits?.perTransferMax ? Number(limits.perTransferMax) : null;
   const spendable = savings.balanceUsd + cusdBalanceUsd;
@@ -542,13 +547,13 @@ function InfiniaLocalSendScreen() {
     setExactLoading(false);
     if (!localMode || chargeExpected) return;
     setAmount('');
-    if (!exactLocal || !destination || !pairReady || destination.verification === 'not_found'
-      || destination.verification === 'pending') return;
+    if (!exactLocal || !destinationId || !pairReady || destinationState === 'not_found'
+      || destinationState === 'pending') return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       setExactLoading(true);
       try {
-        const next = await fetchExactSend(destination.id, exactLocal);
+        const next = await fetchExactSend(destinationId, exactLocal);
         if (cancelled) return;
         if (!next) {
           setExactError('No pudimos cotizar este monto.');
@@ -564,7 +569,9 @@ function InfiniaLocalSendScreen() {
       }
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [localMode, chargeExpected, exactLocal, destination, pairReady, resetReview, exactRetry]);
+  // The recipient's id and state, not the object: a background recheck that
+  // returns the same recipient must not reset a send under review.
+  }, [localMode, chargeExpected, exactLocal, destinationId, destinationState, pairReady, resetReview, exactRetry]);
 
   // Live estimate while typing; the authoritative quote is priced again on
   // the prepared bridge at review.
@@ -583,7 +590,7 @@ function InfiniaLocalSendScreen() {
         // The fee is read with every estimate, not once per recipient: account
         // costs riding on it change as other sends reserve or release them.
         const [next, nextFee] = await Promise.all([
-          fetchPayoutQuote(destination.id, { amount: normalizedAmount, ...(exactLocal ? { exactLocal } : {}) }),
+          fetchPayoutQuote(destination.id, { amount: normalizedAmount, ...(sentExact ? { exactLocal: sentExact } : {}) }),
           fetchPayoutFee(destination.id),
         ]);
         if (!cancelled) { setQuote(next); setFee(nextFee); }
@@ -594,7 +601,7 @@ function InfiniaLocalSendScreen() {
       }
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [destination, pairReady, amountNumber, amountError, normalizedAmount, exactLocal]);
+  }, [destination, pairReady, amountNumber, amountError, normalizedAmount, sentExact]);
 
   const feeView = processorFeeView(fee, amountNumber);
   const finalFeeView = processorFeeView(finalFee, amountNumber);
@@ -631,7 +638,7 @@ function InfiniaLocalSendScreen() {
     }
     // A response for an older form (edited meanwhile) is dropped, never shown or signed.
     const run = ++prepareRun.current;
-    const snapshot = { amount: normalizedAmount, destinationId: recipient.id, exactLocal };
+    const snapshot = { amount: normalizedAmount, destinationId: recipient.id, exactLocal: sentExact };
     let bridgePrepared = false;
     setStep('preparing');
     setFlowError('');
@@ -665,7 +672,7 @@ function InfiniaLocalSendScreen() {
         void loadPixCharge(recipient);
       }
       // An exact amount whose dollars no longer cover it is priced again too.
-      if (snapshot.exactLocal) {
+      if (snapshot.exactLocal && !pixCharge) {
         requestId.current = null;
         setExactRetry((n) => n + 1);
       }
@@ -689,7 +696,7 @@ function InfiniaLocalSendScreen() {
     }
     // Sign only what was reviewed: same amount, same recipient.
     if (!reviewedFor || reviewedFor.amount !== normalizedAmount || reviewedFor.destinationId !== destination.id
-      || reviewedFor.exactLocal !== exactLocal) {
+      || reviewedFor.exactLocal !== sentExact) {
       resetReview();
       setFlowError('El envío cambió. Revísalo de nuevo.');
       return;

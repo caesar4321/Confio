@@ -48,6 +48,15 @@ export const CREATE_VE_EXACT_SEND = gql`mutation CreateVePagoMovilExactSend(
   }
 }`;
 
+/** Bolívar mode against a server that predates it says so; anything else
+ *  (a network error) is worth another try. */
+export function exactQuoteError(error: any): string {
+  const message = String(error?.message || '');
+  return /Cannot query field|Unknown argument|Unknown type/i.test(message)
+    ? 'Por ahora solo puedes enviar un monto en dólares.'
+    : 'No pudimos cotizar este monto. Intenta de nuevo.';
+}
+
 export const START_VE_SEND_FUNDING = gql`mutation StartVePagoMovilSendFunding($orderId: String!) {
   startVePagomovilSendFunding(orderId: $orderId) {
     ${ORDER_FIELDS}

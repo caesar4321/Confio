@@ -45,9 +45,18 @@ class FixedBrebDestinationTests(JourneyTests):
                               minimum_fx_output=minimum)
 
     def bridge(self):
-        t, _ = self.prepared(); t.status = 'delivered'; t.destination_tx_hash = DEST_HASH; t.save()
+        # A new request id and transaction each time: a separately funded bridge.
+        self.request_id = uuid.uuid4()
+        tx = '0x' + uuid.uuid4().hex + uuid.uuid4().hex
+        from . import test_bridge_execution as bridge_fixture
+        deposit = '0x' + (uuid.uuid4().hex + uuid.uuid4().hex)[:40]   # each bridge its own address
+        bound = bridge_fixture.binding
+        with mock.patch.object(bridge_fixture, 'DEPOSIT', deposit), \
+                mock.patch.object(bridge_fixture, 'binding', lambda q, deposit=deposit: bound(q, deposit)):
+            t, _ = self.prepared()
+        t.status = 'delivered'; t.destination_tx_hash = tx; t.save()
         self.credit(self.crypto, amount='10.008795', provider_data={'third_party': {
-            'type': 'CRYPTO', 'crypto_network': 'POLYGON', 'transaction_hash': DEST_HASH}})
+            'type': 'CRYPTO', 'crypto_network': 'POLYGON', 'transaction_hash': tx}})
         reconcile_provider_credit(t)
         return t
 
@@ -74,20 +83,33 @@ class FixedBrebDestinationTests(JourneyTests):
         self.assertFalse(InfiniaJourney.objects.exists())
 
     def test_a_dynamic_qr_is_paid_once_a_static_one_again(self):
-        t = self.bridge()
         dynamic = self.destination(breb('1249'))
-        self.funded(dynamic, bridge=t)
-        with self.assertRaisesRegex(PaymentAccountError, 'no se puede pagar otra vez'):
-            self.funded(dynamic, bridge=t)
-        # The same QR content without "dynamic": the once-rule does not stop it
-        # (whatever else refuses a reused bridge, it is not that rule).
+        first = self.funded(dynamic)
+        done = lambda j: InfiniaJourney.objects.filter(pk=j.pk).update(stage='completed')   # one at a time
+        done(first)
+        local_money.require_unpaid_qr(self.destination(breb('1249', dynamic=False)))
+        with self.assertRaisesRegex(PaymentAccountError, 'QR ya tiene un pago'):
+            local_money.require_unpaid_qr(dynamic)     # the charge view says so before any bridge
+        with self.assertRaisesRegex(PaymentAccountError, 'QR ya tiene un pago'):
+            self.funded(dynamic)                       # a separately funded second payment
+        # A failed first payment does not count: it can be paid then.
+        InfiniaJourney.objects.filter(pk=first.pk).update(stage='failed')
+        local_money.require_unpaid_qr(dynamic)
+        # A static QR with an amount is paid again, each time exactly.
         static = self.destination(breb('1249', dynamic=False))
-        InfiniaJourney.objects.update(destination_snapshot={'store_order': {
-            'key': local_money.store_order_snapshot(static)['key']}})
-        try:
-            self.funded(static, bridge=t)
-        except PaymentAccountError as exc:
-            self.assertNotIn('otra vez', str(exc))
+        one = self.funded(static)
+        done(one)
+        two = self.funded(static)
+        self.assertNotEqual(one.pk, two.pk)
+        self.assertEqual({one.destination_snapshot['store_order']['amount'],
+                          two.destination_snapshot['store_order']['amount']}, {'1249.00'})
+
+    def test_a_payment_rule_never_pays_a_fixed_amount_qr(self):
+        with self.assertRaisesRegex(PaymentAccountError, 'pagos automáticos'):
+            create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                           request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                           destination=self.destination(breb('1249')), minimum_fx_output='1249.00',
+                           funding=mock.Mock())
 
 
 @override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
@@ -146,12 +168,16 @@ class FixedBrebCardTests(PaymentIntentBase):
         self.assertEqual(charge['total_usd'], card.total_usd)   # the same dollars as the assistant's card
         self.assertEqual(charge['estimated_return_usd'], Decimal('0.00'))
         # The screen's quote at those dollars: the merchant receives exactly the QR.
-        quote = local_money.exact_qr_quote(row, local_money.payout_quote(self.owner, row, amount=charge['total_usd']))
+        quote = local_money.exact_qr_quote(row, local_money.payout_quote(self.owner, row, amount=charge['total_usd']),
+                                           charge['amount'])
         self.assertEqual((quote['minimum_target'], quote['target_amount'], quote['expected_target']),
                          (Decimal('25000.00'),) * 3)
         # Dollars that no longer cover it: priced again, never signed short.
         short = local_money.payout_quote(self.owner, row, amount=Decimal('5.00'))
         with self.assertRaisesRegex(PaymentAccountError, 'cambió'):
+            local_money.exact_qr_quote(row, short, '25000')
+        # Asked without the QR's own amount (an older build): refused, never a dollar send.
+        with self.assertRaisesRegex(PaymentAccountError, 'Actualiza la app'):
             local_money.exact_qr_quote(row, short)
         # Any other recipient: the quote is untouched.
         open_row = local_money.resolve_destination(self.owner, 'co_qr', breb())

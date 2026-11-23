@@ -602,7 +602,11 @@ def reread_order(owner, user, intent, meta=None):
         raise _refuse('charge_changed', 'El destino cambió desde que lo viste. Revísalo de nuevo.')
     # Where the dollars are fixed (Pago Móvil) the fee line moves with the
     # market inside the same total: only the total and the estimate matter.
-    if facts['total_usd'] > intent.total_usd or (intent.amount_exact and facts['fee_usd'] > intent.fee_usd):
+    # Exact bolívares: the provider's fee line follows the market reference
+    # inside the same total, so only the total binds (create() refuses a
+    # higher one again).
+    fee_binds = intent.amount_exact and intent.rail_method_id != VE_PAGOMOVIL
+    if facts['total_usd'] > intent.total_usd or (fee_binds and facts['fee_usd'] > intent.fee_usd):
         raise _refuse('quote_changed')
     if not intent.amount_exact and facts['amount_local'] < intent.amount_local * (1 - 4 * _margin()):
         # The estimate fell noticeably since the card: show the new one.

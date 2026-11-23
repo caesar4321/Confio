@@ -38,6 +38,7 @@ import {
   CANCEL_VE_SEND,
   CREATE_VE_EXACT_SEND,
   CREATE_VE_SEND,
+  exactQuoteError,
   VE_SEND_EXACT_QUOTE,
   REPORT_VE_SEND_FUNDING,
   START_VE_SEND_FUNDING,
@@ -164,9 +165,9 @@ export default function VePagoMovilSendScreen() {
           : { query: VE_SEND_QUOTE, variables: { usdAmount: String(toNumber(typed)) }, fetchPolicy: 'network-only' });
         const next = vesMode ? r.data?.vePagomovilSendExactQuote : r.data?.vePagomovilSendQuote;
         if (!cancelled && alive.current) setQuote(next || null);
-      } catch {
+      } catch (error: any) {
         if (!cancelled && alive.current) {
-          setQuote(vesMode ? { success: false, error: 'Por ahora solo puedes enviar un monto en dólares.' } as VeSendQuote : null);
+          setQuote(vesMode ? { success: false, error: exactQuoteError(error) } as VeSendQuote : null);
         }
       }
     }, 450);
@@ -485,7 +486,7 @@ export default function VePagoMovilSendScreen() {
               <View style={styles.disclaimerPill}>
                 <Icon name="info" size={14} color={colors.primaryDark} />
                 <Text style={styles.quoteNote}>{vesMode
-                  ? 'El precio incluye las comisiones y un margen por si la tasa se mueve. Si al pagar no alcanzara, no enviamos el pago y lo revisamos contigo.'
+                  ? 'El precio incluye las comisiones y un pequeño margen por si la tasa se mueve; ese margen no se devuelve. Si al pagar no alcanzara, esperamos un rato y, si sigue sin alcanzar, lo revisamos contigo.'
                   : 'Estimado: los bolívares finales se fijan al convertir tu envío.'}</Text>
               </View>
             </View>

@@ -121,7 +121,12 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
             if exact != exact.quantize(Decimal('0.01')) or charge is not None or (
                     order is not None and Decimal(order['amount']) != exact):
                 raise PaymentAccountError('El monto exacto no coincide con este destino. Revisa el envío.')
-            order = order or {'amount': str(exact), 'reference': '', 'key': f'exact:{request_id}', 'once': False}
+            order = order or {'amount': str(exact.quantize(Decimal('0.01'))), 'reference': '',
+                              'key': f'exact:{request_id}', 'once': False}
+        if order is not None and funding is not None and not str(order['key']).startswith('spei:'):
+            # A payment rule pays its own signed dollars: never a QR that asks
+            # for an amount of its own (nor, dynamic, one paid on the first run).
+            raise PaymentAccountError('Los pagos automáticos no pueden pagar un QR con monto fijo.')
         if order is not None:
             snapshot['store_order'] = order
         if (not bridge or bridge.quote.confio_account_id != owner.pk
@@ -188,12 +193,18 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         order = snapshot['store_order']
         with connection.cursor() as cursor:
             cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [order['key']])
+        # What is being paid, in the person's words: a store's order, a QR's
+        # charge or the amount they typed.
+        what = ('el pedido' if str(order['key']).startswith('spei:')
+                else 'el monto' if str(order['key']).startswith('exact:') else 'el cobro del QR')
         if minimum < Decimal(order['amount']):
-            raise PaymentAccountError('El monto autorizado no cubre el pedido. Revisa el pago de nuevo.')
+            raise PaymentAccountError(f'El monto autorizado no cubre {what}. Revisa el pago de nuevo.')
         if order.get('once', True) and InfiniaJourney.objects.filter(
                 direction='to_bank', destination_snapshot__store_order__key=order['key']) \
                 .exclude(request_id=request_id).exclude(stage='failed').exists():
-            raise PaymentAccountError('Este pedido ya tiene un pago en Confío y no se puede pagar otra vez.')
+            raise PaymentAccountError(
+                'Este pedido ya tiene un pago en Confío y no se puede pagar otra vez.' if what == 'el pedido'
+                else 'Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')
     from .infinia_fee_policy import enabled as fee_enabled, freeze as freeze_fee
     fee = None
     if direction == 'to_bank':

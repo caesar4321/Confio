@@ -214,6 +214,11 @@ class CreateInfiniaJourney(graphene.Mutation):
                     if exact is not None and (not shown or Decimal(str(exact)) != Decimal(shown)):
                         raise payment_intents._refuse('changed')
                     exact = shown or None
+                elif exact is None and destination is not None:
+                    # A fixed-amount QR is paid only by a build that shows it as one.
+                    from .local_money import UPDATE_FOR_FIXED_QR, is_fixed_amount_qr
+                    if is_fixed_amount_qr(destination):
+                        raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
                 # The monthly allowance is checked inside create_journey, under the owner lock.
                 row = create_journey(owner=owner, local_account=local, crypto_account=crypto,
                                      bridge=bridge, credit=credit, destination=destination,
