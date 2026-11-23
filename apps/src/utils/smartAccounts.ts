@@ -149,6 +149,16 @@ export function smartPlaceholderAccount(context: AccountContext): StoredAccount 
   };
 }
 
+/**
+ * Whether the account switcher lists this account: personal and business
+ * only. A Cuenta inteligente (the person's own or an inherited one) is part
+ * of the personal account and opens from its menu, never as an account to
+ * switch to. Inside one, the switcher's personal row is the way back.
+ */
+export function isSwitcherAccount(account: { type?: string | null }): boolean {
+  return String(account.type || '').toLowerCase() !== 'smart';
+}
+
 /** The line under an account's name in the switcher. */
 export function smartSwitcherLabel(account: Pick<StoredAccount, 'smart'>): string {
   return account.smart?.inherited ? INHERITED_ACCOUNT_SWITCHER_LABEL : SMART_ACCOUNT_SWITCHER_LABEL;

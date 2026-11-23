@@ -4,7 +4,7 @@ import { Text } from './common/AppText';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
-import { smartSwitcherLabel } from '../utils/smartAccounts';
+import { isSwitcherAccount, smartSwitcherLabel } from '../utils/smartAccounts';
 
 // Utility function to format phone number with country code
 
@@ -46,9 +46,9 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = React.memo(({
   }
 
   // A personal account shows no phone number (signup no longer asks for one).
-  const displayAccounts = useMemo(() => accounts.map(acc => (
-    acc.type === 'personal' ? { ...acc, phone: undefined } : acc
-  )), [accounts]);
+  const displayAccounts = useMemo(() => accounts
+    .filter(acc => isSwitcherAccount(acc))
+    .map(acc => (acc.type === 'personal' ? { ...acc, phone: undefined } : acc)), [accounts]);
 
   const currentAccount = useMemo(
     () => displayAccounts.find(acc => acc.id === selectedAccount) || displayAccounts[0],

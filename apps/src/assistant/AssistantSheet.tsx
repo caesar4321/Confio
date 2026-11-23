@@ -20,6 +20,7 @@ import {
 import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { Text, TextInput } from '../components/common/AppText';
 import { useAccount } from '../contexts/AccountContext';
 import { navigationRef } from '../navigation/RootNavigation';
@@ -179,10 +180,25 @@ function TypingDots() {
   );
 }
 
-function Bubble({ message, onAction, onWalk, pet }: { message: AssistantMessage; onAction: (target: OpenTarget) => void; onWalk: () => void; pet: PetFace }) {
+export function Bubble({ message, onAction, onWalk, pet }: { message: AssistantMessage; onAction: (target: OpenTarget) => void; onWalk: () => void; pet: PetFace }) {
   const mine = message.role === 'user';
   const team = message.role === 'team';
   const ai = message.role === 'assistant';
+  const words = message.body;
+  // A long press copies the whole message (as in any chat app): text selection inside the conversation's list
+  // is unreliable on Android, and the drag that opens the menu can take the press away from it.
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
+  const copy = useCallback(() => {
+    if (!words) return;
+    Clipboard.setString(words);
+    setCopied(true);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+  }, [words]);
   return (
     <View style={[styles.messageRow, mine && styles.messageRowMine]}>
       {ai ? (
@@ -191,7 +207,13 @@ function Bubble({ message, onAction, onWalk, pet }: { message: AssistantMessage;
         </View>
       ) : null}
     <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs]}>
-      <View style={[styles.bubble, mine ? styles.bubbleMine : team ? styles.bubbleTeam : styles.bubbleTheirs]}>
+      <Pressable
+        onLongPress={words ? copy : undefined}
+        delayLongPress={350}
+        disabled={!words}
+        accessibilityHint={words ? 'Mantén presionado para copiar el mensaje' : undefined}
+        style={[styles.bubble, mine ? styles.bubbleMine : team ? styles.bubbleTeam : styles.bubbleTheirs]}
+      >
         {team ? <Text style={styles.teamName}>{message.senderName}</Text> : null}
         {mine && message.modality === 'VOICE_NOTE' ? (
           <View style={styles.voiceTag}>
@@ -199,11 +221,14 @@ function Bubble({ message, onAction, onWalk, pet }: { message: AssistantMessage;
             <Text style={styles.voiceTagText}>Audio</Text>
           </View>
         ) : null}
-        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]} selectable>
+        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>
           {message.body}
         </Text>
         {message.pending ? <ActivityIndicator size="small" color="#D1FAE5" style={styles.pending} /> : null}
-      </View>
+      </Pressable>
+      {copied ? (
+        <Text style={[styles.copied, mine && styles.copiedMine]} accessibilityLiveRegion="polite">Copiado</Text>
+      ) : null}
       {!mine ? <ActionChips actions={message.actions} messageId={message.id} onPress={onAction} /> : null}
       {!mine ? <WalkChips actions={message.actions} onClose={onWalk} /> : null}
       {/* A shopping task's note: its screen holds the store's live view. */}
@@ -1426,6 +1451,8 @@ const styles = StyleSheet.create({
   bubbleTeam: { backgroundColor: '#EEF2FF', borderBottomLeftRadius: 6 },
   bubbleText: { fontSize: 15, lineHeight: 21, color: '#111827' },
   bubbleTextMine: { color: '#FFFFFF' },
+  copied: { fontSize: 11, color: '#6B7280', marginTop: 2, marginLeft: 4 },
+  copiedMine: { alignSelf: 'flex-end', marginLeft: 0, marginRight: 4 },
   teamName: { fontSize: 12, fontWeight: '700', color: '#4338CA', marginBottom: 2 },
   voiceTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
   voiceTagText: { fontSize: 11, color: '#D1FAE5' },
