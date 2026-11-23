@@ -1,8 +1,9 @@
 """Browserbase over its REST API (docs.browserbase.com, read 2026-11-22).
 
-Three vendor defaults are deliberately reversed:
-  solveCaptchas  off: a CAPTCHA is the person's to answer;
-  recordSession  off: the person types store passwords in the live view;
+The vendor solves CAPTCHAs for the agent (solveCaptchas, founder 2026-11-23:
+the person is never sent to a store to prove they are one). Two vendor
+defaults stay reversed:
+  recordSession  off: store passwords are typed in this browser;
   logSession     off: the same, in network and console logs.
 """
 import requests
@@ -55,7 +56,7 @@ class Browserbase(BrowserProvider):
             'timeout': max(MIN_SECONDS, min(int(seconds), MAX_SECONDS)),
             'region': conf.get('BROWSERBASE_REGION'),
             'browserSettings': {
-                'solveCaptchas': False,
+                'solveCaptchas': True,
                 'recordSession': False,
                 'logSession': False,
                 'viewport': VIEWPORT,

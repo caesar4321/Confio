@@ -20,7 +20,7 @@ export const mobileClientHeaders = (): Record<string, string> => {
   // Which Inicio this build has, so the assistant describes the app the
   // person is actually looking at (no tab bar, the menu, where Pagar is).
   if (CONVERSATION_HOME_ENABLED) headers['X-Confio-Home'] = 'conversation';
-  // This build has the shopping task screen and its live view (agentTasks/):
+  // This build draws the assistant's purchases in the chat (agentTasks/PurchaseCard):
   // without it the assistant never starts a store purchase.
   headers['X-Confio-Browser-Tasks'] = '1';
   const keychainDiagnostic = getKeychainDiagnostic();

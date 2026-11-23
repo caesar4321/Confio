@@ -36,7 +36,7 @@ def search_box(**over):
     return element('Buscar', **{'tag': 'input', 'search': True, 'action': f'{BASE}/jm/search', 'method': 'get', **over})
 
 
-def picture(url=f'{BASE}/pedido/1', boxes=(), words=(), fields=(), text=()):
+def picture(url=f'{BASE}/compras/1', boxes=(), words=(), fields=(), text=()):
     from agent_tasks.cdp import Picture
     return Picture(url=url, png=b'', boxes=tuple(boxes), scale=1.0, words=tuple(words),
                    fields=tuple(fields), text=text if text is None else tuple(text))

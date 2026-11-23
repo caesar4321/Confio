@@ -115,7 +115,6 @@ import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 import { PayoutMethodsScreen } from '../screens/PayoutMethodsScreen';
 import AgendaScreen from '../screens/AgendaScreen';
 import { RampAddressScreen } from '../screens/RampAddressScreen';
-import { AgentTaskScreen } from '../agentTasks/AgentTaskScreen';
 import { AgentStoresScreen } from '../agentTasks/AgentStoresScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import FeeReferralCommissionsScreen from '../screens/FeeReferralCommissionsScreen';
@@ -258,7 +257,6 @@ export const MainNavigator = () => {
             headerShown: false,
           }}
         />
-        <Stack.Screen name="AgentTask" component={AgentTaskScreen} options={{ headerShown: false }} />
         <Stack.Screen name="AgentStores" component={AgentStoresScreen} options={{ headerShown: false }} />
         <Stack.Screen
           name="ConfioAddress"

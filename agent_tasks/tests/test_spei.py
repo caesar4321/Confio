@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from agent_tasks import countries, runner, spei
 from agent_tasks.models import AgentTask
+from agent_tasks.tests.test_runner import came_of
 from agent_tasks.tests.base import picture
 from agent_tasks.tests.test_runner import StepBase
 
@@ -97,7 +98,8 @@ class MexicoTests(StepBase):
         super().setUp()
         self.prepare = self.patch('payment_accounts.payment_intents.prepare')
         self.task = self.make_task(state='awaiting_code', checkout_at=timezone.now(), shown_target='tab',
-                                   site='mercadolibre.com.mx', country='MX')
+                                   site='mercadolibre.com.mx', country='MX',
+                                   order={'amount': '1249.00', 'total': '$1,249.00', 'pressed': True, 'approved': {'total': '$1,249.00'}})
 
     def outcome(self, text, amount='1249.00', level='store_checkout', text_again=None):
         self.prepare.return_value = SimpleNamespace(currency='MXN', amount_exact=True, amount_local=Decimal(amount),
@@ -105,13 +107,13 @@ class MexicoTests(StepBase):
         url = 'https://www.mercadolibre.com.mx/compra/123/pago'
         self.browser.capture.return_value = (picture(url=url, text=text),
                                              picture(url=url, text=text if text_again is None else text_again))
-        self.task.state = 'awaiting_code'
+        self.reading()
         self.task.save()
         with mock.patch.object(runner.Step, 'save', lambda step, **fields: AgentTask.objects.filter(
                 pk=step.task.pk).update(**{k: v for k, v in fields.items() if k != 'payment_intent'})), \
                 mock.patch('payment_accounts.payment_intents.cancel'), mock.patch('agent_tasks.runner.post_payment'):
             self.step(self.task)
-        return self.task.reason if self.task.state == 'needs_person' else 'prepared'
+        return came_of(self.task)
 
     def test_the_orders_spei_details_become_the_card(self):
         self.assertEqual(self.outcome(MERCADO_PAGO), 'prepared')
@@ -122,10 +124,10 @@ class MexicoTests(StepBase):
         self.assertEqual(self.prepare.call_args.kwargs['source'], 'agent_checkout')
 
     def test_a_card_for_another_amount_is_refused(self):
-        self.assertEqual(self.outcome(MERCADO_PAGO, amount='1249.01'), 'code_refused')
+        self.assertEqual(self.outcome(MERCADO_PAGO, amount='1249.01'), 'unpaid')
 
     def test_only_its_own_payee_level(self):
-        self.assertEqual(self.outcome(MERCADO_PAGO, level='unverified'), 'unsigned')
+        self.assertEqual(self.outcome(MERCADO_PAGO, level='unverified'), 'unpaid')
 
     def test_a_page_that_changed_between_the_two_pictures(self):
         changed = tuple('$1,250.00' if node == '$1,249.00' else node for node in MERCADO_PAGO)

@@ -1,20 +1,8 @@
-// Plain helpers of the shopping task screens: no Apollo, so the push service
-// and the chat's chips can use them without the GraphQL documents.
+// Plain helpers of the assistant's purchases: no Apollo, so the push service
+// and the chat can use them without the GraphQL documents.
 
 export const ACTIVE: ReadonlySet<string> = new Set(['queued', 'working', 'needs_person', 'awaiting_code']);
 export const FINISHED: ReadonlySet<string> = new Set(['payment_ready', 'stopped', 'cancelled']);
-// The agent comes back after these: the screen closes when it does.
-export const BACK_TO_AGENT: ReadonlySet<string> = new Set(['login', 'captcha']);
-// The code could not be read off the screen (or was not prepared): what else
-// the person can do is in the server's message. Only a Brazilian store's Pix
-// code is pasted in the chat; Bolivia pays from Pagar, Mexico from the bank.
-export const PASTE_REASONS: ReadonlySet<string> = new Set(['code', 'code_refused', 'screen', 'retry', 'offsite',
-  'unsigned']);
-
-export function pastesInChat(site: string, reason: string): boolean {
-  return PASTE_REASONS.has(reason) && /(^|\.)[a-z0-9-]+\.br$/i.test(site.trim());
-}
-
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function taskIdOf(value: unknown): string | null {
@@ -43,36 +31,56 @@ export function agentTaskNotificationRoute(raw: unknown): string | null {
   return taskIdOf(d.task_id ?? d.data_task_id ?? d.extra_task_id);
 }
 
-/** What a frame inside the live view may load: https or a blank frame, never
- * another app's scheme or plain http. */
-export function allowedSubframe(url: string): boolean {
-  return url === 'about:blank' || url.startsWith('about:srcdoc') || /^https:\/\/[^/?#]/i.test(url);
+type Action = { type: string; target?: string | null };
+
+/** The purchases a message's actions carry ({type: 'task', target: <id>}), once each. */
+export function taskActions(actions: Action[]): string[] {
+  const found: string[] = [];
+  for (const a of actions) {
+    const taskId = a.type === 'task' ? taskIdOf(a.target) : null;
+    if (taskId && !found.includes(taskId)) {
+      found.push(taskId);
+    }
+  }
+  return found;
 }
 
-/** Only the live view's own host (and blank frames) may load in the WebView. */
-export function allowedInLiveView(url: string, host: string | null | undefined): boolean {
-  if (!host) {
-    return false;
+// A purchase posts several notes; its card is drawn once, under the newest of
+// them, and updates in place. Each mounted note says "I carry this purchase".
+const carriers = new Map<string, Map<string, number>>();
+const listeners = new Set<() => void>();
+
+/** The message that draws this purchase's card: the newest note carrying it. */
+export function latestCardFor(taskId: string): string | null {
+  let best: string | null = null;
+  let bestAt = -Infinity;
+  for (const [messageId, at] of carriers.get(taskId) ?? []) {
+    if (at > bestAt || (at === bestAt && best !== null && messageId > best)) {
+      best = messageId;
+      bestAt = at;
+    }
   }
-  if (url === 'about:blank' || url.startsWith('about:srcdoc')) {
-    return true;
-  }
-  const match = /^https:\/\/([^/?#:]+)(?::443)?(?:[/?#]|$)/i.exec(url);
-  return !!match && match[1].toLowerCase() === host.toLowerCase();
+  return best;
 }
 
-/** "12:05" left until `until`, or null once it passed. */
-export function timeLeft(until: string | null | undefined, now: number): string | null {
-  if (!until) {
-    return null;
+/** Register a note as carrying a purchase; returns how to take it back. */
+export function showCard(taskId: string, messageId: string, at: number): () => void {
+  if (!carriers.has(taskId)) {
+    carriers.set(taskId, new Map());
   }
-  const end = Date.parse(until);
-  if (Number.isNaN(end)) {
-    return null;
-  }
-  const seconds = Math.floor((end - now) / 1000);
-  if (seconds <= 0) {
-    return null;
-  }
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  carriers.get(taskId)!.set(messageId, at);
+  listeners.forEach((tell) => tell());
+  // Kept after the note scrolls out of the list: the card stays where the newest note is,
+  // and never jumps to an older one (losing what was being typed in it).
+  return () => undefined;
+}
+
+/** Tests only: a conversation with no purchase notes yet. */
+export function forgetCards(): void {
+  carriers.clear();
+}
+
+export function onCards(tell: () => void): () => void {
+  listeners.add(tell);
+  return () => { listeners.delete(tell); };
 }

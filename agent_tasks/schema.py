@@ -43,6 +43,20 @@ def _read(resolve):
         raise GraphQLError('No pude leer eso ahora. Inténtalo de nuevo.') from None
 
 
+class AgentOptionType(graphene.ObjectType):
+    """A product the store's page showed: its words and picture are the store's, not Confío's."""
+    title = graphene.String(required=True)
+    price = graphene.String(required=True)
+    image = graphene.String(required=True)
+
+
+class AgentOrderType(graphene.ObjectType):
+    """The order the person approves in the chat: the store's own words."""
+    item = graphene.String(required=True)
+    total = graphene.String(required=True)
+    image = graphene.String(required=True)
+
+
 class AgentTaskType(graphene.ObjectType):
     id = graphene.UUID(required=True)
     goal = graphene.String(required=True)
@@ -56,13 +70,17 @@ class AgentTaskType(graphene.ObjectType):
     checkout_handed = graphene.Boolean(
         required=True, description='The person has the checkout: there may be an order even if the task stops')
     payment_intent_id = graphene.UUID()
+    pay_qr = graphene.String(description="The store's QR the person pays from their bank's app (no Confío payment).")
     created_at = graphene.DateTime(required=True)
+    order = graphene.Field(AgentOrderType, description='With reason `approve`: confirm with approveAgentOrder')
+    options = graphene.List(graphene.NonNull(AgentOptionType), required=True,
+                            description='With reason `choose`: pick one with chooseAgentOption(index)')
 
 
 WORKING = {
     'queued': 'Abriendo {site}…',
-    'working': 'Buscando en {site}…',
-    'awaiting_code': 'Leyendo el QR de tu pantalla…',
+    'working': 'Trabajando en {site}…',
+    'awaiting_code': 'Preparando el pago de tu pedido…',
 }
 
 
@@ -73,7 +91,12 @@ def task_type(task):
     if task.state in WORKING:
         message = WORKING[task.state].format(site=task.site)
     elif task.state == 'needs_person':
-        message = notes.say(notes.NEEDS_PERSON.get(task.reason, notes.NEEDS_PERSON['choice']), task)
+        reason = task.reason
+        if reason == 'login' and int((task.counts or {}).get('asked_login') or 0) > 1:
+            reason = 'login_again'
+        message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task)
+    elif task.state == 'payment_ready' and task.reason == 'manual':
+        message = notes.say(notes.PAYMENT_MANUAL, task).replace('{total}', str((task.order or {}).get('total') or ''))
     elif task.state == 'payment_ready':
         message = notes.say(notes.PAYMENT_READY, task)
     else:
@@ -82,7 +105,13 @@ def task_type(task):
         id=task.internal_id, goal=task.goal, site=task.site, status=task.state, reason=task.reason, message=message,
         wait_until=task.wait_until, checkout_handed=task.checkout_at is not None,
         payment_intent_id=task.payment_intent.internal_id if task.payment_intent_id else None,
-        created_at=task.created_at)
+        # The store's own QR, for the person to pay from their bank (only when Confío cannot).
+        pay_qr=str((task.order or {}).get('pay_qr') or '') or None if task.state == 'payment_ready' else None,
+        created_at=task.created_at,
+        order=(AgentOrderType(item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
+                              image=str(task.order.get('image') or '')) if task.order else None),
+        options=[AgentOptionType(title=str(o.get('title') or ''), price=str(o.get('price') or ''),
+                                 image=str(o.get('image') or '')) for o in (task.options or [])])
 
 
 class Query(graphene.ObjectType):
@@ -150,6 +179,60 @@ class ResumeAgentTask(_Result):
             return _failure(cls, exc)
 
 
+class ChooseAgentOption(_Result):
+    class Arguments:
+        id = graphene.UUID(required=True)
+        index = graphene.Int(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, index):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.choose(*_owner(info), id, index)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
+class SignInAgentStore(_Result):
+    """The person's account at the store, typed in the chat's card. Stored encrypted; never echoed."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        identifier = graphene.String(required=True)
+        password = graphene.String(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, identifier, password):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.sign_in(*_owner(info), id, identifier, password)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
+class GiveAgentCode(_Result):
+    class Arguments:
+        id = graphene.UUID(required=True)
+        code = graphene.String(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, code):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.give_code(*_owner(info), id, code)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
+class ApproveAgentOrder(_Result):
+    class Arguments:
+        id = graphene.UUID(required=True)
+        total = graphene.String(description='The total on the card the person saw')
+
+    @classmethod
+    def mutate(cls, root, info, id, total=None):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.approve(*_owner(info), id, total=total)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
 class CancelAgentTask(_ById):
     class Arguments:
         id = graphene.UUID(required=True)
@@ -207,5 +290,9 @@ class Mutation(graphene.ObjectType):
     start_agent_task = StartAgentTask.Field()
     resume_agent_task = ResumeAgentTask.Field()
     cancel_agent_task = CancelAgentTask.Field()
+    choose_agent_option = ChooseAgentOption.Field()
+    sign_in_agent_store = SignInAgentStore.Field()
+    give_agent_code = GiveAgentCode.Field()
+    approve_agent_order = ApproveAgentOrder.Field()
     open_agent_live_view = OpenAgentLiveView.Field()
     forget_agent_store = ForgetAgentStore.Field()

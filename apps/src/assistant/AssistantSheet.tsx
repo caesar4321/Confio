@@ -74,7 +74,7 @@ import { pickFromLibrary } from '../services/systemPicker';
 import { useHomeGuide } from './useHomeGuide';
 import AssistantPlusPanel from './AssistantPlusPanel';
 import VoiceCallPanel from './VoiceCallPanel';
-import { TaskChips } from '../agentTasks/TaskChips';
+import { PurchaseCards } from '../agentTasks/PurchaseCards';
 import { SmartContextAssistantNotice, isSmartContext } from './SmartContextNotice';
 import { clearCallError, startCall, useCall } from './callStore';
 import {
@@ -413,12 +413,12 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
         onLeave={onWalk} roomy={roomy} />
       <ActionChips actions={message.actions} messageId={message.id} onPress={onAction} roomy={roomy} />
       <WalkChips actions={message.actions} onClose={onWalk} roomy={roomy} />
-      {/* A shopping task's note: its screen holds the store's live view. */}
-      <TaskChips actions={message.actions} onOpen={(taskId) => {
+      {/* A purchase the assistant is making: its products, sign-in and order, all answered here. */}
+      <PurchaseCards actions={message.actions} messageId={message.id} createdAt={message.createdAt} onStores={() => {
         onWalk();
         setTimeout(() => {
           if (navigationRef.isReady()) {
-            (navigationRef as any).navigate('AgentTask', { taskId });
+            (navigationRef as any).navigate('AgentStores');
           }
         }, roomy ? 0 : 250);
       }} />

@@ -268,13 +268,9 @@ export class PushNotificationService {
         notification_type
       });
 
-      // A shopping task: the person's turn, its payment, or a stop after the hand-over.
-      const agentTaskId = agentTaskNotificationRoute(remoteMessage.data);
-      if (agentTaskId) {
-        (RootNavigation.navigationRef as any).navigate('Main', {
-          screen: 'AgentTask',
-          params: { taskId: agentTaskId },
-        });
+      // A purchase the assistant is making: its card is in the conversation, on Inicio.
+      if (agentTaskNotificationRoute(remoteMessage.data)) {
+        (RootNavigation.navigationRef as any).navigate('Main', { screen: 'BottomTabs', params: { screen: 'Home' } });
         return;
       }
 

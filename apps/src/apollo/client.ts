@@ -252,6 +252,8 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   const isAssistantMail = operation.operationName?.includes('AssistantMail');
   const redactVariables = isMembershipClaim || isAssistantMail || [
     'AskAssistant', 'SendSupportMessage', 'CreateAssistantPet',
+    // A store's sign-in and its one-time code (agentTasks/api.ts).
+    'SignInAgentStore', 'GiveAgentCode',
     'StartAssistantVoice', 'ConnectAssistantVoice', 'RunAssistantVoiceTool', 'LogAssistantVoice',
     'UpdateAssistantProfile', 'UseAssistantPet', 'DeleteAssistantPet',
     // Calendar titles the person ticked.
@@ -267,6 +269,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   // reason, so they go with it.
   const redactErrorText = isMembershipClaim || shouldNeverMutateSession(operation.operationName)
     || operation.operationName === 'AnalyzeAssistantCalendar' || isAssistantMail
+    || ['SignInAgentStore', 'GiveAgentCode'].includes(operation.operationName)
     || VE_PAGOMOVIL_SENSITIVE_OPERATIONS.includes(operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {

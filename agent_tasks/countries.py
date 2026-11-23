@@ -8,10 +8,11 @@ rail that pays a store's EXACT local amount is not offered: a dollar transfer
 to an account number is never the store's charge, and the order is unpaid or
 paid twice.
 
-Today: Brazil (Pix QR, Infinia) and Bolivia (bank QR, paid by the provider
-that decodes it). Mexico SPEI, Argentina's fixed-amount QR and Venezuela's
-Pago Móvil need exact-amount payouts first (docs/designs/ai-assistant-server-
-architecture.md, section 5.6).
+Today: Brazil (Pix QR, Infinia), Mexico (SPEI, Infinia) and Bolivia (bank
+QR, paid by the provider that decodes it; while QR Bolivia is off the order is
+still placed and the person pays the store's QR from their bank: `manual`).
+Argentina's fixed-amount QR and Venezuela's Pago Móvil need exact-amount
+payouts first (docs/designs/ai-assistant-server-architecture.md, section 5.6).
 """
 from dataclasses import dataclass
 import re
@@ -42,6 +43,12 @@ class Rail:
         raise NotImplementedError
 
     kind = 'qr'            # read as one QR on screen (runner.code_on_screen)
+    can_go_manual = False  # when Confío cannot pay it, the person pays the store's own code
+
+    def manual(self, meta):
+        """True when Confío cannot pay this rail's code now: the order is still placed and the
+        person is handed the store's own QR to pay from their bank's app."""
+        return False
 
     def request(self, meta):
         return {'method_id': self.method_id, 'meta': dict(meta or {})}
@@ -85,7 +92,8 @@ class BoliviaQrRail(Rail):
         for text in texts:
             if not 16 <= len(text) <= _BO_MAX or _link(text) or intent_rails.detect_method(text) is not None:
                 continue
-            fields = local_money.emv_fields(text)
+            # A scheme prefix ("QRSIMPLE:") may come before the EMV body: its country is read past it.
+            fields = local_money.emv_fields(re.sub(r'^[^:]{1,20}:', '', text))
             if fields and fields.get('58') not in (None, 'BO'):
                 continue  # another country's payment code
             found.add(text)
@@ -94,12 +102,16 @@ class BoliviaQrRail(Rail):
     def written(self, words):
         return set()  # nothing on a page can be told to be one
 
+    can_go_manual = True
+
     def ready(self, account, identity, meta):
-        from payment_accounts.services import PaymentAccountError
+        # Payable either way: by Confío when QR Bolivia is on, else by the person's own bank (manual).
+        return None
+
+    def manual(self, meta):
         from ramps import bolivia_qr
         # The switch and the build, never a tester list: open to everyone or to nobody.
-        if not (bolivia_qr.enabled(bolivia_qr.SEND) and bolivia_qr.client_supports(bolivia_qr.SEND, meta)):
-            raise PaymentAccountError('QR Bolivia no está disponible ahora.')
+        return not (bolivia_qr.enabled(bolivia_qr.SEND) and bolivia_qr.client_supports(bolivia_qr.SEND, meta))
 
 
 @dataclass(frozen=True)

@@ -67,6 +67,7 @@ class Page:
         self._active, self._allowed, self._main = active, None, ''
         self._pages, self._page_session = [], None
         self._sending = None
+        self.target = ''
         self.refused_send = False
         self.refused_document = False
         self._loading = False  # a document was let through and has not arrived
@@ -87,6 +88,7 @@ class Page:
                 if target['targetId'] != kept['targetId']:
                     self.call('Target.closeTarget', {'targetId': target['targetId']})
             self._attach(kept['targetId'])
+            self.target = str(kept['targetId'])
             self._page_session = self._session
             try:
                 # One left open by the last step blocks everything until it is answered.
@@ -340,6 +342,23 @@ class Page:
             raise
         except (TimeoutError, OSError, ValueError, WebSocketException) as exc:
             raise CdpError(f'{method}: {type(exc).__name__}') from None
+
+    def click(self, x, y):
+        """A real click at a point of the page, as a finger's: the page's own scripts answer it."""
+        for kind, button, count in (('mouseMoved', 'none', 0), ('mousePressed', 'left', 1),
+                                    ('mouseReleased', 'left', 1)):
+            self.call('Input.dispatchMouseEvent', {'type': kind, 'x': x, 'y': y, 'button': button,
+                                                   'clickCount': count})
+
+    def insert(self, text):
+        """Type into whatever has the focus. Never logged: it may be a password."""
+        self.call('Input.insertText', {'text': text})
+
+    def enter(self):
+        for kind in ('keyDown', 'keyUp'):
+            self.call('Input.dispatchKeyEvent', {
+                'type': kind, 'key': 'Enter', 'code': 'Enter', 'windowsVirtualKeyCode': 13,
+                'nativeVirtualKeyCode': 13, **({'text': '\r'} if kind == 'keyDown' else {})})
 
     def evaluate(self, expression):
         out = self.call('Runtime.evaluate', {'expression': expression, 'returnByValue': True, 'awaitPromise': True})

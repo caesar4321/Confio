@@ -334,11 +334,8 @@ export const NotificationScreen = () => {
       }
     }
 
-    // A shopping task's turn, payment or stop: its own screen.
-    const agentTaskId = agentTaskNotificationRoute(notification.data);
-    if (agentTaskId) {
-      // Tasks live on a personal account: from a business or Cuenta
-      // inteligente context switch first, as a push does.
+    // A purchase the assistant is making: its card is in the conversation, on Inicio.
+    if (agentTaskNotificationRoute(notification.data)) {
       let current: { type?: string } | null = null;
       try {
         const { AuthService } = await import('../services/authService');
@@ -346,15 +343,14 @@ export const NotificationScreen = () => {
       } catch {
         current = null;
       }
+      const RootNavigation = await import('../navigation/RootNavigation');
+      const open = () => (RootNavigation.navigationRef as any).navigate('Main', { screen: 'BottomTabs', params: { screen: 'Home' } });
       if (current && current.type !== 'personal') {
         const { PushNotificationService } = await import('../services/pushNotificationService');
-        const RootNavigation = await import('../navigation/RootNavigation');
-        PushNotificationService.deferSwitchThenNavigate('personal_0', () => {
-          (RootNavigation.navigationRef as any).navigate('Main', { screen: 'AgentTask', params: { taskId: agentTaskId } });
-        });
+        PushNotificationService.deferSwitchThenNavigate('personal_0', open);
         return;
       }
-      (navigation as any).navigate('AgentTask', { taskId: agentTaskId });
+      open();
       return;
     }
 

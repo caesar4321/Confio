@@ -18,12 +18,13 @@ class BrowserbaseTests(SimpleTestCase):
         response.json.return_value = body
         return mock.patch('agent_tasks.browsers.browserbase.requests.request', return_value=response)
 
-    def test_captcha_solving_recording_and_logging_are_off(self):
+    def test_the_vendor_solves_captchas_and_nothing_typed_is_recorded(self):
         made = {'id': 's', 'connectUrl': 'wss://x', 'expiresAt': '2026-11-22T12:00:00Z'}
         with self.answer(made) as sent:
             Browserbase().open(profile_id='p', country='BR', seconds=900)
         body = sent.call_args.kwargs['json']
-        for key in ('solveCaptchas', 'recordSession', 'logSession'):
+        self.assertIs(body['browserSettings']['solveCaptchas'], True)
+        for key in ('recordSession', 'logSession'):
             self.assertIs(body['browserSettings'][key], False)
         self.assertNotIn('proxies', body)
         self.assertEqual(body['browserSettings']['context'], {'id': 'p', 'persist': True})
@@ -103,14 +104,15 @@ class ModelViewTests(SimpleTestCase):
 
     def test_the_model_has_no_way_to_order_or_pay(self):
         names = {tool['name'] for tool in self.sent(snap())['tools']}
-        self.assertEqual(names, {'click', 'search', 'wait', 'ready_for_checkout', 'ask_person', 'give_up'})
+        self.assertEqual(names, {'click', 'search', 'offer_products', 'wait', 'ready_for_checkout', 'ask_person',
+                                 'give_up'})
 
 
 class SchemaTests(SimpleTestCase):
     def test_no_argument_names_an_account_or_a_connection(self):
         built = str(graphene.Schema(query=schema.Query, mutation=schema.Mutation))
         for word in ('accountId', 'userId', 'businessId', 'connectUrl', 'sessionId', 'externalId', 'JSONString',
-                     'unpaidCode', 'approveAgentOrder'):
+                     'unpaidCode'):
             self.assertNotIn(word, built)
 
 

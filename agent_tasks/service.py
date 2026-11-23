@@ -28,7 +28,7 @@ MESSAGES = {
     'goal': 'Dime en una frase qué quieres comprar.',
     'active_task': 'Acabo de empezar esa compra hace un momento.',
     'store_busy': 'Estoy usando esa tienda para una compra tuya. Cuando termine puedes cerrar la sesión.',
-    'checkout_open': ('Tu pedido en {site} sigue abierto. Termínalo o cancélalo en la pantalla de la tienda y '
+    'checkout_open': ('Tu pedido en {site} sigue en curso. Espera a que termine o cancélalo en su tarjeta, y '
                       'después te ayudo con lo nuevo.'),
     'daily_limit': 'Llegaste al máximo de compras por hoy. Mañana seguimos.',
     'busy': 'Ahora hay muchas compras en curso. Inténtalo en unos minutos.',
@@ -219,7 +219,8 @@ def resume(account, user, task_id, view=None):
     if not conf.get('AGENT_TASKS_ENABLED'):
         raise TaskRefused('unavailable')
     task = get(account, user, task_id)
-    if task.state != 'needs_person':
+    # A card in the chat has its own answer (choose, sign_in, give_code, approve): this is not one.
+    if task.state != 'needs_person' or task.reason in ('choose', 'login', 'otp', 'approve'):
         raise TaskRefused('not_open')
     if not task.wait_until or task.wait_until <= timezone.now():
         runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
@@ -230,6 +231,94 @@ def resume(account, user, task_id, view=None):
         if not AgentTask.objects.filter(pk=task.pk, state='needs_person', steps=task.steps).update(
                 state='awaiting_code' if task.checkout_at else 'working', reason='', wait_until=None,
                 history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now(), **shown):
+            raise TaskRefused('not_open')
+        runner.kick(task.pk)
+    task.refresh_from_db()
+    return task
+
+
+def _answered(account, user, task_id, reason, **fields):
+    """The person answered a card in the chat: the agent goes on. `fields` may
+    hold a callable `history` entry builder's result."""
+    if not conf.get('AGENT_TASKS_ENABLED'):
+        raise TaskRefused('unavailable')
+    task = get(account, user, task_id)
+    if task.state != 'needs_person' or task.reason != reason or not task.wait_until:
+        raise TaskRefused('not_open')
+    if task.wait_until <= timezone.now():
+        runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
+        raise TaskRefused('not_open')
+    with transaction.atomic():
+        if not AgentTask.objects.filter(pk=task.pk, state='needs_person', reason=reason, steps=task.steps).update(
+                state='working', reason='', wait_until=None, updated_at=timezone.now(), **fields):
+            raise TaskRefused('not_open')
+        runner.kick(task.pk)
+    task.refresh_from_db()
+    return task
+
+
+def sign_in(account, user, task_id, identifier, password):
+    """The person's account at the store, from the card in the chat: into the vault, never anywhere else."""
+    from . import vault
+    identifier, password = str(identifier or '').strip(), str(password or '')
+    if not identifier or not password or len(identifier) > vault.MAX_CHARS or len(password) > vault.MAX_CHARS:
+        raise TaskRefused('goal', 'Escribe tu usuario y tu contraseña de la tienda.')
+    task = get(account, user, task_id)
+    if task.state != 'needs_person' or task.reason != 'login':
+        raise TaskRefused('not_open')
+    vault.save(user, task.site, identifier, password)
+    return _answered(account, user, task_id, 'login')
+
+
+def give_code(account, user, task_id, code):
+    from . import vault
+    code = ''.join(str(code or '').split())
+    if not 3 <= len(code) <= 12:
+        raise TaskRefused('goal', 'Escribe el código que te envió la tienda.')
+    task = get(account, user, task_id)
+    if task.state != 'needs_person' or task.reason != 'otp':
+        raise TaskRefused('not_open')
+    vault.put_code(task, code)
+    return _answered(account, user, task_id, 'otp')
+
+
+def approve(account, user, task_id, total=None):
+    """The person approved the order named in the chat: its item and that total. The agent presses the
+    store's final button only for the same total."""
+    task = get(account, user, task_id)
+    order = dict(task.order or {})
+    if not order.get('total') or not order.get('button') or not order.get('page'):
+        raise TaskRefused('not_open')
+    if total is not None and str(total) != order['total']:
+        # The card they tapped showed another order: they approve what they saw, or nothing.
+        raise TaskRefused('not_open')
+    # Bound to that item, that total, that button, on that page; used once (operate._order).
+    order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item')}
+    return _answered(account, user, task_id, 'approve', order=order)
+
+
+def choose(account, user, task_id, index):
+    """The person picked one of the products offered in the chat: the agent goes on with it."""
+    if not conf.get('AGENT_TASKS_ENABLED'):
+        raise TaskRefused('unavailable')
+    task = get(account, user, task_id)
+    options = task.options or []
+    if task.state != 'needs_person' or task.reason != 'choose' or not task.wait_until:
+        raise TaskRefused('not_open')
+    if task.wait_until <= timezone.now():
+        runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
+        raise TaskRefused('not_open')
+    try:
+        picked = options[int(index)]
+    except (IndexError, TypeError, ValueError) as exc:
+        raise TaskRefused('not_found') from exc
+    if int(index) < 0:
+        raise TaskRefused('not_found')
+    history = [*(task.history or []), {'did': runner.CHOSEN, 'result': str(picked.get('title') or '')[:120]}]
+    with transaction.atomic():
+        if not AgentTask.objects.filter(pk=task.pk, state='needs_person', reason='choose', steps=task.steps).update(
+                state='working', reason='', wait_until=None, pending_url=str(picked.get('href') or ''),
+                options=[picked], history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now()):
             raise TaskRefused('not_open')
         runner.kick(task.pk)
     task.refresh_from_db()
@@ -295,7 +384,9 @@ def live_view(account, user, task_id):
 
 def stores(account, user):
     require_owner(account, user)
-    return sorted(set(AgentProfile.objects.filter(user=user).values_list('site', flat=True)))
+    from .models import AgentCredential
+    return sorted(set(AgentProfile.objects.filter(user=user).values_list('site', flat=True))
+                  | set(AgentCredential.objects.filter(user=user).values_list('site', flat=True)))
 
 
 def forget_store(account, user, site):
@@ -303,6 +394,8 @@ def forget_store(account, user, site):
     require_owner(account, user)
     if AgentTask.objects.filter(user=user, site=site, state__in=AgentTask.ACTIVE).exists():
         raise TaskRefused('store_busy')
+    from . import vault
+    vault.forget(user, site)
     for profile in AgentProfile.objects.filter(user=user, site=site):
         try:
             browsers.provider(profile.provider).delete_profile(profile.external_id)
@@ -385,7 +478,8 @@ def _sweep():
           lambda task: runner.post_payment(task, task.payment_intent), 'payment cards')
 
     def scrub(task):
-        AgentTask.objects.filter(pk=task.pk).update(goal='', history=[], shown_target='', visited_pages=[])
+        AgentTask.objects.filter(pk=task.pk).update(goal='', history=[], shown_target='', visited_pages=[],
+                                                    options=[], order={}, pending_url='', secret_once='')
 
     old = Q(created_at__lt=now - timedelta(days=conf.get('AGENT_TASKS_KEEP_DAYS')))
     _each(AgentTask.objects.exclude(state__in=AgentTask.ACTIVE).exclude(goal='')
@@ -399,3 +493,12 @@ def _sweep():
 
     idle = Q(last_used_at__lt=now - timedelta(days=conf.get('AGENT_TASKS_PROFILE_IDLE_DAYS')))
     _each(AgentProfile.objects.filter(idle | Q(user__is_active=False)).order_by('?'), forget, 'profiles')
+    # A store's saved sign-in is not kept for a deleted person (deletion is soft: no cascade) nor past its use.
+    from .models import AgentCredential
+    unused = Q(updated_at__lt=now - timedelta(days=conf.get('AGENT_TASKS_PROFILE_IDLE_DAYS')))
+    AgentCredential.objects.filter(unused | Q(user__is_active=False)).exclude(
+        user__in=active.values('user')).delete()
+    # A purchase a worker left behind after its browser closed is ended and said, never left in the way.
+    _each(active.filter(state__in=AgentTask.RUNNING, session_expires_at__lt=now).exclude(lease_until__gt=now),
+          lambda task: runner.end(task, 'stopped', 'session_expired', only={'state__in': AgentTask.RUNNING}),
+          'expired sessions')

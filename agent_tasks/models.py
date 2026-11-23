@@ -28,6 +28,22 @@ class AgentProfile(models.Model):
         return f'AgentProfile {self.pk} {self.site}'
 
 
+class AgentCredential(models.Model):
+    """A person's sign-in at one store, encrypted. Typed by the runner into the
+    store's own sign-in page; never shown, logged, in the chat, or given to a model."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='agent_credentials')
+    site = models.CharField(max_length=253)
+    secret = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'site'], name='agent_credential_one_per_store')]
+
+    def __str__(self):
+        return f'AgentCredential {self.pk} {self.site}'
+
+
 class AgentTask(models.Model):
     STATES = [
         ('queued', 'Queued'),
@@ -75,6 +91,21 @@ class AgentTask(models.Model):
     cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
     # Short facts for the next step: what was done and what came of it. Never typed text.
     history = models.JSONField(default=list, blank=True)
+
+    # Products offered to the person in the chat: [{title, price, image, href}], what the
+    # store's page showed (third-party text and pictures). They pick one; its page is opened next.
+    options = models.JSONField(default=list, blank=True)
+    pending_url = models.TextField(blank=True, default='')
+    # The order the person is asked to approve: {item, total, button, image}. The total is the
+    # store's own words; the agent presses the final button only for that same total.
+    order = models.JSONField(default=dict, blank=True)
+    # A one-time code the person typed for the store (encrypted, cleared when used).
+    secret_once = models.TextField(blank=True, default='')
+    # Where the purchase is: '' shopping, 'ordering' from the cart on, 'ordered' once the final
+    # button was pressed. Kept here, not in the rolling history: safety checks read it.
+    phase = models.CharField(max_length=12, blank=True, default='')
+    # How many times each thing was tried or asked (sign-ins, asks, CAPTCHA waits, unread payments).
+    counts = models.JSONField(default=dict, blank=True)
 
     payment_intent = models.ForeignKey('payment_accounts.PaymentIntent', on_delete=models.PROTECT,
                                        null=True, blank=True, related_name='+')

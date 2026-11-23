@@ -21,7 +21,7 @@ Every function here is pure: page facts in, a decision out.
 """
 import re
 import unicodedata
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 from . import sites
 
@@ -120,8 +120,13 @@ _FINAL_BUTTON = re.compile(
     r'|confirmar e pagar|place order|pay now|pagar agora|pagar ahora|pagar pedido|pagar com pix|pagar con qr|pagar r\$ ?[\d.,]+|pagar bs\.? ?[\d.,]+'
     # Not "Finalizar compra": a cart's way into the checkout, not its last button.
     r'|pagar \$ ?[\d.,]+|pagar con (spei|transferencia)')
+# Wider than _FINAL_BUTTON (which decides what a checkout is): anything that reads as the last press.
+_FINAL_WORDS = re.compile(r'\b(realiza(r)? (tu |el |seu |o )?pedido|comprar ahora|comprar agora|buy now|'
+                          r'confirmar (compra|pedido|pago)|place (your )?order)\b')
 _LOGIN_URL = re.compile(
-    r'(/login\b|/signin\b|/sign-in\b|/registration\b|/identification\b|/lgz/|/authentication\b|/account-verification\b)',
+    r'(/login\b|/signin\b|/sign-in\b|/registration\b|/identification\b|/lgz/|/authentication\b|/account-verification\b'
+    # Amazon's sign-in and its verification steps.
+    r'|/ap/(signin|cvf|mfa)\b)',
     re.I)
 _BLOCKED_PAGE = re.compile(
     r'\b(acesso negado|access denied|acceso denegado|unusual traffic|trafego incomum|you have been blocked'
@@ -135,6 +140,142 @@ def _compact(text):
 def _segments(parts, *, fragment=True):
     path = unquoted(f'{parts.path}/{parts.fragment.split("?")[0]}' if fragment else parts.path)
     return [_compact(segment) for segment in re.split(r'[/;]', path) if segment]
+
+
+# ── the agent's own checkout (operate.py) ──
+# What a control says decides whether a model may press it. On a checkout page
+# only what is on this list: any other button there may be the one that buys.
+_MAY_PRESS = re.compile(
+    r'\b(continuar|continue|siguiente|next|seguir|prosseguir|avancar|cambiar|change|alterar|trocar|editar|edit|elegir'
+    r'|escolher|seleccionar|selecionar|select|usar|use|enviar a|entregar|deliver|ver|mostrar|show|otro|otra|outro'
+    r'|other|no,? gracias|nao,? obrigado|no thanks|omitir|pular|skip|cerrar|fechar|close|eliminar|remover|quitar'
+    r'|remove|carrito|carrinho|cart|cesta|proceder|proceed|aceptar|aceitar|accept|entendido|ok)\b')
+# Outside a checkout page, the ways into one.
+_ENTER_CHECKOUT = re.compile(
+    r'\b(comprar ahora|comprar agora|buy now|finalizar compra|proceder al pago|proceed to checkout|ir a pagar'
+    r'|ir al pago|ir para o pagamento|checkout|continuar( compra)?|carrito|carrinho|cart|cesta)\b')
+# Never, in any phase: what would change the person's account or buy something else.
+_NEVER = re.compile(
+    r'\b(cancelar (el |o )?(pedido|compra|orden)|cancel (the )?order|volver a comprar|comprar de nuevo'
+    r'|comprar novamente|buy (it )?again|reorder|eliminar (la |mi )?(direccion|cuenta|tarjeta)|excluir (endereco|conta)'
+    r'|delete (address|account)|cerrar sesion|sair|log ?out|sign ?out|prime|meli\+|suscri\w*|subscri\w*|assin\w*'
+    r'|gift ?card|tarjeta de regalo|vale[- ]presente|1[- ]clic\w*)\b')
+_ACCOUNT_PATH = re.compile(r'/(logout|signout|sign-out|cancel\w*|delete\w*|unsubscribe|subscri\w*|prime|membership'
+                           r'|gift-?cards?)(/|$)')
+# A button that reads as the last one of a checkout.
+_FINAL_LOOK = re.compile(r'\b(confirmar|confirma|realizar|realiza|hacer|haz|fazer|finalizar|finaliza|completar|completa'
+                         r'|concluir|place|submit|complete|pagar|paga|pay|comprar|compra|buy|gerar|generar)\b')
+_CONFIRMED = re.compile(
+    r'pedido (realizado|confirmado|recibido|registrado)|gracias por (tu|su) (compra|pedido)|tu pedido (fue|ha sido)'
+    r'|order (placed|confirmed|received)|thank you.{0,20}order|pedido (efetuado|feito|recebido)'
+    r'|obrigado pela (sua )?compra|compra (realizada|confirmada)')
+# A whole path segment that names an order's own page. Never a substring: a seller names
+# a product "Compra Fácil" and its slug would read as an order.
+_ORDER_SEGMENT = re.compile(
+    r'(your)?orders?(details?|status|summary|confirmation|confirmed|completed?|history|view)?|ordenes|pedidos?'
+    r'(detalhes?|detalle|realizado|confirmado)?|minhascompras|miscompras|compras?|purchases?|pagamentos?|payments?'
+    r'|pagos?|thankyou|thanks|gracias|obrigado|congrats|confirmacao|confirmation|orderconfirmation')
+# A product's page, whatever else its path says: a seller writes its title, its pictures and its text.
+_PRODUCT_SEGMENT = re.compile(r'dp|product|products|produto|produtos|producto|productos|p|item|itm|ml[a-z]\d+[a-z0-9]*')
+_PRODUCT_WORD = re.compile(r'^(producto|produto|product|articulo|item|categoria|category|categorias|catalogo)')
+_PRODUCT_HOST = re.compile(r'(produto|articulo|produtos|articulos)\.')
+# A seller's, a brand's or a search's page: they name themselves what they like.
+_SELLER_HOST = re.compile(r'(lista|listado|perfil|perfiles|eshops?)\.')
+_SELLER_SEGMENT = re.compile(r'perfil|profile|loja|lojas|tienda|tiendas|stores?|shops?|seller|sellers|vendedor'
+                             r'|vendedores|sp|s|brand|marca|search|busca|buscar|b|l|listado|lista|pagina|page|pages')
+# The stores we know, by their own order and checkout paths.
+_KNOWN_ORDER_PATHS = (
+    (re.compile(r'(^|\.)amazon\.com(\.[a-z]{2})?$|(^|\.)amazon\.[a-z]{2}$'),
+     re.compile(r'/(gp/buy/|gp/css/order|gp/your-account/order|your-orders/|checkout/|cpe/yourpayments/)')),
+    (re.compile(r'(^|\.)mercadoli(vre|bre)\.com(\.[a-z]{2})?$'),
+     re.compile(r'/(gz/checkout/|checkout/|compras?/\d|my_purchases/|my-purchases/|purchases/\d)')),
+)
+_CARD = re.compile(r'\b(tarjeta|cartao|card|credito|debito|credit|debit|visa|mastercard|amex|american express'
+                   r'|terminada en|final \d{4}|meses sin intereses|parcel\w*|cuotas)\b|\*{2,} ?\d{4}')
+
+
+def may_press(element, *, on_checkout):
+    """A control a checkout model may click: a choice, a link, or a button whose words are on the list."""
+    parts = _parts(element)
+    if any(_NEVER.search(part) for part in parts):
+        return False
+    # A label for the final button, or a tab or option that holds it, presses that button.
+    # A radio or checkbox submits nothing: "Pagar con SPEI" there is the method, chosen.
+    tick = (element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')) \
+        or element.get('role') in ('radio', 'checkbox')
+    if not tick and any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in parts):
+        return False
+    if element.get('tag') in ('label', 'select') or element.get('role') in ('radio', 'checkbox', 'option', 'tab') \
+            or (element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')):
+        return True
+    if element.get('tag') == 'a':
+        # An anchor dressed as the final button is that button, whatever its tag.
+        if any(_FINAL_LOOK.search(part) or _FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part)
+               for part in parts):
+            return False
+        return not _ACCOUNT_PATH.search(urlsplit(element.get('href') or '').path.lower())
+    if not parts:
+        return False
+    allowed = _MAY_PRESS if on_checkout else _ENTER_CHECKOUT
+    if not on_checkout and any(_FINAL_BUTTON.fullmatch(p) or _FINAL_WORDS.search(p) for p in parts):
+        return False   # a final button on a page not recognised as a checkout is still a final button
+    return all(allowed.search(part) for part in parts) and not (on_checkout and any(_FINAL_LOOK.search(p) for p in parts))
+
+
+def final_looking(element):
+    """A control that could be the one that places the order (named, never pressed, by a model)."""
+    return (element.get('tag') in ('button', 'a') or element.get('role') == 'button'
+            or (element.get('tag') == 'input' and element.get('type') in ('button', 'submit'))) \
+        and any(_FINAL_LOOK.search(part) for part in _parts(element)) \
+        and not any(_NEVER.search(part) for part in _parts(element))
+
+
+def account_address(url):
+    """An address that acts on the person's account: never opened, in any phase."""
+    return bool(_ACCOUNT_PATH.search(urlsplit(url or '').path.lower()))
+
+
+def order_placed(page):
+    return bool(_CONFIRMED.search(fold(page.text[:20000])))
+
+
+def order_address(url):
+    """An order's or a checkout's own page: where its payment data may be read."""
+    parts = urlsplit(url or '')
+    host = (parts.hostname or '').lower()
+    path = parts.path.lower()
+    # The stores we know: their own order and checkout paths, nothing else (a seller names a
+    # profile, a brand store or a search "pagamentos" too).
+    for known, allowed in _KNOWN_ORDER_PATHS:
+        if known.search(host):
+            return bool(allowed.match(path)) and not _SELLER_HOST.match(host)
+    segments = _segments(parts, fragment=False)
+    # A product's, a seller's, a brand's or a search's page, whatever else its address says
+    # ("/producto/checkout/1", "/@vendedor/pedidos"): a seller picks those words.
+    if _PRODUCT_HOST.match(host) or _SELLER_HOST.match(host) \
+            or any(_SELLER_SEGMENT.fullmatch(segment) or _PRODUCT_SEGMENT.fullmatch(segment)
+                   or _PRODUCT_WORD.search(segment) for segment in segments) \
+            or re.search(r'/(@|~|u/)', path):
+        return False
+    # The fragment is never read here: a page's own anchor is anything its writer wants.
+    if checkout_address(urlunsplit(parts._replace(fragment=''))):
+        return True
+    # Elsewhere an order's word AND an order's number: "/pedido/123", never "/loja/compras".
+    return any(_ORDER_SEGMENT.fullmatch(segment) for segment in segments) \
+        and any(re.search(r'\d', segment) for segment in segments)
+
+
+def login_address(url):
+    return bool(_LOGIN_URL.search(urlsplit(url or '').path))
+
+
+def card_words(text):
+    return bool(_CARD.search(fold(text)))
+
+
+def final_button(element):
+    """A control whose words place an order or pay it: never pressed by a model."""
+    return any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in _parts(element))
 
 
 def checkout_address(url):

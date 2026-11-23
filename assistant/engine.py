@@ -1894,7 +1894,7 @@ class Toolbelt:
                     logger.warning('Confio Assistant: store task check failed', exc_info=True)
         return self._store_tasks_ready
 
-    def start_store_task(self, store=None):
+    def start_store_task(self, store=None, what=None):
         # The goal is the person's typed words; the model only points at a store.
         from . import confirm
         # Code's own question (an amount, a "sí") replaces the reply: a purchase started beside it would go unseen.
@@ -1907,7 +1907,7 @@ class Toolbelt:
         # What to buy is often said a few messages before "hazlo tú": the person's own recent typed words.
         recent = store_task_words(getattr(self, 'turn_history', None) or [])
         answer, _ = assistant_tool.call(self.viewer, self.payment_texts, saw_web=self.saw_web, store=store,
-                                        recent=recent)
+                                        recent=recent, what=what)
         if not (isinstance(answer, dict) and answer.get('ok') is False):
             # A purchase started: no question or card of code's may join this reply (confirm.busy) and hide it.
             self.result.store_task_started = True

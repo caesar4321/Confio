@@ -1,5 +1,5 @@
-// Cloud-browser shopping tasks (server: agent_tasks/schema.py). Kept apart
-// from the shared query files: a server without agent_tasks rejects only these.
+// Purchases the assistant makes in a cloud browser (server: agent_tasks/schema.py).
+// Kept apart from the shared query files: a server without agent_tasks rejects only these.
 import { gql } from '@apollo/client';
 
 const TASK_FIELDS = `
@@ -10,9 +10,10 @@ const TASK_FIELDS = `
   reason
   message
   waitUntil
-  checkoutHanded
   paymentIntentId
-  createdAt
+  payQr
+  options { title price image }
+  order { item total image }
 `;
 
 export const GET_AGENT_TASK = gql`
@@ -27,23 +28,36 @@ export const GET_AGENT_STORES = gql`
   }
 `;
 
-export const RESUME_AGENT_TASK = gql`
-  mutation ResumeAgentTask($id: UUID!, $view: String) {
-    resumeAgentTask(id: $id, view: $view) { success errors errorCode task { ${TASK_FIELDS} } }
+const RESULT = `success errors errorCode task { ${TASK_FIELDS} }`;
+
+export const CHOOSE_AGENT_OPTION = gql`
+  mutation ChooseAgentOption($id: UUID!, $index: Int!) {
+    chooseAgentOption(id: $id, index: $index) { ${RESULT} }
+  }
+`;
+
+// The person's account at the store: its variables are never logged (apollo/client.ts).
+export const SIGN_IN_AGENT_STORE = gql`
+  mutation SignInAgentStore($id: UUID!, $identifier: String!, $password: String!) {
+    signInAgentStore(id: $id, identifier: $identifier, password: $password) { ${RESULT} }
+  }
+`;
+
+export const GIVE_AGENT_CODE = gql`
+  mutation GiveAgentCode($id: UUID!, $code: String!) {
+    giveAgentCode(id: $id, code: $code) { ${RESULT} }
+  }
+`;
+
+export const APPROVE_AGENT_ORDER = gql`
+  mutation ApproveAgentOrder($id: UUID!, $total: String) {
+    approveAgentOrder(id: $id, total: $total) { ${RESULT} }
   }
 `;
 
 export const CANCEL_AGENT_TASK = gql`
   mutation CancelAgentTask($id: UUID!) {
-    cancelAgentTask(id: $id) { success errors errorCode task { ${TASK_FIELDS} } }
-  }
-`;
-
-// A mutation on purpose: the URL controls the remote browser. Never cache,
-// log or share it, and ask again each time the screen opens.
-export const OPEN_AGENT_LIVE_VIEW = gql`
-  mutation OpenAgentLiveView($id: UUID!) {
-    openAgentLiveView(id: $id) { success errors errorCode url expiresIn site host pageHost view }
+    cancelAgentTask(id: $id) { ${RESULT} }
   }
 `;
 
@@ -53,37 +67,24 @@ export const FORGET_AGENT_STORE = gql`
   }
 `;
 
-export type AgentTaskStatus =
-  | 'queued' | 'working' | 'needs_person' | 'awaiting_code' | 'payment_ready' | 'stopped' | 'cancelled';
+export type AgentOption = { title: string; price: string; image: string };
+export type AgentOrder = { item: string; total: string; image: string };
 
 export type AgentTask = {
   id: string;
   goal: string;
   site: string;
-  status: AgentTaskStatus | string;
+  status: string;
   reason: string;
   message: string;
   waitUntil?: string | null;
-  checkoutHanded: boolean;
   paymentIntentId?: string | null;
-  createdAt: string;
+  // The store's own QR the person pays from their bank's app (no Confío payment: QR Bolivia off).
+  payQr?: string | null;
+  options: AgentOption[];
+  order?: AgentOrder | null;
 };
 
-export type LiveView = {
-  success: boolean;
-  errors: string[];
-  errorCode?: string | null;
-  url?: string | null;
-  expiresIn?: number | null;
-  site?: string | null;
-  host?: string | null;
-  pageHost?: string | null;
-  /** Names the tab this screen shows: sent back with "Ya terminé", so that tab is the one read. */
-  view?: string | null;
-};
+export type AgentAnswer = { success?: boolean; errors?: string[]; errorCode?: string | null; task?: AgentTask | null };
 
-export {
-  ACTIVE, FINISHED, BACK_TO_AGENT, PASTE_REASONS, pastesInChat, taskIdOf, agentTaskNotificationRoute, allowedInLiveView,
-  allowedSubframe, timeLeft,
-}
-  from './helpers';
+export { ACTIVE, FINISHED, taskIdOf, agentTaskNotificationRoute, taskActions, latestCardFor, showCard } from './helpers';

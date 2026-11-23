@@ -63,6 +63,12 @@ _READ = r'''(() => {
       autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
       label: label.slice(0, __MAX_LABEL__), cut: label.length > __MAX_LABEL__,
       href: tag === 'a' ? el.href : '',
+      // A product's picture, for the card the person picks from: an address, never loaded here.
+      image: (() => {
+        const img = tag === 'a' ? el.querySelector('img') : null;
+        const src = img ? String(img.currentSrc || img.src || '') : '';
+        return /^https:\/\//.test(src) ? src.slice(0, 600) : '';
+      })(),
       // getAttribute, not form.action: a field named "action" would shadow the property.
       action: sends ? address(attr(el, 'formaction') || attr(form, 'action') || document.baseURI) : '',
       method: sends ? String(attr(el, 'formmethod') || attr(form, 'method') || 'get').toLowerCase() : '',
@@ -82,11 +88,16 @@ _READ = r'''(() => {
         (document.querySelector('base[target]') || {getAttribute: () => ''}).getAttribute('target') || '').toLowerCase()),
       secret_form: !!(form && Element.prototype.querySelector.call(form, 'input[type=password],input[autocomplete^="cc-"]')),
       disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
+      // A chosen option (a payment method, an address): what the checkout will use.
+      checked: !!el.checked || ['aria-checked', 'aria-selected'].some(a => el.getAttribute(a) === 'true') ||
+        (tag === 'label' && !!(el.control && el.control.checked)),
+      maxlength: Number(el.getAttribute('maxlength')) || 0,
       search: tag === 'input' && (el.type === 'search' || el.getAttribute('role') === 'searchbox' ||
         !!el.closest('[role=search]') || searchNames.includes(el.getAttribute('name') || '')),
     };
   };
-  const found = [...document.querySelectorAll('a[href],button,input:not([type=hidden]),div[role=button],span[role=button]')]
+  const found = [...document.querySelectorAll('a[href],button,input:not([type=hidden]),div[role=button],span[role=button],' +
+      'select,label[for],[role=radio],[role=checkbox],[role=option],[role=tab]')]
     .filter(seen);
   let picked = found;
   if (found.length > __MAX_ELEMENTS__) {
@@ -150,6 +161,40 @@ _PRESS = '(() => {' + _SAME + r'''
     if (extra) extra.remove();
   }
   return '';
+})()'''
+
+# Where a control is on screen, for a real click (a checkout's and a sign-in's
+# controls answer scripts, not forms). `clear` empties a field first.
+_POINT = '(() => {' + _SAME + r'''
+  el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  // What a click there would really hit: a banner or a widget over it is not this control.
+  const hit = document.elementFromPoint(x, y);
+  if (!hit || !(hit === el || el.contains(hit) || (hit.closest && hit.closest('label') && el.labels &&
+      [...el.labels].includes(hit.closest('label'))))) return 'covered';
+  // Inside this control, another button or link would take the click (a tab or a row that holds the final button).
+  const inner = hit.closest && hit.closest('button, a[href], input[type=submit], input[type=button], [role=button]');
+  if (inner && inner !== el && el.contains(inner)) return 'covered';
+  // Nor a control that sits inside a button or link: the click would be that one's.
+  const outer = el.parentElement && el.parentElement.closest('button, a[href], [role=button]');
+  if (outer) return 'covered';
+  // A label clicks its control: never one that is a button.
+  if (el.tagName === 'LABEL' && el.control && (el.control.tagName === 'BUTTON' ||
+      ['submit', 'button', 'image'].includes((el.control.type || '').toLowerCase()))) return 'covered';
+  if (__CLEAR__) {
+    if (el.tagName !== 'INPUT') return 'not_a_field';
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '');
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    el.focus();
+  }
+  return {x, y};
+})()'''
+
+# After the click that focuses a field: it, and nothing else, has the focus (and a password goes only into a password field).
+_FOCUSED = r'''(() => {
+  const el = (globalThis.picked || [])[__REF__];
+  return !!el && document.activeElement === el && (!__SECRET__ || el.type === 'password');
 })()'''
 
 _SEARCH = '(() => {' + _SAME + r'''
@@ -241,6 +286,33 @@ class Reader:
     def press(self, element) -> str:
         """'' when its form was sent, else why it was not."""
         return self._act(_PRESS, element)
+
+    def _point(self, element, clear=False):
+        at = self._run(_script(_POINT, REF=element['ref'], URL=self._url, CLEAR=bool(clear),
+                               WAS={key: element[key] for key in BOUND if key in element}), gesture=True)
+        return at if isinstance(at, dict) and 'x' in at else str(at or 'changed')
+
+    def click(self, element) -> str:
+        """'' when the control was clicked for real, else why not."""
+        at = self._point(element)
+        if not isinstance(at, dict):
+            return at
+        self.page.click(at['x'], at['y'])
+        self.page.settle()
+        return ''
+
+    def type(self, element, text, *, secret=False) -> str:
+        """'' when `text` was typed into that very field (emptied first), else why
+        not. Nothing is typed unless the field itself holds the focus; a
+        `secret` only into a password field."""
+        at = self._point(element, clear=True)
+        if not isinstance(at, dict):
+            return at
+        self.page.click(at['x'], at['y'])
+        if self._run(_script(_FOCUSED, REF=element['ref'], SECRET=bool(secret))) is not True:
+            return 'not_focused'
+        self.page.insert(text)
+        return ''
 
     def landed_on_a_page(self) -> bool:
         """After a press: an HTML page, not a cart's JSON or an error."""

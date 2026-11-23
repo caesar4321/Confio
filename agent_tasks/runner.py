@@ -17,6 +17,7 @@ on a live state, so a cancellation wins over a step in flight.
 """
 import hashlib
 import logging
+import re
 import time
 import uuid
 from datetime import timedelta
@@ -51,6 +52,11 @@ CHECKOUT_TURN_MIN = timedelta(minutes=5)
 ASKED = 'asked the person: '
 RESUMED = 'the person took the screen'
 BACK_TO_AGENT = frozenset({'login', 'captcha'})
+# A CAPTCHA is solved by the browser's vendor: the agent only waits for it.
+CAPTCHA, CAPTCHA_TRIES, CAPTCHA_WAIT_SECONDS = 'captcha', 8, 6
+# Products shown in the chat for the person to pick one.
+CHOSEN, MAX_OPTIONS = 'the person chose', 5
+UNREAD = 'the payment was not read'
 # In these the person has the whole store in front of them and may well finish
 # the purchase, so each is already the hand-over: the agent does not come back.
 CARRIES_ON = frozenset({'details', 'choice', 'consent'})
@@ -187,11 +193,19 @@ def run_step(task_id, turn=None):
 
 
 class Step:
+    ASKED, GIVE_UP, HISTORY_KEPT = ASKED, GIVE_UP, HISTORY_KEPT
+    fingerprint = staticmethod(fingerprint)
+    same_page = staticmethod(same_page)
+
     def __init__(self, task, lease):
         self.task, self.lease, self.meter = task, lease, agent.Meter()
         self.delay = 0
         self.only_get = False
+        self.operating = False   # in a sign-in, cart or checkout: real clicks, the store's own requests
         self.seen_url = ''
+
+    def app_meta(self):
+        return app_meta(self.task)
 
     # ---------------------------------------------------------------- the row
 
@@ -215,16 +229,9 @@ class Step:
         told = exc if isinstance(exc, (CdpError, agent.AgentUnavailable, browsers.BrowserUnavailable)) else ''
         logger.warning('agent task %s: %s %s', self.task.internal_id, type(exc).__name__, told)
         try:
-            handed = self.task.checkout_at is not None
-            if handed and isinstance(exc, CdpError):
-                # Usually a message the store left over the page: only they can close it.
-                self.hand_over('screen')
-            elif handed:
-                # Said at once: trying again by itself would open a new window
-                # over the copy, and ask for one while none is open.
-                self.hand_over('retry')
-            elif self.task.failures + 1 >= MAX_FAILURES:
-                self.stop('error')
+            if self.task.failures + 1 >= MAX_FAILURES:
+                # After the order was placed, say so: it waits to be paid at the store.
+                self.stop('error')   # after an order its words say an order may exist (notes.stopped_text)
             else:
                 self.save(failures=self.task.failures + 1, steps=self.task.steps + 1)
                 self.delay = 5
@@ -259,7 +266,7 @@ class Step:
             self.open_browser()
         elif task.session_expires_at <= timezone.now() + SESSION_MARGIN:
             return self.stop('session_expired')
-        handed = task.checkout_at is not None
+        handed = task.state == 'awaiting_code'
         with Page(task.connect_url, active=not handed) as browser:
             if handed:
                 return self.after_checkout(browser)
@@ -294,7 +301,7 @@ class Step:
                            else 'AGENT_TASKS_CHECKOUT_WAIT_SECONDS')
         # Before they confirm an order at the store: what they have to pay it with. Read
         # before their clock is set. In the chat only: a push shows on the lock screen.
-        extra = notes.balance_line(task) if kind == 'checkout' else ''
+        extra = notes.balance_line(task) if kind == 'approve' else ''
         now = timezone.now()
         until = min(now + timedelta(seconds=seconds), task.session_expires_at - SESSION_MARGIN)
         # Said before they order, not while they are ordering.
@@ -310,14 +317,19 @@ class Step:
         """As many steps as fit in one guarded connection: between two
         connections nobody checks what a page goes on to load."""
         task = self.task
-        browser.guard_documents(
-            lambda url, method: guard.hop_allowed(url, method, task.site, only_get=self.only_get))
+        # While shopping, only reading the store. In its sign-in and checkout, the store's own
+        # pages and its payment house, whatever they send.
+        browser.guard_documents(lambda url, method: (
+            (sites.within(url, task.site, house=True) and not guard.account_address(url)) if self.operating
+            else guard.hop_allowed(url, method, task.site, only_get=self.only_get)))
         until = time.monotonic() + conf.get('AGENT_TASKS_HOLD_SECONDS')
         while True:
-            self.only_get, self.delay = False, 0
+            from . import operate
+            # From the cart on, the store's own redirects (to its checkout, its payment house) are its own.
+            self.only_get, self.delay, self.operating = False, 0, operate.ordering(task)
             browser.refused_document = browser.refused_send = False
             self.before_checkout(browser)
-            if task.state != 'working' or task.checkout_at or time.monotonic() >= until:
+            if task.state != 'working' or time.monotonic() >= until:
                 return
             if not conf.get('AGENT_TASKS_ENABLED'):
                 return self.stop('busy')
@@ -337,31 +349,93 @@ class Step:
             if browser.refused_document is True:
                 return self.stop('cannot_do')
             return self.remember(f'open {task.site}', 'ok', state='working')
+        if task.pending_url:
+            # The product the person picked: its address was checked when it was offered.
+            address = task.pending_url
+            if guard.address_refusal(address, task.site):
+                return self.stop('cannot_do')
+            self.save(pending_url='')
+            browser.goto(address)
+            return self.remember('open the chosen product', 'ok')
         reader = pages.Reader(browser)
         seen = reader.read()
         self.seen_url = seen.url
+        from . import operate
         inside = sites.within(seen.url, task.site)
         page = same_page(seen.url)
-        if inside and page not in (task.visited_pages or []) and len(task.visited_pages or []) < MAX_VISITED:
+        needed = guard.person_needed(seen)
+        # The store's own sign-in, cart and checkout: no seller writes there, and its payment
+        # data is read off such a page later, so they are not "pages the agent read".
+        # From the cart on, the order's own pages are not "read while shopping"; any other page
+        # (a product a link led back to) still is: a seller writes there.
+        store_only = guard.is_checkout(seen) or guard.login_address(seen.url) \
+            or (operate.ordering(task) and guard.order_address(seen.url))
+        if inside and not store_only and page not in (task.visited_pages or []) \
+                and len(task.visited_pages or []) < MAX_VISITED:
             self.save(visited_pages=[*(task.visited_pages or []), page])
         if not inside:
-            if sites.within(seen.url, task.site, house=True):
-                return self.hand_checkout()  # the store's payment house is already the checkout
+            if sites.within(seen.url, task.site, house=True) and operate.ordering(task):
+                return operate.checkout(self, browser, reader, seen)  # the store's payment house
             if sum(entry.get('did') == 'left the store' for entry in task.history or []) >= MAX_LEFT_STORE:
                 return self.stop('cannot_do')  # its home keeps sending us away
             browser.goto(f'https://{task.site}/')
             return self.remember('left the store', 'back to its home page')
         if guard.blocked(seen):
             return self.stop('blocked')
-        if guard.is_checkout(seen):
-            return self.hand_checkout()  # no model works inside a checkout
-        needed = guard.person_needed(seen)
-        # Once by itself per kind; then the model decides (a solved challenge
-        # or a header's sign-in box stays on the page).
-        if needed and not any(entry.get('did') == f'{ASKED}{needed}' for entry in task.history or []):
-            return self.hand_over(needed)
+        if needed == 'captcha':
+            return self.await_captcha()
+        if needed == 'login':
+            done = operate.sign_in(self, browser, reader, seen)
+            if done is not operate.NOT_A_FORM:
+                return done
+        if guard.is_checkout(seen) or operate.ordering(task):
+            return operate.checkout(self, browser, reader, seen)
         name, args = agent.decide(task, seen, self.meter)
         return self.act(browser, reader, seen, name, args)
+
+    def offer(self, seen, args):
+        """The products the person picks from, in the chat: only links this store
+        page really has, that may be opened. Their names and prices are the page's."""
+        task = self.task
+        if task.options:
+            return self.remember('offer_products', 'refused: already offered. Work on the product page.')
+        pictures = {}
+        for element in seen.elements:
+            if element.get('image') and element.get('href'):
+                pictures.setdefault(element['href'].split('#')[0], element['image'])
+        options, seen_links = [], set()
+        for item in (args.get('items') or [])[:MAX_OPTIONS * 2]:
+            element = seen.element(item.get('ref')) if isinstance(item, dict) else None
+            if element is None or guard.link_refusal(element, task.site, seen):
+                continue
+            href = element['href']
+            if href.split('#')[0] in seen_links:
+                continue
+            seen_links.add(href.split('#')[0])
+            title = guard.clean(agent.redact(item.get('title') or element.get('label')), 120)
+            if not title:
+                continue
+            options.append({'title': title, 'price': guard.clean(agent.redact(item.get('price')), 30),
+                            'image': element.get('image') or pictures.get(href.split('#')[0], ''), 'href': href})
+            if len(options) >= MAX_OPTIONS:
+                break
+        if not options:
+            return self.remember('offer_products', 'refused: none of those is a product link of this store')
+        if len(options) == 1:
+            # Nothing to pick between: go on with it.
+            self.save()
+            return self.remember(CHOSEN, options[0]['title'], pending_url=options[0]['href'], options=options)
+        return self.hand_over('choose', options=options)
+
+    def await_captcha(self):
+        """The browser's vendor solves a CAPTCHA by itself: look again in a few
+        seconds. The person is never asked. One it cannot solve ends the purchase."""
+        from . import operate
+        if operate.count(self.task, 'captcha') >= CAPTCHA_TRIES:
+            return self.stop('blocked')
+        self.delay = CAPTCHA_WAIT_SECONDS
+        return self.remember(CAPTCHA, 'the browser is solving it: look again',
+                             counts=operate.counted(self.task, 'captcha'))
 
     def hand_checkout(self, kind='checkout', body=None):
         from . import service
@@ -370,12 +444,10 @@ class Step:
             service.require_payable(self.task.account, self.task.user, self.task.country, app_meta(self.task))
         except service.TaskRefused:
             return self.stop('cannot_pay')
-        # The page handed over is in visited_pages unless it is a checkout,
-        # which may go on to show its QR at the same address.
-        if self.seen_url and guard.checkout_address(self.seen_url):
-            self.save(visited_pages=[page for page in self.task.visited_pages or []
-                                     if page != same_page(self.seen_url)])
-        return self.hand_over(kind, body=body, checkout_at=timezone.now())
+        # The item is in the cart: from here the agent works the checkout itself (operate.py).
+        from . import operate
+        return self.remember('ready for the checkout', 'the item is in the cart: go to the checkout',
+                             phase='ordering')
 
     def act(self, browser, reader, seen, name, args):
         task = self.task
@@ -384,11 +456,15 @@ class Step:
             return self.remember('wait', 'ok')
         if name == 'ask_person':
             kind = args.get('kind')
-            if kind in BACK_TO_AGENT:
-                return self.hand_over(kind)
-            return self.hand_checkout(kind if kind in CARRIES_ON else 'choice')
+            if kind == 'captcha':
+                return self.await_captcha()
+            if kind == 'login':
+                return self.remember('ask_person', 'refused: there is no sign-in form here; open the sign-in page')
+            return self.stop('cannot_do')   # nobody is sent to the store: what only they can give ends it
         if name == 'ready_for_checkout':
             return self.hand_checkout()
+        if name == 'offer_products':
+            return self.offer(seen, args)
         if name == 'give_up':
             reason = args.get('reason')
             return self.stop(reason if reason in GIVE_UP else 'cannot_do')
@@ -450,47 +526,65 @@ class Step:
     # ------------------------------------------------------ after the checkout
 
     def after_checkout(self, browser):
-        """What the person has on screen. No script runs and nothing is touched."""
+        """The order's payment data, read off the tab the agent left on it. No
+        script runs and nothing is touched. What cannot be read goes back to
+        the agent to find the page (operate.AFTER), a few times."""
         from payment_accounts import payment_intents
         from payment_accounts.services import PaymentAccountError
         task = self.task
         shots = browser.capture(task.shown_target) if task.shown_target else None
         if not shots:
-            return self.hand_over('screen')
-        # The store's own pages: anyone can create a page at a payment house.
-        if not sites.within(shots[0].url, task.site):
-            return self.hand_over('offsite')
+            return self.unread('screen')
+        # The store's own pages: anyone can create a page at a payment house. And the order's
+        # own page (a checkout or an order address): never a shopping page a seller writes on.
+        if not sites.within(shots[0].url, task.site) or not guard.order_address(shots[0].url):
+            return self.unread('offsite')
         if same_page(shots[0].url) in (task.visited_pages or []):
-            return self.hand_over('code')  # a shopping page: a QR there is a seller's picture
+            return self.unread('code')  # a shopping page: a QR there is a seller's picture
         rail = countries.rail(task.country)
         if rail is None:
-            return self.hand_over('code_refused')
+            return self.stop('unpaid')
         if rail.kind == 'qr':
             (code, why), extra = code_on_screen(shots, rail), {}
         else:
             code, extra, why = rail.read(shots)
         if not code:
-            return self.hand_over(why)
+            return self.unread(why)
+        if rail.manual(app_meta(task)):
+            return self.hand_manual(code)
         self.save()
         try:
             intent = payment_intents.prepare(task.account, task.user, code, created_by='assistant',
                                              source='agent_checkout',
                                              request={**rail.request(app_meta(task)), **extra})
         except PaymentAccountError as exc:
+            if rail.can_go_manual and getattr(exc, 'code', None) in MANUAL_WHEN:
+                # Confío cannot pay anything for this person right now: their bank can. Never when the
+                # refusal is about the QR itself ('rail', 'no_code', 'no_amount'): the provider is the
+                # one that says it is the store's payment code.
+                return self.hand_manual(code)
             # Nobody vouched for that code, so it is not handed on as this order's.
             why = guard.clean(str(exc), 200)
-            plain = notes.say(notes.NEEDS_PERSON['code_refused'], task)
             # The screen stays: many refusals pass, and it may be the only place that code is.
             # A balance or what is missing stays in the chat, off the lock screen.
-            return self.hand_over('code_refused', body=f'{plain} {why}'.strip(), push_text=plain)
+            return self.stop('unpaid', body=f"{notes.stopped_text(task, 'unpaid')} {why}".strip())
         if (intent.currency != rail.currency or not intent.amount_exact or intent.rail_method_id != rail.method_id
                 or ('amount_local' in extra and intent.amount_local != Decimal(extra['amount_local']))):
             payment_intents.cancel(task.account, intent.internal_id)
-            return self.hand_over('code_refused')
+            return self.stop('unpaid')
+        order = task.order or {}
+        # Only the order the agent placed carries an amount to pay: `pressed` is written only when the
+        # person's approval matched (operate._order), and the approval itself is then used up.
+        approved = order.get('amount') if order.get('pressed') and not order.get('unapproved') else None
+        # No amount the person approved (an order the store shows as placed without them): no card.
+        if not approved or intent.amount_local != Decimal(approved):
+            # Not the order the person approved (another order's page, or a seller's): never offered.
+            payment_intents.cancel(task.account, intent.internal_id)
+            return self.stop('unpaid')
         if intent.payee_level not in rail.payees:
             # A name the QR wrote about itself is not read off a screen. Pasted, it is asked about (confirm.py).
             payment_intents.cancel(task.account, intent.internal_id)
-            return self.hand_over('unsigned')
+            return self.stop('unpaid')
         try:
             self.save(payment_intent=intent, state='payment_ready', reason='', wait_until=None)
         except Lost:
@@ -499,6 +593,38 @@ class Step:
         close_session(task)
         post_payment(task, intent)
 
+
+    def hand_manual(self, code):
+        """Confío cannot pay this country's code now: the person pays the store's own QR from
+        their bank's app. Only for the order the agent placed with their approval."""
+        task = self.task
+        order = task.order or {}
+        if not order.get('pressed') or order.get('unapproved') or not order.get('total'):
+            return self.stop('unpaid')
+        # Nobody decodes it for us here: what the code says of itself must be this order's.
+        from payment_accounts import local_money
+        # A bank's QR may carry a scheme prefix ("QRSIMPLE:") before its EMV body.
+        fields = local_money.emv_fields(re.sub(r'^[^:]{1,20}:', '', code)) or {}
+        try:
+            amount_ok = '54' not in fields or Decimal(fields['54']) == Decimal(str(order.get('amount')))
+        except Exception:
+            amount_ok = False
+        if not amount_ok or fields.get('58') not in (None, 'BO') or fields.get('53') not in (None, '068'):
+            return self.stop('unpaid')
+        self.save(order={**order, 'pay_qr': code}, state='payment_ready', reason='manual', wait_until=None)
+        close_session(task)
+        text = notes.say(notes.PAYMENT_MANUAL, task).replace('{total}', str(order.get('total')))
+        notes.post(task, text, 'payment', push='payment', push_body=text)
+
+    def unread(self, why):
+        from . import operate
+        if operate.count(self.task, 'unread') >= operate.MAX_UNREAD:
+            return self.stop('unpaid')
+        return self.remember(UNREAD, str(why), state='working', reason='',
+                             counts=operate.counted(self.task, 'unread'))
+
+# Refusals that say nothing about the code: Confío cannot pay for this person now.
+MANUAL_WHEN = frozenset({'unavailable', 'not_personal', 'rate_limited'})
 
 def post_payment(task, intent):
     """Idempotent: the sweep calls it again if the worker died before it."""

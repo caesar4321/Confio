@@ -56,7 +56,6 @@ export type MainStackParamList = {
   PayoutMethods: undefined;
   Agenda: undefined;
   RampAddress: undefined;
-  AgentTask: { taskId: string };
   AgentStores: undefined;
   ConfioAddress: undefined;
   Notification: undefined;

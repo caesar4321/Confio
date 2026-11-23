@@ -108,7 +108,9 @@ class LoggingGraphQLView(GraphQLView):
                 # but this log runs BEFORE that, on the raw body.
                 sensitive = membership_claim or any(field in routed_query for field in (
                     'reportWalletRecoveryDiagnostic', 'analyzeAssistantCalendar',
-                    'AssistantMail', 'assistantMail'))
+                    'AssistantMail', 'assistantMail',
+                    # A store's sign-in and one-time code (agent_tasks): never in a log.
+                    'signInAgentStore', 'giveAgentCode'))
                 if _should_log_graphql_request_details():
                     logger.info("GraphQL Query: %s", '[redacted]' if sensitive else query)
                     logger.info("GraphQL Variables: %s", '[redacted]' if sensitive else body.get('variables', {}))

@@ -3,14 +3,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-STARTED = 'Voy a buscarlo en {site}. La compra la confirmas tú en la tienda y el pago lo apruebas tú aquí.'
+STARTED = 'Voy a buscarlo en {site}.'
 # {pay}, {qr}, {paste} and {vouches} are the country's rail (countries.py).
 CARRY_ON = (' Desde ahí sigue tú con la compra: elige {pay}, confirma el pedido y, con {qr} en pantalla, '
             'toca "Ya terminé".')
 NEEDS_PERSON = {
-    'login': 'Necesito que inicies sesión en {site}. La contraseña la escribes tú: no la veo ni la guardo. '
-             'Solo inicia sesión: la compra la confirmas después.',
+    'login': ('Para comprar en {site} necesito entrar con tu cuenta de esa tienda. Escríbela en la tarjeta: se '
+              'guarda cifrada y solo se usa para iniciar sesión ahí.'),
+    'login_again': '{site} no me dejó entrar con esos datos. Revísalos y escríbelos otra vez.',
+    'otp': '{site} te envió un código de verificación. Escríbelo en la tarjeta.',
+    # {{item}} and {{total}} are the order's (operate._order).
+    # Fixed words: what the store wrote (the item, the total) is shown only on the card.
+    'approve': 'Tu pedido en {site} está listo, a pagar con {pay}. Revísalo en la tarjeta y confírmalo: lo hago yo.',
     'captcha': '{site} pide comprobar que eres una persona. Eso lo haces tú.',
+    'choose': 'Encontré estas opciones en {site}. Elige una y yo sigo.',
     'details': '{site} pide datos que solo escribes tú.' + CARRY_ON,
     'choice': 'Hay algo que debes elegir tú en {site}.' + CARRY_ON,
     'consent': '{site} pide aceptar condiciones. Eso lo decides tú.' + CARRY_ON,
@@ -32,6 +38,9 @@ NEEDS_PERSON = {
                      'o {paste}.'),
 }
 MAYBE_NOT_ADDED = ' Puede que no se haya agregado al carrito: si no está, agrégalo tú.'
+# Confío cannot pay this country's code now (QR Bolivia off): the order is placed and the person pays it.
+PAYMENT_MANUAL = ('Tu pedido en {site} está hecho. Págalo tú con el QR de abajo desde la app de tu banco: guárdalo '
+                  'y súbelo allí. Antes de pagar revisa que el monto sea {{total}}.')
 PAYMENT_READY = ('Preparé el pago con {qr} que se veía en {site}. {vouches} Antes de pagar revisa que el monto y el '
                  'cobro sean los de tu pedido.')
 STOPPED = {
@@ -48,12 +57,17 @@ STOPPED = {
     'error': 'Algo falló y lo detuve. Puedes pedírmelo otra vez.',
     'cancelled': 'Listo, lo cancelé.',
     'replaced': 'Dejé la compra en {site} para empezar la nueva.',
+    'sign_in': 'No pude entrar a tu cuenta de {site}, así que no seguí. Pídemelo otra vez cuando quieras.',
+    'unpaid': ('No pude preparar el pago de tu pedido en {site} desde aquí. Puede que el pedido haya quedado hecho '
+               'y esté esperando el pago: revísalo en tus compras de {site}.'),
+    'cancelled_ordered': ('Dejé de seguir esta compra. Puede que el pedido haya quedado hecho en {site}: revísalo en '
+                          'tus compras de la tienda.'),
     'unavailable': 'Ahora no puedo abrir el navegador para comprar por ti. Pídemelo más tarde.',
 }
 # After the hand-over, nothing may suggest there is no order.
 AFTER_CHECKOUT = (' Si ya confirmaste el pedido, sigue en tus compras de {site}: para pagarlo, {paste}.')
 TASK_ACTION = {'type': 'task', 'label': 'Ver la compra'}
-PUSH = {'person': 'Te toca a ti', 'payment': 'Revisa tu pago', 'check': 'Revisa tu compra'}
+PUSH = {'person': 'Tu compra te espera', 'payment': 'Revisa tu pago', 'check': 'Revisa tu compra'}
 
 
 def balance_line(task):
@@ -79,10 +93,11 @@ def shortfall_line(task, intent):
 
 
 def stopped_text(task, reason):
-    text = STOPPED.get(reason, STOPPED['error'])
-    # Also when they only took the screen to sign in: they may have bought then.
-    if task.checkout_at or any(entry.get('did') == 'the person took the screen' for entry in task.history or []):
-        text += AFTER_CHECKOUT
+    if task.checkout_at:
+        # The final button was pressed: whatever ended it, an order may exist. Never "compra tú".
+        text = STOPPED['cancelled_ordered' if reason in ('cancelled', 'replaced') else 'unpaid']
+    else:
+        text = STOPPED.get(reason, STOPPED['error'])
     return say(text, task)
 
 

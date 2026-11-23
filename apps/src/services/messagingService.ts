@@ -802,12 +802,11 @@ class MessagingService {
       }
     }
 
-    // A shopping task: its screen holds the store's live view (the account
-    // switch above already put the person on the task's personal account).
-    const agentTaskId = agentTaskNotificationRoute(data);
-    if (agentTaskId) {
+    // A purchase the assistant is making: its card is in the conversation, on Inicio (the
+    // account switch above already put the person on the purchase's personal account).
+    if (agentTaskNotificationRoute(data)) {
       if (navigationRef.current && navigationRef.current.isReady()) {
-        (navigationRef.current as any).navigate('Main', { screen: 'AgentTask', params: { taskId: agentTaskId } });
+        (navigationRef.current as any).navigate('Main', { screen: 'BottomTabs', params: { screen: 'Home' } });
       }
       return;
     }
