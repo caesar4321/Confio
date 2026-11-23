@@ -1,4 +1,4 @@
-// "Ver la tarea": the chip agent_tasks/notes.py puts on its chat notes
+// "Abrir la tienda": the chip agent_tasks/notes.py puts on its chat notes
 // ({type: 'task', target: <task id>}). It opens the task screen.
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -7,6 +7,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Text } from '../components/common/AppText';
 import { colors } from '../config/theme';
 import { taskIdOf } from './helpers';
+
+const CHIP_LABEL = 'Abrir la tienda';
 
 type Action = { type: string; target?: string | null; label?: string | null };
 
@@ -17,7 +19,8 @@ export function taskActions(actions: Action[]): { taskId: string; label: string 
     const taskId = a.type === 'task' ? taskIdOf(a.target) : null;
     if (taskId && !seen.has(taskId)) {
       seen.add(taskId);
-      found.push({ taskId, label: a.label || 'Ver la tarea' });
+      // Its own words, whatever an older note said ("Ver la tarea" is gone).
+      found.push({ taskId, label: CHIP_LABEL });
     }
   }
   return found;

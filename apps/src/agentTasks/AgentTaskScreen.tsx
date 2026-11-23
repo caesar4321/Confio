@@ -39,7 +39,7 @@ const WAIT_TEXT = 'Espera un momento: tu respuesta anterior todavía se está en
 // The server never shows a page outside the store before the hand-over.
 const LEFT_STORE = 'left_store';
 // Tasks live on the person's own personal account: from any other, none is found.
-export const NOT_FOUND = 'No encontré esta tarea. Las compras con el asistente se hacen desde tu cuenta personal: '
+export const NOT_FOUND = 'No encontré esta compra. Las compras con el asistente se hacen desde tu cuenta personal: '
   + 'cámbiate a ella si estás en otra.';
 
 /** When the live view is on screen. Before the hand-over (sign-in, captcha)
@@ -401,14 +401,14 @@ function TaskView({ taskId }: { taskId: string | null }) {
 
   const onCancel = () => {
     Alert.alert(
-      'Cancelar la tarea',
+      'Cancelar la compra',
       handed
         ? 'Si ya confirmaste el pedido en la tienda, sigue en tus compras de la tienda.'
         : 'El asistente dejará de buscar.',
       [
         { text: 'Volver', style: 'cancel' },
         {
-          text: 'Cancelar la tarea',
+          text: 'Cancelar la compra',
           style: 'destructive',
           onPress: () => act('cancel',
             async () => (await cancel({ variables: { id: taskId } })).data?.cancelAgentTask, 'No pude cancelarla.'),
@@ -433,7 +433,7 @@ function TaskView({ taskId }: { taskId: string | null }) {
       <View style={styles.screen}>
         {header}
         <View style={styles.center}>
-          <Text style={styles.message}>{error ? 'No pude leer la tarea. Revisa tu conexión.' : NOT_FOUND}</Text>
+          <Text style={styles.message}>{error ? 'No pude leer la compra. Revisa tu conexión.' : NOT_FOUND}</Text>
           {error ? <Button title="Reintentar" variant="secondary" onPress={load} /> : null}
         </View>
       </View>

@@ -13,7 +13,8 @@ def ready(viewer):
     try:
         return bool(conf.get('AGENT_TASKS_ENABLED') and viewer.user is not None
                     and viewer.account_type == 'personal' and not viewer.is_employee
-                    and service.build_supported(viewer.request_meta) and qr.available() and conf.browserbase_api_key())
+                    and service.build_supported(viewer.request_meta) and qr.available() and conf.browserbase_api_key()
+                    and service.worker_alive())
     except Exception:  # noqa: BLE001 - no tool is always safe
         logger.warning('agent task tool check failed', exc_info=True)
         return False

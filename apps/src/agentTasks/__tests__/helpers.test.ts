@@ -51,14 +51,14 @@ it('counts down to the deadline and says nothing once it passed', () => {
   expect(timeLeft('soon', now)).toBeNull();
 });
 
-it('draws one chip per task note, with its label', () => {
+it('draws one chip per purchase note, always in its own words', () => {
   expect(taskActions([
     { type: 'task', target: ID, label: 'Ver la tarea' },
     { type: 'task', target: ID, label: 'otra vez' },
     { type: 'task', target: 'not-an-id' },
     { type: 'navigate', target: ID },
-  ])).toEqual([{ taskId: ID, label: 'Ver la tarea' }]);
-  expect(taskActions([{ type: 'task', target: ID }])).toEqual([{ taskId: ID, label: 'Ver la tarea' }]);
+  ])).toEqual([{ taskId: ID, label: 'Abrir la tienda' }]);
+  expect(taskActions([{ type: 'task', target: ID }])).toEqual([{ taskId: ID, label: 'Abrir la tienda' }]);
 });
 
 it('sends only a Brazilian store\'s unread code to the chat', () => {

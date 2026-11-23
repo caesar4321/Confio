@@ -10,6 +10,7 @@ from agent_tasks import assistant_tool, browsers, runner, service
 from agent_tasks.models import AgentProfile, AgentTask
 from agent_tasks.tests.base import BASE, RowsBase, SITE
 
+REAL_WORKER_ALIVE = service.worker_alive   # before any test patches it
 BUILD = {'HTTP_X_CONFIO_VERSION': '5.4.0', 'HTTP_X_CONFIO_BROWSER_TASKS': '1'}
 
 
@@ -67,9 +68,27 @@ class StartTests(ServiceBase):
         self.refused('unavailable', self.start)
         self.assertFalse(AgentTask.objects.exists())
 
-    def test_one_at_a_time(self):
+    def test_a_new_request_sets_the_earlier_purchase_aside_by_itself(self):
+        earlier = self.start()
+        later = self.start(goal='un chocolate amargo')
+        earlier.refresh_from_db()
+        self.assertEqual((earlier.state, earlier.reason), ('cancelled', 'replaced'))
+        self.assertEqual(later.state, 'queued')
+        # Its note says so; it never says "tarea".
+        said = [call.args[1] for call in self.post.call_args_list]
+        self.assertTrue(any('Dejé la compra en' in text for text in said), said)
+        self.assertFalse(any('tarea' in text.lower() for text in said), said)
+
+    @override_settings(AGENT_TASKS_PER_DAY=2)
+    def test_one_set_aside_before_it_opened_does_not_count_toward_the_day(self):
         self.start()
-        self.refused('active_task', self.start)
+        self.start(goal='otro')
+        self.start(goal='otro más')   # the two earlier ones never opened a browser
+
+    def test_nothing_is_started_without_a_browser_worker(self):
+        self.worker.return_value = False
+        self.refused('unavailable', self.start)
+        self.assertFalse(AgentTask.objects.exists())
 
     @override_settings(AGENT_TASKS_PER_DAY=1)
     def test_a_day_has_a_limit(self):
@@ -264,3 +283,39 @@ class ToolTests(ServiceBase):
     def test_recent_words_that_are_not_this_message_are_not_used(self):
         result, task = self.call(['compra um cabo no mercado livre'], recent=['outra coisa', 'compra um cabo'])
         self.assertEqual(task.goal, 'compra um cabo no mercado livre')
+
+
+class WorkerTests(ServiceBase):
+    def test_the_heartbeat_marks_a_worker_and_it_goes_stale(self):
+        from django.core.cache import cache
+        cache.delete(service.WORKER_KEY)
+        self.assertFalse(REAL_WORKER_ALIVE())
+        service.worker_seen()
+        self.assertTrue(REAL_WORKER_ALIVE())
+        cache.set(service.WORKER_KEY, timezone.now().timestamp() - service.WORKER_FRESH_SECONDS - 1, 60)
+        self.assertFalse(REAL_WORKER_ALIVE())
+
+    def test_the_sweep_asks_the_browser_queue_for_a_heartbeat(self):
+        with mock.patch('agent_tasks.tasks.heartbeat.apply_async') as sent:
+            service.sweep()
+        self.assertEqual(sent.call_args.kwargs['queue'], 'browser')
+
+    def test_with_no_worker_what_waits_for_one_is_stopped_and_told(self):
+        stuck = self.make_task(state='queued')
+        AgentTask.objects.filter(pk=stuck.pk).update(created_at=timezone.now() - timedelta(minutes=4))
+        fresh_user, fresh_account = self.person()
+        fresh = self.make_task(user=fresh_user, account=fresh_account, state='queued')
+        self.worker.return_value = False
+        with mock.patch('agent_tasks.tasks.heartbeat.apply_async'):
+            service.sweep()
+        stuck.refresh_from_db()
+        fresh.refresh_from_db()
+        self.assertEqual((stuck.state, stuck.reason), ('stopped', 'unavailable'))
+        self.assertEqual(fresh.state, 'queued')   # a moment old: the worker may still answer
+        self.assertIn('Ahora no puedo abrir el navegador', self.post.call_args.args[1])
+
+    def test_the_chat_does_not_offer_purchases_without_a_worker(self):
+        viewer = SimpleNamespace(user=self.user, account_type='personal', is_employee=False, request_meta=BUILD)
+        self.assertTrue(assistant_tool.ready(viewer))
+        self.worker.return_value = False
+        self.assertFalse(assistant_tool.ready(viewer))

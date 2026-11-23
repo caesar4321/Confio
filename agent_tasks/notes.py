@@ -47,10 +47,12 @@ STOPPED = {
     'busy': 'Ahora no puedo abrir el navegador. Inténtalo más tarde.',
     'error': 'Algo falló y lo detuve. Puedes pedírmelo otra vez.',
     'cancelled': 'Listo, lo cancelé.',
+    'replaced': 'Dejé la compra en {site} para empezar la nueva.',
+    'unavailable': 'Ahora no puedo abrir el navegador para comprar por ti. Pídemelo más tarde.',
 }
 # After the hand-over, nothing may suggest there is no order.
 AFTER_CHECKOUT = (' Si ya confirmaste el pedido, sigue en tus compras de {site}: para pagarlo, {paste}.')
-TASK_ACTION = {'type': 'task', 'label': 'Ver la tarea'}
+TASK_ACTION = {'type': 'task', 'label': 'Abrir la tienda'}
 PUSH = {'person': 'Te toca a ti', 'payment': 'Revisa tu pago', 'check': 'Revisa tu compra'}
 
 

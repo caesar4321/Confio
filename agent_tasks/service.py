@@ -26,10 +26,10 @@ MESSAGES = {
                 '(.mx, con transferencia SPEI). Escríbeme la dirección de la tienda.'),
     'store': 'No puedo trabajar en ese sitio.',
     'goal': 'Dime en una frase qué quieres comprar.',
-    'active_task': 'Ya estoy con una tarea tuya. Termínala o cancélala primero.',
+    'active_task': 'Estoy terminando de cerrar tu compra anterior. Pídemelo otra vez en un momento.',
     'daily_limit': 'Llegaste al máximo de compras por hoy. Mañana seguimos.',
     'busy': 'Ahora hay muchas compras en curso. Inténtalo en unos minutos.',
-    'not_found': 'No encontré esa tarea.',
+    'not_found': 'No encontré esa compra.',
     'not_open': 'Esto ya no está esperando tu respuesta.',
     'view': 'No reconozco esa pantalla. Ábrela de nuevo.',
     'left_store': 'El navegador salió de la tienda. Por seguridad no te muestro esa página.',
@@ -87,9 +87,32 @@ def require_payable(account, user, country, meta):
         raise TaskRefused('unavailable', str(exc) or None) from exc
 
 
+# The browser worker answers the sweep's heartbeat (tasks.heartbeat on its own
+# queue). With none seen lately, purchases are not offered nor started: a
+# queued one would wait forever and stand in the way of the next.
+WORKER_KEY = 'agent_tasks:worker_seen'
+WORKER_FRESH_SECONDS = 180
+
+
+def worker_seen():
+    from django.core.cache import cache
+    cache.set(WORKER_KEY, timezone.now().timestamp(), WORKER_FRESH_SECONDS * 2)
+
+
+def worker_alive():
+    from django.core.cache import cache
+    try:
+        seen = cache.get(WORKER_KEY)
+    except Exception:  # noqa: BLE001 - unknown is not alive
+        return False
+    return seen is not None and timezone.now().timestamp() - float(seen) < WORKER_FRESH_SECONDS
+
+
 def start(account, user, *, goal, site, meta=None):
-    """A new task. `goal` is the person's own words, stored verbatim."""
-    if not conf.get('AGENT_TASKS_ENABLED') or not qr.available() or not conf.browserbase_api_key():
+    """A new purchase. `goal` is the person's own words, stored verbatim. An
+    earlier one still going is set aside for it: the person never manages them."""
+    if (not conf.get('AGENT_TASKS_ENABLED') or not qr.available() or not conf.browserbase_api_key()
+            or not worker_alive()):
         raise TaskRefused('unavailable')
     if not build_supported(meta):
         raise TaskRefused('update_app')
@@ -105,9 +128,13 @@ def start(account, user, *, goal, site, meta=None):
     if country not in conf.get('AGENT_TASKS_COUNTRIES') or countries.rail(country) is None:
         raise TaskRefused('country')
     mine = AgentTask.objects.filter(user=user)
-    if mine.filter(state__in=AgentTask.ACTIVE).exists():
-        raise TaskRefused('active_task')
-    if mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).count() >= conf.get('AGENT_TASKS_PER_DAY'):
+    for earlier in mine.filter(state__in=AgentTask.ACTIVE):
+        # The new request is what they want now. Its note says so (and, after the
+        # hand-over, that an order they confirmed there still waits to be paid).
+        runner.end(earlier, 'cancelled', 'replaced')
+    # Set aside before its browser ever opened costs nothing, as below.
+    if (mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(state='cancelled', steps=0).count()
+            >= conf.get('AGENT_TASKS_PER_DAY')):
         raise TaskRefused('daily_limit')
     require_payable(account, user, country, meta)
     try:
@@ -260,6 +287,16 @@ def _each(rows, work, what):
 
 
 def sweep():
+    from .tasks import heartbeat
+    try:
+        # Answered only by a browser worker: worker_alive() reads its mark.
+        heartbeat.apply_async(queue=conf.get('AGENT_TASKS_QUEUE'), expires=120)
+    except Exception:  # noqa: BLE001 - the sweep goes on
+        logger.warning('agent task heartbeat not sent', exc_info=True)
+    _sweep()
+
+
+def _sweep():
     """Expired waits end (first: they are the person's), lost steps run again,
     finished tasks release their browser, and what is old or a deleted
     person's is not kept."""
@@ -272,6 +309,14 @@ def sweep():
     _each(active.filter(state='needs_person', wait_until__lte=now).order_by('wait_until'), expire, 'waits')
     # Deletion here is a soft delete, so no FK cascade does any of this.
     _each(active.filter(user__is_active=False), lambda task: runner.end(task, 'cancelled', 'cancelled'), 'deleted')
+
+    if not worker_alive():
+        # No browser worker to run them: what waited for one is stopped and the person told,
+        # never left to stand in the way of the next request.
+        _each(active.filter(state__in=AgentTask.RUNNING, created_at__lt=now - timedelta(minutes=3))
+              .exclude(lease_until__gt=now),
+              lambda task: runner.end(task, 'stopped', 'unavailable', only={'state__in': AgentTask.RUNNING}),
+              'stranded')
 
     def rerun(task):
         # Touched first, so a backlog is one delivery per interval, not one per sweep.

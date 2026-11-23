@@ -514,7 +514,7 @@ it('a second tap while the first is answered says so', async () => {
 it('a first read that failed keeps trying, and can be retried by hand', async () => {
   mockQuery.mockRejectedValueOnce(new Error('offline'));
   const tree = await mount();
-  expect(texts(tree)).toContain('No pude leer la tarea. Revisa tu conexión.');
+  expect(texts(tree)).toContain('No pude leer la compra. Revisa tu conexión.');
   expect(button(tree, 'Reintentar')).toBeDefined();
   await rerender(tree);
   expect(texts(tree)).toContain('Necesito que inicies sesión en mercadolibre.com.mx.');
@@ -631,7 +631,7 @@ it('asks before cancelling', async () => {
 it('says so when the task is not this person\'s or does not exist', async () => {
   mockTask = null;
   const tree = await mount();
-  expect(texts(tree).some((t) => t.startsWith('No encontré esta tarea.'))).toBe(true);
+  expect(texts(tree).some((t) => t.startsWith('No encontré esta compra.'))).toBe(true);
   expect(texts(tree).some((t) => t.includes('cuenta personal'))).toBe(true);
   expect(mockOpen).not.toHaveBeenCalled();
 });
