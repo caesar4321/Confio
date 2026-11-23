@@ -619,9 +619,9 @@ class ExactLocalApiRound5Tests(ExactLocalApiTests):
     def test_more_copies_of_a_qr_than_can_be_checked_count_as_held(self):
         fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
         key = local_money.store_order_snapshot(fixed)['key']
-        self.assertFalse(local_money.is_held(key, destination=fixed))
+        self.assertFalse(bool(local_money.held(key, destination=fixed)))
         with mock.patch.object(local_money, 'SAME_QR_LIMIT', 0):
-            self.assertTrue(local_money.is_held(key, destination=fixed))
+            self.assertTrue(bool(local_money.held(key, destination=fixed)))
 
     def test_a_rail_less_argentine_row_gets_its_rail(self):
         from .test_breb_fixed_qr import argentina
@@ -656,10 +656,10 @@ class ExactLocalRound6JourneyTests(ExactLocalRound4JourneyTests):
                                destination=fixed, minimum_fx_output='1249.00')
         key = first.destination_snapshot['store_order']['key']
         stranger = type(self.owner).objects.create(user=self.owner.user, account_type='business', account_index=9)
-        self.assertTrue(local_money.is_held(key, exclude_request_id=first.request_id, destination=fixed,
-                                            owner=stranger))
-        self.assertFalse(local_money.is_held(key, exclude_request_id=first.request_id, destination=fixed,
-                                             owner=self.owner))
+        self.assertTrue(bool(local_money.held(key, exclude_request_id=first.request_id, destination=fixed,
+                                            owner=stranger)))
+        self.assertFalse(bool(local_money.held(key, exclude_request_id=first.request_id, destination=fixed,
+                                             owner=self.owner)))
 
     def test_the_paid_once_lookups_use_their_indexes(self):
         from django.db import connection
@@ -774,6 +774,36 @@ class ExactLocalApiRound8Tests(ExactLocalApiTests):
         self.assertEqual(held['rate'], Decimal('5.0000'))   # 500 for the same 100 dollars
 
 
+class ExactLocalRound9JourneyTests(ExactLocalRound8JourneyTests):
+    def test_a_bridge_that_never_delivered_does_not_hold_a_qr(self):
+        fixed = self.fixed(breb('1249'))
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        key = first.destination_snapshot['store_order']['key']
+        for status in ('expired', 'failed', 'refunded'):
+            with self.subTest(status=status):
+                first.bridge.status = status; first.bridge.save(update_fields=['status'])
+                self.assertEqual(local_money.held(key, destination=fixed), '')   # the journey is not failed yet
+
+    def test_a_card_started_from_an_older_build_is_refused(self):
+        row = self.destination()
+        card = mock.Mock(params={'exact_local': '1249.00'}, amount_exact=True)
+        with mock.patch.object(payment_intents, 'journey_guard', return_value=card), \
+                mock.patch.object(local_money, 'fixed_qr_build_supported', return_value=False):
+            result = self.mutate(row)
+        self.assertFalse(result.success)
+        self.assertIn('Actualiza la app', result.errors[0])
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound9Tests(ExactLocalApiTests):
+    def test_an_exact_cards_rate_is_what_each_dollar_buys(self):
+        intent = payment_intents.prepare(self.owner, self.user, created_by='scan', source='form', request={
+            'method_id': 'br_pix', 'value': 'ana@example.com', 'amount_local': '500'})
+        self.assertEqual(intent.rate, (Decimal('500') / intent.total_usd).quantize(Decimal('0.0001'), rounding='ROUND_DOWN'))
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -801,3 +831,7 @@ only_own_tests(ExactLocalApiRound7Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalRound8JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
                ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests)
 only_own_tests(ExactLocalApiRound8Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound9JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
+               ExactLocalRound8JourneyTests)
+only_own_tests(ExactLocalApiRound9Tests, ExactLocalApiTests)

@@ -340,6 +340,13 @@ def store_order_terms(request):
     return {'amount': str(amount.quantize(CENT)), 'reference': reference}
 
 
+def _all_in_rate(exact, price):
+    """What each dollar of an exact card buys, as Pagar shows it (the spare
+    stays local, so it is part of this payment's cost)."""
+    total = Decimal(str(price['total_usd']))
+    return (exact / total).quantize(Decimal('0.0001'), rounding=ROUND_DOWN) if total > 0 else price['rate']
+
+
 def _pace(owner):
     try:
         local_money.pace_exact_quotes(owner)
@@ -483,13 +490,13 @@ def read_transfer(owner, user, method_id, request, *, client=None):
         # rest stays in the person's own peso account (store_order_snapshot).
         exact = Decimal(exact).quantize(CENT)
         facts.update(_order_price(owner, destination, exact, client=client))
-        facts.update(amount_exact=True, amount_local=exact, minimum_local=exact)
+        facts.update(amount_exact=True, amount_local=exact, minimum_local=exact, rate=_all_in_rate(exact, facts))
     elif typed:
         # The person named an exact local amount for a key or an account: the
         # same pricing, and the payment (not the recipient) carries the amount.
         exact = Decimal(typed)
         facts.update(_order_price(owner, destination, exact, client=client))
-        facts.update(amount_exact=True, amount_local=exact, minimum_local=exact)
+        facts.update(amount_exact=True, amount_local=exact, minimum_local=exact, rate=_all_in_rate(exact, facts))
         facts.update(family='local_transfer', provider=JOURNEY_PROVIDER, destination=destination,
                      params={'exact_local': typed})
         return facts

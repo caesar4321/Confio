@@ -161,6 +161,22 @@ EXACT_QUOTES_PER_WINDOW = 20
 EXACT_QUOTE_WINDOW_SECONDS = 60
 
 
+def _pace_exact(user):
+    """Every exact-bolívares price (a quote, or an order priced fresh) asks
+    Pago ASAP and the bridge several times; their limits are shared with real
+    payouts, so each person is paced."""
+    from django.core.cache import cache
+    key = f've_exact_quote:{user.pk}'
+    cache.add(key, 0, EXACT_QUOTE_WINDOW_SECONDS)
+    try:
+        count = cache.incr(key)
+    except ValueError:   # the window ended between add and incr
+        cache.set(key, 1, EXACT_QUOTE_WINDOW_SECONDS)
+        count = 1
+    if count > EXACT_QUOTES_PER_WINDOW:
+        raise VePagoMovilError('Espera un momento antes de cotizar otro monto.')
+
+
 def _exact_adapter():
     """The send provider, when it can pay an exact bolívar amount."""
     adapter = ve_pagomovil.send_adapter()
@@ -370,6 +386,7 @@ class CreateVePagoMovilSend(graphene.Mutation):
                 raise VePagoMovilError(step_up, FACE_STEP_UP_NEXT_STEP)
             beneficiary = _beneficiary(cedula, phone, bank_code, beneficiary_name)
             if ves_amount not in (None, ''):
+                _pace_exact(user)
                 ramp = _exact_adapter().create(user, account, amount, beneficiary, exact_ves=ves_amount)
             else:
                 ramp = ve_pagomovil.send_adapter().create(user, account, amount, beneficiary)
@@ -509,16 +526,7 @@ class Query(graphene.ObjectType):
             # send), and a per-person pace: Pago ASAP's limits are shared
             # with real payouts.
             user, _ = _preflight(info, SEND)
-            from django.core.cache import cache
-            key = f've_exact_quote:{user.pk}'
-            cache.add(key, 0, EXACT_QUOTE_WINDOW_SECONDS)
-            try:
-                count = cache.incr(key)
-            except ValueError:   # the window ended between add and incr
-                cache.set(key, 1, EXACT_QUOTE_WINDOW_SECONDS)
-                count = 1
-            if count > EXACT_QUOTES_PER_WINDOW:
-                raise VePagoMovilError('Espera un momento antes de cotizar otro monto.')
+            _pace_exact(user)
             quote = _exact_adapter().quote_exact(ves_amount)
             quote.pop('exact_ves', None)
             for key, name in (('min_usd', 'VE_PAGOMOVIL_SEND_MIN_USD'), ('max_usd', 'VE_PAGOMOVIL_SEND_MAX_USD')):

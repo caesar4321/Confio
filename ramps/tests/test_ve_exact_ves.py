@@ -273,3 +273,23 @@ class ExactRound8Tests(TestCase):
         plain = self._ramp(estimate={'rate': '1000'})
         self.assertEqual(ve_send.view(exact)['exact_ves'], '15000.00')
         self.assertIsNone(ve_send.view(plain)['exact_ves'])
+
+
+class ExactRound9Tests(TestCase):
+    def test_exact_orders_share_the_quote_pace(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        from ramps.ve_pagomovil_schema import CreateVePagoMovilSend, EXACT_QUOTES_PER_WINDOW
+        cache.clear()
+        user = get_user_model().objects.create(username='ve-exact-9', firebase_uid='ve-exact-9')
+        info = mock.Mock(context=mock.Mock(user=user, META={}))
+        adapter = mock.Mock()
+        adapter.create.side_effect = ve_pagomovil.VePagoMovilError('El precio cambió. Revisa el envío de nuevo.')
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(user, mock.Mock())), \
+                mock.patch('security.face_step_up.missing_face_step_up', return_value=None), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter):
+            answers = [CreateVePagoMovilSend().mutate(info, usd_amount='0.01', cedula='V12345678', phone='04141234567',
+                                                      bank_code='0102', ves_amount='25000')
+                       for _ in range(EXACT_QUOTES_PER_WINDOW + 1)]
+        self.assertEqual(adapter.create.call_count, EXACT_QUOTES_PER_WINDOW)   # the last one never reaches Pago ASAP
+        self.assertIn('Espera', answers[-1].error)

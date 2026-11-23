@@ -214,11 +214,14 @@ class CreateInfiniaJourney(graphene.Mutation):
                     exact = _exact_amount(exact)
                 fixed = destination is not None and is_fixed_amount_qr(destination)
                 if intent is not None:
-                    if fixed and is_new_send:
+                    shown = (intent.params or {}).get('exact_local')
+                    if (fixed or shown) and is_new_send:
+                        # Started from this device: it must be a build that
+                        # says where an exact payment's spare goes.
                         from .local_money import fixed_qr_build_supported
                         if not fixed_qr_build_supported(info.context.META):
-                            raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
-                    shown = (intent.params or {}).get('exact_local')
+                            raise PaymentAccountError(UPDATE_FOR_FIXED_QR if fixed
+                                                      else 'Actualiza la app para enviar un monto exacto.')
                     if exact is not None and (not shown or exact != Decimal(shown)):
                         raise payment_intents._refuse('changed')
                     if fixed and not intent.amount_exact and is_new_send:

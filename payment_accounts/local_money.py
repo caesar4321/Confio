@@ -1511,7 +1511,7 @@ SAME_QR_LIMIT = 500
 
 def _same_qr_destinations(destination):
     """Every recipient row (any account) that holds this very QR, at most
-    SAME_QR_LIMIT + 1 (is_held counts more than the limit as held)."""
+    SAME_QR_LIMIT + 1 (held() counts more than the limit as held)."""
     method, payload = _qr_payload(destination)
     if method is None or not payload:
         return []
@@ -1551,10 +1551,6 @@ def held(key, exclude_request_id=None, destination=None, owner=None):
     return state
 
 
-def is_held(key, exclude_request_id=None, destination=None, owner=None):
-    return bool(held(key, exclude_request_id=exclude_request_id, destination=destination, owner=owner))
-
-
 def held_message(state, what='QR'):
     if state == SIGNING:
         return f'Hay un pago de este {what} esperando firma. Espera unos minutos y vuelve a intentarlo.'
@@ -1569,13 +1565,16 @@ def _live(rows, exclude_request_id=None, owner=None):
     client's, unique per account only)."""
     import time
     rows = rows.exclude(stage='failed').exclude(bridge__status='prepared', bridge__deadline__lt=int(time.time()))
+    # A bridge that ended without delivering, before any conversion: nothing
+    # reached the provider, even while the journey is not yet marked failed.
+    rows = rows.exclude(bridge__status__in=('expired', 'failed', 'refunded'), fx_operation__isnull=True)
     if exclude_request_id:
         rows = rows.exclude(request_id=exclude_request_id, confio_account=owner) if owner is not None \
             else rows.exclude(request_id=exclude_request_id)
     return rows
 
 
-def holding_payments(key, exclude_request_id=None, owner=None, destination=None):
+def holding_payments(key, exclude_request_id=None, owner=None):
     """The live payments that carry this order or QR key."""
     from .models import InfiniaJourney
     return _live(InfiniaJourney.objects.filter(direction='to_bank', destination_snapshot__store_order__key=key),
