@@ -1553,3 +1553,10 @@ confio_admin_site.register(LocationReading, LocationReadingAdmin)
 from smart_account.admin import REGISTRY as SMART_ACCOUNT_ADMIN_REGISTRY
 for _smart_model, _smart_admin in SMART_ACCOUNT_ADMIN_REGISTRY:
     confio_admin_site.register(_smart_model, _smart_admin)
+
+
+# Cloud-browser shopping tasks (agent_tasks/): read-only.
+from agent_tasks.admin import AgentProfileAdmin, AgentTaskAdmin
+from agent_tasks.models import AgentProfile, AgentTask
+confio_admin_site.register(AgentTask, AgentTaskAdmin)
+confio_admin_site.register(AgentProfile, AgentProfileAdmin)

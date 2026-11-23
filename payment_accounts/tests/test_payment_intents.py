@@ -109,7 +109,7 @@ class PrepareTests(PaymentIntentBase):
         from pathlib import Path
         source = (Path(__file__).resolve().parents[2] / 'config/settings.py').read_text()
         self.assertIn("default='holder_verified,confio_account,provider_named,institution_charge,"
-                      "institution_amount,saved_payee')", source)
+                      "institution_amount,saved_payee,'\n            'store_checkout')", source)
         self.assertRegex(source, r"PAYMENT_INTENTS_ALLOWED_USER_IDS = config\([^)]*default=''\)")
         self.assertRegex(source, r"PAYMENT_INTENTS_MIN_APP_VERSION = config\([^)]*default=''\)")
         with override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=''):

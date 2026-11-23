@@ -135,6 +135,15 @@ PAYMENT_PREPARED_REPLY = ('Preparé el pago. Revisa el comercio, el monto y el t
                           'se paga solo cuando lo confirmas con Confío Face.')
 
 
+def _started_a_task(history, message):
+    # A store task's note after a message: that request was served, and a
+    # later "gracias" must not start the same purchase again.
+    later = history[history.index(message) + 1:] if message in history else []
+    # Its first note only: a later "te toca" must not swallow a code pasted just before "págalo".
+    notices = (str((getattr(m, 'metadata', None) or {}).get('notice') or '') for m in later)
+    return any(notice.startswith('agent_task:') and notice.endswith(':start') for notice in notices)
+
+
 def payment_texts(history):
     """The messages a payment code may be read from: what the person typed
     or pasted just now, and the typed message right before it when it is a
@@ -167,11 +176,28 @@ def payment_texts(history):
     if not mine or not typed(mine[-1]):
         return []
     texts = [mine[-1].body.strip()]
-    if len(mine) > 1 and typed(mine[-2]) and not answered_with_a_card(mine[-2]):
+    if (len(mine) > 1 and typed(mine[-2]) and not answered_with_a_card(mine[-2])
+            and not _started_a_task(history, mine[-2])):
         earlier, latest = getattr(mine[-2], 'created_at', None), getattr(mine[-1], 'created_at', None)
         if earlier is not None and latest is not None and timedelta(0) <= latest - earlier <= PAYMENT_CODE_WINDOW:
             texts.append(mine[-2].body.strip())
     return texts
+
+
+STORE_TASK_WINDOW = timedelta(minutes=15)
+
+
+def store_task_words(history):
+    """The person's own typed messages of the last minutes, oldest first: a
+    purchase is often named a few messages before "hazlo tú" (agent_tasks).
+    Never a tapped suggestion, a voice note, a photo or anyone else's text."""
+    mine = [m for m in history if m.sender_type == 'USER' and (m.body or '').strip()
+            and not (m.metadata or {}).get('client_reported') and not (m.metadata or {}).get('handoff_note')
+            and str((m.metadata or {}).get('modality') or 'TEXT').upper() == 'TEXT' and not is_tapped_text(m.body)]
+    latest = getattr(mine[-1], 'created_at', None) if mine else None
+    return [m.body.strip() for m in mine
+            if latest is not None and getattr(m, 'created_at', None) is not None
+            and timedelta(0) <= latest - m.created_at <= STORE_TASK_WINDOW]
 
 
 OWNER_WORDS_MESSAGES = 10
@@ -1325,6 +1351,9 @@ class Toolbelt:
                 },
                 'strict': True,
             })
+        if self.store_tasks_ready():
+            from agent_tasks import assistant_tool
+            specs.append(assistant_tool.spec())
         if self.payments_ready():
             specs.append({
                 'type': 'function',
@@ -1545,8 +1574,11 @@ class Toolbelt:
             'smart_account_review': self.smart_account_review,
             'smart_account_alerts': self.smart_account_alerts,
             'prepare_payment': self.prepare_payment,
+            'start_store_task': self.start_store_task,
         }.get(name)
         if name == 'prepare_payment' and not self.payments_ready():
+            handler = None
+        if name == 'start_store_task' and not self.store_tasks_ready():
             handler = None
         if name in SMART_OPS_TOOLS and not self.smart_ops():
             handler = None
@@ -1783,6 +1815,7 @@ class Toolbelt:
         'get_month_summary', 'get_transactions', 'get_portfolio', 'analyze_finances', 'get_topup_status',
         'categorize_transactions', 'smart_account_rules', 'smart_account_review', 'propose_smart_account_rule',
         'propose_target_allocation', 'smart_account_alerts', 'prepare_payment',
+        'start_store_task',
     })
 
     def search_web(self, query, language='español'):
@@ -1813,6 +1846,34 @@ class Toolbelt:
             # Web text is untrusted: the answer that follows gets no tools.
             self.saw_web = True
         return found
+
+    # ── Shopping in a cloud browser: the owner confirms and pays, see agent_tasks/ ──
+
+    def store_tasks_ready(self) -> bool:
+        """Open to everyone on a build with the live view, on their own personal account."""
+        if not hasattr(self, '_store_tasks_ready'):
+            self._store_tasks_ready = False
+            if self.can_navigate and self.payments_ready():  # an order nobody could pay is never started
+                try:
+                    from agent_tasks import assistant_tool
+                    self._store_tasks_ready = assistant_tool.ready(self.viewer)
+                except Exception:  # noqa: BLE001 — no tool is always safe
+                    logger.warning('Confio Assistant: store task check failed', exc_info=True)
+        return self._store_tasks_ready
+
+    def start_store_task(self, store=None):
+        # The goal is the person's typed words; the model only points at a store.
+        if self.result.payment_intent is not None or self.result.rule_proposal is not None:
+            return {'ok': False, '_denied': True, 'motivo': 'Ya hay una propuesta en esta respuesta.'}
+        if 'start_store_task' in self.paid_used:
+            return {'ok': False, '_denied': True, 'motivo': 'Una compra por mensaje.'}
+        self.paid_used.add('start_store_task')
+        from agent_tasks import assistant_tool
+        # What to buy is often said a few messages before "hazlo tú": the person's own recent typed words.
+        recent = store_task_words(getattr(self, 'turn_history', None) or [])
+        answer, _ = assistant_tool.call(self.viewer, self.payment_texts, saw_web=self.saw_web, store=store,
+                                        recent=recent)
+        return answer
 
     # ── Prepared payments: a card the owner reviews and signs ──────────────
 

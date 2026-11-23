@@ -998,7 +998,8 @@ class PaymentIntent(models.Model):
     CREATED_BY = [('assistant', 'Assistant'), ('scan', 'Scan'), ('share', 'Share'), ('paste', 'Paste')]
     SOURCES = [('pasted_code', 'Pasted code'), ('shared_qr', 'Shared QR'), ('scanned_qr', 'Scanned QR'),
                ('owner_words', 'Details in the owner\'s own words'), ('form', 'Details typed in the app'),
-               ('saved_payee', 'A saved recipient')]
+               ('saved_payee', 'A saved recipient'),
+               ('agent_checkout', 'A checkout the owner finished in the assistant browser')]
     # How far the rail vouches for who is paid (payment_intents.LEVELS and the rails).
     PAYEE_LEVELS = [('holder_verified', 'Registered holder, verified by the bank lookup'),
                     ('confio_account', 'A Confío account'),
@@ -1008,6 +1009,7 @@ class PaymentIntent(models.Model):
                     ('signed_charge', 'Charge and receiver signed by the site of the charge'),
                     ('signed_amount', 'Charge signed by the site of the charge, name from the code'),
                     ('saved_payee', 'A recipient in the owner\'s own agenda'),
+                    ('store_checkout', 'A store order\'s account read off the store\'s own checkout, no lookup'),
                     ('self_reported', 'Name from the code, unverified'),
                     ('unverified', 'Identifier as given, no holder lookup')]
     # What kind of payment it is, whoever carries it: an exact local amount

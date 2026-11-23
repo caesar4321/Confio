@@ -76,6 +76,9 @@ TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions', 'prepare_p
                    'privacy_settings', 'propose_referrer', 'propose_stock_trade', 'propose_topup',
                    'note_first_use'}
 
+# A store task starts from typed words and continues on cards.
+TEXT_ONLY_TOOLS |= {'start_store_task'}
+
 
 def _realtime_tools(belt):
     tools = []

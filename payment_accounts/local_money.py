@@ -825,11 +825,18 @@ def _validate(method, value, client):
                 'institution': '', 'checked_at': timezone.now().isoformat()}
 
 
-def resolve_destination(owner, method_id, raw_value, *, client=None):
+def resolve_destination(owner, method_id, raw_value, *, client=None, store_order=None):
+    """`store_order` ({'amount', 'reference'}, SPEI only): one store order's
+    account, paid once with the order's own reference. Its row is never a
+    saved recipient and never another order's."""
     from django.db import transaction
     method = get_method(method_id, 'send')
     value = normalize_value(method, raw_value)
     details = {'type': method.destination_type, method.field: value, **dict(method.constants)}
+    if store_order is not None:
+        if method.id != 'mx_clabe':
+            raise PaymentAccountError('Este medio no paga pedidos de tiendas.')
+        details['reference'] = store_order['reference']
     qr_data = decode_breb_qr(value) if method.id == 'co_qr' else None
     if qr_data:
         details[method.field] = qr_data['key']
@@ -845,6 +852,8 @@ def resolve_destination(owner, method_id, raw_value, *, client=None):
         # Different QR amounts/references must never overwrite a saved intent.
         if qr_data:
             candidates = candidates.filter(provider_data__breb_qr__payload=value)
+        elif store_order is not None:
+            candidates = candidates.filter(provider_data__store_order=store_order)
         else:
             candidates = candidates.filter(Q(provider_data__method_id__isnull=True)
                                            | ~Q(provider_data__method_id='co_qr'))
@@ -861,6 +870,11 @@ def resolve_destination(owner, method_id, raw_value, *, client=None):
                 destination.save(update_fields=['provider_data'])
             elif fixed_pix_charge(method, value):
                 destination.provider_data = {**(destination.provider_data or {}), 'fixed_charge': True}
+                destination.save(update_fields=['provider_data'])
+            elif store_order is not None:
+                # fixed_charge keeps it out of the saved list (saved_destinations).
+                destination.provider_data = {**(destination.provider_data or {}), 'fixed_charge': True,
+                                             'store_order': store_order}
                 destination.save(update_fields=['provider_data'])
         check = _start_check(destination)
     validation = _validate(method, value, client)
@@ -1037,6 +1051,19 @@ def charge_snapshot(destination):
             'amount': str(charge['amount'] or ''), 'expires_at': charge['expiration_raw'],
             'holder': str(charge['validation'].get('holder_name') or ''),
             'holder_source': str(charge['validation'].get('holder_source') or 'dict')}
+
+
+def store_order_snapshot(destination):
+    """The terms a journey pays one store order on (SPEI: exact pesos with the
+    order's reference); None for any other recipient. The key is the order:
+    paid once, from any account."""
+    order = (destination.provider_data or {}).get('store_order') if destination is not None else None
+    if not order:
+        return None
+    clabe = (destination.details or {}).get('clabe', '')
+    return {'amount': str(order['amount']), 'reference': str(order['reference']),
+            # The order is its account and reference: a second reading with another amount is the same order.
+            'key': 'spei:order:' + _sha(f"{clabe}|{order['reference']}")}
 
 
 def _seconds_left(expires_at):

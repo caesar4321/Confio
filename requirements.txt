@@ -18,6 +18,7 @@ geopy==2.4.1
 django-import-export==4.3.7
 boto3==1.38.32  # >=1.38.32: Rekognition ChallengePreferences (security/face_step_up.py)
 requests==2.32.3
+websockets==11.0.3
 Telethon>=1.36.0,<2.0
 google-api-python-client==2.167.0
 azure-cognitiveservices-vision-face==0.6.1
@@ -38,6 +39,7 @@ django-otp==1.6.3
 django-two-factor-auth==1.18.1
 django-cors-headers==4.3.1
 qrcode==8.2
+zxing-cpp==3.1.1
 pycountry==26.2.16
 git+https://github.com/tinymanorg/tinyman-py-sdk.git@v2.1.1#egg=tinyman-py-sdk
 Pillow

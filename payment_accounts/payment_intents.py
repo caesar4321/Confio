@@ -16,7 +16,9 @@ Rules this module keeps (docs/designs/ai-assistant-first-redesign.md, section 3)
   field; a confirmation with another hash, or after the charge or the price
   moved against the person, is refused and needs a new quote (a new row).
 - The code comes from the person: their own message, their camera, or a share.
-  A code found in tool output, a web page or assistant text never reaches here.
+  One other source: the screen where the owner just finished a store's checkout
+  themselves (source 'agent_checkout', agent_tasks/runner.after_checkout), read
+  by code. A code in tool output or assistant text never reaches here.
 - Fail closed: no row unless the charge is readable, payable and priced.
 """
 import hashlib
@@ -63,7 +65,10 @@ INSTITUTION_LEVELS = {'signed_charge': 'institution_charge', 'signed_amount': 'i
 # before). The rest
 # (a site we cannot tie to an institution, a name that is only the code's
 # text, an identifier nobody looked up) need PAYMENT_INTENTS_PAYEE_LEVELS.
-DEFAULT_LEVELS = 'holder_verified,confio_account,provider_named,institution_charge,institution_amount,saved_payee'
+DEFAULT_LEVELS = ('holder_verified,confio_account,provider_named,institution_charge,institution_amount,saved_payee,'
+                  # A store order's account as the store's own checkout screen showed it (agent_tasks,
+                  # founder 2026-11-23): only that source makes it, and the card says it is unverified.
+                  'store_checkout')
 CLIENT_EVENTS = frozenset({'card_shown', 'sheet_opened'})
 # Control, format (bidi, zero-width, tags), private-use, unassigned, line/paragraph separators.
 _UNSAFE_CATEGORIES = frozenset({'Cc', 'Cf', 'Co', 'Cn', 'Cs', 'Zl', 'Zp'})
@@ -404,6 +409,8 @@ def prepare(owner, user, raw_code=None, *, created_by, source, request=None, mes
     """
     refusal_source = {'created_by': created_by}
     request = dict(request or {})
+    # Where the request came from is the caller's argument, never a request field.
+    request['_source'] = source
     if raw_code is not None:
         request['code'] = str(raw_code or '').strip()
     try:
@@ -447,6 +454,12 @@ def prepare(owner, user, raw_code=None, *, created_by, source, request=None, mes
         # No time left to review and sign it: no card, rather than one born expired.
         _track(None, 'refused', user=user, reason='expiring', **refusal_source)
         raise _refuse('rail', 'Este cobro vence muy pronto para pagarlo con seguridad. Pide un QR nuevo.')
+    if source == 'agent_checkout' and supersedes is not None and (
+            (facts['currency'], facts['amount_local']) != (supersedes.currency, supersedes.amount_local)):
+        # The order's amount was what the first card showed. Checked before anything is saved or
+        # retired: a row with another amount would become what the next re-quote compares to.
+        _track(None, 'refused', user=user, reason='changed', **refusal_source)
+        raise _refuse('changed')
     with transaction.atomic():
         intent = PaymentIntent(
             confio_account=owner, user=user, created_by=created_by, source=source, rail_method_id=method_id,
@@ -1079,6 +1092,10 @@ def _request_of(intent, meta=None):
     own stored details (never from the client)."""
     if intent.family in ('local_charge', 'local_transfer'):
         method = local_money.METHODS[intent.rail_method_id]
+        order = (intent.params or {}).get('store_order')
+        if order:
+            return {'method_id': method.id, 'value': local_money._destination_value(intent.destination, method),
+                    'amount_local': order['amount'], 'reference': order['reference'], 'meta': meta}
         return {'method_id': method.id, 'value': local_money._destination_value(intent.destination, method),
                 'amount_usd': None if intent.family == 'local_charge' else intent.total_usd, 'meta': meta}
     if intent.family == 'confio_send':
@@ -1456,6 +1473,11 @@ def journey_guard(owner, request_id, *, direction, bridge, destination, minimum_
         raise _refuse('changed')
     if not _bridge_signable(bridge) or not _charge_has_time(intent):
         raise _refuse('expired')
+    if intent.family == 'local_transfer' and (intent.params or {}).get('store_order'):
+        # A store order: the very order the card showed, on its own row.
+        if (destination.provider_data or {}).get('store_order') != intent.params['store_order']:
+            raise _refuse('charge_changed')
+        return intent
     if intent.family == 'local_transfer':
         # The recipient must still read as the card showed it.
         try:

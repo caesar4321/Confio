@@ -288,8 +288,89 @@ def _location(owner, method, meta):
     breb_location.require_for_country(owner, method.country, meta or {})
 
 
+# A store's SPEI order: its CLABE, exact pesos and the order's reference, as
+# the store's own checkout screen showed them (agent_tasks). The dollars are
+# priced so that the conversion's guaranteed minimum covers the order; the
+# payout is exactly the order (infinia_journeys); what the conversion lands
+# above it stays in the person's own peso account (founder, 2026-11-23).
+STORE_ORDER_SOURCE = 'agent_checkout'
+SPEI_REFERENCE_MAX = 40
+_PRICE_TRIES = 5
+
+
+def store_order_terms(request):
+    """{'amount', 'reference'} when this request pays one store order, else None."""
+    if request.get('_source') != STORE_ORDER_SOURCE or request.get('reference') in (None, ''):
+        return None
+    reference = ' '.join(str(request.get('reference') or '').split())
+    if not 1 <= len(reference) <= SPEI_REFERENCE_MAX or not all(c.isascii() and (c.isalnum() or c == ' ')
+                                                                 for c in reference):
+        raise _refuse('no_code', 'La referencia del pedido no es válida para SPEI.')
+    try:
+        amount = Decimal(str(request.get('amount_local')))
+    except (InvalidOperation, TypeError, ValueError):
+        amount = None
+    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(CENT) \
+            or amount >= Decimal('1e8'):
+        raise _refuse('no_amount', 'No pude leer el monto del pedido.')
+    return {'amount': str(amount.quantize(CENT)), 'reference': reference}
+
+
+def _order_price(owner, destination, exact, *, client=None):
+    """The dollars whose guaranteed minimum covers `exact` local units."""
+    dollars = Decimal('10.00')
+    for _ in range(_PRICE_TRIES):
+        price = _transfer_price(owner, destination, dollars, client=client)
+        # Scaled both ways from the probe: an amount under the probe is not
+        # charged the probe's dollars.
+        needed = (dollars * exact / price['minimum_local']).quantize(CENT, rounding=ROUND_UP) + CENT
+        if price['minimum_local'] >= exact and dollars <= needed:
+            return price
+        dollars = needed
+    raise _refuse('rail', 'No pudimos cotizar este pedido. Intenta de nuevo.')
+
+
+# The bank a CLABE belongs to is its first three digits (Banxico's institution codes).
+CLABE_BANKS = {'002': 'Banamex', '012': 'BBVA México', '014': 'Santander', '021': 'HSBC', '030': 'BanBajío',
+               '036': 'Inbursa', '044': 'Scotiabank', '058': 'Banregio', '072': 'Banorte', '127': 'Banco Azteca',
+               '137': 'BanCoppel', '646': 'STP', '722': 'Mercado Pago'}
+
+
+def _order_facts(destination, order, price):
+    exact = Decimal(order['amount'])
+    clabe = (destination.details or {}).get('clabe', '')
+    return {
+        # Read off the store's own checkout; no holder lookup (founder, 2026-11-23).
+        'payee_name': 'Cuenta de la tienda', 'payee_level': _allowed('store_checkout'), 'payee_document': '',
+        'institution': CLABE_BANKS.get(clabe[:3], ''), 'payee_account': _clean(clabe, 140),
+        **price, 'amount_exact': True, 'amount_local': exact, 'minimum_local': exact,
+    }
+
+
+def read_store_order(owner, user, method_id, request, order, *, client=None):
+    from .payment_intents import _identity
+    method = local_money.get_method(method_id, 'send')
+    if method.id != 'mx_clabe':
+        raise _refuse('no_code', 'Este medio no paga pedidos de tiendas.')
+    raw = str(request.get('code') or request.get('value') or '').strip()
+    try:
+        value = local_money.normalize_value(method, raw)
+    except PaymentAccountError as exc:
+        raise _refuse('no_code', str(exc)) from exc
+    local_money.require_rail(owner, _identity(owner), method)
+    destination = local_money.resolve_destination(owner, method_id, value, client=client, store_order=order)
+    facts = _order_facts(destination, order, _order_price(owner, destination, Decimal(order['amount']),
+                                                          client=client))
+    facts.update(family='local_transfer', provider=JOURNEY_PROVIDER, destination=destination,
+                 params={'store_order': order})
+    return facts
+
+
 def read_transfer(owner, user, method_id, request, *, client=None):
     from .payment_intents import _identity
+    order = store_order_terms(request)
+    if order is not None:
+        return read_store_order(owner, user, method_id, request, order, client=client)
     method = local_money.get_method(method_id, 'send')
     raw = str(request.get('code') or request.get('value') or '').strip()
     try:
@@ -314,6 +395,17 @@ def reread_transfer(owner, intent, request_meta=None, *, client=None):
     not move against the owner. Returns the recipient row."""
     method = local_money.get_method(intent.rail_method_id, 'send')
     _location(owner, method, request_meta)
+    order = (intent.params or {}).get('store_order')
+    if order:
+        # The same order: its row still carries it, and the dollars shown still cover it.
+        destination = intent.destination
+        if (destination.provider_data or {}).get('store_order') != order:
+            raise _refuse('charge_changed', 'El pedido cambió desde que lo viste. Revísalo de nuevo.')
+        price = _transfer_price(owner, destination, intent.total_usd, client=client)
+        if price['minimum_local'] < Decimal(order['amount']) or price['fee_usd'] > intent.fee_usd \
+                or price['currency'] != intent.currency:
+            raise _refuse('quote_changed')
+        return destination
     destination = local_money.recheck_destination(intent.destination, client=client)
     payee = transfer_payee(destination)
     if any(payee[key] != getattr(intent, key) for key in payee):

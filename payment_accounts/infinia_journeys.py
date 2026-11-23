@@ -110,6 +110,10 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         charge = charge_snapshot(destination)
         if charge is not None:
             snapshot['pix_charge'] = charge
+        from .local_money import store_order_snapshot
+        order = store_order_snapshot(destination)
+        if order is not None:
+            snapshot['store_order'] = order
         if (not bridge or bridge.quote.confio_account_id != owner.pk
                 or bridge.quote.source_token_id != 'BSC:USDT'
                 or bridge.quote.funding_instruction.financial_account_id != crypto_account.pk):
@@ -167,6 +171,19 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         payable = require_payable_charge(owner, destination, exclude_request_id=request_id)
         if minimum != payable['amount'] or Decimal(snapshot['pix_charge']['amount']) != payable['amount']:
             raise PaymentAccountError('El monto autorizado no coincide con el cobro. Revisa el pago de nuevo.')
+    if direction == 'to_bank' and snapshot.get('store_order'):
+        # One store order is paid once, from whichever account: serialized,
+        # then refused while any payment of it is running or has paid it.
+        from django.db import connection
+        order = snapshot['store_order']
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [order['key']])
+        if minimum < Decimal(order['amount']):
+            raise PaymentAccountError('El monto autorizado no cubre el pedido. Revisa el pago de nuevo.')
+        if order.get('once', True) and InfiniaJourney.objects.filter(
+                direction='to_bank', destination_snapshot__store_order__key=order['key']) \
+                .exclude(request_id=request_id).exclude(stage='failed').exists():
+            raise PaymentAccountError('Este pedido ya tiene un pago en Confío y no se puede pagar otra vez.')
     from .infinia_fee_policy import enabled as fee_enabled, freeze as freeze_fee
     fee = None
     if direction == 'to_bank':
@@ -494,6 +511,10 @@ def _new_operation(j, leg, source, target, amount):
 # conversion does not use go back to the person's own wallet (return leg).
 RETURN_LEG = 'return'
 USDC_QUANTUM = Decimal('0.000001')
+
+
+def _store_order(j):
+    return (j.destination_snapshot or {}).get('store_order') if j.direction == 'to_bank' else None
 
 
 def _charge(j):
@@ -1184,6 +1205,18 @@ def advance_journey(journey_id, *, client=None, bridge_client=None, intents=None
                 _require_capability(target, 'send_third_party')
                 quantum = Decimal('0.01') if j.direction == 'to_bank' else Decimal('0.000001')
                 payout_amount = proceeds.quantize(quantum, rounding=ROUND_DOWN)
+                order = _store_order(j)
+                if order is not None:
+                    # A store order is paid exactly; the conversion's minimum
+                    # covered it (create_journey), and the rest stays in the
+                    # person's own local account.
+                    payout_amount = positive(order['amount'])
+                    if payout_amount > proceeds:
+                        _state(j, 'needs_review', failure='store_order_short'); return j
+                    j.money_flow.metadata = dict(j.money_flow.metadata or {}, store_order_remainder={
+                        'amount': str((proceeds - payout_amount).quantize(quantum)), 'asset': target.asset,
+                        'financial_account_id': str(target.internal_id)})
+                    j.money_flow.save(update_fields=['metadata', 'updated_at'])
                 positive(payout_amount)
                 direct = j.direction == 'to_wallet' and j.minimum_wallet_output is not None
                 if direct:

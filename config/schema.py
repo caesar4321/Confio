@@ -33,6 +33,7 @@ from assistant import calendar_schema as assistant_calendar_schema
 from assistant.gmail import schema as assistant_gmail_schema
 from assistant import connections_schema as assistant_connections_schema
 from blockchain import schema as blockchain_schema
+from agent_tasks import schema as agent_tasks_schema
 from billing import schema as billing_schema
 from smart_account import schema as smart_account_schema
 import graphene
@@ -40,7 +41,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(ve_pagomovil_schema.Query, bolivia_qr_schema.Query, users_schema.Query, UnifiedTransactionQuery, MonthSummaryQuery, CategoryPromptQuery, send_schema.Query, send_schema.LinkInviteQuery, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, cusd_plus_crypto_schema.Query, cusd_plus_perps_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, marketplace_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, teams_schema.TeamsQuery, assistant_schema.Query, assistant_memory_schema.Query, assistant_gmail_schema.Query, assistant_connections_schema.Query, blockchain_schema.Query, billing_schema.Query, smart_account_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
+class Query(ve_pagomovil_schema.Query, bolivia_qr_schema.Query, users_schema.Query, UnifiedTransactionQuery, MonthSummaryQuery, CategoryPromptQuery, send_schema.Query, send_schema.LinkInviteQuery, payments_schema.Query, ramps_schema.Query, payment_accounts_schema.Query, pending_payin_schema.PendingPayinQuery, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, cusd_plus_schema.Query, cusd_plus_crypto_schema.Query, cusd_plus_perps_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, marketplace_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, teams_schema.TeamsQuery, assistant_schema.Query, assistant_memory_schema.Query, assistant_gmail_schema.Query, assistant_connections_schema.Query, blockchain_schema.Query, billing_schema.Query, smart_account_schema.Query, agent_tasks_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -81,6 +82,7 @@ class Mutation(
 	blockchain_schema.Mutation,
 	billing_schema.Mutation,
 	smart_account_schema.Mutation,
+	agent_tasks_schema.Mutation,
 	web3auth_schema.Web3AuthMutation,
 	graphene.ObjectType
 ):
