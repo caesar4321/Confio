@@ -223,6 +223,8 @@ def fixed_qr_amount(destination):
     amount = fields.get('54', '')
     if amount and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount) or Decimal(amount) <= 0):
         raise PaymentAccountError('El monto del QR no es válido.')
+    if amount and Decimal(amount) >= Decimal('1e9'):   # the ceiling of every exact amount
+        raise PaymentAccountError('Ese monto es demasiado alto para un envío.')
     if amount and fields.get('53') != ISO_NUMERIC.get(method.asset):
         raise PaymentAccountError('El monto de este QR no está en la moneda del país.')
     return amount
@@ -261,7 +263,10 @@ def normalize_value(method, raw):
     if method.id == 'co_qr':
         # A fixed amount is paid exactly: the dollars are priced to cover it
         # and the payout is the QR's pesos (store_order_snapshot).
-        require_whole_units('COP', decode_breb_qr(value)['amount'])
+        breb_amount = decode_breb_qr(value)['amount']
+        if breb_amount and Decimal(breb_amount) >= Decimal('1e9'):   # the ceiling of every exact amount
+            raise PaymentAccountError('Ese monto es demasiado alto para un envío.')
+        require_whole_units('COP', breb_amount)
         # One text per QR: the CRC is checked case-blind, so it is stored in
         # capitals (the paid-once key and the same-QR lookup compare text).
         value = value[:-4] + value[-4:].upper()
@@ -300,6 +305,8 @@ def normalize_value(method, raw):
         if amount is not None and (not re.fullmatch(r'[0-9]{1,13}(?:\.[0-9]{1,2})?', amount)
                                    or Decimal(amount) <= 0):
             raise PaymentAccountError('El monto del QR no es válido.')
+        if amount is not None and Decimal(amount) >= Decimal('1e9'):   # the ceiling of every exact amount
+            raise PaymentAccountError('Ese monto es demasiado alto para un envío.')
         if amount is not None and not fields.get('53'):
             raise PaymentAccountError('Este QR no indica su moneda. Pide uno nuevo.')
         if amount is not None and fields.get('53') != ISO_NUMERIC.get(method.asset):
@@ -1620,7 +1627,15 @@ def _live(rows, exclude_request_id=None, owner=None):
     the caller's own retry (same account and request id: a request id is the
     client's, unique per account only)."""
     import time
-    rows = rows.exclude(stage='failed').exclude(bridge__status='prepared', bridge__deadline__lt=int(time.time()))
+    from django.db.models import CharField, Exists, OuterRef, Value
+    from django.db.models.functions import Cast, Concat
+    from blockchain.models import SponsoredBatch
+    # A signed batch is recorded before it is broadcast; the bridge row is
+    # marked submitted only afterwards. One with a batch is never "unsigned".
+    batch = SponsoredBatch.objects.filter(
+        client_request_id=Concat(Value('bridge:'), Cast(OuterRef('bridge__internal_id'), CharField())))
+    rows = rows.exclude(stage='failed').annotate(_signed_batch=Exists(batch)).exclude(
+        bridge__status='prepared', bridge__deadline__lt=int(time.time()), _signed_batch=False)
     # A bridge that ended without delivering, before any conversion: nothing
     # reached the provider, even while the journey is not yet marked failed.
     rows = rows.exclude(bridge__status__in=('expired', 'failed', 'refunded'), fx_operation__isnull=True)
@@ -1714,7 +1729,10 @@ EXACT_QUOTE_WINDOW_SECONDS = 60
 
 def pace_exact_quotes(owner):
     """Each exact price is several bridge estimates and provider quotes: a
-    per-person pace keeps typing (or a script) off the providers' limits."""
+    per-person pace keeps typing (or a script) off the providers' limits.
+    Kept in Django's cache (per process today: prod runs one daphne process;
+    with several, each would keep its own count and price memory, which only
+    loosens the pace, never what is paid: every confirmation re-prices)."""
     from django.core.cache import cache
     key = f'exact_quotes:{owner.pk}'
     cache.add(key, 0, EXACT_QUOTE_WINDOW_SECONDS)

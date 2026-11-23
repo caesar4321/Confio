@@ -1090,6 +1090,30 @@ class ExactLocalApiRound18Tests(ExactLocalApiTests):
             intent_rails.exact_local({'method_id': 've_pagomovil_send', 'amount_local': '10.001'})
 
 
+class ExactLocalRound19JourneyTests(ExactLocalRound16JourneyTests):
+    def test_a_signed_batch_keeps_an_expired_bridge_holding_the_qr(self):
+        from blockchain.models import SponsoredBatch
+        fixed = self.fixed(breb('1249'))
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        key = first.destination_snapshot['store_order']['key']
+        first.bridge.status = 'prepared'; first.bridge.deadline = 1
+        first.bridge.save(update_fields=['status', 'deadline'])
+        self.assertEqual(local_money.held(key, destination=fixed), '')   # never signed: free
+        SponsoredBatch.objects.create(user=self.owner.user, user_bsc_address='0x' + '1' * 40, kind='payment_bridge',
+                                      num_calls=1, calls_json='[]', gas_limit=1, max_fee_wei='1',
+                                      client_request_id='bridge:' + str(first.bridge.internal_id))
+        self.assertTrue(local_money.held(key, destination=fixed))   # signed and broadcast: still held
+
+    def test_a_qr_amount_has_the_exact_ceiling(self):
+        with self.assertRaisesRegex(PaymentAccountError, 'demasiado alto'):
+            local_money.normalize_value(local_money.METHODS['co_qr'], breb('1000000000'))
+        with self.assertRaisesRegex(PaymentAccountError, 'demasiado alto'):
+            local_money.normalize_value(local_money.METHODS['ar_qr'],
+                                        qr(('01', '12'), ('53', '032'), ('54', '1000000000'), ('58', 'AR')))
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -1142,6 +1166,10 @@ only_own_tests(ExactLocalRound16JourneyTests, journey_fixture.JourneyTests, Exac
 only_own_tests(ExactLocalApiRound16Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound17Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound18Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound19JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests, ExactLocalRound6JourneyTests, ExactLocalRound7JourneyTests,
+               ExactLocalRound8JourneyTests, ExactLocalRound9JourneyTests, ExactLocalRound10JourneyTests,
+               ExactLocalRound12JourneyTests, ExactLocalRound15JourneyTests, ExactLocalRound16JourneyTests)
 
 
 class TelegramGuardTests(intent_fixture.PaymentIntentBase):
