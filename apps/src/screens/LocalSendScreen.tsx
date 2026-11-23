@@ -526,13 +526,15 @@ function InfiniaLocalSendScreen() {
       }
       resetReview();
       keepRepriceNotice();
+      setLocationBlocked(false);   // priced: the location pass is in
       setPixCharge(next);
       setAmount(next.totalUsd);
     } catch (error: any) {
       if (run === chargeRun.current && mounted.current) {
         setPixChargeError(error?.message || 'No pudimos revisar este cobro.');
-        // A Bre-B location check offers the location screen, as everywhere else.
-        setLocationBlocked(isBrebLocationFailure(error));
+        // A Bre-B location check offers the location screen, as everywhere
+        // else; any other error leaves an earlier prompt as it was.
+        if (isBrebLocationFailure(error)) setLocationBlocked(true);
       }
     } finally {
       if (run === chargeRun.current && mounted.current) setPixChargeLoading(false);
@@ -576,14 +578,16 @@ function InfiniaLocalSendScreen() {
         }
         resetReview();
         keepRepriceNotice();
+        setLocationBlocked(false);   // priced: the location pass is in
         setExactSend(next);
         setAmount(next.totalUsd);
       } catch (error: any) {
         if (!cancelled) {
           setExactError(isUnsupportedMode(error) ? 'Por ahora solo puedes enviar un monto en dólares.'
             : error?.message || 'No pudimos cotizar este monto.');
-          // A Bre-B location check offers the location screen, as everywhere else.
-          setLocationBlocked(isBrebLocationFailure(error));
+          // A Bre-B location check offers the location screen, as everywhere
+          // else; any other error leaves an earlier prompt as it was.
+          if (isBrebLocationFailure(error)) setLocationBlocked(true);
         }
       } finally {
         if (!cancelled) setExactLoading(false);

@@ -208,7 +208,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
         if minimum < Decimal(order['amount']):
             raise PaymentAccountError(f'El monto autorizado no cubre {what}. Revisa el pago de nuevo.')
         from .local_money import is_held
-        if order.get('once', True) and is_held(order['key'], exclude_request_id=request_id, destination=destination):
+        if order.get('once', True) and is_held(order['key'], exclude_request_id=request_id, destination=destination,
+                                                owner=owner):
             raise PaymentAccountError(
                 'Este pedido ya tiene un pago en Confío y no se puede pagar otra vez.' if what == 'el pedido'
                 else 'Este QR ya tiene un pago en Confío y no se puede pagar otra vez.')

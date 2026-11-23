@@ -248,3 +248,17 @@ class ExactRound5Tests(TestCase):
         self.assertTrue(all(a.success for a in answers[:-1]))
         self.assertFalse(answers[-1].success)
         self.assertIn('Espera', answers[-1].error)
+
+
+class ExactRound6Tests(TestCase):
+    def test_a_pace_window_ending_mid_count_is_no_error(self):
+        from django.contrib.auth import get_user_model
+        from ramps.ve_pagomovil_schema import Query
+        user = get_user_model().objects.create(username='ve-exact-6', firebase_uid='ve-exact-6')
+        adapter = mock.Mock()
+        adapter.quote_exact.return_value = {'usd_amount': '16.40', 'estimated_ves': '15000.00', 'exact_ves': '15000.00'}
+        with mock.patch('ramps.ve_pagomovil_schema._preflight', return_value=(user, mock.Mock())), \
+                mock.patch.object(ve_pagomovil, 'send_adapter', return_value=adapter), \
+                mock.patch('django.core.cache.cache.incr', side_effect=ValueError('expired')):
+            result = Query().resolve_ve_pagomovil_send_exact_quote(mock.Mock(context=mock.Mock(user=user, META={})), '15000')
+        self.assertTrue(result.success, result.error)

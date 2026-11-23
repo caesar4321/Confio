@@ -510,7 +510,12 @@ class Query(graphene.ObjectType):
             from django.core.cache import cache
             key = f've_exact_quote:{user.pk}'
             cache.add(key, 0, EXACT_QUOTE_WINDOW_SECONDS)
-            if cache.incr(key) > EXACT_QUOTES_PER_WINDOW:
+            try:
+                count = cache.incr(key)
+            except ValueError:   # the window ended between add and incr
+                cache.set(key, 1, EXACT_QUOTE_WINDOW_SECONDS)
+                count = 1
+            if count > EXACT_QUOTES_PER_WINDOW:
                 raise VePagoMovilError('Espera un momento antes de cotizar otro monto.')
             quote = _exact_adapter().quote_exact(ves_amount)
             quote.pop('exact_ves', None)

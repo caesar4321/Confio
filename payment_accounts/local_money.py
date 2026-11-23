@@ -1468,12 +1468,14 @@ def _exact_amount(value):
     return amount.quantize(FIAT_CENT)
 
 
-FIXED_QR_MIN_APP_VERSION = '5.4.0'   # the first build that shows a fixed-amount QR as one
+# The first version that shows a fixed-amount QR as one. 5.4.1, not 5.4.0:
+# 5.4.0 builds were made before this change and may be out on test tracks.
+FIXED_QR_MIN_APP_VERSION = '5.4.1'
 
 
 def fixed_qr_build_supported(meta):
     """The build pays a fixed-amount QR as one (LOCAL_MONEY_FIXED_QR_MIN_APP_VERSION,
-    5.4.0 by default): an older build is told to update before any bridge."""
+    5.4.1 by default): an older build is told to update before any bridge."""
     from ramps.ve_pagomovil import _version
     floor = _version(getattr(settings, 'LOCAL_MONEY_FIXED_QR_MIN_APP_VERSION', FIXED_QR_MIN_APP_VERSION))
     version = _version((meta or {}).get('HTTP_X_CONFIO_VERSION', ''))
@@ -1513,15 +1515,16 @@ def _same_qr_destinations(destination):
     return [str(value) for value in rows.order_by('pk').values_list('internal_id', flat=True)[:SAME_QR_LIMIT + 1]]
 
 
-def is_held(key, exclude_request_id=None, destination=None):
+def is_held(key, exclude_request_id=None, destination=None, owner=None):
     """Whether a paid-once order or QR is held (holding_payments). Fails
     closed: more rows holding the same QR than can be checked count as held."""
     if destination is not None and ':qr:' in str(key) and len(_same_qr_destinations(destination)) > SAME_QR_LIMIT:
         return True
-    return holding_payments(key, exclude_request_id=exclude_request_id, destination=destination).exists()
+    return holding_payments(key, exclude_request_id=exclude_request_id, destination=destination,
+                            owner=owner).exists()
 
 
-def holding_payments(key, exclude_request_id=None, destination=None):
+def holding_payments(key, exclude_request_id=None, destination=None, owner=None):
     """The payments that hold a paid-once order or QR: any that is not
     failed, except one whose bridge was never signed and can no longer be
     (someone who only opened a payment does not block everyone else). For a
@@ -1533,11 +1536,19 @@ def holding_payments(key, exclude_request_id=None, destination=None):
     if destination is not None and ':qr:' in str(key):
         legacy = _same_qr_destinations(destination)
         if legacy:
-            held |= (Q(destination_snapshot__destination_internal_id__in=legacy)
+            # Paid before QRs carried their amount: named in the snapshot
+            # since 2026-11-21, and in the bridge's quote since 2026-09-24.
+            held |= ((Q(destination_snapshot__destination_internal_id__in=legacy)
+                      | Q(bridge__quote__money_flow__metadata__local_destination_id__in=legacy))
                      & ~Q(destination_snapshot__has_key='store_order'))
     rows = InfiniaJourney.objects.filter(held, direction='to_bank') \
         .exclude(stage='failed').exclude(bridge__status='prepared', bridge__deadline__lt=int(time.time()))
-    return rows.exclude(request_id=exclude_request_id) if exclude_request_id else rows
+    if exclude_request_id:
+        # Only the caller's own retry is not "another payment": a request id
+        # is the client's, unique per account only.
+        rows = rows.exclude(request_id=exclude_request_id, confio_account=owner) if owner is not None \
+            else rows.exclude(request_id=exclude_request_id)
+    return rows
 
 
 def exact_qr_quote(destination, quote, exact=None):
@@ -1568,6 +1579,25 @@ def exact_qr_quote(destination, quote, exact=None):
     return {**quote, 'target_amount': exact, 'minimum_target': exact, 'expected_target': exact}
 
 
+EXACT_QUOTES_PER_WINDOW = 30
+EXACT_QUOTE_WINDOW_SECONDS = 60
+
+
+def pace_exact_quotes(owner):
+    """Each exact price is several bridge estimates and provider quotes: a
+    per-person pace keeps typing (or a script) off the providers' limits."""
+    from django.core.cache import cache
+    key = f'exact_quotes:{owner.pk}'
+    cache.add(key, 0, EXACT_QUOTE_WINDOW_SECONDS)
+    try:
+        count = cache.incr(key)
+    except ValueError:   # the window ended between add and incr
+        cache.set(key, 1, EXACT_QUOTE_WINDOW_SECONDS)
+        count = 1
+    if count > EXACT_QUOTES_PER_WINDOW:
+        raise PaymentAccountError('Espera un momento antes de cotizar otro monto.')
+
+
 def exact_send_quote(owner, destination, exact, *, client=None):
     """What sending an exact local amount the person typed costs, all in
     (the Pagar screen's charge view): the dollars whose guaranteed minimum
@@ -1578,6 +1608,7 @@ def exact_send_quote(owner, destination, exact, *, client=None):
     if (destination.provider_data or {}).get('store_order'):
         raise PaymentAccountError('Este pedido ya trae su monto.')
     exact = _exact_amount(exact)
+    pace_exact_quotes(owner)
     price = _order_price(owner, destination, exact, client=client)
     return {'amount': exact, 'asset': price['currency'], 'total_usd': price['total_usd'],
             'fee_usd': price['fee_usd'], 'estimated_return_usd': Decimal('0.00'),
@@ -1594,6 +1625,7 @@ def fixed_qr_charge_quote(owner, destination, *, client=None):
     peso account."""
     from .intent_rails import _order_price
     require_unpaid_qr(destination)
+    pace_exact_quotes(owner)
     order = store_order_snapshot(destination)
     exact = Decimal(order['amount'])
     price = _order_price(owner, destination, exact, client=client)

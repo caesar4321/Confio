@@ -449,8 +449,9 @@ class ExactLocalApiRound3Tests(ExactLocalApiTests):
         old = resolve('5.3.7')
         self.assertFalse(old.success)
         self.assertIn('Actualiza la app', old.errors[0])
-        self.assertTrue(resolve('5.4.0').success)
-        self.assertTrue(resolve('5.3.7').success is False and resolve('').success is False)
+        self.assertTrue(resolve('5.4.1').success)
+        # 5.4.0 builds were made before this change; no version at all is no build we know.
+        self.assertTrue(resolve('5.4.0').success is False and resolve('').success is False)
         fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
         with mock.patch.object(local_money, 'payout_quote') as quote, self.assertRaisesRegex(Exception, 'Actualiza'):
             LocalMoneyQuery().resolve_local_payout_quote(self.info, fixed.internal_id, amount=Decimal('50'))
@@ -629,6 +630,74 @@ class ExactLocalApiRound5Tests(ExactLocalApiTests):
         self.assertEqual(local_money.method_of(row).id, 'ar_qr')
 
 
+class ExactLocalRound6JourneyTests(ExactLocalRound4JourneyTests):
+    def test_a_qr_paid_in_dollars_before_snapshots_named_recipients_still_holds_it(self):
+        fixed = self.fixed(breb('1249'))
+        old = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                             request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                             destination=fixed, minimum_fx_output='1249.00')
+        snapshot = dict(old.destination_snapshot)
+        snapshot.pop('store_order'); snapshot.pop('destination_internal_id')   # as in September
+        InfiniaJourney.objects.filter(pk=old.pk).update(destination_snapshot=snapshot, stage='completed')
+        flow = old.bridge.quote.money_flow
+        flow.metadata = dict(flow.metadata or {}, local_destination_id=str(fixed.internal_id))
+        flow.save(update_fields=['metadata'])
+        other = self.fixed(breb('1249'))
+        PayoutDestination.objects.filter(pk__in=[fixed.pk, other.pk]).update(country='COL')
+        other.refresh_from_db()
+        with self.assertRaisesRegex(PaymentAccountError, 'QR ya tiene un pago'):
+            local_money.require_unpaid_qr(other)
+
+    def test_another_accounts_request_id_is_not_its_own_retry(self):
+        fixed = self.fixed(breb('1249'))
+        first = create_journey(owner=self.owner, local_account=self.local, crypto_account=self.crypto,
+                               request_id=uuid.uuid4(), direction='to_bank', bridge=self.bridge(),
+                               destination=fixed, minimum_fx_output='1249.00')
+        key = first.destination_snapshot['store_order']['key']
+        stranger = type(self.owner).objects.create(user=self.owner.user, account_type='business', account_index=9)
+        self.assertTrue(local_money.is_held(key, exclude_request_id=first.request_id, destination=fixed,
+                                            owner=stranger))
+        self.assertFalse(local_money.is_held(key, exclude_request_id=first.request_id, destination=fixed,
+                                             owner=self.owner))
+
+    def test_the_paid_once_lookups_use_their_indexes(self):
+        from django.db import connection
+        lookups = (InfiniaJourney.objects.filter(destination_snapshot__store_order__key='k'),
+                   InfiniaJourney.objects.filter(destination_snapshot__destination_internal_id__in=['a']),
+                   PayoutDestination.objects.filter(provider_data__breb_qr__payload='p'),
+                   PayoutDestination.objects.filter(details__qrCode='p'))
+        with connection.cursor() as cursor:
+            cursor.execute('SET LOCAL enable_seqscan = off')
+            for qs, index in zip(lookups, ('infinia_journey_order_key_idx', 'infinia_journey_destination_id_idx',
+                                           'payout_destination_breb_qr_idx', 'payout_destination_qr_code_idx')):
+                sql, params = qs.query.sql_with_params()
+                cursor.execute('EXPLAIN ' + sql, params)
+                with self.subTest(index=index):
+                    self.assertIn(index, ' '.join(row[0] for row in cursor.fetchall()))
+
+
+@override_settings(PAYMENT_INTENTS_PAYEE_LEVELS=EVERY_LEVEL, INFINIA_ACCOUNT_VALIDATION_ENABLED=False)
+class ExactLocalApiRound6Tests(ExactLocalApiTests):
+    def test_exact_prices_are_paced_per_person(self):
+        from django.core.cache import cache
+        cache.clear()
+        row = local_money.resolve_destination(self.owner, 'br_pix', 'ana@example.com')
+        with mock.patch.object(local_money, 'EXACT_QUOTES_PER_WINDOW', 2):
+            local_money.exact_send_quote(self.owner, row, '500')
+            local_money.exact_send_quote(self.owner, row, '501')
+            with self.assertRaisesRegex(PaymentAccountError, 'Espera'):
+                local_money.exact_send_quote(self.owner, row, '502')
+
+    def test_a_moved_pago_movil_price_is_a_new_quote_not_a_failure(self):
+        from payment_accounts import intent_rails
+        from ramps.pagoasap_send import PRICE_MOVED
+        rail = mock.Mock()
+        rail.create.return_value = mock.Mock(success=False, order_id=None, error=PRICE_MOVED, next_step=None)
+        with mock.patch.object(intent_rails, '_rail_of', return_value=rail), self.assertRaises(IntentRefused) as refused:
+            intent_rails.create_order(mock.Mock(), mock.Mock())
+        self.assertEqual(refused.exception.code, 'quote_changed')
+
+
 def only_own_tests(cls, *bases):
     """Run only the tests a class defines itself, not the ones its fixture
     base classes bring along (they run in their own modules)."""
@@ -647,3 +716,6 @@ only_own_tests(ExactLocalApiRound3Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalRound4JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests)
 only_own_tests(ExactLocalApiRound4Tests, ExactLocalApiTests)
 only_own_tests(ExactLocalApiRound5Tests, ExactLocalApiTests)
+only_own_tests(ExactLocalRound6JourneyTests, journey_fixture.JourneyTests, ExactLocalJourneyTests, ExactLocalRound3Tests,
+               ExactLocalRound4JourneyTests)
+only_own_tests(ExactLocalApiRound6Tests, ExactLocalApiTests)

@@ -735,7 +735,10 @@ def create_order(info, intent):
     funding and signs it."""
     out = _rail_of(intent).create(info, intent)
     if not getattr(out, 'success', False) or not getattr(out, 'order_id', None):
-        refusal = _refuse('rail', getattr(out, 'error', None) or 'No pudimos crear este pago. Intenta de nuevo.')
+        error = getattr(out, 'error', None) or 'No pudimos crear este pago. Intenta de nuevo.'
+        from ramps.pagoasap_send import PRICE_MOVED
+        # A moved price is a new quote for the same card, not a failed payment.
+        refusal = _refuse('quote_changed' if error == PRICE_MOVED else 'rail', error)
         refusal.next_step = getattr(out, 'next_step', None) or ''
         raise refusal
     return str(out.order_id), out
