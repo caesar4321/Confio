@@ -479,9 +479,9 @@ class ExactLocalApiRound3Tests(ExactLocalApiTests):
         old = resolve('5.3.7')
         self.assertFalse(old.success)
         self.assertIn('Actualiza la app', old.errors[0])
-        self.assertTrue(resolve('5.4.1').success)
-        # 5.4.0 builds were made before this change; no version at all is no build we know.
-        self.assertTrue(resolve('5.4.0').success is False and resolve('').success is False)
+        self.assertTrue(resolve('5.4.0').success)   # the release that carries this change
+        # 5.3.9 is the latest in the stores; no version at all is no build we know.
+        self.assertTrue(resolve('5.3.9').success is False and resolve('').success is False)
         fixed = local_money.resolve_destination(self.owner, 'co_qr', breb('25000'))
         with mock.patch.object(local_money, 'payout_quote') as quote, self.assertRaisesRegex(Exception, 'Actualiza'):
             LocalMoneyQuery().resolve_local_payout_quote(self.info, fixed.internal_id, amount=Decimal('50'))

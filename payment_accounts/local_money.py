@@ -1498,14 +1498,14 @@ def _exact_amount(value):
     return amount.quantize(FIAT_CENT)
 
 
-# The first version that shows a fixed-amount QR as one. 5.4.1, not 5.4.0:
-# 5.4.0 builds were made before this change and may be out on test tracks.
-FIXED_QR_MIN_APP_VERSION = '5.4.1'
+# The first version that shows a fixed-amount QR as one: 5.4.0, the release
+# that carries this change (5.3.9 is the latest in the stores).
+FIXED_QR_MIN_APP_VERSION = '5.4.0'
 
 
 def fixed_qr_build_supported(meta):
     """The build pays a fixed-amount QR as one (LOCAL_MONEY_FIXED_QR_MIN_APP_VERSION,
-    5.4.1 by default): an older build is told to update before any bridge."""
+    5.4.0 by default): an older build is told to update before any bridge."""
     from ramps.ve_pagomovil import _version
     floor = _version(getattr(settings, 'LOCAL_MONEY_FIXED_QR_MIN_APP_VERSION', FIXED_QR_MIN_APP_VERSION))
     version = _version((meta or {}).get('HTTP_X_CONFIO_VERSION', ''))
