@@ -383,6 +383,7 @@ class LocalMoneyQuery(graphene.ObjectType):
             destination = PayoutDestination.objects.get(internal_id=destination_id, confio_account=owner)
             bridge = (PaymentBridgeTransfer.objects.select_related('quote__funding_instruction').get(
                 internal_id=bridge_id, quote__confio_account=owner) if bridge_id else None)
+            local_money.require_exact_for_fixed(destination, exact_local)   # before any provider is asked
             quote = local_money.exact_qr_quote(
                 destination, local_money.payout_quote(owner, destination, amount=amount, bridge=bridge),
                 exact_local)
@@ -529,6 +530,11 @@ class ResolveLocalDestination(graphene.Mutation):
             local_money.require_rail(owner, _identity(owner, required=False), method)
             from . import breb_location
             breb_location.require_for_country(owner, method.country, info.context.META)
+            if method.id in local_money.FIXED_QR_METHODS and not local_money.fixed_qr_build_supported(
+                    info.context.META) and local_money.qr_amount(method, local_money.normalize_value(method, value)):
+                # An older build would type dollars for it: told to update
+                # before any recipient, bridge or provider quote.
+                raise local_money.PaymentAccountError(local_money.UPDATE_FOR_FIXED_QR)
             row = local_money.resolve_destination(owner, method_id, value)
             return cls(success=True, errors=[], destination=_destination(row))
         except Exception as exc:

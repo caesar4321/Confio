@@ -567,6 +567,8 @@ function InfiniaLocalSendScreen() {
         if (!cancelled) {
           setExactError(isUnsupportedMode(error) ? 'Por ahora solo puedes enviar un monto en dólares.'
             : error?.message || 'No pudimos cotizar este monto.');
+          // A Bre-B location check offers the location screen, as everywhere else.
+          setLocationBlocked(isBrebLocationFailure(error));
         }
       } finally {
         if (!cancelled) setExactLoading(false);
@@ -851,7 +853,10 @@ function InfiniaLocalSendScreen() {
   const unavailable = methodsQuery.data && (!method || method.status !== 'live');
   // Exact sends land exactly the amount: no "≈", and the rate is what each dollar sent buys.
   const quoteHeadline = quote ? `${exactShown ? '' : '≈ '}${formatRampMoney(quote.targetAmount, quote.asset)}` : '';
-  const shownRate = quote && exactShown && amountNumber > 0
+  // Where the conversion's surplus stays local (a fixed QR, a typed amount),
+  // the rate shown is all in; a Pix charge returns it, so its rate is the market's.
+  const allInRate = brebCharge || (Boolean(exactLocal) && Boolean(exactSend));
+  const shownRate = quote && allInRate && amountNumber > 0
     ? String(Number(quote.targetAmount) / amountNumber) : quote?.rate || '';
   const currency = method ? currencyName(method.asset) : 'moneda local';
 
@@ -1131,7 +1136,7 @@ function InfiniaLocalSendScreen() {
                         {destination.qrMerchantCity ? ` · ${destination.qrMerchantCity}` : ''}
                       </Text> : null}
                       {destination.qrAmount ? <Text style={styles.helperText}>
-                        Monto indicado en el QR: {formatRampMoney(destination.qrAmount, 'COP')}. Lo pagamos exacto.
+                        Monto indicado en el QR: {formatRampMoney(destination.qrAmount, 'COP')}. Lo pagamos exactamente.
                       </Text> : null}
                     </View>
                   ) : null}
@@ -1303,7 +1308,7 @@ function InfiniaLocalSendScreen() {
                     <>
                       <Text style={styles.quoteEyebrow}>{pixCharge ? 'El comercio recibe exactamente' : exactShown ? 'Recibe exactamente' : 'Estimado que recibe'}</Text>
                       <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
-                      <Text style={styles.quoteRate}>{exactShown
+                      <Text style={styles.quoteRate}>{allInRate
                         ? `1 USD = ${formatRampRate(shownRate)} ${quote.asset} · con comisiones y margen incluidos`
                         : `1 USD ≈ ${formatRampRate(quote.rate)} ${quote.asset} · estimado neto de conversión`}</Text>
                       <View style={styles.quoteDivider} />

@@ -283,7 +283,26 @@ EXACT_PRICE_TRIES = 6
 PRICE_MOVED = 'El precio cambió. Revisa el envío de nuevo.'
 
 
+EXACT_QUOTE_CACHE_SECONDS = 15
+
+
 def quote_exact(ves) -> dict:
+    """quote_exact_now, kept a few seconds per amount: typing asks again
+    often, and each answer is several Relay quotes and Pago ASAP previews."""
+    from django.core.cache import cache
+    try:
+        key = f'pagoasap:exact:{Decimal(str(ves)).quantize(ve_send.CENT):f}'
+    except (InvalidOperation, TypeError, ValueError):
+        return quote_exact_now(ves)
+    cached = cache.get(key)
+    if cached is not None:
+        return dict(cached)
+    quote = quote_exact_now(ves)
+    cache.set(key, dict(quote), EXACT_QUOTE_CACHE_SECONDS)
+    return quote
+
+
+def quote_exact_now(ves) -> dict:
     """The dollars that pay exactly `ves` bolívares by Pago Móvil, all in.
 
     Priced from Pago ASAP's own cost for that payout plus a margin
@@ -330,20 +349,27 @@ def quote_exact(ves) -> dict:
     raise VePagoMovilError(GENERIC_ERROR)
 
 
+UNREADABLE = object()
+
+
 def exact_ves_of(ramp):
-    """The exact bolívares a send pays, or None for a dollar send."""
-    value = ((ve_send._section(ramp).get('estimate') or {}).get('exact_ves'))
-    try:
-        return Decimal(str(value)) if value not in (None, '') else None
-    except (InvalidOperation, TypeError, ValueError):
+    """The exact bolívares a send pays, None for a dollar send, or UNREADABLE
+    for an exact send whose amount cannot be read (never a dollar send)."""
+    estimate = ve_send._section(ramp).get('estimate') or {}
+    if 'exact_ves' not in estimate:
         return None
+    try:
+        value = Decimal(str(estimate['exact_ves']))
+    except (InvalidOperation, TypeError, ValueError):
+        return UNREADABLE
+    return value if value.is_finite() and value > 0 else UNREADABLE
 
 
 def create(user, account, amount: Decimal, beneficiary: dict, exact_ves=None):
     if not _polygon_address():
         raise VePagoMovilError(UNAVAILABLE)
     if exact_ves is not None:
-        estimate = quote_exact(exact_ves)
+        estimate = quote_exact_now(exact_ves)   # never a cached price for the order itself
         # Priced again now: never more dollars than the person approved, and
         # never more than the fresh price either (a stale screen does not
         # overpay): the send is the fresh price, its lines as quoted.
@@ -429,13 +455,17 @@ def payout_terms(ramp, inflight) -> dict | None:
     if rate <= 0 or usd <= 0:
         return None
     exact = exact_ves_of(ramp)
+    if exact is UNREADABLE:
+        return {'review': 'exact_ves_unreadable'}
     if exact is not None:
         # An exact bolívar send pays exactly that; what the deposit bought
         # above it stays in Confío's Pago ASAP balance. Dollars that no longer
         # cover it go to review, never a smaller payout.
         total = _cost(client, exact)
         if total <= 0:
-            return None
+            # No price for it right now: wait (the same clock as a short
+            # deposit), never a payout of another amount.
+            return {'wait': 'exact_payout_unpriced'}
         if total > usd:
             # The rate moved against it since funding: wait for it to come
             # back (ve_send's RATE_WAIT), then review. Never a smaller payout.

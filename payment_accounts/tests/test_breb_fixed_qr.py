@@ -259,3 +259,4 @@ class PaymentRuleFixedQrTests(intent_fixture.PaymentIntentBase):
             funding.return_value.terms.return_value = terms
             infinia_payouts._open(rule, mock.Mock(pk=1), None, None)
         self.assertEqual(stopped.exception.code, 'payout_fixed_amount_qr')
+        self.assertEqual(stopped.exception.deactivate, 'payout_fixed_amount_qr')   # the rule stops, its owner is told

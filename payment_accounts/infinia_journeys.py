@@ -89,6 +89,8 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     journey's Face grant. A contract-funded bridge accepts nothing else."""
     enabled()
     request_id = uuid.UUID(str(request_id))
+    if exact_payout is not None and direction != 'to_bank':
+        raise PaymentAccountError('Un monto exacto solo se paga en un envío a una cuenta.')
     minimum = positive(minimum_fx_output)
     wallet_minimum = positive(minimum_wallet_output) if minimum_wallet_output is not None else None
     owner = type(owner).objects.select_for_update().get(pk=owner.pk)
@@ -167,7 +169,12 @@ def create_journey(*, owner, local_account, crypto_account, request_id, minimum_
     _require_capability(source, 'convert')
     _require_capability(target, 'send_third_party')
     existing = InfiniaJourney.objects.filter(confio_account=owner, request_id=request_id).first()
-    expected = (direction, local_account.pk, crypto_account.pk, minimum, snapshot, wallet, wallet_minimum)
+    compared = snapshot
+    if existing and 'store_order' in snapshot and 'store_order' not in (existing.destination_snapshot or {}):
+        # A journey made before this recipient was paid exactly (a fixed-
+        # amount QR then paid in dollars): its retry returns it as it was.
+        compared = {key: value for key, value in snapshot.items() if key != 'store_order'}
+    expected = (direction, local_account.pk, crypto_account.pk, minimum, compared, wallet, wallet_minimum)
     if existing:
         actual = (existing.direction, existing.local_account_id, existing.crypto_account_id,
                   existing.minimum_fx_output, existing.destination_snapshot, existing.wallet_address, existing.minimum_wallet_output)

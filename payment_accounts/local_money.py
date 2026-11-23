@@ -1134,7 +1134,8 @@ def store_order_snapshot(destination):
         method, payload = _qr_payload(destination)
         return {'amount': str(Decimal(amount).quantize(FIAT_CENT)), 'reference': '',
                 'key': f'{method.id}:qr:' + _sha(payload),
-                'once': (emv_fields(payload) or {}).get('01') == '12'}
+                # Only a QR that says it is static (01=11) may be paid again.
+                'once': (emv_fields(payload) or {}).get('01') != '11'}
     order = (destination.provider_data or {}).get('store_order') if destination is not None else None
     if not order:
         return None
@@ -1444,10 +1445,30 @@ def _exact_amount(value):
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         amount = None
-    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(FIAT_CENT) \
-            or amount >= Decimal('1e9'):
+    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(FIAT_CENT):
         raise PaymentAccountError('Escribe el monto en moneda local con hasta dos decimales.')
+    if amount >= Decimal('1e9'):
+        raise PaymentAccountError('Ese monto es demasiado alto para un envío.')
     return amount.quantize(FIAT_CENT)
+
+
+FIXED_QR_MIN_APP_VERSION = '5.4.0'   # the first build that shows a fixed-amount QR as one
+
+
+def fixed_qr_build_supported(meta):
+    """The build pays a fixed-amount QR as one (LOCAL_MONEY_FIXED_QR_MIN_APP_VERSION,
+    5.4.0 by default): an older build is told to update before any bridge."""
+    from ramps.ve_pagomovil import _version
+    floor = _version(getattr(settings, 'LOCAL_MONEY_FIXED_QR_MIN_APP_VERSION', FIXED_QR_MIN_APP_VERSION))
+    version = _version((meta or {}).get('HTTP_X_CONFIO_VERSION', ''))
+    return floor is not None and version is not None and version >= floor
+
+
+def require_exact_for_fixed(destination, exact):
+    """A fixed-amount QR is quoted only with its own amount (asked before any
+    provider is): an older build that types dollars is told to update."""
+    if exact is None and is_fixed_amount_qr(destination):
+        raise PaymentAccountError(UPDATE_FOR_FIXED_QR)
 
 
 def require_unpaid_qr(destination):
@@ -1500,6 +1521,8 @@ def exact_send_quote(owner, destination, exact, *, client=None):
     from .intent_rails import _order_price
     if charge_snapshot(destination) is not None or is_fixed_amount_qr(destination):
         raise PaymentAccountError('Este QR ya trae su monto.')
+    if (destination.provider_data or {}).get('store_order'):
+        raise PaymentAccountError('Este pedido ya trae su monto.')
     exact = _exact_amount(exact)
     price = _order_price(owner, destination, exact, client=client)
     return {'amount': exact, 'asset': price['currency'], 'total_usd': price['total_usd'],

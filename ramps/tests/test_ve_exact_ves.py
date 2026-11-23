@@ -27,7 +27,7 @@ class ExactQuoteTests(TestCase):
         with mock.patch.object(pagoasap_send, '_client', return_value=client or pagoasap_client()), \
                 mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
                 mock.patch('payment_accounts.relay.RelayClient', return_value=relay or relay_delivering()):
-            return pagoasap_send.quote_exact(ves)
+            return pagoasap_send.quote_exact_now(ves)
 
     def test_dollars_cover_the_exact_bolivares_without_overcharging(self):
         quote = self.quote('19800.00')   # Pago ASAP: 19.80 USD at 1000 VES/USD
@@ -93,7 +93,7 @@ class ExactPayoutTests(TestCase):
         quote = {'usd_amount': '19.50', 'usdt_amount': '19.30', 'confio_fee_usd': '0.20',
                  'processor_fee_usd': '0.40', 'estimated_ves': '18000.00', 'exact_ves': '18000.00', 'rate': '923.0769'}
         with mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
-                mock.patch.object(pagoasap_send, 'quote_exact', return_value=quote), \
+                mock.patch.object(pagoasap_send, 'quote_exact_now', return_value=quote), \
                 mock.patch.object(ve_send, 'current_block', return_value=1000), \
                 mock.patch.object(ve_send, 'reserve') as reserve, mock.patch.object(ve_send, 'prepare') as prepare:
             pagoasap_send.create(self.user, mock.Mock(), Decimal('25.00'), {'phone': '584141234567'},
@@ -108,7 +108,7 @@ class ExactPayoutTests(TestCase):
     def test_create_never_charges_more_than_approved(self):
         quote = {'usd_amount': '25.00', 'estimated_ves': '19800.00', 'exact_ves': '19800.00'}
         with mock.patch.object(pagoasap_send, '_polygon_address', return_value=WALLET), \
-                mock.patch.object(pagoasap_send, 'quote_exact', return_value=quote), \
+                mock.patch.object(pagoasap_send, 'quote_exact_now', return_value=quote), \
                 self.assertRaisesRegex(ve_pagomovil.VePagoMovilError, 'cambió'):
             pagoasap_send.create(self.user, mock.Mock(), Decimal('20.00'), {}, exact_ves='19800.00')
 
@@ -155,7 +155,7 @@ class ExactPayoutBalanceTests(TestCase):
         unpriced = pagoasap_client(total='0')          # no preview cost: not payable yet, never guessed
         ramp = self._pay(ramp, unpriced)
         unpriced.create_payout.assert_not_called()
-        self.assertNotEqual(ve_send._phase(ramp), 'payout_review')
+        self.assertEqual(ramp.status_detail, 'waiting_rate')
 
 
 class ExactCreateSchemaTests(TestCase):
@@ -171,3 +171,32 @@ class ExactCreateSchemaTests(TestCase):
         self.assertFalse(result.success)
         self.assertIn('dólares', result.error)
         adapter.return_value.create.assert_not_called()
+
+
+class ExactRound3Tests(TestCase):
+    setUp = send_fixture.SendCoreTests.setUp
+    _ramp = send_fixture.SendCoreTests._ramp
+    _funded = send_fixture.SendCoreTests._funded
+    _pay = send_fixture.SendCoreTests._pay
+
+    def test_an_unreadable_exact_amount_goes_to_review_never_a_dollar_payout(self):
+        ramp = self._funded(estimate={'exact_ves': 'abc'}, estimated_ves='15000.00')
+        client = pagoasap_client()
+        ramp = self._pay(ramp, client)
+        self.assertEqual(ramp.status_detail, 'needs_review:exact_ves_unreadable')
+        client.create_payout.assert_not_called()
+
+    def test_no_price_keeps_the_wait_clock(self):
+        ramp = self._funded(estimate={'exact_ves': '15000.00'}, estimated_ves='15000.00')
+        ramp = self._pay(ramp, pagoasap_client(total='0'))
+        self.assertEqual(ramp.status_detail, 'waiting_rate')
+        self.assertTrue(ve_send._section(ramp).get('payout_wait_since'))
+
+    def test_the_quote_is_kept_a_few_seconds_but_never_for_the_order(self):
+        from django.core.cache import cache
+        cache.clear()
+        quote = {'usd_amount': '16.40', 'exact_ves': '15000.00'}
+        with mock.patch.object(pagoasap_send, 'quote_exact_now', return_value=quote) as now:
+            pagoasap_send.quote_exact('15000.00')
+            pagoasap_send.quote_exact('15000')
+        self.assertEqual(now.call_count, 1)

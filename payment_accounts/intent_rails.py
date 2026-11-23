@@ -313,9 +313,10 @@ def exact_local(request):
         amount = Decimal(str(raw))
     except (InvalidOperation, TypeError, ValueError):
         amount = None
-    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(CENT) \
-            or amount >= Decimal('1e9'):
+    if amount is None or not amount.is_finite() or amount <= 0 or amount != amount.quantize(CENT):
         raise _refuse('no_amount', 'Escribe el monto en moneda local con hasta dos decimales.')
+    if amount >= Decimal('1e9'):
+        raise _refuse('no_amount', 'Ese monto es demasiado alto para un envío.')
     return str(amount.quantize(CENT))
 
 
@@ -337,8 +338,33 @@ def store_order_terms(request):
     return {'amount': str(amount.quantize(CENT)), 'reference': reference}
 
 
+def _require_unpaid(destination):
+    """A dynamic fixed-amount QR someone already paid ends the card
+    (charge_changed), before any bridge is prepared for it."""
+    try:
+        local_money.require_unpaid_qr(destination)
+    except PaymentAccountError as exc:
+        raise _refuse('charge_changed', str(exc)) from exc
+
+
+ORDER_PRICE_CACHE_SECONDS = 20
+
+
 def _order_price(owner, destination, exact, *, client=None):
-    """The dollars whose guaranteed minimum covers `exact` local units."""
+    """The dollars whose guaranteed minimum covers `exact` local units.
+    Kept a few seconds per recipient and amount: typing asks again often, and
+    every try is a bridge estimate and a provider quote."""
+    from django.core.cache import cache
+    key = f'order_price:{owner.pk}:{destination.pk}:{Decimal(exact).quantize(CENT):f}'
+    cached = cache.get(key)
+    if cached is not None:
+        return dict(cached)
+    price = _search_order_price(owner, destination, exact, client=client)
+    cache.set(key, dict(price), ORDER_PRICE_CACHE_SECONDS)
+    return price
+
+
+def _search_order_price(owner, destination, exact, *, client=None):
     dollars = Decimal('10.00')
     for _ in range(_PRICE_TRIES):
         price = _transfer_price(owner, destination, dollars, client=client)
@@ -408,6 +434,7 @@ def read_transfer(owner, user, method_id, request, *, client=None):
     destination = local_money.recheck_destination(local_money.resolve_destination(owner, method_id, value,
                                                                                   client=client), client=client)
     facts = transfer_payee(destination)
+    _require_unpaid(destination)
     if exact:
         # A QR with a fixed amount (Bre-B, Argentina): priced in dollars so the
         # guaranteed minimum covers it; the journey pays exactly its amount and the
@@ -450,6 +477,7 @@ def reread_transfer(owner, intent, request_meta=None, *, client=None):
     payee = transfer_payee(destination)
     if any(payee[key] != getattr(intent, key) for key in payee):
         raise _refuse('charge_changed', 'El destino cambió desde que lo viste. Revísalo de nuevo.')
+    _require_unpaid(destination)
     price = _transfer_price(owner, destination, intent.total_usd, client=client)
     if price['minimum_local'] < intent.minimum_local or price['fee_usd'] > intent.fee_usd \
             or price['currency'] != intent.currency:
