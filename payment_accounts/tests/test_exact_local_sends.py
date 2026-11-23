@@ -527,7 +527,7 @@ class ExactLocalRound4JourneyTests(ExactLocalRound3Tests):
         self.assertTrue(right.success, right.errors)
         self.assertEqual(right.journey.destination_snapshot['store_order']['amount'], '1249.00')
 
-    def test_the_retry_exception_is_only_for_qrs(self):
+    def test_a_dollar_journeys_retry_is_never_returned_as_exact(self):
         row, t, request = self.destination(), self.bridge(), uuid.uuid4()
         args = dict(owner=self.owner, local_account=self.local, crypto_account=self.crypto, request_id=request,
                     direction='to_bank', bridge=t, destination=row, minimum_fx_output='1249.00')

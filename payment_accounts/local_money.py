@@ -1560,24 +1560,20 @@ def held(key, exclude_request_id=None, destination=None, owner=None):
     fixed-amount QR was ever paid before QRs carried their key (prod checked
     2026-11-23), so there are no older keyless payments to look for.
     `destination` is accepted for callers' symmetry and not needed."""
-    sets = [holding_payments(key, exclude_request_id=exclude_request_id, owner=owner)]
-    state = ''
-    for rows in sets:
-        signed = rows.exclude(bridge__status='prepared')
-        # In review with no payout, or a payout that failed or came back:
-        # nobody was paid (REVIEW); anything else may have paid (PAID).
-        unpaid_review = Q(stage='needs_review') & (Q(payout_operation__isnull=True)
-                                                  | Q(payout_operation__status__in=('failed', 'reversed')))
-        if signed.exclude(unpaid_review).exists():
-            return PAID
-        if signed.exists():
-            # Held by a payment in review that has not paid anyone: still
-            # held (ops may yet pay it), but not said to be paid. Marking
-            # that journey failed releases the QR.
-            state = REVIEW
-        elif rows.exists() and state != REVIEW:
-            state = SIGNING
-    return state
+    rows = holding_payments(key, exclude_request_id=exclude_request_id, owner=owner)
+    signed = rows.exclude(bridge__status='prepared')
+    # In review with no payout, or a payout that failed or came back:
+    # nobody was paid (REVIEW); anything else may have paid (PAID).
+    unpaid_review = Q(stage='needs_review') & (Q(payout_operation__isnull=True)
+                                              | Q(payout_operation__status__in=('failed', 'reversed')))
+    if signed.exclude(unpaid_review).exists():
+        return PAID
+    if signed.exists():
+        # Held by a payment in review that has not paid anyone: still held
+        # (ops may yet pay it), but not said to be paid. Marking that journey
+        # failed releases the QR.
+        return REVIEW
+    return SIGNING if rows.exists() else ''
 
 
 def held_message(state, what='QR'):
