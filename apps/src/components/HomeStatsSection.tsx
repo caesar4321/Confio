@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import {
   AppState,
   type AppStateStatus,
+  ScrollView,
   View,
   StyleSheet,
   TouchableOpacity,
@@ -101,11 +102,16 @@ type HomeStatsSectionProps = {
   /** The portfolio's stocks.enabled — the same flag the explorer checks.
    * The tile must never offer a screen that will answer "no disponibles". */
   stocksEnabled?: boolean;
+  /** `strip`: at the top of Comunidad (conversation home), drawn in
+   * Comunidad's own grammar, a titled row of cards like the league strips
+   * under it, instead of Inicio's one-card row of five cells. */
+  variant?: 'row' | 'strip';
 };
 
 export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
   refreshNonce = 0,
   stocksEnabled = false,
+  variant = 'row',
 }) => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { separators } = useNumberLocale();
@@ -359,6 +365,37 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({
     </TouchableOpacity>
   );
 
+  if (variant === 'strip') {
+    return (
+      <View style={styles.strip}>
+        <Text style={styles.stripTitle} accessibilityRole="header">Confío en números</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stripRow}>
+          {tiles.map((tile) => (
+            <TouchableOpacity
+              key={tile.key}
+              style={styles.stripCard}
+              activeOpacity={0.7}
+              onPress={tile.onPress}
+              disabled={!tile.onPress}
+              accessibilityRole={tile.onPress ? 'button' : 'text'}
+              accessibilityLabel={accessibilityLabelFor(tile)}
+            >
+              <View style={styles.stripBadge}>
+                <Icon name={tile.icon} size={20} color={TILE_COLORS[tile.key as keyof typeof TILE_COLORS] ?? colors.primaryDark} />
+              </View>
+              <Text style={styles.stripName} numberOfLines={1}>{tile.label}</Text>
+              {/* Dollars carry their sign, like every amount in Comunidad. */}
+              <Text style={styles.stripValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                {tile.unit === 'USD' ? `US$${tile.value}` : tile.value}
+              </Text>
+              <Text style={styles.stripMeta} numberOfLines={1}>{tile.descriptor}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.card}>
@@ -427,4 +464,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#E5E7EB',
     marginVertical: 6,
   },
+  // Comunidad strip: the same measures as LeagueStrips (title 15/700, cards
+  // 112 wide with a 44 badge, 13/600 name, 14/700 figure, 11 detail).
+  strip: { marginBottom: 14 },
+  stripTitle: { fontSize: 15, fontWeight: '700', color: colors.dark, marginBottom: 8 },
+  stripRow: { gap: 10, paddingRight: 16 },
+  stripCard: {
+    width: 112, alignItems: 'center', gap: 5, paddingVertical: 12, paddingHorizontal: 8, borderRadius: 14,
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+  },
+  stripBadge: {
+    width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.neutralDark,
+  },
+  stripName: { fontSize: 13, fontWeight: '600', color: colors.dark, textAlign: 'center' },
+  stripValue: {
+    alignSelf: 'stretch', textAlign: 'center', fontSize: 14, fontWeight: '700', color: colors.dark, fontVariant: ['tabular-nums'],
+  },
+  stripMeta: { alignSelf: 'stretch', textAlign: 'center', fontSize: 11, color: colors.textSecondary },
 });

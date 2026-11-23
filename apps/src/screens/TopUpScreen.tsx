@@ -52,7 +52,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
 import { FaceCheckError, isFaceStepUpRequired, withFaceStepUp } from '../services/faceStepUp';
-import { formatPercent, sanitizeAmountInput } from '../utils/numberLocale';
+import { formatPercent, sanitizeAmountInput, toAmountInput } from '../utils/numberLocale';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
@@ -168,6 +168,23 @@ const TopUpScreen = () => {
   // the old rail. A bare navigate('TopUp') must not land BSC-only accounts
   // on a path that needs an Algorand address.
   const isSavingsRail = route.params?.destination !== 'cusd';
+  // Started from the chat with the amount the person wrote there: filled in
+  // once, and only when this screen is in the currency they wrote it in (a
+  // rail country that differs from where they live must not turn 500
+  // bolivianos into 500 of something else).
+  const prefilled = useRef(false);
+  const prefillAmount = route.params?.amount;
+  const prefillCurrency = route.params?.amountCurrency;
+  useEffect(() => {
+    if (prefilled.current || !availability?.fiatCurrency || !prefillAmount) {
+      return;
+    }
+    prefilled.current = true;
+    const value = Number(prefillAmount);
+    if (prefillCurrency === availability.fiatCurrency && Number.isFinite(value) && value > 0) {
+      setAmount((typed) => typed || toAmountInput(value));
+    }
+  }, [availability?.fiatCurrency, prefillAmount, prefillCurrency]);
   const { data: dollarDestinationData } = useQuery(TOP_UP_DOLLAR_DESTINATION, {
     fetchPolicy: 'cache-and-network',
     skip: !isSavingsRail,

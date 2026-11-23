@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { getKeychainDiagnostic } from './keychainDiagnostic';
 import { ASSISTANT_MEMORY_ENABLED } from '../assistant/memory/flag';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
 
 // Compatibility hints only: the backend independently requires and grades
 // Rekognition sessions. Never send a client-side "face passed" assertion.
@@ -16,6 +17,9 @@ export const mobileClientHeaders = (): Record<string, string> => {
   if (ASSISTANT_MEMORY_ENABLED) headers['X-Confio-Memory'] = '1';
   // How long this phone's keystore took to hand over the session, so a
   // phone where it is slow shows up in the server log (timings only).
+  // Which Inicio this build has, so the assistant describes the app the
+  // person is actually looking at (no tab bar, the menu, where Pagar is).
+  if (CONVERSATION_HOME_ENABLED) headers['X-Confio-Home'] = 'conversation';
   // This build has the shopping task screen and its live view (agentTasks/):
   // without it the assistant never starts a store purchase.
   headers['X-Confio-Browser-Tasks'] = '1';

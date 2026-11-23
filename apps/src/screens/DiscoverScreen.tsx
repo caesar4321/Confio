@@ -54,9 +54,15 @@ type DiscoverScreenProps = {
   refreshSignal?: number;
   /** The posts this pane currently shows, each time that list changes. */
   onShown?: (posts: { id: string; publishedAt?: string | null }[]) => void;
+  /** Drawn above everything else in the feed's header and scrolls with it. */
+  topAccessory?: React.ReactNode;
+  /** Extra room at the end of the feed (a floating button over it). */
+  bottomInset?: number;
 };
 
-export const DiscoverScreen = ({ sections: sectionKeys, refreshSignal, onShown }: DiscoverScreenProps = {}) => {
+export const DiscoverScreen = ({
+  sections: sectionKeys, refreshSignal, onShown, topAccessory, bottomInset,
+}: DiscoverScreenProps = {}) => {
   const offered = useMemo(
     () => (sectionKeys?.length
       ? DISCOVER_SECTIONS.filter((s) => sectionKeys.includes(s.key))
@@ -303,8 +309,10 @@ export const DiscoverScreen = ({ sections: sectionKeys, refreshSignal, onShown }
         commentCounts={commentCounts}
         postExtras={postExtras}
         onOpenAuthor={(userId) => navigation.navigate('CommunityMemberProfile', { userId })}
-        sectionAccessory={showPrompt || showMyPosts || showLeague ? (
+        bottomInset={bottomInset}
+        sectionAccessory={topAccessory || showPrompt || showMyPosts || showLeague ? (
           <>
+            {topAccessory}
             {showLeague ? <LeagueStrips /> : null}
             {showPrompt ? (
               <CommunityComposePrompt onPress={() => navigation.navigate('CommunityCompose')} />

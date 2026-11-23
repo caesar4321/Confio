@@ -46,7 +46,10 @@ export type ClientFunnelEvent =
     // Paid Cuenta inteligente funnel (spec 7.9). The client may only emit
     // `subscribe_opened` and `subscribe_signed`; every chain-proven stage is
     // written by the server (users/funnel_schema.py SMART_ACCOUNT_CLIENT_STAGES).
-    | 'smart_account_funnel';
+    | 'smart_account_funnel'
+    // Which doors of Inicio people use (services/homeNavAnalytics.ts): the
+    // server keeps only `surface`, `target` and `home`, as short slugs.
+    | 'home_nav_tapped';
 
 export const AnalyticsService = {
     /**

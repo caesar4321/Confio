@@ -66,6 +66,9 @@ export function pickDesignation(list: BeneficiaryDesignation[]): BeneficiaryDesi
 }
 
 export interface SmartAccountEntryState {
+  /** The account read has answered (or failed) once: before that, whether
+   * the viewer has one is not known, and nothing is drawn as an offer. */
+  known: boolean;
   /** The viewer has a Cuenta inteligente (any billing state). */
   subscriber: boolean;
   /** Its total, a decimal string; null when unknown. */
@@ -175,6 +178,7 @@ export function useSmartAccountEntry(enabled: boolean): SmartAccountEntryState {
   const offline = useOfflineDesignations(serverListMissing);
   const offlineDesignation = serverListMissing ? offline[0] ?? null : null;
   return {
+    known: enabled && (entry.data !== undefined || entry.failed),
     subscriber,
     totalUsd: subscriber ? entry.data?.totalUsd ?? null : null,
     canSubscribe,

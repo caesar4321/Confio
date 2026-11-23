@@ -39,3 +39,14 @@ export const STOCKS_TRADING_UI_ENABLED = true;
 // stocks; the server's cryptoCapabilities (enabled / tradingEnabled /
 // buyEnabled) stay the operational and country-aware switches.
 export const CRYPTO_TRADING_UI_ENABLED = true;
+
+// CONVERSATION_HOME_ENABLED — the tab-less home
+// (docs/designs/ai-assistant-first-redesign.md, section 7): Inicio is the
+// assistant conversation, Pagar is the composer's primary button, and
+// Invertir / Comunidad / Comprar / Perfil open from a drawer. ON (founder,
+// 2026-11-22): the next build ships it. The five-tab navigator stays in the
+// code for one release (rollback: set this to false). The assistant's map of
+// this layout and the "a step rests on a tap" rule live on the server and
+// are picked by the X-Confio-Home header this build sends: the server side
+// (assistant/, users/funnel_schema.py) must be deployed before the build.
+export const CONVERSATION_HOME_ENABLED = true;

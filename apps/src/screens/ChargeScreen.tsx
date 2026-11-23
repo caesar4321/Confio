@@ -30,6 +30,7 @@ import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { useRef } from 'react';
 import { colors } from '../config/theme';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { formatTokenLabel, isDollarToken } from '../utils/tokenDisplay';
@@ -413,7 +414,9 @@ const ChargeScreen = () => {
             <Circle cx="105%" cy="30%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
           </Svg>
           <View style={styles.headerInner}>
-          {isStackScreen ? (
+          {/* Without a tab bar (conversation home) the tab needs the arrow
+              too; goBack() on a tab returns to Inicio. */}
+          {isStackScreen || CONVERSATION_HOME_ENABLED ? (
             <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={22} color={colors.white} />
             </TouchableOpacity>

@@ -17,6 +17,7 @@ import { ComprarInterestSheet } from '../components/comprar/ComprarInterestSheet
 import { AnalyticsService } from '../services/analyticsService';
 import { formatFeeBps, formatReference, formatUsd } from '../utils/comprarFormat';
 import { explainLocateOutcome } from '../utils/comprarLocate';
+import { useFloatingPrimaryInset } from '../home/useFloatingPrimaryInset';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 const PAGE_SIZE = 20;
@@ -27,6 +28,8 @@ const PAGE_SIZE = 20;
  * door: an intent probe, never a deposit or a list of nothing.
  */
 export const ComprarScreen = () => {
+  // Room for the floating Pagar button at the end of the list (conversation home).
+  const floatingInset = useFloatingPrimaryInset();
   useNumberLocale(); // amounts follow the user's number format, live
   const navigation = useNavigation<Nav>();
   const { location, home: homeLocation, resolving, choose, relocate } = useComprarLocation();
@@ -188,7 +191,7 @@ export const ComprarScreen = () => {
   return (
     <View style={styles.screen}>
       {location && !isLive ? (
-        <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: 32 + floatingInset }}>
           {header}
           {fakeDoor}
         </ScrollView>
@@ -199,7 +202,7 @@ export const ComprarScreen = () => {
           numColumns={2}
           columnWrapperStyle={styles.columns}
           ListHeaderComponent={header}
-          contentContainerStyle={{ paddingBottom: 32 }}
+          contentContainerStyle={{ paddingBottom: 32 + floatingInset }}
           initialNumToRender={PAGE_SIZE}
           maxToRenderPerBatch={10}
           windowSize={21}

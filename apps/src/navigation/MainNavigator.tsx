@@ -119,6 +119,8 @@ import { AgentTaskScreen } from '../agentTasks/AgentTaskScreen';
 import { AgentStoresScreen } from '../agentTasks/AgentStoresScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import FeeReferralCommissionsScreen from '../screens/FeeReferralCommissionsScreen';
+import InviteScreen from '../screens/InviteScreen';
+import FounderScreen from '../screens/FounderScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
 import { LatamCommunityScreen } from '../screens/LatamCommunityScreen';
 import { FundFlowScreen } from '../screens/FundFlowScreen';
@@ -827,6 +829,8 @@ export const MainNavigator = () => {
           component={FeeReferralCommissionsScreen}
           options={{ headerShown: false }}
         />
+        <Stack.Screen name="Invite" component={InviteScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="Founder" component={FounderScreen} options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen
           name="ConfioTokenInfo"
           component={ConfioTokenInfoScreen}

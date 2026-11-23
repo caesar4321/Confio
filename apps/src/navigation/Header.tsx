@@ -33,6 +33,14 @@ interface HeaderProps {
   unreadMessages?: number;
   currentAccountAvatar?: string;
   rightAccessory?: React.ReactNode;
+  /** Conversation home: a screen opened from the drawer shows ☰ instead of
+   * a back arrow. `menuDot`: something new is behind it. */
+  onMenuPress?: () => void;
+  menuDot?: boolean;
+  /** Title and icon colour, overriding the light/dark default. The
+   * conversation home draws on the brand field in `onHeroField` (white is
+   * 1.9:1 there); the screen's hero text uses the same ink. */
+  ink?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -53,11 +61,14 @@ export const Header: React.FC<HeaderProps> = ({
   unreadMessages = 0,
   currentAccountAvatar = 'U',
   rightAccessory,
+  onMenuPress,
+  menuDot = false,
+  ink,
 }) => {
   // SafeAreaView already handles the top inset; keep only the baseline internal padding.
   const topPadding = Platform.OS === 'ios' ? 12 : 12;
   const isLightTheme = isLight || isHomeScreen;
-  const textColor = isLightTheme ? '#FFFFFF' : '#1F2937';
+  const textColor = ink ?? (isLightTheme ? '#FFFFFF' : '#1F2937');
   
   const bg = backgroundColor ? backgroundColor : (isHomeScreen ? colors.heroField : '#F3F4F6');
   return (
@@ -77,7 +88,24 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Shrinks (the title truncates) so a long title at large text sizes
           can never push the right-hand controls off the screen. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, flexShrink: 1, marginRight: 12 }}>
-        {showBackButton && !isHomeScreen && (
+        {onMenuPress ? (
+          <TouchableOpacity
+            onPress={onMenuPress}
+            style={{ marginRight: 14 }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={menuDot ? 'Menú, hay novedades' : 'Menú'}
+          >
+            <Icon name="menu" size={24} color={textColor} />
+            {menuDot ? (
+              <View style={{
+                position: 'absolute', top: -2, right: -3, width: 10, height: 10, borderRadius: 5,
+                backgroundColor: '#6D28D9', borderWidth: 2, borderColor: bg,
+              }} />
+            ) : null}
+          </TouchableOpacity>
+        ) : null}
+        {showBackButton && !isHomeScreen && !onMenuPress && (
           <TouchableOpacity
             onPress={() => { if (onBackPress) { onBackPress(); } else { navigation.goBack(); } }}
             style={{ marginRight: 16 }}

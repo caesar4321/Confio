@@ -86,6 +86,11 @@ import { formatDecimal } from '../utils/numberLocale';
 import { formatMinorMoney } from '../utils/currencies';
 import { useNumberLocale } from '../contexts/NumberLocaleProvider';
 import { BALANCE_VISIBILITY_KEY, loadSavedBalanceVisibility, PREFERENCES_KEYCHAIN_SERVICE } from '../utils/balanceVisibility';
+import { useHomeMoneyStore, type HomeAccount, type HomeMoney } from '../home/homeMoneyStore';
+import { isSwitcherAccount, smartSwitcherLabel } from '../utils/smartAccounts';
+import { buildHomeMoney, type HomeMoneyInput } from '../home/buildHomeMoney';
+import { useStableHeroMonth } from '../home/useStableHeroMonth';
+import { logHomeNav } from '../services/homeNavAnalytics';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
 const INVITE_TS_KEY = 'invite_banner_last_ts';
 
@@ -121,7 +126,11 @@ interface QuickAction {
   route: () => void;
 }
 
-export const HomeScreen = () => {
+// `embedded`: mounted inside the conversation home, drawing only its dialogs
+// (docs/designs/ai-assistant-first-redesign.md 7.4). Same balances, same
+// background work; the figures are published for the home's header and menu,
+// which is where the person's money is shown.
+export const HomeScreen = ({ embedded = false }: { embedded?: boolean } = {}) => {
   const sendAnchor = useGuideAnchor('home_send');
   const receiveAnchor = useGuideAnchor('home_receive');
   // Re-render when the user's country (number format) resolves after mount.
@@ -802,10 +811,10 @@ export const HomeScreen = () => {
 
 
   // Pull to refresh handler
-  const onRefresh = useCallback(async () => {
+  const onRefresh = useCallback(async (quiet?: unknown) => {
     setRefreshing(true);
-    // Add haptic feedback
-    if (Platform.OS === 'ios') {
+    // Add haptic feedback (a pull by the person; never the menu's own refresh)
+    if (Platform.OS === 'ios' && quiet !== true) {
       Vibration.vibrate(10);
     }
 
@@ -876,7 +885,10 @@ export const HomeScreen = () => {
   //
   // Positions never swap (muscle memory). Only the emphasis moves: with
   // nothing to send, the useful door is Recibir, so it is the filled one.
-  const balancesLoaded = !myBalancesLoading && !savingsPortfolio.loading;
+  // Known once the first answer is in, and kept while a refresh is out (the
+  // menu asks again each time it opens): a refetch must not take the wallets
+  // away and put them back, nor move the filled verb.
+  const balancesLoaded = !!myBalancesData && !savingsPortfolio.loading;
   const primaryAction: 'send' | 'receive' =
     // Cuenta inteligente money is not sent from this wallet's Enviar.
     balancesLoaded && totalUSDValue - smartAccountUsd < 0.01 ? 'receive' : 'send';
@@ -1150,6 +1162,203 @@ export const HomeScreen = () => {
   // Check for pending account switch from push notification when screen gains focus
   usePendingNotificationSwitch(handleAccountSwitch);
 
+  // One dollar sign across the conversation home: in much of Latin America
+  // a bare "$" reads as pesos.
+  const usdSign = embedded ? 'US$' : '$';
+  const openSmartEntry = () => {
+    const target = smartEntry.target;
+    if (target.screen === 'SmartAccountHome') {
+      navigation.navigate('SmartAccountHome');
+    } else if (target.screen === 'SmartAccountOffer') {
+      navigation.navigate('SmartAccountOffer', target.params);
+    } else if (target.screen === 'BeneficiaryDesignations') {
+      navigation.navigate('BeneficiaryDesignations');
+    } else {
+      navigation.navigate(target.screen, target.params);
+    }
+  };
+
+  // ── Conversation home: publish what its header and drawer show. ──
+  // Handlers go through a ref so the snapshot only changes when a figure does.
+  const masked = !(canViewBalance && showBalance);
+  const billingEntry = isAuthReady && isPersonalAccount && billingSummaryData?.myBillingSummary?.linked
+    ? billingSummaryData?.myBillingSummary?.entry : null;
+  const moneyHandlers = useRef<Record<string, () => void>>({});
+  moneyHandlers.current = {
+    toggleBalance: toggleBalanceVisibility,
+    toggleCurrency: () => setShowLocalCurrency(!showLocalCurrency),
+    refresh: () => { void onRefresh(true); },
+    createBusiness: handleCreateBusinessAccount,
+    openMonth: () => {
+      AnalyticsService.logFunnelEvent('hero_cashflow_tapped', { state: heroMonth.kind === 'month' ? 'month' : 'invite' });
+      navigation.navigate('MonthSummary', heroMonth.kind === 'month'
+        ? { year: heroMonth.summary.year, month: heroMonth.summary.month, masked }
+        : { masked });
+    },
+    dollar: () => navigation.navigate('AccountDetail', {
+      accountType: 'cusd_plus',
+      accountName: savingsPortfolio.savings.enabled ? 'Confío Dollar+' : 'Confío Dollar',
+      accountSymbol: '$cUSD+',
+      accountBalance: '0.00',
+    }),
+    legacy: navigateToCUSDAccount,
+    confio: navigateToConfioAccount,
+    // No segment bar in the conversation home: ask for Invertir by name.
+    invest: () => navigation.navigate('BottomTabs', { screen: 'Invest', params: { segment: 'invest', at: Date.now() } }),
+    smart: openSmartEntry,
+    send: () => quickActions.find((a) => a.id === 'send')?.route(),
+    receive: () => quickActions.find((a) => a.id === 'receive')?.route(),
+    pendingIncoming: () => navigation.navigate('PendingIncoming'),
+    inviteClaim: () => { void handleClaimInvite(); },
+    payroll: () => navigation.navigate('PayrollPending'),
+    presaleClaim: () => navigation.navigate('ConfioPresale'),
+    dues: () => { if (billingEntry) navigation.navigate('Memberships', { obligationId: billingEntry.id }); },
+    humanitarian: () => {
+      if (activeHumanitarianCampaign) navigation.navigate('HumanitarianAid', { slug: activeHumanitarianCampaign.slug });
+    },
+  };
+  const dollarUsd = savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd + savingsPortfolio.usdtBalanceUsd;
+  const balancesKnown = balancesLoaded;
+  const showLegacyDollar = !savingsPortfolio.savings.cusdDepositsPaused || cUSDBalance > 0;
+  const actionIds = quickActions.map((a) => a.id).join(',');
+  const noticeKey: HomeMoneyInput['noticeKey'] = homePromo === 'pendingIncoming' || homePromo === 'inviteClaim'
+    || homePromo === 'payroll' || (homePromo === 'presaleClaim' && confioPresaleLocked > 0)
+    ? homePromo
+    : billingEntry && billingEntry.status !== 'paid' && billingEntry.status !== 'payment_pending'
+      && !billingEntry.applicationStatus ? 'dues'
+      : activeHumanitarianCampaign ? 'humanitarian' : null;
+  const campaignTitle: string | null = activeHumanitarianCampaign?.title || null;
+  const legacyDollarUsd = showLegacyDollar ? cUSDBalance : null;
+  // The menu's account switcher: every account, the current one marked,
+  // each with the words the old switcher used for its kind.
+  const selectedAccountId = activeAccount?.id || displayAccounts[0]?.id || '';
+  const menuAccounts = useMemo<HomeAccount[]>(() => displayAccounts
+    .filter((account: any) => isSwitcherAccount(account))
+    .map((account: any) => {
+    const type = String(account.type || '').toLowerCase();
+    const role = account.employeeRole === 'cashier' ? 'Cajero' : account.employeeRole === 'manager' ? 'Gerente' : 'Admin';
+    return {
+      id: account.id,
+      name: account.name,
+      kind: type === 'personal' ? 'Personal'
+        : type === 'smart' ? smartSwitcherLabel(account)
+        : account.isEmployee ? `Empleado · ${role}` : 'Negocio',
+      avatar: account.avatar || String(account.name || '?').charAt(0).toUpperCase(),
+      selected: account.id === selectedAccountId,
+    };
+  }), [displayAccounts, selectedAccountId]);
+  // The total in the currency the person chose with the menu's switch.
+  const totalText = showLocalCurrency
+    ? `${currency.symbol} ${formatAmount.plain(floorToDecimals(totalLocalValue, 2))}`
+    : `US$${formatFixedFloor(totalUSDValue, 2)}`;
+  const currencyCode: string | null = canShowLocalCurrency ? (showLocalCurrency ? currency.code : 'USD') : null;
+  const currencyHint = showLocalCurrency ? 'Mostrar en dólares' : `Mostrar en ${currency.name}`;
+  // One object per state and per summary: see useStableHeroMonth for why.
+  const publishedMonth = useStableHeroMonth(heroMonth);
+  const homeMoney = useMemo<HomeMoney>(() => buildHomeMoney({
+    ready: isInitialized,
+    masked,
+    canToggle: canViewBalance,
+    totalText,
+    currencyCode,
+    currencyHint,
+    accounts: menuAccounts,
+    month: publishedMonth,
+    balancesKnown,
+    dollar: { plus: savingsPortfolio.savings.enabled, usd: dollarUsd },
+    legacyDollarUsd,
+    investments: { visible: investments.visible, totalKnown: investments.totalKnown, totalUsd: investments.totalUsd },
+    confioTotal,
+    smart: smartAccountRow
+      ? { known: smartEntry.known, subscriber: smartEntry.subscriber, totalUsd: smartEntry.totalUsd, canSubscribe: smartEntry.canSubscribe }
+      : null,
+    actionIds: actionIds.split(',').filter(Boolean) as ('send' | 'receive')[],
+    primaryAction,
+    noticeKey,
+    pendingPayrollCount,
+    campaignTitle,
+  }, (key: string) => () => {
+    if (key.startsWith('switchAccount:')) {
+      void handleAccountSwitch(key.slice('switchAccount:'.length));
+    } else {
+      moneyHandlers.current[key]?.();
+    }
+  }),
+  [masked, canViewBalance, isInitialized, totalText, currencyCode, currencyHint, menuAccounts, handleAccountSwitch, publishedMonth, balancesKnown, dollarUsd, legacyDollarUsd,
+   investments.visible, investments.totalKnown, investments.totalUsd, confioTotal, smartAccountRow,
+   smartEntry.known, smartEntry.subscriber, smartEntry.totalUsd, smartEntry.canSubscribe, savingsPortfolio.savings.enabled,
+   actionIds, primaryAction, noticeKey, pendingPayrollCount, campaignTitle]);
+  // Into this home shell's own store (there can be more than one shell).
+  const moneyStore = useHomeMoneyStore();
+  useEffect(() => {
+    if (embedded) moneyStore.publish(homeMoney);
+  }, [embedded, homeMoney, moneyStore]);
+  useEffect(() => () => {
+    if (embedded) moneyStore.reset();
+  }, [embedded, moneyStore]);
+
+  // Modals this screen owns in either layout (the account switcher, the
+  // swap and referral dialogs).
+  const overlays = (
+    <>
+        {/* Profile Menu */}
+        <ProfileMenu
+          visible={profileMenu.showProfileMenu}
+          onClose={profileMenu.closeProfileMenu}
+          accounts={displayAccounts}
+          selectedAccount={activeAccount?.id || displayAccounts[0]?.id || ''}
+          onAccountSwitch={handleAccountSwitch}
+          onCreateBusinessAccount={handleCreateBusinessAccount}
+        />
+
+        {/* Account Switch Overlay */}
+        <AccountSwitchOverlay
+          visible={switchState.isLoading}
+          progress={switchState.progress}
+        />
+
+        {/* Referral Input Modal */}
+        <ReferralInputModal
+          visible={showReferralInput}
+          onClose={() => setShowReferralInput(false)}
+          onSuccess={() => {
+            setShowReferralInput(false);
+            // Refresh balances
+            setTimeout(() => {
+              refetchMyBalances();
+            }, 500);
+          }}
+        />
+
+        <LoadingOverlay
+          visible={claimingInvite}
+          message="Reclamando tu invitación..."
+        />
+
+        <ReferralSuccessModal
+          visible={showDeferredReferralSuccess}
+          onClose={() => setShowDeferredReferralSuccess(false)}
+        />
+
+        {/* The Algorand auto-swaps take priority: they carry the
+            wallet-recovery mode. The savings mint reuses the same spinner. */}
+        <AutoSwapModal
+          visible={swapModalAsset !== null || walletRecoveryRequired || mintingSavings}
+          assetType={swapModalAsset ?? (mintingSavings ? 'USDT' : null)}
+          mode={walletRecoveryRequired ? 'wallet_recovery_required' : 'processing'}
+          onClose={dismissWalletRecovery}
+        />
+    </>
+  );
+
+  // ── The conversation home: nothing of this screen is drawn. It stays
+  // mounted for what Inicio always did in the background (arrivals, swaps,
+  // the account switcher) and for the figures it publishes; the menu is
+  // where the person sees their money. ──
+  if (embedded) {
+    return overlays;
+  }
+
   return (
     <View style={styles.container}>
       {/* Skeleton overlay — rendered on top while loading, then removed */}
@@ -1159,12 +1368,12 @@ export const HomeScreen = () => {
             <View style={styles.balanceCardInner}>
               <View style={styles.portfolioHeader}>
                 <View style={styles.portfolioTitleContainer}>
-                  <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
-                  <Text style={styles.portfolioSubLabel}>En Dólares</Text>
+                  {embedded ? null : <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>}
+                  {embedded ? null : <Text style={styles.portfolioSubLabel}>En Dólares</Text>}
                 </View>
               </View>
               <View style={styles.balanceContainer}>
-                <Text style={styles.currencySymbol}>$</Text>
+                <Text style={styles.currencySymbol}>{usdSign}</Text>
                 <Text style={styles.balanceAmount}>••••••</Text>
               </View>
             </View>
@@ -1207,10 +1416,14 @@ export const HomeScreen = () => {
           <View style={styles.balanceCardInner}>
           <View style={styles.portfolioHeader}>
             <View style={styles.portfolioTitleContainer}>
-              <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
-              <Text style={styles.portfolioSubLabel}>
-                {showLocalCurrency ? `En ${currency.name}` : 'En Dólares'}
-              </Text>
+              {embedded ? null : <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>}
+              {/* Under "Mi dinero" with "US$" beside the figure, "En Dólares"
+                  says nothing new; the local currency's name still does. */}
+              {embedded && !showLocalCurrency ? null : (
+                <Text style={styles.portfolioSubLabel}>
+                  {showLocalCurrency ? `En ${currency.name}` : 'En Dólares'}
+                </Text>
+              )}
             </View>
             <View style={styles.portfolioActions}>
               {/* Only show eye toggle if employee has viewBalance permission or not an employee */}
@@ -1253,7 +1466,7 @@ export const HomeScreen = () => {
           ]}
           >
             <Text style={styles.currencySymbol}>
-              {showLocalCurrency ? currency.symbol : '$'}
+              {showLocalCurrency ? currency.symbol : usdSign}
             </Text>
                     <Text style={styles.balanceAmount}>
               {displayedPortfolioBalance}
@@ -1294,6 +1507,7 @@ export const HomeScreen = () => {
                     style={[styles.heroAction, filled ? styles.heroActionFilled : styles.heroActionGlass]}
                     onPress={() => {
                       reportGuideTap(action.id === 'send' ? 'home_send' : 'home_receive');
+                      logHomeNav('home', action.id);
                       action.route();
                     }}
                     activeOpacity={0.85}
@@ -1491,11 +1705,14 @@ export const HomeScreen = () => {
           </Animated.View>
         )}
 
-        {/* Crecimiento Confío stats */}
-        <HomeStatsSection
-          refreshNonce={statsRefreshNonce}
-          stocksEnabled={savingsPortfolio.stocks.enabled}
-        />
+        {/* Crecimiento Confío stats. In the conversation home they sit at
+            the top of Comunidad instead. */}
+        {!embedded && (
+          <HomeStatsSection
+            refreshNonce={statsRefreshNonce}
+            stocksEnabled={savingsPortfolio.stocks.enabled}
+          />
+        )}
 
         {/* Wallets Section */}
         <View style={styles.walletsSection}>
@@ -1503,7 +1720,7 @@ export const HomeScreen = () => {
 
           {/* Both queries feed rows here, so wait for both: a $0.00 dollar
               row that fills in a beat later reads as "my money is gone". */}
-          {(myBalancesLoading || savingsPortfolio.loading) ? (
+          {!balancesLoaded ? (
             <>
               <WalletCardSkeleton />
               <WalletCardSkeleton />
@@ -1542,7 +1759,7 @@ export const HomeScreen = () => {
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
                   ]}
-                  onPress={() => navigation.navigate('AccountDetail', {
+                  onPress={() => { logHomeNav('home', 'wallet_dollar'); navigation.navigate('AccountDetail', {
                     accountType: 'cusd_plus',
                     // Same rule as the row title: an ineligible user must not
                     // land on a screen headed "Confío Dollar+".
@@ -1552,7 +1769,7 @@ export const HomeScreen = () => {
                     // Live figures come from the portfolio inside the screen;
                     // this is only the first paint.
                     accountBalance: '0.00',
-                  })}
+                  }); }}
                 >
                   <View style={styles.walletCardContent}>
                     <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
@@ -1595,7 +1812,7 @@ export const HomeScreen = () => {
                             below was counting all along. Eligibility gates
                             MINTING, never what you already hold. */}
                         {(canViewBalance && showBalance)
-                          ? `$${formatFixedFloor(
+                          ? `${usdSign}${formatFixedFloor(
                               savingsPortfolio.savings.balanceUsd + savingsPortfolio.cusdBalanceUsd +
                               savingsPortfolio.usdtBalanceUsd,
                               2,
@@ -1616,7 +1833,7 @@ export const HomeScreen = () => {
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
                   ]}
-                  onPress={navigateToCUSDAccount}
+                  onPress={() => { logHomeNav('home', 'wallet_legacy'); navigateToCUSDAccount(); }}
                 >
                   <View style={styles.walletCardContent}>
                     <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
@@ -1641,7 +1858,7 @@ export const HomeScreen = () => {
                         {/* Hide balance for employees without viewBalance permission */}
                         {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
                           ? '••••'
-                          : showBalance ? `$${formatFixedFloor(cUSDBalance, 2)}` : '••••'}
+                          : showBalance ? `${usdSign}${formatFixedFloor(cUSDBalance, 2)}` : '••••'}
                       </Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
@@ -1658,18 +1875,7 @@ export const HomeScreen = () => {
                     styles.walletCard,
                     pressed && { opacity: 0.7 }
                   ]}
-                  onPress={() => {
-                    const target = smartEntry.target;
-                    if (target.screen === 'SmartAccountHome') {
-                      navigation.navigate('SmartAccountHome');
-                    } else if (target.screen === 'SmartAccountOffer') {
-                      navigation.navigate('SmartAccountOffer', target.params);
-                    } else if (target.screen === 'BeneficiaryDesignations') {
-                      navigation.navigate('BeneficiaryDesignations');
-                    } else {
-                      navigation.navigate(target.screen, target.params);
-                    }
-                  }}
+                  onPress={() => { logHomeNav('home', 'wallet_smart'); openSmartEntry(); }}
                   accessibilityRole="button"
                   accessibilityLabel={smartEntry.subscriber
                     ? 'Cuenta inteligente, ' + ((canViewBalance && showBalance && smartEntry.totalUsd !== null)
@@ -1702,7 +1908,7 @@ export const HomeScreen = () => {
                         <Text style={styles.walletBalanceText}>
                           {!(canViewBalance && showBalance) ? '••••'
                             : smartEntry.totalUsd === null ? '—'
-                            : '$' + formatFixedFloor(Number(smartEntry.totalUsd), 2)}
+                            : usdSign + formatFixedFloor(Number(smartEntry.totalUsd), 2)}
                         </Text>
                       ) : null}
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
@@ -1717,7 +1923,7 @@ export const HomeScreen = () => {
                   styles.walletCard,
                   pressed && { opacity: 0.7 }
                 ]}
-                onPress={navigateToConfioAccount}
+                onPress={() => { logHomeNav('home', 'wallet_confio'); navigateToConfioAccount(); }}
               >
                 <View style={styles.walletCardContent}>
                   <View style={[styles.walletLogoContainer, { backgroundColor: colors.secondary }]}>
@@ -1759,7 +1965,11 @@ export const HomeScreen = () => {
                   accessibilityRole="button"
                   accessibilityLabel="Inversiones"
                   accessibilityHint="Abre Invertir"
-                  onPress={() => navigation.navigate('BottomTabs', { screen: 'Invest' })}
+                  onPress={() => {
+                    logHomeNav('home', 'wallet_invest');
+                    navigation.navigate('BottomTabs', embedded
+                      ? { screen: 'Invest', params: { segment: 'invest', at: Date.now() } } : { screen: 'Invest' });
+                  }}
                 >
                   <View style={styles.walletCardContent}>
                     {/* A category mark, not a token logo: the row holds
@@ -1776,7 +1986,7 @@ export const HomeScreen = () => {
                         {!(canViewBalance && showBalance)
                           ? '••••'
                           : !investments.totalKnown ? '—'
-                          : `$${formatFixedFloor(investments.totalUsd, 2)}`}
+                          : `${usdSign}${formatFixedFloor(investments.totalUsd, 2)}`}
                       </Text>
                       <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
@@ -1788,7 +1998,7 @@ export const HomeScreen = () => {
         </View>
 
         {/* Ghost Input for Referral */}
-        {referralStatusData?.checkReferralStatus?.canSetReferrer !== false && (
+        {!embedded && referralStatusData?.checkReferralStatus?.canSetReferrer !== false && (
           <View style={styles.ghostInputContainer}>
             <TouchableOpacity onPress={() => setShowReferralInput(true)} style={styles.ghostButton}>
               <Text style={styles.ghostButtonText}>¿Tienes un código de invitación?</Text>
@@ -1798,54 +2008,7 @@ export const HomeScreen = () => {
       </ScrollView>
 
 
-      {/* Profile Menu */}
-      <ProfileMenu
-        visible={profileMenu.showProfileMenu}
-        onClose={profileMenu.closeProfileMenu}
-        accounts={displayAccounts}
-        selectedAccount={activeAccount?.id || displayAccounts[0]?.id || ''}
-        onAccountSwitch={handleAccountSwitch}
-        onCreateBusinessAccount={handleCreateBusinessAccount}
-      />
-
-      {/* Account Switch Overlay */}
-      <AccountSwitchOverlay
-        visible={switchState.isLoading}
-        progress={switchState.progress}
-      />
-
-      {/* Referral Input Modal */}
-      <ReferralInputModal
-        visible={showReferralInput}
-        onClose={() => setShowReferralInput(false)}
-        onSuccess={() => {
-          setShowReferralInput(false);
-          // Refresh balances
-          setTimeout(() => {
-            refetchMyBalances();
-          }, 500);
-        }}
-      />
-
-      <LoadingOverlay
-        visible={claimingInvite}
-        message="Reclamando tu invitación..."
-      />
-
-      <ReferralSuccessModal
-        visible={showDeferredReferralSuccess}
-        onClose={() => setShowDeferredReferralSuccess(false)}
-      />
-
-      {/* The Algorand auto-swaps take priority: they carry the
-          wallet-recovery mode. The savings mint reuses the same spinner. */}
-      <AutoSwapModal
-        visible={swapModalAsset !== null || walletRecoveryRequired || mintingSavings}
-        assetType={swapModalAsset ?? (mintingSavings ? 'USDT' : null)}
-        mode={walletRecoveryRequired ? 'wallet_recovery_required' : 'processing'}
-        onClose={dismissWalletRecovery}
-      />
-
+      {overlays}
     </View>
   );
 };

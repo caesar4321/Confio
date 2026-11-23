@@ -202,7 +202,9 @@ export type MainStackParamList = {
     accountBalance: string;
     accountAddress?: string;
   };
-  TopUp: { destination?: 'cusd' | 'cusd_plus' } | undefined;
+  // amount + amountCurrency: a top-up started from the chat, with the amount
+  // the person wrote (filled in only when the screen is in that currency).
+  TopUp: { destination?: 'cusd' | 'cusd_plus'; amount?: string; amountCurrency?: string } | undefined;
   Sell: { destination?: 'cusd' | 'cusd_plus' } | undefined;
   ConvertSavings: undefined;
   WithdrawSavings: undefined;
@@ -582,6 +584,9 @@ export type MainStackParamList = {
   } | undefined;
   Achievements: undefined;
   FeeReferralCommissions: undefined;
+  /** "Invitar y ganar": the referral programme (menu row, and a line in Perfil). */
+  Invite: undefined;
+  Founder: undefined;
   ConfioTokenInfo: undefined;
   LatamCommunity: undefined;
   FundFlow: undefined;

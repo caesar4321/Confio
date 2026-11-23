@@ -1,5 +1,5 @@
 // Open/close state for Confio Assistant, the screen the user is on, and the Assistant+ plan.
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { navigationRef } from '../navigation/RootNavigation';
 import type { AssistantPlan } from './api';
 import type { VoiceNote } from './voiceNote';
@@ -72,6 +72,16 @@ type AssistantState = {
   // The first-steps card or its pencil is up: the bubble steps aside.
   guideShown: boolean;
   setGuideShown: (shown: boolean) => void;
+  // The conversation home is on screen (the chat itself is Inicio): a request
+  // for Confio Assistant goes to it instead of opening the box, and the
+  // floating bubble steps away. `homeSeq` is that conversation's openSeq.
+  homeActive: boolean;
+  setHomeActive: (active: boolean) => void;
+  homeSeq: number;
+  // The conversation home's menu is open over the screen: the bubble, which
+  // floats above every screen, steps away like the other floating button.
+  menuOpen: boolean;
+  setMenuOpen: (open: boolean) => void;
 };
 
 const AssistantContext = createContext<AssistantState | null>(null);
@@ -100,8 +110,25 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     return navigationRef.addListener('state', update);
   }, []);
 
+  const [homeActive, setHomeActiveState] = useState(false);
+  const homeActiveRef = useRef(false);
+  const [homeSeq, setHomeSeq] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const setHomeActive = useCallback((active: boolean) => {
+    homeActiveRef.current = active;
+    setHomeActiveState(active);
+  }, []);
+
   const open = useCallback((opts: OpenOptions = {}) => {
     setRequest(opts);
+    // Julian, News and direct messages still open in the box.
+    if (homeActiveRef.current && (!opts.channel || opts.channel === 'ia')) {
+      // The box may be open over Inicio (Julian's channel): it steps away so
+      // the conversation can take the request now, not whenever it closes.
+      setIsOpen(false);
+      setHomeSeq((n) => n + 1);
+      return;
+    }
     setOpenSeq((n) => n + 1);
     setIsOpen(true);
   }, []);
@@ -173,11 +200,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeDmFolder, consumeVoiceNote, consumeVoiceNoteData, available, setAvailable, aiEnabled, setAiEnabled, plan, setPlan, inCall, setInCall,
       bubbleAnchor, setBubbleAnchor, micBusy, setMicBusy, openSeq, navNote, showNavNote, boxShown, setBoxShown,
-      guideShown, setGuideShown,
+      guideShown, setGuideShown, homeActive, setHomeActive, homeSeq, menuOpen, setMenuOpen,
     }),
     [isOpen, route, open, close, consumePrompt, consumePicker, consumeProbe, consumePlus, consumeCall, consumeChannel,
       consumeDmFolder, consumeVoiceNote, consumeVoiceNoteData, available,
-      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote, boxShown, guideShown],
+      aiEnabled, plan, inCall, bubbleAnchor, micBusy, openSeq, navNote, showNavNote, boxShown, guideShown,
+      homeActive, setHomeActive, homeSeq, menuOpen],
   );
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }

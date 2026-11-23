@@ -4,6 +4,12 @@ jest.mock('react-native-device-info', () => ({
   getBuildNumber: jest.fn(() => '157'),
 }));
 
+// A build constant: each test picks the home it is about.
+let mockConversationHome = false;
+jest.mock('../../config/features', () => ({
+  get CONVERSATION_HOME_ENABLED() { return mockConversationHome; },
+}));
+
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { mobileClientHeaders, createMobileWebSocket } from '../mobileClientHeaders';
@@ -28,6 +34,16 @@ describe('Face release compatibility headers', () => {
       'X-Confio-Build': '157', 'X-Confio-Face-Capable': '1', 'X-Confio-Memory': '1',
       'X-Confio-Browser-Tasks': '1',
     });
+  });
+
+  it('says when Inicio is the conversation, so the assistant describes the right app', () => {
+    mockConversationHome = true;
+    try {
+      expect(mobileClientHeaders()['X-Confio-Home']).toBe('conversation');
+    } finally {
+      mockConversationHome = false;
+    }
+    expect(mobileClientHeaders()).not.toHaveProperty('X-Confio-Home');
   });
 
   it('says this build has the shopping task screen, so the assistant may start a store purchase', () => {

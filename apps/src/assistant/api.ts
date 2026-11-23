@@ -121,6 +121,7 @@ export const ASK_ASSISTANT = gql`
     $audioDurationMs: Int
     $screen: String
     $timezone: String
+    $guideStep: String
   ) {
     askAssistant(
       body: $body
@@ -129,6 +130,7 @@ export const ASK_ASSISTANT = gql`
       audioDurationMs: $audioDurationMs
       screen: $screen
       timezone: $timezone
+      guideStep: $guideStep
     ) {
       success
       error
@@ -142,6 +144,41 @@ export const ASK_ASSISTANT = gql`
     }
   }
 `;
+
+// A message with a photo. Its own document: the photo arguments reach only
+// the send that carries one, so a server that predates them fails that send
+// alone and never the plain chat.
+export const ASK_ASSISTANT_WITH_PHOTO = gql`
+  mutation AskAssistantWithPhoto(
+    $body: String
+    $photoBase64: String!
+    $photoMimeType: String
+    $screen: String
+    $timezone: String
+    $guideStep: String
+  ) {
+    askAssistant(
+      body: $body
+      photoBase64: $photoBase64
+      photoMimeType: $photoMimeType
+      screen: $screen
+      timezone: $timezone
+      guideStep: $guideStep
+    ) {
+      success
+      error
+      userMessage { ${MESSAGE_FIELDS} }
+      reply { ${MESSAGE_FIELDS} }
+      actions { type destination target ticker label }
+      mode
+      remainingTurns
+      dataChanged
+    }
+  }
+`;
+
+/** The body the server gives a photo sent with no words (assistant/photos.py). */
+export const PHOTO_ONLY_BODY = '📷 Foto';
 
 // Own document: the guideStep argument must not reach the chat's mutation.
 export const ASK_ASSISTANT_IN_GUIDE = gql`
@@ -240,6 +277,8 @@ export type AssistantMessage = {
   modality?: string | null;
   actions: AssistantAction[];
   pending?: boolean;
+  /** A photo being sent: the file on this phone, shown in the bubble. */
+  photoUri?: string;
 };
 
 export type AssistantProfile = {

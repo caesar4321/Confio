@@ -7,6 +7,11 @@ import { InvestScreen } from './InvestScreen';
 import { DiscoverScreen } from './DiscoverScreen';
 import { CommunityPreviewCard } from '../components/CommunityPreviewCard';
 import { markCommunitySeen, refreshCommunityPeek, type ShownPost, useCommunityPeek } from '../services/communityPeek';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
+import { DrawerHeader } from '../home/DrawerHeader';
+import { HomeStatsSection } from '../components/HomeStatsSection';
+import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
+import { useFloatingPrimaryInset } from '../home/useFloatingPrimaryInset';
 
 export type InvestSegment = 'invest' | 'community';
 
@@ -28,6 +33,63 @@ const SEGMENTS: { key: InvestSegment; label: string }[] = [
  * count pill, and the Invertir tab icon a badge (BottomTabNavigator).
  */
 export const InvestTabScreen = ({ route }: { route?: { params?: { segment?: InvestSegment; at?: number } } }) => {
+  return CONVERSATION_HOME_ENABLED ? <InvestDrawerScreen route={route} /> : <InvestSegmentsScreen route={route} />;
+};
+
+/**
+ * The conversation home: Invertir and Comunidad are two entries in the
+ * menu, so this screen shows one of them under its own title, with no
+ * segment bar and no preview of one inside the other. Comunidad opens with
+ * the network's figures (they left Inicio), drawn as one of its own strips.
+ */
+const InvestDrawerScreen = ({ route }: { route?: { params?: { segment?: InvestSegment; at?: number } } }) => {
+  const [segment, setSegment] = useState<InvestSegment>(route?.params?.segment ?? 'invest');
+  const requested = route?.params?.segment;
+  const requestedAt = route?.params?.at;
+  const isFocused = useIsFocused();
+  const { stocks } = useSavingsPortfolio();
+  const floatingInset = useFloatingPrimaryInset();
+  const [communityRefresh, setCommunityRefresh] = useState(0);
+  React.useEffect(() => {
+    if (segment === 'community') setCommunityRefresh((n) => n + 1);
+  }, [segment]);
+  React.useEffect(() => {
+    if (requested) setSegment(requested);
+  }, [requested, requestedAt]);
+  useFocusEffect(useCallback(() => { void refreshCommunityPeek(); }, []));
+  // Same rule as the segments: only posts actually on screen clear the badge.
+  const [shown, setShown] = useState<ShownPost[]>([]);
+  const visible = isFocused && segment === 'community';
+  React.useEffect(() => {
+    if (visible && shown.length) void markCommunitySeen(shown);
+  }, [visible, shown]);
+
+  return (
+    <View style={styles.screen}>
+      <DrawerHeader
+        title={segment === 'community' ? 'Comunidad' : 'Invertir'}
+        backgroundColor={colors.heroField}
+        isLight
+      />
+      {/* No Comunidad preview on top of Invertir here: Comunidad is its own
+          entry in the menu, with its own badge. */}
+      <View style={[styles.pane, segment !== 'invest' && styles.hidden]}>
+        <InvestScreen />
+      </View>
+      <View style={[styles.pane, segment !== 'community' && styles.hidden]}>
+        <DiscoverScreen
+          sections={['community']}
+          refreshSignal={communityRefresh}
+          onShown={setShown}
+          topAccessory={<HomeStatsSection variant="strip" refreshNonce={communityRefresh} stocksEnabled={stocks.enabled} />}
+          bottomInset={floatingInset}
+        />
+      </View>
+    </View>
+  );
+};
+
+const InvestSegmentsScreen = ({ route }: { route?: { params?: { segment?: InvestSegment; at?: number } } }) => {
   const navigation = useNavigation<any>();
   const [segment, setSegment] = useState<InvestSegment>(route?.params?.segment ?? 'invest');
   const requested = route?.params?.segment;

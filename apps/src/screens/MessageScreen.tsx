@@ -9,6 +9,9 @@ import { Header } from '../navigation/Header';
 import { describeTypes, logBreadcrumb } from '../services/crashLog';
 import { colors } from '../config/theme';
 import { useOptionalAssistant } from '../assistant/AssistantContext';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
+import { isSmartContext } from '../assistant/SmartContextNotice';
+import { useAccount } from '../contexts/AccountContext';
 
 
 export const MessageScreen = () => {
@@ -17,6 +20,7 @@ export const MessageScreen = () => {
   const [screenState, setScreenState] = useState<'inbox' | 'channel'>('inbox');
   const initialChannelId = route.params?.initialChannelId;
   const assistant = useOptionalAssistant();
+  const { activeAccount } = useAccount();
 
   // Mensajes lives in the floating box now. Pushes and confio://messages/…
   // links still land on this route: hand them to the box and step back.
@@ -26,6 +30,14 @@ export const MessageScreen = () => {
     }
     // 'ia' shows Confio Assistant, or the classic support thread when it's unavailable.
     const channel = initialChannelId === 'julian' || initialChannelId === 'confio' ? initialChannelId : 'ia';
+    if (CONVERSATION_HOME_ENABLED && channel === 'ia' && !isSmartContext(activeAccount)) {
+      // The conversation home: that thread is Inicio. Go there instead of
+      // opening the same conversation in the box on top of it. A Cuenta
+      // inteligente context has its own home and no thread: the box still
+      // tells the person to switch account.
+      navigation.popTo('BottomTabs', { screen: 'Home' } as any);
+      return;
+    }
     assistant.open({ channel });
     if (navigation.canGoBack()) {
       navigation.goBack();

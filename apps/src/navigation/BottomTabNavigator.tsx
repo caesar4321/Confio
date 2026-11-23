@@ -4,7 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
 import { View, StyleSheet, Platform } from 'react-native';
 import { Text } from '../components/common/AppText';
-import { useNavigation } from '@react-navigation/native';
+import { getFocusedRouteNameFromRoute, useNavigation, useNavigationState, useRoute } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { BottomTabParamList, RootStackParamList } from '../types/navigation';
 import { InvestTabScreen } from '../screens/InvestTabScreen';
@@ -21,6 +21,19 @@ import { colors } from '../config/theme';
 import { peekBadge, useCommunityPeek, watchCommunityPeek } from '../services/communityPeek';
 import { useSharedQr } from '../hooks/useSharedQr';
 import { Alert } from 'react-native';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
+import { AppDrawerProvider } from '../home/AppDrawer';
+import { ConversationHomeScreen } from '../home/ConversationHomeScreen';
+import { DrawerHeader } from '../home/DrawerHeader';
+import { FloatingPrimaryButton } from '../home/FloatingPrimaryButton';
+import { logHomeNav } from '../services/homeNavAnalytics';
+
+// Module-level, so the tab bar and headers keep a stable identity.
+const NoTabBar = () => null;
+const ComprarDrawerHeader = () => <DrawerHeader title="Comprar" backgroundColor="#fff" />;
+const ProfileDrawerHeader = () => <DrawerHeader title="Mi Perfil" backgroundColor={colors.heroField} isLight />;
+// The same names the conversation home's doors log, so the two compare.
+const TAB_TARGETS: Record<string, string> = { Scan: 'pay' };
 
 // The Cuenta inteligente homes, loaded only when a smart context is active:
 // almost nobody is in one at launch, and the tab bar should not pull their
@@ -63,6 +76,19 @@ export const BottomTabNavigator = () => {
   // those flows for a smart token too (dual enforcement).
   const isSmartAccount = accountType === 'smart';
   const isInheritedAccount = isSmartAccount && (activeAccount?.index ?? 0) > 0;
+  // The conversation home (docs/designs/ai-assistant-first-redesign.md 7):
+  // no tab bar; the same routes, reached from the drawer. A Cuenta
+  // inteligente context keeps its own two-tab home for now.
+  const conversationHome = CONVERSATION_HOME_ENABLED && !isSmartAccount;
+  // From the parent stack's raw state, so it is right on the first render (a
+  // link that opens straight on Invertir) and on every tab change. The route
+  // object from useRoute() alone is reused across tab changes outside
+  // production and would leave this one navigation behind.
+  const shellKey = useRoute().key;
+  const focusedTab = useNavigationState((state) => {
+    const shell = state.routes.find((r) => r.key === shellKey);
+    return shell ? getFocusedRouteNameFromRoute(shell) : undefined;
+  }) ?? 'Home';
 
   // A QR shared from another app opens Pagar as if it had been scanned; the
   // scan handler applies every check (employee, rail, account) from there.
@@ -78,11 +104,17 @@ export const BottomTabNavigator = () => {
 
   //
   const handleNotificationPress = useCallback(() => {
+    logHomeNav('header', 'notifications');
     navigation.navigate('Notification' as any);
   }, [navigation]);
   const handleChargePress = useCallback(() => {
+    logHomeNav('header', 'charge');
     navigation.navigate('Charge' as any);
   }, [navigation]);
+  const handleProfileMenuPress = useCallback(() => {
+    logHomeNav('header', 'switch_account');
+    profileMenu.openProfileMenu();
+  }, [profileMenu.openProfileMenu]);
 
 
   // Create stable header components for each screen
@@ -91,7 +123,7 @@ export const BottomTabNavigator = () => {
       navigation={navigation}
       isHomeScreen={true}
       title="Confío"
-      onProfilePress={profileMenu.openProfileMenu}
+      onProfilePress={handleProfileMenuPress}
       onNotificationPress={handleNotificationPress}
       // A business has Cobrar as a tab; a person gets it here and in Recibir.
       onChargePress={isBusinessAccount ? undefined : handleChargePress}
@@ -101,7 +133,7 @@ export const BottomTabNavigator = () => {
       unreadNotifications={unreadNotifications}
       currentAccountAvatar={currentAccountAvatar}
     />
-  ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, handleChargePress, isBusinessAccount, unreadNotifications, currentAccountAvatar]);
+  ), [navigation, handleProfileMenuPress, handleNotificationPress, handleChargePress, isBusinessAccount, unreadNotifications, currentAccountAvatar]);
 
 
   // Charge header removed since ChargeScreen has its own header
@@ -167,10 +199,18 @@ export const BottomTabNavigator = () => {
   // );
 
   //
+  // Chosen per build, never per account: swapping the wrapper would remount
+  // every tab on an account switch.
+  const Shell = CONVERSATION_HOME_ENABLED ? AppDrawerProvider : React.Fragment;
   return (
-    <>
+    <Shell>
       <Tabs.Navigator
         detachInactiveScreens
+        tabBar={conversationHome ? NoTabBar : undefined}
+        screenListeners={({ route }: { route: { name: string } }) => ({
+          // Only the tab bar fires this (the conversation home has none).
+          tabPress: () => logHomeNav('tabs', TAB_TARGETS[route.name] || route.name.toLowerCase()),
+        })}
         screenOptions={{
           tabBarActiveTintColor: '#8B5CF6',
           tabBarInactiveTintColor: '#6B7280',
@@ -186,13 +226,19 @@ export const BottomTabNavigator = () => {
       >
         <Tabs.Screen 
           name="Home" 
-          component={isInheritedAccount ? InheritedAccountTab : isSmartAccount ? SmartAccountHomeTab : HomeScreen}
+          component={isInheritedAccount ? InheritedAccountTab : isSmartAccount ? SmartAccountHomeTab
+            : conversationHome ? ConversationHomeScreen : HomeScreen}
           options={{
             header: () => <HomeHeader />,
             // The smart homes draw the shared Header themselves (help circle
-            // and the account avatar live in it).
-            headerShown: !isSmartAccount,
-            freezeOnBlur: true,
+            // and the account avatar live in it); so does the conversation home.
+            headerShown: !isSmartAccount && !conversationHome,
+            // The conversation home keeps publishing balances for the drawer
+            // while another screen is in front, so it is never frozen; and it
+            // mounts with the shell, so a shell opened straight on Invertir or
+            // Comprar still has a menu with the person's money in it.
+            freezeOnBlur: !conversationHome,
+            lazy: !conversationHome,
             tabBarLabel: 'Inicio',
             tabBarIcon: ({ color, size }: any) => <GuideAnchorView id="tab_home"><Icon name="home" size={size} color={color} /></GuideAnchorView>
           }}
@@ -202,6 +248,9 @@ export const BottomTabNavigator = () => {
           name="Invest"
           component={InvestTabScreen}
           options={{
+            // The conversation home's Invertir/Comunidad draw their own
+            // header (the title follows which one is open).
+            headerShown: !conversationHome,
             // The shared Header, like every main tab: same title size and
             // position everywhere. The screen's hero continues its green.
             header: () => (
@@ -232,7 +281,9 @@ export const BottomTabNavigator = () => {
             options={{ ...chargeTabOptions, freezeOnBlur: true }}
           />
         )}
-        {!isBusinessAccount && !isSmartAccount && (
+        {/* The conversation home pays from the stack's Scan (it has the back
+            arrow a screen without tabs needs). */}
+        {!isBusinessAccount && !isSmartAccount && !conversationHome && (
           <Tabs.Screen
             name="Scan"
             component={ScanTab}
@@ -246,7 +297,7 @@ export const BottomTabNavigator = () => {
           name="Comprar"
           component={ComprarScreen}
           options={{
-            header: () => (
+            header: conversationHome ? ComprarDrawerHeader : () => (
               <Header
                 navigation={navigation}
                 isHomeScreen={false}
@@ -267,13 +318,14 @@ export const BottomTabNavigator = () => {
           name="Profile" 
           component={ProfileScreen}
           options={{
-            header: () => <ProfileHeader />,
+            header: conversationHome ? ProfileDrawerHeader : () => <ProfileHeader />,
             tabBarLabel: 'Perfil',
             tabBarIcon: ({ color, size }: any) => <GuideAnchorView id="tab_profile"><Icon name="user" size={size} color={color} /></GuideAnchorView>
           }}
         />
       </Tabs.Navigator>
-    </>
+      {conversationHome ? <FloatingPrimaryButton tab={focusedTab} /> : null}
+    </Shell>
   );
 };
 

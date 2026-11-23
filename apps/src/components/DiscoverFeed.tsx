@@ -244,6 +244,8 @@ type DiscoverFeedProps = {
   onSelectSection?: (key: DiscoverSectionKey) => void;
   /** Rendered under the chips (e.g. the compose prompt, "Mis publicaciones"). */
   sectionAccessory?: React.ReactNode;
+  /** Extra room at the end of the list (a floating button over it). */
+  bottomInset?: number;
   /** Comments per Comunidad post id; posts without comments are absent. */
   commentCounts?: Record<number, number>;
   /** Author and activity extras per post id (absent on an older server). */
@@ -271,6 +273,7 @@ export function DiscoverFeed({
   commentCounts,
   postExtras,
   onOpenAuthor,
+  bottomInset = 0,
 }: DiscoverFeedProps) {
   const renderItem = ({ item }: { item: DiscoverItem }) => (
     <DiscoverPostCard
@@ -327,7 +330,7 @@ export function DiscoverFeed({
       ListHeaderComponent={listHeader}
       keyExtractor={(item) => String(item.id)}
       renderItem={renderItem}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={bottomInset ? [styles.content, { paddingBottom: 28 + bottomInset }] : styles.content}
       refreshControl={
         onRefresh ? (
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />

@@ -74,6 +74,23 @@ export function setGuideWalkListener(listener: ((key: string) => void) | null) {
   walkListener = listener;
 }
 
+// A step's own way there, offered as a chip in the home conversation: the
+// card (the walk engine) runs it like any other walk.
+export type GuideTrailRequest = {
+  step: string;
+  detail: string;
+  stops: { route: string; text: string; pointer: string }[];
+};
+let trailListener: ((request: GuideTrailRequest) => void) | null = null;
+
+export function requestGuideTrail(request: GuideTrailRequest) {
+  trailListener?.(request);
+}
+
+export function setGuideTrailListener(listener: ((request: GuideTrailRequest) => void) | null) {
+  trailListener = listener;
+}
+
 export function useGuidePointer() {
   return useSyncExternalStore(subscribe, () => pointer);
 }

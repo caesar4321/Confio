@@ -1,10 +1,8 @@
 import { reportGuideTap, useGuideAnchor, useScrollToGuidePointer } from '../assistant/guidePointer';
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, AppState, AppStateStatus } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Alert, AppState, AppStateStatus } from 'react-native';
 import { Text } from '../components/common/AppText';
-import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
-import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useAuth, useAuthReady } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
@@ -15,19 +13,17 @@ import { ReferralInputModal } from '../components/ReferralInputModal';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { DriveStorageFullModal } from '../components/DriveStorageFullModal';
 import { useQuery } from '@apollo/client';
-import { GET_MY_PROFILE_PICTURE, GET_MY_REFERRALS } from '../apollo/queries';
+import { GET_MY_PROFILE_PICTURE } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
-import { StatusTierBadge, TierProgress } from '../components/StatusTierBadge';
+import { StatusTierBadge } from '../components/StatusTierBadge';
 import { colors } from '../config/theme';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
 import DeviceInfo from 'react-native-device-info';
 import { Button } from '../components/common/Button';
-import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
-import { CommissionsEntryRow } from '../components/CommissionsEntryRow';
-import { DEFAULT_TERMS, commissionPercents, useFeeReferralSummary, windowRule } from '../hooks/useFeeReferralSummary';
-import { formatDecimal } from '../utils/numberLocale';
 import { profileDisplayInfo } from './profileDisplayInfo';
+import { useFloatingPrimaryInset } from '../home/useFloatingPrimaryInset';
 
 // Utility function to format phone number with country code
 
@@ -35,6 +31,8 @@ import { profileDisplayInfo } from './profileDisplayInfo';
 type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const ProfileScreen = () => {
+  // Room for the floating Pagar button at the end of the list (conversation home).
+  const floatingInset = useFloatingPrimaryInset();
   const verificationAnchor = useGuideAnchor('profile_verification');
   const inviteAnchor = useGuideAnchor('profile_invite');
   const scrollRef = React.useRef<ScrollView>(null);
@@ -52,13 +50,6 @@ export const ProfileScreen = () => {
     return iso ? String(iso).toUpperCase() : null;
   }, [userProfile]);
   const canManageBankAccounts = !activeAccount?.isEmployee || Boolean((activeAccount as any)?.employeePermissions?.manageBankAccounts);
-  const needsFriendlyUsername = React.useMemo(() => {
-    if (!rawUsername) return true;
-    if (rawUsername.startsWith('user_')) return true;
-    // Treat long alphanumeric handles without separators as auto-generated
-    if (/^[a-z0-9]{10,}$/.test(rawUsername)) return true;
-    return false;
-  }, [rawUsername]);
   const [showReferralModal, setShowReferralModal] = React.useState(false);
   // Measured size of the header field. Its height changes after mount (name,
   // tier badge, phone load async) and an absoluteFill Svg with percentage
@@ -75,60 +66,6 @@ export const ProfileScreen = () => {
   const [biometricError, setBiometricError] = React.useState<string | null>(null);
   const appState = React.useRef(AppState.currentState);
 
-  // Referral commission: 50% of an invited friend's fee (the referral program).
-  const commission = useFeeReferralSummary(activeAccount?.type?.toLowerCase() === 'business');
-  const commissionTerms = commission ?? DEFAULT_TERMS;
-  const commissionSharePct = commissionPercents(commissionTerms).sharePct;
-
-  const referralShareMessage = React.useMemo(() => {
-    return buildReferralShareMessage(userProfile?.username);
-  }, [userProfile?.username]);
-
-  const handleShareReferral = React.useCallback(async () => {
-    try {
-      AnalyticsService.logFunnelEvent('referral_whatsapp_share_tapped', {
-        surface: 'profile',
-        referral_code: normalizeInviteUsername(userProfile?.username),
-      }, {
-        sourceType: 'referral_link',
-        channel: 'whatsapp',
-      });
-    } catch (_e) {
-      // never block sharing
-    }
-
-    const encodedMessage = encodeURIComponent(referralShareMessage);
-    const whatsappSchemeUrl = `whatsapp://send?text=${encodedMessage}`;
-    const whatsappWebUrl = `https://wa.me/?text=${encodedMessage}`;
-    try {
-      const canUseScheme = await Linking.canOpenURL(whatsappSchemeUrl);
-      if (canUseScheme) {
-        await Linking.openURL(whatsappSchemeUrl);
-      } else {
-        await Linking.openURL(whatsappWebUrl);
-      }
-    } catch (error) {
-      try {
-        await Share.share({
-          message: referralShareMessage,
-          title: 'Invitación Confío',
-        });
-      } catch (shareError) {
-      }
-    }
-  }, [referralShareMessage]);
-
-  const handleCopyUsername = React.useCallback(() => {
-    if (!username) {
-      Alert.alert(
-        'Configura tu usuario',
-        'Edita tu perfil y crea un @usuario para poder invitar amigos y ganar tu comisión.'
-      );
-      return;
-    }
-    Clipboard.setString(username);
-    Alert.alert('Usuario copiado', 'Comparte tu @usuario por WhatsApp o redes sociales.');
-  }, [username]);
   // Debug active account changes to ensure real-time updates
   React.useEffect(() => {
   }, [activeAccount, accountsLoading]);
@@ -306,32 +243,6 @@ export const ProfileScreen = () => {
     navigation.navigate('LegalDocument', { docType });
   };
 
-  const handleSocialMediaPress = async (platform: 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'whatsapp') => {
-    let url = '';
-    switch (platform) {
-      case 'tiktok':
-        url = 'https://www.tiktok.com/@julianmoonluna';
-        break;
-      case 'instagram':
-        url = 'https://www.instagram.com/julianmoonluna_';
-        break;
-      case 'youtube':
-        url = 'https://www.youtube.com/@julianmoonluna';
-        break;
-      case 'facebook':
-        url = 'https://facebook.com/JulianMoonLuna';
-        break;
-      case 'whatsapp':
-        url = 'https://whatsapp.com/channel/0029Vb8g5GJIiRotAGdWKI1t';
-        break;
-    }
-
-    try {
-      await Linking.openURL(url);
-    } catch (error) {
-    }
-  };
-
   // Get display information based on active account
   const getDisplayInfo = () => profileDisplayInfo({
     activeAccount, userProfile, username, accountsLoading, isUserProfileLoading,
@@ -348,47 +259,10 @@ export const ProfileScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
   const profilePictureUrl: string | null = isBusinessAccount ? null : pictureData?.myProfilePicture?.url || null;
-  const { data: referralData } = useQuery(GET_MY_REFERRALS, {
-    fetchPolicy: 'cache-and-network',
-  });
-
-  const referralStats = React.useMemo(() => {
-    if (!referralData?.myReferrals || !userProfile?.id) return { pending: 0, earned: 0, isReferred: false };
-
-    const currentUserId = String(userProfile.id);
-    let pending = 0;
-    let earned = 0;
-    let isReferred = false;
-
-    referralData.myReferrals.forEach((ref: any) => {
-      const isReferrer = String(ref.referrerUser?.id) === currentUserId;
-      const isReferee = String(ref.referredUser?.id) === currentUserId;
-
-      if (isReferee) isReferred = true;
-
-      const frameworkStatus = isReferrer ? ref.referrerRewardStatus : ref.refereeRewardStatus;
-      // The Decimal scalar arrives as a STRING: without Number() these sums
-      // concatenate ("5.00" + "5.00" = "5.005.00") instead of adding.
-      const amount = Number(
-        (isReferrer ? ref.rewardReferrerConfio : ref.rewardRefereeConfio) ?? 0,
-      ) || 0;
-
-      // 'pending'/'locked' = the condition isn't met yet. 'eligible' = the
-      // bonus is EARNED and held in the account — not withdrawable until
-      // $CONFIO launches.
-      if (frameworkStatus === 'pending' || frameworkStatus === 'locked') {
-        pending += amount;
-      } else if (frameworkStatus === 'eligible') {
-        earned += amount;
-      }
-    });
-
-    return { pending, earned, isReferred };
-  }, [referralData, userProfile]);
 
   return (
     <>
-      <ScrollView ref={scrollRef} onScroll={onGuideScroll} scrollEventThrottle={32} style={styles.container} contentContainerStyle={styles.scrollContent}>
+      <ScrollView ref={scrollRef} onScroll={onGuideScroll} scrollEventThrottle={32} style={styles.container} contentContainerStyle={[styles.scrollContent, { paddingBottom: floatingInset }]}>
         {/* Header Section — brand field: same vertical gradient + coin ring
             family as Home; top edge is exactly colors.heroField so it meets the
             flat nav header without a seam. Padding lives on headerInner (Yoga
@@ -482,155 +356,30 @@ export const ProfileScreen = () => {
           </View>
         </View>
 
-        {/* Referral Program Card */}
+        {/* Invitar y ganar has its own screen (and its own row in the menu):
+            here, one line that opens it. */}
         {activeAccount?.type.toLowerCase() !== 'business' && (
-          <View style={styles.referralCard}>
-            <View style={styles.referralHeader}>
-              <View style={styles.referralIconBadge}>
-                <Icon name="gift" size={20} color={colors.white} />
-              </View>
-              <View style={styles.referralHeaderText}>
-                <Text style={styles.referralTitle}>
-                  Tu red de confianza ahora te paga
-                </Text>
-                <Text style={styles.referralSubtitle}>
-                  <Text style={styles.referralSubtitleAccent}>Invita a quienes confías.</Text>
-                  {` Cuando mueven su dinero, Confío te comparte el ${commissionSharePct} de su comisión, en dólares y al instante.`}
-                </Text>
-              </View>
+          <TouchableOpacity
+            ref={inviteAnchor}
+            style={styles.inviteDoor}
+            onPress={() => {
+              reportGuideTap('profile_invite');
+              navigation.navigate('Invite');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Invitar y ganar"
+          >
+            <View style={styles.inviteDoorBadge}>
+              <Icon name="gift" size={20} color={colors.white} />
             </View>
-
-            <View style={styles.referralActions}>
-              <TouchableOpacity
-                ref={inviteAnchor}
-                style={styles.referralShareButton}
-                onPress={() => {
-                  reportGuideTap('profile_invite');
-                  handleShareReferral();
-                }}
-              >
-                <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
-                <Text style={styles.referralShareText}>Invitar por WhatsApp</Text>
-              </TouchableOpacity>
-            </View>
-
-            {commission && commission.friendCount > 0 && (
-              // Existing invitations count from launch: tell dormant
-              // referrers their old invites can start paying now.
-              <Text style={[styles.referralCriteriaNote, { marginTop: 10 }]}>
-                {commission.friendCount === 1 ? 'Ya tienes 1 invitado.' : `Ya tienes ${commission.friendCount} invitados.`}
-                {' '}Cuando ambos estén verificados, empiezas a ganar.
-              </Text>
-            )}
-
-            {commission && !commission.viewerVerified && (
-              <TouchableOpacity
-                style={[styles.referralUpdateUsername, { marginTop: 10 }]}
-                onPress={() => navigation.navigate('Verification' as never)}
-              >
-                <Icon name="shield" size={16} color={colors.primaryDark} />
-                <Text style={styles.referralUpdateUsernameText}>Verifica tu identidad para empezar a ganar</Text>
-                <Icon name="chevron-right" size={16} color={colors.primaryDark} />
-              </TouchableOpacity>
-            )}
-
-            {/* The permanent entry: never waits for the summary to load. */}
-            <View style={{ marginTop: 12 }}>
-              <CommissionsEntryRow
-                summary={commission}
-                onPress={() => navigation.navigate('FeeReferralCommissions')}
-              />
-            </View>
-
-            {/* $CONFIO bonuses ended with the commission launch: the row stays
-                only for people holding bonuses they already earned. */}
-            {referralStats.earned > 0 && (
-            <TouchableOpacity
-              style={[
-                styles.referralClaimButton,
-                // Highlight once there is something earned to show
-                referralStats.earned > 0 && { backgroundColor: colors.primarySoft, borderColor: colors.primaryDark, borderLeftWidth: 4 }
-              ]}
-              onPress={() => navigation.navigate('ReferralRewardClaim')}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                {referralStats.earned > 0 ? (
-                  <View style={[styles.referralStatusDot, { backgroundColor: colors.primaryDark }]} />
-                ) : referralStats.pending > 0 ? (
-                  <View style={[styles.referralStatusDot, { backgroundColor: colors.warning.icon }]} />
-                ) : (
-                  <Icon name="gift" size={16} color={colors.primaryDark} style={{ marginRight: 8 }} />
-                )}
-
-                <Text style={[
-                  styles.referralClaimText,
-                  referralStats.earned > 0 && { color: colors.successText, fontWeight: '700' },
-                  // pending = waiting on the friend's deposit, not an error
-                  referralStats.pending > 0 && { color: colors.warning.text },
-                ]}>
-                  {/* Earned, not withdrawable: the bonus is held in the
-                      account until $CONFIO launches. */}
-                  {referralStats.earned > 0
-                    ? `${formatDecimal(referralStats.earned)} $CONFIO ganados`
-                    : 'Ver mis bonos ($CONFIO)'}
-                </Text>
-              </View>
-              <Icon name="chevron-right" size={16} color={colors.primaryDark} />
-            </TouchableOpacity>
-            )}
-
-            {/* Tier progress indicator */}
-            {activeAccount?.type.toLowerCase() === 'personal' && (
-              <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
-                <TierProgress
-                  referralCount={userProfile?.referralCount ?? 0}
-                  nextTierName={userProfile?.nextTierName}
-                  nextTierReferralsNeeded={userProfile?.nextTierReferralsNeeded}
-                />
-              </View>
-            )}
-
-            {needsFriendlyUsername && (
-              <TouchableOpacity style={styles.referralUpdateUsername} onPress={() => navigation.navigate('UpdateUsername')}>
-                <Icon name="edit-3" size={16} color={colors.primaryDark} />
-                <Text style={styles.referralUpdateUsernameText}>Personalizar mi código</Text>
-                <Icon name="chevron-right" size={16} color={colors.primaryDark} />
-              </TouchableOpacity>
-            )}
-
-            {!referralStats.isReferred && (
-              <TouchableOpacity
-                style={styles.referralUpdateUsername}
-                onPress={() => navigation.navigate('Achievements')}
-              >
-                <Icon name="user-plus" size={16} color={colors.primaryDark} />
-                <Text style={styles.referralUpdateUsernameText}>¿Te invitó alguien? Pon su código</Text>
-                <Icon name="chevron-right" size={16} color={colors.primaryDark} />
-              </TouchableOpacity>
-            )}
-
-            <View style={styles.referralCriteria}>
-              <Text style={styles.referralCriteriaTitle}>¿Cómo funciona?</Text>
-              <Text style={styles.referralCriteriaItem}>1. Comparte tu link por WhatsApp con la historia del fundador.</Text>
-              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta y descubre Confío.</Text>
-              <Text style={styles.referralCriteriaItem}>3. Cuando ambos verifican su identidad, recibes al instante el {commissionSharePct} de la comisión que tu amigo paga al recargar, retirar, invertir o enviar fuera de Confío, en dólares (cUSD). {windowRule(commissionTerms.windowDays)}.</Text>
-            </View>
-
-            {/* Tier ladder in one line; the badge itself still shows next to names. */}
-            <View style={styles.referralCriteria}>
-              <Text style={styles.referralCriteriaNote}>
-                🏅 Tu insignia sube con los amigos que invitas: ⭐ 1, 💎 3 y 🏆 10 amigos verificados con depósito.
+            <View style={styles.inviteDoorText}>
+              <Text style={styles.inviteDoorTitle}>Invitar y ganar</Text>
+              <Text style={styles.inviteDoorSub} numberOfLines={2}>
+                Cuando tus invitados mueven su dinero, tú ganas en dólares.
               </Text>
             </View>
-
-            <View style={styles.referralCriteria}>
-              <TouchableOpacity onPress={() => navigation.navigate('Achievements')}>
-                <Text style={[styles.referralCriteriaItem, { color: colors.accent, marginTop: 4, fontWeight: '600' }]}>
-                  Ver instrucciones completas
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+            <Icon name="chevron-right" size={20} color={colors.primaryDark} />
+          </TouchableOpacity>
         )}
 
         {/* Account Management Card */}
@@ -849,88 +598,25 @@ export const ProfileScreen = () => {
           </View>
         </View>
 
-        {/* Follow the Founder Section */}
-        <View style={styles.founderSection}>
-          <View style={styles.founderHeader}>
-            <Icon name="star" size={20} color={colors.primary} />
-            <Text style={styles.founderTitle}>Sigue al fundador</Text>
-          </View>
-
-          <View style={styles.socialButtonsContainer}>
-            <TouchableOpacity
-              style={styles.socialImageButton}
-              onPress={() => handleSocialMediaPress('tiktok')}
-              accessibilityRole="link"
-              accessibilityLabel="TikTok de Julian Moon"
-            >
-              <Image
-                source={require('../assets/png/TikTok.png')}
-                style={styles.socialButtonImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.socialImageButton}
-              onPress={() => handleSocialMediaPress('instagram')}
-              accessibilityRole="link"
-              accessibilityLabel="Instagram de Julian Moon"
-            >
-              <Image
-                source={require('../assets/png/Instagram.png')}
-                style={styles.socialButtonImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.socialImageButton}
-              onPress={() => handleSocialMediaPress('youtube')}
-              accessibilityRole="link"
-              accessibilityLabel="YouTube de Julian Moon"
-            >
-              <Image
-                source={require('../assets/png/YouTube.png')}
-                style={styles.socialButtonImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.socialImageButton}
-              onPress={() => handleSocialMediaPress('facebook')}
-              accessibilityRole="link"
-              accessibilityLabel="Facebook de Julian Moon"
-            >
-              <Image
-                source={require('../assets/png/Facebook.png')}
-                style={styles.socialButtonImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.socialImageButton}
-              onPress={() => handleSocialMediaPress('whatsapp')}
-              accessibilityRole="link"
-              accessibilityLabel="Canal de WhatsApp de Julian Moon"
-            >
-              {/* Bubble fills only 86% of the SVG viewBox (baked-in shadow
-                  margin), so 47 renders a 40px bubble like the others. */}
-              <WhatsAppLogo width={47} height={47} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.founderStory}>
-            <Text style={styles.founderHandle}>@julianmoonluna</Text>
-            <Text style={styles.founderTagline}>
-              Un coreano que sueña con una nueva Latinoamérica
-            </Text>
-            <Text style={styles.founderDescription}>
-              Descubre por qué un coreano confía en América Latina
-            </Text>
-          </View>
-        </View>
+        {/* The founder has a screen of his own, under "Invitar y ganar" in the
+            menu. Where there is no menu (the five-tab app), one line opens it. */}
+        {!CONVERSATION_HOME_ENABLED ? (
+          <TouchableOpacity
+            style={styles.inviteDoor}
+            onPress={() => navigation.navigate('Founder')}
+            accessibilityRole="button"
+            accessibilityLabel="El fundador"
+          >
+            <View style={styles.inviteDoorBadge}>
+              <Icon name="star" size={20} color={colors.white} />
+            </View>
+            <View style={styles.inviteDoorText}>
+              <Text style={styles.inviteDoorTitle}>El fundador</Text>
+              <Text style={styles.inviteDoorSub} numberOfLines={2}>Julian Moon y dónde seguirlo.</Text>
+            </View>
+            <Icon name="chevron-right" size={20} color={colors.primaryDark} />
+          </TouchableOpacity>
+        ) : null}
 
         {/* Legal Links */}
         <View style={styles.legalSection}>
@@ -997,6 +683,8 @@ export const ProfileScreen = () => {
   );
 };
 
+const HERO_INK = CONVERSATION_HOME_ENABLED ? colors.onHeroField : colors.white;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1061,10 +749,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.white,
   },
+  // The conversation home draws the header above in the field's dark ink:
+  // the hero text is the same ink.
   name: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: colors.white,
+    color: HERO_INK,
   },
   profileNameRow: {
     flexDirection: 'row',
@@ -1087,12 +777,14 @@ const styles = StyleSheet.create({
   },
   accountType: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.9)',
+    fontWeight: CONVERSATION_HOME_ENABLED ? '600' : 'normal',
+    color: CONVERSATION_HOME_ENABLED ? colors.onHeroField : 'rgba(255, 255, 255, 0.9)',
     marginBottom: 2,
   },
   subtitle: {
     fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: CONVERSATION_HOME_ENABLED ? '600' : 'normal',
+    color: CONVERSATION_HOME_ENABLED ? colors.onHeroField : 'rgba(255, 255, 255, 0.8)',
   },
   card: {
     backgroundColor: colors.white,
@@ -1170,298 +862,32 @@ const styles = StyleSheet.create({
     color: colors.danger,
     marginTop: 4,
   },
-  referralCard: {
+  inviteDoor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     backgroundColor: colors.white,
     borderRadius: 20,
     marginHorizontal: 16,
     marginBottom: 16,
-    padding: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-      },
-      android: {
-        elevation: 3,
-      },
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 12 },
+      android: { elevation: 3 },
     }),
   },
-  referralHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 16,
-    marginBottom: 16,
+  inviteDoorBadge: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryDark,
   },
-  referralIconBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  referralHeaderText: {
-    flex: 1,
-    gap: 4,
-  },
-  referralTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  referralSubtitleAccent: {
-    fontWeight: '700',
-    color: colors.accent,
-  },
-  referralSubtitle: {
-    fontSize: 13,
-    color: colors.text.secondary,
-    lineHeight: 18,
-  },
-  referralUsername: {
-    backgroundColor: colors.primarySoft,
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  referralUsernameLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primaryDark,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
-  referralUsernameValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.primaryDark,
-  },
-  referralUsernameHint: {
-    marginTop: 8,
-    fontSize: 12,
-    color: colors.primaryDark,
-    lineHeight: 18,
-  },
-  referralActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 18,
-  },
-  referralCopyButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: colors.primarySoft,
-    gap: 8,
-  },
-  referralCopyText: {
-    color: colors.primaryDark,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  referralShareButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: colors.primaryDark,
-    gap: 8,
-  },
-  referralShareText: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  referralClaimButton: {
-    marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.3)',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: colors.primarySoft,
-    gap: 8,
-  },
-  referralStatusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
-  },
-  referralClaimText: {
-    flex: 1,
-    marginHorizontal: 12,
-    color: colors.primaryDark,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  referralUpdateUsername: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: colors.neutralDark,
-    marginBottom: 18,
-  },
-  referralUpdateUsernameText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primaryDark,
-  },
-  referralSteps: {
-    gap: 12,
-    marginBottom: 16,
-  },
-  referralStep: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  referralStepNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.primarySoft,
-    textAlign: 'center',
-    lineHeight: 24,
-    fontWeight: '700',
-    fontSize: 13,
-    color: colors.primaryDark,
-  },
-  referralStepText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.text.secondary,
-    lineHeight: 19,
-  },
-  referralCriteria: {
-    marginTop: 4,
-    marginBottom: 16,
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: colors.neutral,
-    gap: 4,
-  },
-  referralCriteriaTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text.primary,
-    marginBottom: 4,
-  },
-  referralCriteriaItem: {
-    fontSize: 13,
-    color: colors.text.secondary,
-    lineHeight: 18,
-  },
-  referralCriteriaNote: {
-    marginTop: 8,
-    fontSize: 12,
-    color: colors.primaryDark,
-  },
-  referralRegisterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: colors.primarySoft,
-    marginBottom: 12,
-  },
-  referralRegisterButtonText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primaryDark,
-  },
-  referralLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  referralLinkText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primaryDark,
-  },
-  founderSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    alignItems: 'center',
-  },
+  inviteDoorText: { flex: 1 },
+  inviteDoorTitle: { fontSize: 16, fontWeight: '700', color: colors.dark },
+  inviteDoorSub: { fontSize: 13, lineHeight: 18, color: colors.textSecondary, marginTop: 2 },
   separator: {
     height: 1,
     backgroundColor: colors.border,
     marginHorizontal: 16,
     marginVertical: 8,
-  },
-  founderHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    gap: 8,
-  },
-  founderTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text.primary,
-  },
-  socialButtonsContainer: {
-    flexDirection: 'row',
-    marginVertical: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  // 5 × (56 + 8) = 320: fits the 328px content width of a 360dp screen.
-  // Assets are cropped full-bleed, so render size = visible size.
-  socialImageButton: {
-    width: 56,
-    height: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 4,
-  },
-  socialButtonImage: {
-    width: 40, // uniform: all PNGs are cropped full-bleed, so 40 = 40 visible
-    height: 40,
-  },
-  founderStory: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  founderHandle: {
-    fontSize: 16,
-    color: colors.primary,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  founderTagline: {
-    fontSize: 15,
-    color: colors.text.primary,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  founderDescription: {
-    fontSize: 13,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    fontStyle: 'italic',
   },
   legalSection: {
     flexDirection: 'row',

@@ -30,12 +30,14 @@ import {
   measureGuideAnchor,
   setGuidePointer,
   setGuideTapListener,
+  setGuideTrailListener,
   setGuideWalkListener,
   requestGuideWalk,
   subscribeGuideRefresh,
   useGuidePointer,
 } from './guidePointer';
 import { BUBBLE_ROUTES, TAB_ROUTES } from './suggestions';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
 import GuideOpening from './GuideOpening';
 import { GUIDE_TOP_UP_STEP, requestTopUpDecline } from './guideTopUpDecline';
 import { forgetTopUpPriceSeen, sawTopUpPriceThisRun } from '../services/topUpExit';
@@ -77,6 +79,25 @@ type Trail = {
   started: boolean;
   pointing: string;
 };
+
+// The conversation home has no tab bar and no verbs on Inicio to circle: a
+// walk that starts at one of them opens that screen instead, and the pencil
+// takes over from the first button inside it
+// (docs/designs/ai-assistant-first-redesign.md 7.5).
+const main = (screen: string, params?: object) => (navigationRef as any).navigate('Main', { screen, params });
+const tab = (screen: string, params?: object) => main('BottomTabs', { screen, params });
+const HOME_JUMPS: Record<string, { route: string; go: () => void }> = {
+  tab_profile: { route: 'Profile', go: () => tab('Profile') },
+  tab_invest: { route: 'Invest', go: () => tab('Invest', { segment: 'invest', at: Date.now() }) },
+  tab_comprar: { route: 'Comprar', go: () => tab('Comprar') },
+  tab_pay: { route: 'Scan', go: () => main('Scan', { mode: 'pagar' }) },
+  home_send: { route: 'Send', go: () => main('Send') },
+  home_receive: { route: 'Receive', go: () => main('Receive') },
+};
+// Screens a walk may open directly when its trail leads there: they need no
+// parameters and are what the step is about (spec 7.5: the chip opens the
+// real screen). Without this, "Verificar mi identidad" would stop at Perfil.
+const DIRECT_STOPS = new Set(['Verification']);
 
 // The way to the first real stop from wherever the person is.
 function stopFor(walk: Trail, route?: string) {
@@ -126,13 +147,14 @@ export default function AssistantGuideCard() {
   const ready = isAuthenticated && !authLoading && available && aiEnabled && personal;
   const { data, refetch } = useQuery(GET_ASSISTANT_GUIDE, {
     variables: { screen: route ?? null, contextKey },
-    skip: !ready || !onGuideRoute,
+    // In the conversation home the conversation reads the step (useHomeGuide).
+    skip: !ready || !onGuideRoute || CONVERSATION_HOME_ENABLED,
     fetchPolicy: 'network-only',
     errorPolicy: 'ignore',
   });
   // Something changed on this screen (an identity came back approved).
   useEffect(() => subscribeGuideRefresh(() => {
-    if (ready && onGuideRoute) {
+    if (ready && onGuideRoute && !CONVERSATION_HOME_ENABLED) {
       refetch().catch(() => undefined);
     }
   }), [ready, onGuideRoute, refetch]);
@@ -157,6 +179,10 @@ export default function AssistantGuideCard() {
     // Verification steps give way as soon as the next real step exists.
     const busy = !!guide && guide.step !== 'verify' && guide.step !== 'verifying';
     const walking = !!trail.current || (!!pointer && pointer.step !== 'verify');
+    // The conversation home says the step itself, as the assistant's message.
+    if (CONVERSATION_HOME_ENABLED) {
+      return undefined;
+    }
     if (!next || seen.current.has(next.step) || busy || walking || opening || pending || !onGuideRoute
         || isOpen || inCall || (next.presentation === 'full' && route !== HOME_ROUTE)) {
       return undefined;
@@ -221,8 +247,33 @@ export default function AssistantGuideCard() {
   }, []);
 
   const showStop = useCallback((walk: Trail) => {
+    if (CONVERSATION_HOME_ENABLED && !walk.started) {
+      const first = walk.stops[0];
+      const jump = first?.route === HOME_ROUTE ? HOME_JUMPS[first.pointer] : undefined;
+      // Already on one of the walk's own screens (asked "¿cómo la compro?" on
+      // the stock's page): point here, as the five-tab app does, instead of
+      // carrying the person back to the start.
+      const here = routeRef.current;
+      const alreadyOnTheWay = here !== HOME_ROUTE && walk.stops.some((s) => s.route === here);
+      if (jump && !alreadyOnTheWay) {
+        walk.started = true;
+        const direct = walk.stops.find((s) => DIRECT_STOPS.has(s.route));
+        const target = direct ? { route: direct.route, go: () => main(direct.route) } : jump;
+        // What was opened for them: the Inicio button it stands for, or the screen itself.
+        const opened = direct ? direct.route.toLowerCase() : first.pointer;
+        record(walk.step, 'opened', undefined, walk.detail ? `${walk.detail}:${opened}` : opened);
+        if (here !== target.route) {
+          // The route change brings this back for the next stop.
+          target.go();
+          return;
+        }
+      }
+    }
     const stop = stopFor(walk, routeRef.current);
-    if (!stop) {
+    // Back on the conversation home mid-walk: the button the server would
+    // circle on Inicio is not there, so the walk ends instead of pointing at nothing.
+    const goneFromHome = CONVERSATION_HOME_ENABLED && stop?.route === HOME_ROUTE && !!HOME_JUMPS[stop.pointer];
+    if (!stop || goneFromHome) {
       trail.current = null;
       setGuidePointer(null);
       return;
@@ -272,10 +323,16 @@ export default function AssistantGuideCard() {
     setGuideWalkListener((key) => {
       const step = `walk:${key}`;
       const flow = flowRef.current;
+      const from = routeRef.current;
       const failed = () => showNavNote('No pude mostrarte los pasos ahora. Inténtalo de nuevo.');
       apollo.query({ query: GET_ASSISTANT_WALK, variables: { key }, fetchPolicy: 'network-only' }).then(({ data: found }) => {
         if (flow !== flowRef.current) {
           return;  // another account meanwhile
+        }
+        // In the conversation home a walk opens a screen: an answer that
+        // arrives after the person moved on must not take them elsewhere.
+        if (CONVERSATION_HOME_ENABLED && from !== routeRef.current) {
+          return;
         }
         const stops = found?.assistantWalk?.trail;
         if (!stops?.length) {
@@ -291,6 +348,20 @@ export default function AssistantGuideCard() {
     });
     return () => setGuideWalkListener(null);
   }, [apollo, clear, record, showStop, showNavNote]);
+
+  // A step's chip in the home conversation: the same engine walks its trail.
+  useEffect(() => {
+    setGuideTrailListener(({ step, detail, stops }) => {
+      clear();
+      if (!stops.length) {
+        return;
+      }
+      const walk = { step, detail, stops, started: false, pointing: '' };
+      trail.current = walk;
+      showStop(walk);
+    });
+    return () => setGuideTrailListener(null);
+  }, [clear, showStop]);
 
   // The funnel: did the pencil appear, and did the person tap what it circled?
   useEffect(() => {

@@ -20,6 +20,7 @@ import OndoLogo from '../assets/png/Ondo.png';
 import { VenueAttribution, venueA11y } from '../components/VenueAttribution';
 import { FEATURED_STOCK_TICKERS } from '../config/stockPresentation';
 import { colors } from '../config/theme';
+import { CONVERSATION_HOME_ENABLED } from '../config/features';
 import { useAccount } from '../contexts/AccountContext';
 import { reportGuideTap, useGuideAnchor, useScrollToGuidePointer } from '../assistant/guidePointer';
 import { useGmMarket } from '../hooks/useGmMarket';
@@ -44,6 +45,7 @@ import { useSavingsPortfolio } from '../hooks/useSavingsPortfolio';
 import { MainStackParamList } from '../types/navigation';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
+import { useFloatingPrimaryInset } from '../home/useFloatingPrimaryInset';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -64,6 +66,8 @@ const num = (v: unknown): number | null => {
  * here (a hub), never on Home.
  */
 export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode } = {}) => {
+  // Room for the floating Pagar button at the end of the list (conversation home).
+  const floatingInset = useFloatingPrimaryInset();
   const navigation = useNavigation<Nav>();
   const isFocused = useIsFocused();
   const { formatNumber } = useNumberFormat();
@@ -206,8 +210,10 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
   return (
     <View style={styles.screen}>
       {/* Scoped to focus: the tab stays mounted under the other tabs. */}
-      {isFocused && <StatusBar barStyle="light-content" backgroundColor={colors.heroField} />}
-      <ScrollView ref={scrollRef} onScroll={onGuideScroll} scrollEventThrottle={32} contentContainerStyle={{ paddingBottom: 32 }} showsVerticalScrollIndicator={false}
+      {isFocused && (
+        <StatusBar barStyle={CONVERSATION_HOME_ENABLED ? 'dark-content' : 'light-content'} backgroundColor={colors.heroField} />
+      )}
+      <ScrollView ref={scrollRef} onScroll={onGuideScroll} scrollEventThrottle={32} contentContainerStyle={{ paddingBottom: 32 + floatingInset }} showsVerticalScrollIndicator={false}
         refreshControl={isEmployee ? undefined : (
           <RefreshControl refreshing={refreshing} onRefresh={() => { void onRefresh(); }}
             tintColor={colors.white} colors={[colors.primary]} />
@@ -551,12 +557,16 @@ export const InvestScreen = ({ topAccessory }: { topAccessory?: React.ReactNode 
   );
 };
 
+const HERO_INK = CONVERSATION_HOME_ENABLED ? colors.onHeroField : colors.white;
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.neutral },
   hero: { backgroundColor: colors.heroField, overflow: 'hidden' },
   heroInner: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 56 },
-  heroHeadline: { fontSize: 26, fontWeight: '800', color: colors.white, marginTop: 4 },
-  heroSub: { fontSize: 15, lineHeight: 21, color: colors.white, opacity: 0.9, marginTop: 4 },
+  // The conversation home draws the header above this hero in the field's
+  // dark ink: the hero text is the same ink (5.1:1; white is 1.9:1).
+  heroHeadline: { fontSize: 26, fontWeight: '800', color: HERO_INK, marginTop: 4 },
+  heroSub: { fontSize: 15, lineHeight: 21, color: HERO_INK, opacity: CONVERSATION_HOME_ENABLED ? 1 : 0.9, marginTop: 4 },
 
   cards: { paddingHorizontal: 16, marginTop: -36, gap: 14 },
   card: {
