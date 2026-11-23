@@ -67,7 +67,9 @@ def kick(task_id, countdown=0):
         turn = AgentTask.objects.filter(pk=task_id).values_list('steps', flat=True).first()
         try:
             # The step number is a token: a duplicate delivery finds it spent.
-            step.apply_async(args=[task_id, turn], countdown=countdown, queue=conf.get('AGENT_TASKS_QUEUE'))
+            # A step nobody took within minutes is stale: the sweep sends a fresh one if it still matters.
+            step.apply_async(args=[task_id, turn], countdown=countdown, queue=conf.get('AGENT_TASKS_QUEUE'),
+                             expires=countdown + 300)
         except Exception:  # noqa: BLE001 - the sweep picks it up
             logger.exception('agent task step was not queued')
     transaction.on_commit(send)

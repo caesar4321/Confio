@@ -59,6 +59,10 @@ class RowsBase(TestCase):
         self.qr = self.patch('agent_tasks.qr.available', return_value=True)
         # A browser worker answered the heartbeat lately.
         self.worker = self.patch('agent_tasks.service.worker_alive', return_value=True)
+        # No real heartbeat leaves a test, and none is left pending between tests.
+        self.heartbeat = self.patch('agent_tasks.tasks.heartbeat.apply_async')
+        from django.core.cache import cache
+        cache.delete('agent_tasks:heartbeat_pending')
         # No balance read reaches the chain: unknown unless a test says otherwise.
         self.held = self.patch('payment_accounts.shortfall.dollars_held', return_value=None)
 

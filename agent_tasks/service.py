@@ -27,6 +27,8 @@ MESSAGES = {
     'store': 'No puedo trabajar en ese sitio.',
     'goal': 'Dime en una frase qué quieres comprar.',
     'active_task': 'Acabo de empezar esa compra hace un momento.',
+    'store_busy': 'Estoy usando esa tienda para una compra tuya. Cuando termine puedes cerrar la sesión.',
+    'just_started': 'Ya estoy buscándolo en {site}.',
     'checkout_open': ('Tu pedido en {site} sigue abierto. Termínalo o cancélalo en la pantalla de la tienda y '
                       'después te ayudo con lo nuevo.'),
     'daily_limit': 'Llegaste al máximo de compras por hoy. Mañana seguimos.',
@@ -148,6 +150,10 @@ def start(account, user, *, goal, site, meta=None):
     open_order = mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=False).first()
     if open_order is not None:
         raise TaskRefused('checkout_open', MESSAGES['checkout_open'].format(site=open_order.site))
+    # A second message within a minute about the same store is the same purchase, not a new one.
+    recent = mine.filter(state__in=AgentTask.ACTIVE, site=store, created_at__gte=timezone.now() - timedelta(seconds=60))
+    if recent.exists():
+        raise TaskRefused('just_started', MESSAGES['just_started'].format(site=store))
     # Cancelled before its browser ever opened (no provider yet) costs nothing.
     free = Q(state='cancelled', provider='')
     if (mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(free).count()
@@ -170,12 +176,19 @@ def start(account, user, *, goal, site, meta=None):
             # (its step, if one runs, loses its lease and stops). The new request is what they want.
             earlier = list(mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=True)
                            .values_list('pk', flat=True))
-            mine.filter(pk__in=earlier, state__in=AgentTask.ACTIVE).update(
+            # Re-checked as it is set aside: one that reached the checkout meanwhile stays.
+            mine.filter(pk__in=earlier, state__in=AgentTask.ACTIVE, checkout_at__isnull=True).update(
                 state='cancelled', reason='replaced', wait_until=None, lease=None, lease_until=None, updated_at=now)
+            earlier = list(mine.filter(pk__in=earlier, state='cancelled', reason='replaced', updated_at=now)
+                           .values_list('pk', flat=True))
             task = AgentTask.objects.create(account=account, user=user, goal=goal, site=store, country=country,
                                             app_version=str((meta or {}).get('HTTP_X_CONFIO_VERSION') or '')[:20])
             runner.kick(task.pk)
     except IntegrityError as exc:
+        # The earlier one reached the checkout as this one started: that order stays, said as such.
+        open_order = mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=False).first()
+        if open_order is not None:
+            raise TaskRefused('checkout_open', MESSAGES['checkout_open'].format(site=open_order.site)) from exc
         raise TaskRefused('active_task') from exc
     for gone in AgentTask.objects.filter(pk__in=earlier):
         runner.close_session(gone)
@@ -294,7 +307,7 @@ def forget_store(account, user, site):
     """Delete a store's sign-in, at the vendor and here. Works with the switch off."""
     require_owner(account, user)
     if AgentTask.objects.filter(user=user, site=site, state__in=AgentTask.ACTIVE).exists():
-        raise TaskRefused('active_task')
+        raise TaskRefused('store_busy')
     for profile in AgentProfile.objects.filter(user=user, site=site):
         try:
             browsers.provider(profile.provider).delete_profile(profile.external_id)
@@ -343,11 +356,16 @@ def _sweep():
 
     if not worker_alive():
         # No browser worker: a purchase that never opened a browser (queued, no provider) is
-        # stopped and the person told. Anything a worker ever touched has its own timeouts.
+        # stopped and the person told. One a worker already touched is left to its own path.
         _each(active.filter(state='queued', provider='', checkout_at__isnull=True,
                             created_at__lt=now - timedelta(minutes=3)),
               lambda task: runner.end(task, 'stopped', 'unavailable', only={'state': 'queued', 'provider': ''}),
               'stranded')
+    # Never started within minutes, worker or not: the person has moved on. It is not started late.
+    _each(active.filter(state='queued', provider='', checkout_at__isnull=True,
+                        created_at__lt=now - timedelta(minutes=10)),
+          lambda task: runner.end(task, 'stopped', 'unavailable', only={'state': 'queued', 'provider': ''}),
+          'never started')
 
     def rerun(task):
         # Touched first, so a backlog is one delivery per interval, not one per sweep.

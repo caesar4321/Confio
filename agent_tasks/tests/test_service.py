@@ -70,6 +70,7 @@ class StartTests(ServiceBase):
 
     def test_a_new_request_sets_the_earlier_purchase_aside_by_itself(self):
         earlier = self.start()
+        AgentTask.objects.filter(pk=earlier.pk).update(created_at=timezone.now() - timedelta(minutes=2))
         later = self.start(goal='un chocolate amargo')
         earlier.refresh_from_db()
         self.assertEqual((earlier.state, earlier.reason), ('cancelled', 'replaced'))
@@ -81,6 +82,7 @@ class StartTests(ServiceBase):
 
     def test_nothing_is_set_aside_when_the_new_one_is_refused(self):
         earlier = self.start()
+        AgentTask.objects.filter(pk=earlier.pk).update(created_at=timezone.now() - timedelta(minutes=2))
         self.payable.side_effect = service.TaskRefused('unavailable')
         self.refused('unavailable', self.start, goal='otra cosa')
         earlier.refresh_from_db()
@@ -96,10 +98,10 @@ class StartTests(ServiceBase):
         self.assertEqual(earlier.state, 'needs_person')
 
     @override_settings(AGENT_TASKS_PER_DAY=2)
-    def test_only_one_set_aside_before_its_browser_opened_is_free(self):
-        self.start()
-        self.start(goal='otro')
-        self.start(goal='otro más')   # the two earlier ones never opened a browser
+    def test_a_purchase_set_aside_before_its_browser_opened_is_free(self):
+        for goal in ('uno', 'otro', 'otro más'):   # the earlier ones never opened a browser
+            AgentTask.objects.filter(user=self.user).update(created_at=timezone.now() - timedelta(minutes=2))
+            self.start(goal=goal)
         AgentTask.objects.filter(user=self.user).update(provider='fake')   # now they all did
         AgentTask.objects.filter(user=self.user, state__in=AgentTask.ACTIVE).update(state='stopped')
         self.refused('daily_limit', self.start, goal='y otra')
@@ -360,3 +362,26 @@ class WorkerTests(ServiceBase):
         self.assertTrue(assistant_tool.ready(viewer))
         self.worker.return_value = False
         self.assertFalse(assistant_tool.ready(viewer))
+
+
+class SameStoreTests(ServiceBase):
+    def test_a_follow_up_within_a_minute_is_the_same_purchase(self):
+        first = self.start()
+        with self.assertRaises(service.TaskRefused) as refused:
+            self.start(goal='y que sea USB-C')
+        self.assertEqual(refused.exception.code, 'just_started')
+        first.refresh_from_db()
+        self.assertEqual(first.state, 'queued')
+
+    def test_one_never_started_within_minutes_is_not_started_late_even_with_a_worker(self):
+        old = self.make_task(state='queued', provider='', session_id='', connect_url='', session_expires_at=None)
+        AgentTask.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(minutes=11))
+        service.sweep()   # a worker is alive here
+        old.refresh_from_db()
+        self.assertEqual((old.state, old.reason), ('stopped', 'unavailable'))
+
+    def test_forgetting_a_store_in_use_says_so(self):
+        self.make_task(state='working')
+        with self.assertRaises(service.TaskRefused) as refused:
+            service.forget_store(self.account, self.user, SITE)
+        self.assertEqual(refused.exception.code, 'store_busy')
