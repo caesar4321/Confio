@@ -21,6 +21,9 @@ NEEDS_PERSON = {
     # The click judge could not tell: never a dead end, the person says yes or no.
     'step': '{site} pide «{{step}}» para seguir. No sé si conviene: ¿lo hago?',
     'approve': 'Tu pedido en {site} está listo, a pagar con {pay}. Revísalo en la tarjeta y confírmalo: lo hago yo.',
+    # Not a Cuenta inteligente subscriber (spec decision 37): the priced order, and the way to have it bought.
+    'subscribe': ('Tu pedido en {site} está listo. Para que lo compre y lo pague yo, activa Cuenta inteligente; '
+                  'después vuelve aquí y te lo muestro para confirmarlo.'),
     # Confío cannot pay this one: said before they confirm, so nobody orders what they cannot pay.
     'approve_manual': ('Tu pedido en {site} está listo. Esta vez no puedo pagarlo yo: cuando lo haga, te muestro '
                        '{qr} y lo pagas tú desde tu banco con {pay}. Si puedes pagarlo así, confírmalo en la '

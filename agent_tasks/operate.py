@@ -417,6 +417,12 @@ def _order(step, browser, reader, seen, element, label, args):
     # Who pays it is part of what they approve: said before they confirm, and asked again if it changed.
     mode, offer = service.pay_mode(task, step.app_meta())
     order = {**order, 'manual': mode == 'manual', 'offer': offer}
+    if not service.subscribed(task.user):
+        # Buying and paying for the person is Cuenta inteligente's (spec decision 37). The priced order is
+        # shown with the offer instead of a confirm; asked again right here on every press, so a
+        # subscription that ended in between never buys. Subscribed by then, the same card confirms.
+        return step.hand_over('subscribe', order={**order, 'approved': None}, body=notes.say(
+            notes.NEEDS_PERSON['subscribe'], task) + notes.breakdown_text(order))
     # What the person approves is the purchase: this item, this total, this address, who pays.
     if not approved or amount_of(approved.get('total')) != amount or {
             key: approved.get(key) for key in ('item', 'manual', 'address')} != {
@@ -460,6 +466,9 @@ def _again(step, browser, reader, seen, element, label):
     read, why = _reviewed(step, seen, element, order.get('item') or '', amount)
     if read is not None and order.get('address') and not written_on(seen.text, order.get('address')):
         read, why = None, 'the delivery address is not the one the person approved'
+    from . import service
+    if read is not None and not service.subscribed(task.user):
+        read, why = None, 'the person no longer has Cuenta inteligente'   # never a press without it (decision 37)
     if read is None:
         return step.remember('not_placed', f'refused: not the order the person approved ({why})')
     step.save(order={**order, 'pressed_at': [*pressed_at, where]}, checkout_at=timezone.now(),

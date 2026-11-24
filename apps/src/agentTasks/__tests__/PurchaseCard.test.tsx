@@ -114,6 +114,21 @@ it('the order is approved with one tap, showing the item and the total', async (
   expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$112.50' });
 });
 
+it('without Cuenta inteligente the priced order comes with the offer, never a confirm button', async () => {
+  const opened: unknown[][] = [];
+  mockTask = task({ reason: 'subscribe', options: [], message: 'Para que lo compre y lo pague yo, activa Cuenta inteligente…',
+    order: { item: 'Turin Magno Chocolates', total: '$129.00', image: '' } });
+  mockMutate.mockResolvedValue(answered('approveAgentOrder'));
+  const tree = await mount(<PurchaseCards actions={ACTION} messageId="m1" createdAt="2026-11-23T20:00:00Z"
+    onOpen={(...args: unknown[]) => { opened.push(args); }} />);
+  expect(texts(tree)).toEqual(expect.arrayContaining(['Turin Magno Chocolates', '$129.00']));
+  expect(tree.root.findAll((n) => n.props.title === 'Confirmar pedido')).toHaveLength(0);
+  await act(async () => { tree.root.findAll((n) => n.props.title === 'Activar Cuenta inteligente')[0].props.onPress(); });
+  expect(opened).toEqual([['SmartAccountOffer', { door: 'chip', trigger: 'agent_purchase' }]]);
+  await act(async () => { labelled(tree, 'Ya la activé: seguir').props.onPress(); });
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$129.00' });
+});
+
 it('the card says what the total is made of: the shipping is never a surprise', async () => {
   mockTask = task({ reason: 'approve', options: [], message: 'Listo para pedir…',
     order: { item: 'Turin Magno Chocolates', total: '$129.00', image: '',

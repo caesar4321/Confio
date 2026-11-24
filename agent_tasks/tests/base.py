@@ -63,6 +63,8 @@ class RowsBase(TestCase):
         self.heartbeat = self.patch('agent_tasks.tasks.heartbeat.apply_async')
         from django.core.cache import cache
         cache.delete('agent_tasks:heartbeat_pending')
+        # Buying for the person is Cuenta inteligente's: a subscriber unless a test says otherwise.
+        self.plus = self.patch('assistant.billing.has_plus', return_value=True)
         # No balance read reaches the chain: unknown unless a test says otherwise.
         self.held = self.patch('payment_accounts.shortfall.dollars_held', return_value=None)
 

@@ -32,6 +32,7 @@ MESSAGES = {
                       'después te ayudo con lo nuevo.'),
     'daily_limit': ('Llegaste al máximo de {limit} compras en 24 horas. En unas horas puedes pedirme otra.'),
     'busy': 'Ahora hay muchas compras en curso. Inténtalo en unos minutos.',
+    'subscribe': 'Para que lo compre y lo pague yo, activa Cuenta inteligente. Después sigue aquí.',
     'not_found': 'No encontré esa compra.',
     'not_open': 'Esto ya no está esperando tu respuesta.',
     'view': 'No reconozco esa pantalla. Ábrela de nuevo.',
@@ -57,6 +58,11 @@ def build_supported(meta):
     version = _version((meta or {}).get('HTTP_X_CONFIO_VERSION'))
     return (floor is not None and version is not None and version >= floor
             and str((meta or {}).get(conf.get('AGENT_TASKS_CAPABLE_HEADER')) or '') == '1')
+
+
+def subscribed(user):
+    """Buying and paying for the person is Cuenta inteligente's (spec decision 37)."""
+    return _plus(user)
 
 
 def _plus(user):
@@ -251,7 +257,7 @@ def resume(account, user, task_id, view=None):
         raise TaskRefused('unavailable')
     task = get(account, user, task_id)
     # A card in the chat has its own answer (choose, sign_in, give_code, approve): this is not one.
-    if task.state != 'needs_person' or task.reason in ('choose', 'login', 'otp', 'approve'):
+    if task.state != 'needs_person' or task.reason in ('choose', 'login', 'otp', 'approve', 'subscribe'):
         raise TaskRefused('not_open')
     if not task.wait_until or task.wait_until <= timezone.now():
         runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
@@ -317,6 +323,14 @@ def approve(account, user, task_id, total=None):
     """The person approved the order named in the chat: its item and that total. The agent presses the
     store's final button only for the same total."""
     task = get(account, user, task_id)
+    if task.reason == 'subscribe':
+        # Held for Cuenta inteligente (decision 37). Subscribed now, the purchase goes on, and the ordinary
+        # order card follows with who pays and the balance: this tap approves nothing.
+        if not subscribed(user):
+            raise TaskRefused('subscribe')
+        entry = {'did': 'the person has Cuenta inteligente now', 'result': 'call ready_to_order again'}
+        return _answered(account, user, task_id, 'subscribe',
+                         history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
     order = dict(task.order or {})
     if not order.get('total') or not order.get('button') or not order.get('page'):
         raise TaskRefused('not_open')

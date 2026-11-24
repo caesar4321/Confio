@@ -1993,6 +1993,39 @@ class CheckoutTests(StepBase):
             self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'), order)
         prepare.assert_not_called()   # nothing is even prepared for an order nobody approved
 
+    def test_without_cuenta_inteligente_the_priced_order_comes_with_the_offer_never_a_purchase(self):
+        from agent_tasks.schema import task_type
+        self.plus.return_value = False
+        task = self.named()
+        self.assertEqual((task.state, task.reason), ('needs_person', 'subscribe'))
+        shown = task_type(task)
+        self.assertEqual((shown.order.item, shown.order.total), ('Chocolate Ibarra', 'R$ 189,00'))
+        self.assertIn('activa Cuenta inteligente', shown.message)
+        with self.assertRaises(service.TaskRefused) as refused:
+            service.approve(self.account, self.user, task.internal_id, total='R$ 189,00')
+        self.assertEqual(refused.exception.code, 'subscribe')
+        self.reader.click.assert_not_called()
+        # Subscribed meanwhile: the tap only resumes; the ordinary order card (who pays, the balance) follows,
+        # and only its confirm presses the store's button.
+        self.plus.return_value = True
+        task = service.approve(self.account, self.user, task.internal_id, total='R$ 189,00')
+        self.assertFalse((task.order or {}).get('approved'))
+        task = self.step(task, checkout_page())
+        self.assertEqual(task.reason, 'approve')
+        self.reader.click.assert_not_called()
+        task = service.approve(self.account, self.user, task.internal_id, total='R$ 189,00')
+        task = self.step(task, checkout_page())
+        self.reader.click.assert_called_once()
+        self.assertEqual(task.phase, 'ordered')
+
+    def test_a_subscription_that_ended_after_the_approval_never_buys(self):
+        task = self.named()
+        task = service.approve(self.account, self.user, task.internal_id, total='R$ 189,00')
+        self.plus.return_value = False
+        task = self.step(task, checkout_page())
+        self.assertEqual(task.reason, 'subscribe')
+        self.reader.click.assert_not_called()
+
     def test_the_card_says_what_the_total_is_made_of(self):
         from agent_tasks.schema import task_type
         self.review.side_effect = lambda task, page, element, item, meter: {

@@ -97,7 +97,7 @@ class StartTests(ServiceBase):
         earlier.refresh_from_db()
         self.assertEqual(earlier.state, 'needs_person')
 
-    @override_settings(AGENT_TASKS_PER_DAY=2)
+    @override_settings(AGENT_TASKS_PER_DAY_PLUS=2)
     def test_a_purchase_set_aside_before_its_browser_opened_is_free(self):
         for goal in ('uno', 'otro', 'otro más'):   # the earlier ones never opened a browser
             AgentTask.objects.filter(user=self.user).update(created_at=timezone.now() - timedelta(minutes=2))
@@ -118,7 +118,7 @@ class StartTests(ServiceBase):
         self.refused('unavailable', self.start)
         self.assertFalse(AgentTask.objects.exists())
 
-    @override_settings(AGENT_TASKS_PER_DAY=1)
+    @override_settings(AGENT_TASKS_PER_DAY_PLUS=1)
     def test_a_day_has_a_limit(self):
         self.make_task(state='stopped')
         self.refused('daily_limit', self.start)

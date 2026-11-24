@@ -193,7 +193,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
       {waiting && task.reason === 'otp' ? (
         <Code sending={tapping === 'code'} onSend={(code) => act('code', GIVE_AGENT_CODE, { code }, 'giveAgentCode')} />
       ) : null}
-      {waiting && task.reason === 'approve' && task.order ? (
+      {waiting && (task.reason === 'approve' || task.reason === 'subscribe') && task.order ? (
         <View style={styles.order}>
           <Photo uri={task.order.image} size={72} />
           <View style={styles.orderText}>
@@ -246,6 +246,21 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
       {waiting && task.reason === 'approve' && task.order ? (
         <Button title="Confirmar pedido" loading={tapping === 'approve'}
           onPress={() => { act('approve', APPROVE_AGENT_ORDER, { total: task.order!.total }, 'approveAgentOrder'); }} />
+      ) : null}
+      {/* Buying and paying is Cuenta inteligente's (spec decision 37): the offer instead of a confirm. Back
+          subscribed, "seguir" resumes and the ordinary order card follows (who pays, the balance). */}
+      {waiting && task.reason === 'subscribe' && task.order ? (
+        <View style={styles.stepRow}>
+          {onOpen ? (
+            <Button title="Activar Cuenta inteligente"
+              onPress={() => onOpen('SmartAccountOffer', { door: 'chip', trigger: 'agent_purchase' })} />
+          ) : null}
+          <Pressable accessibilityRole="button" accessibilityLabel="Ya la activé: seguir" style={styles.link}
+            disabled={tapping !== null}
+            onPress={() => { act('approve', APPROVE_AGENT_ORDER, { total: task.order!.total }, 'approveAgentOrder'); }}>
+            <Text style={styles.linkText}>Ya la activé: seguir</Text>
+          </Pressable>
+        </View>
       ) : null}
       {task.status === 'payment_ready' && task.payQr ? <StoreQr code={task.payQr} total={task.order?.total ?? ''} /> : null}
       {task.status === 'payment_ready' && task.payDetails?.length ? <PayDetails details={task.payDetails} /> : null}

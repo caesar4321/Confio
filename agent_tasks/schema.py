@@ -89,7 +89,7 @@ class AgentTaskType(graphene.ObjectType):
     open_account_method = graphene.String(
         description='The local account (LocalAccountApplication methodId) that would let Confío pay it next time.')
     created_at = graphene.DateTime(required=True)
-    order = graphene.Field(AgentOrderType, description='With reason `approve`: confirm with approveAgentOrder')
+    order = graphene.Field(AgentOrderType, description='With reason `approve`: confirm with approveAgentOrder. With `subscribe`, approveAgentOrder only resumes once subscribed')
     options = graphene.List(graphene.NonNull(AgentOptionType), required=True,
                             description='With reason `choose`: pick one with chooseAgentOption(index)')
 
@@ -144,7 +144,7 @@ def task_type(task):
         message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task).replace(
             '{step}', str(((task.order or {}).get('ask_step') or {}).get('label') or '')[:80]).replace(
             '{what}', str(((task.order or {}).get('request') or {}).get('what') or '')[:120])
-        if task.reason == 'approve':
+        if task.reason in ('approve', 'subscribe'):
             message += notes.breakdown_text(task.order)   # what the total is made of: today's app shows this text
     elif task.state == 'payment_ready' and task.reason == 'manual':
         message = notes.manual_text(task)
