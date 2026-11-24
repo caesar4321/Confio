@@ -114,6 +114,14 @@ it('the order is approved with one tap, showing the item and the total', async (
   expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$112.50' });
 });
 
+it('the card says what the total is made of: the shipping is never a surprise', async () => {
+  mockTask = task({ reason: 'approve', options: [], message: 'Listo para pedir…',
+    order: { item: 'Turin Magno Chocolates', total: '$129.00', image: '',
+      breakdown: [{ label: 'Productos', value: '$85.00' }, { label: 'Envío', value: '$44.00' }] } });
+  const tree = await mount();
+  expect(texts(tree)).toEqual(expect.arrayContaining(['Productos', '$85.00', 'Envío', '$44.00', 'Total $129.00']));
+});
+
 it('while it works the journey says where the purchase is, with small talk that never says bought', async () => {
   mockTask = task({ status: 'working', reason: '', options: [], stage: 'cart', message: 'Preparando tu carrito en amazon.com.mx…' });
   const tree = await mount();

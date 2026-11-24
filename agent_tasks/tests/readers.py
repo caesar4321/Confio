@@ -197,7 +197,7 @@ def review_by_words(task, page, element, item, meter):
             'pays_with': 'asked' if not refusal else ('card' if 'card' in refusal else 'other'),
             'total': grand_total(page.text),
             'item_shown': not words or any(word in guard.fold(page.text[:100000]) for word in words),
-            'ship_to': ship_to(page.text), 'why': refusal or 'read by words'}
+            'ship_to': ship_to(page.text), 'why': refusal or 'read by words', 'lines': []}
 
 
 def payment_page_by_words(task, page, meter):

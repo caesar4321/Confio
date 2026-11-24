@@ -371,6 +371,22 @@ def _reviewed(step, seen, element, item, amount):
     return read, ''
 
 
+BREAKDOWN_KINDS = ('products', 'shipping', 'tax', 'discount', 'fee', 'other')
+
+
+def breakdown(read, page_text, amount):
+    """What makes up the total, as the second reader listed it: kept only when every figure is written on the
+    page and they add up to exactly the total (a discount takes away). Else [] (the card shows the total alone)."""
+    lines, sum_ = [], Decimal(0)
+    for line in read.get('lines') or []:
+        figure = amount_of(line.get('amount'))
+        if line.get('kind') not in BREAKDOWN_KINDS or figure is None or not figure_on(page_text, figure):
+            return []
+        sum_ += -figure if line['kind'] == 'discount' else figure
+        lines.append({'kind': line['kind'], 'amount': guard.clean(line['amount'], 24)})
+    return lines if len(lines) >= 2 and sum_ == amount else []
+
+
 def _order(step, browser, reader, seen, element, label, args):
     """The final button, named with the order's total. A second model reads the page (agent.review); code
     checks the facts; the person approves the purchase once; it is pressed only for what they approved."""
@@ -396,6 +412,7 @@ def _order(step, browser, reader, seen, element, label, args):
     where = step.fingerprint(seen.url)
     order = {'item': item, 'total': total, 'amount': format(amount, 'f'), 'button': label, 'page': where,
              'image': picked.get('image', ''), 'address': address,
+             'breakdown': breakdown(read, seen.text, amount),
              'seen_clabes': (task.order or {}).get('seen_clabes') or []}
     # Who pays it is part of what they approve: said before they confirm, and asked again if it changed.
     mode, offer = service.pay_mode(task, step.app_meta())
@@ -407,7 +424,7 @@ def _order(step, browser, reader, seen, element, label, args):
         # A new order, or one that changed: the person is asked (again). Its note is fixed words:
         # what the store wrote is shown only on the card.
         return step.hand_over('approve', order=order, body=notes.say(
-            notes.NEEDS_PERSON['approve_manual' if mode == 'manual' else 'approve'], task))
+            notes.NEEDS_PERSON['approve_manual' if mode == 'manual' else 'approve'], task) + notes.breakdown_text(order))
     # Used once, and written down first: an answer lost on the way is never a second order.
     step.save(order={**order, 'pressed': True, 'pressed_at': [step.same_page(seen.url)]}, phase='ordered',
               checkout_at=timezone.now(),

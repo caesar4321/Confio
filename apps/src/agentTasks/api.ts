@@ -19,7 +19,7 @@ const TASK_FIELDS = `
   payDetails { label value }
   openAccountMethod
   options { title price image }
-  order { item total image address }
+  order { item total image address breakdown { label value } }
 `;
 
 export const GET_AGENT_TASK = gql`
@@ -86,7 +86,11 @@ export const FORGET_AGENT_STORE = gql`
 `;
 
 export type AgentOption = { title: string; price: string; image: string };
-export type AgentOrder = { item: string; total: string; image: string; address?: string | null };
+export type AgentOrder = {
+  item: string; total: string; image: string; address?: string | null;
+  // What the total is made of (Productos, Envío…): the server checked it adds up to the total.
+  breakdown?: { label: string; value: string }[] | null;
+};
 
 export type AgentTask = {
   id: string;

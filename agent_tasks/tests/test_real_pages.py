@@ -74,3 +74,36 @@ class AmazonMexicoSpeiReviewTests(SimpleTestCase):
         read = readers.review_by_words(SimpleNamespace(country='MX'), self.page, self.final, 'Chocolate', None)
         self.assertEqual((read['places_order'], read['pays_with'], read['total']), (True, 'asked', '99.48'))
         self.assertTrue(operate.written_on(self.page.text, read['ship_to']))
+
+
+class BreakdownTests(SimpleTestCase):
+    """What the total is made of, on the card: kept only when the figures are on the page and add up."""
+
+    def setUp(self):
+        self.page = recorded('amazon_mx_review')   # Productos $85.00, Envío $44.00, Total $129.00
+
+    def read(self, *lines):
+        return {'lines': [{'kind': kind, 'amount': amount} for kind, amount in lines]}
+
+    def test_products_and_shipping_that_add_up_are_shown_in_confios_words(self):
+        from agent_tasks import notes
+        lines = operate.breakdown(self.read(('products', '$85.00'), ('shipping', '$44.00')), self.page.text,
+                                  operate.amount_of('$129.00'))
+        self.assertEqual(notes.breakdown_text({'total': '$129.00', 'breakdown': lines}),
+                         ' Total $129.00: productos $85.00 + envío $44.00.')
+
+    def test_anything_doubtful_shows_the_total_alone(self):
+        total = operate.amount_of('$129.00')
+        for lines in ((('products', '$85.00'),),                                # one line explains nothing
+                      (('products', '$85.00'), ('shipping', '$40.00')),         # does not add up
+                      (('products', '$85.00'), ('shipping', '$44.00'), ('tax', '$9.00')),
+                      (('products', '$100.00'), ('discount', '$15.00'), ('shipping', '$44.00')),  # $100 not on it
+                      (('products', '$85.00'), ('nonsense', '$44.00'))):
+            with self.subTest(lines=lines):
+                self.assertEqual(operate.breakdown(self.read(*lines), self.page.text, total), [])
+
+    def test_a_discount_takes_away(self):
+        text = 'Productos: $100.00 Descuento: -$15.00 Envío: $44.00 Total: $129.00'
+        lines = operate.breakdown(self.read(('products', '$100.00'), ('discount', '$15.00'), ('shipping', '$44.00')),
+                                  text, operate.amount_of('$129.00'))
+        self.assertEqual([line['kind'] for line in lines], ['products', 'discount', 'shipping'])

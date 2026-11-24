@@ -1993,6 +1993,19 @@ class CheckoutTests(StepBase):
             self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'), order)
         prepare.assert_not_called()   # nothing is even prepared for an order nobody approved
 
+    def test_the_card_says_what_the_total_is_made_of(self):
+        from agent_tasks.schema import task_type
+        self.review.side_effect = lambda task, page, element, item, meter: {
+            **review_by_words(task, page, element, item, meter),
+            'lines': [{'kind': 'products', 'amount': 'R$ 150,00'}, {'kind': 'shipping', 'amount': 'R$ 39,00'}]}
+        task = self.named(checkout_page(extra='Produtos R$ 150,00 Frete R$ 39,00'))
+        self.assertEqual(task.reason, 'approve')
+        shown = task_type(task)
+        self.assertIn('Total R$ 189,00: productos R$ 150,00 + envío R$ 39,00.', shown.message)
+        self.assertEqual([(line.label, line.value) for line in shown.order.breakdown],
+                         [('Productos', 'R$ 150,00'), ('Envío', 'R$ 39,00')])
+        self.assertIn('envío R$ 39,00', self.post.call_args.args[1])   # the chat line says it too
+
     def test_the_approval_is_for_the_total_on_the_card_they_saw(self):
         task = self.named()
         with self.assertRaises(service.TaskRefused):

@@ -56,6 +56,8 @@ class AgentOrderType(graphene.ObjectType):
     total = graphene.String(required=True)
     image = graphene.String(required=True)
     address = graphene.String(description='Where it is delivered, as the checkout writes it: part of the approval.')
+    breakdown = graphene.List(graphene.NonNull(lambda: AgentPayDetailType), required=True,
+                              description='What makes up the total (productos, envío...), checked to add up to it.')
 
 
 class AgentPayDetailType(graphene.ObjectType):
@@ -142,6 +144,8 @@ def task_type(task):
         message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task).replace(
             '{step}', str(((task.order or {}).get('ask_step') or {}).get('label') or '')[:80]).replace(
             '{what}', str(((task.order or {}).get('request') or {}).get('what') or '')[:120])
+        if task.reason == 'approve':
+            message += notes.breakdown_text(task.order)   # what the total is made of: today's app shows this text
     elif task.state == 'payment_ready' and task.reason == 'manual':
         message = notes.manual_text(task)
     elif task.state == 'payment_ready':
@@ -165,7 +169,13 @@ def task_type(task):
         if task.state == 'needs_person' and task.reason == 'act' else None,
         order=(AgentOrderType(item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
                               image=str(task.order.get('image') or ''),
-                              address=str(task.order.get('address') or '')) if task.order else None),
+                              address=str(task.order.get('address') or ''),
+                              breakdown=[AgentPayDetailType(label=notes.BREAKDOWN_LABELS[line['kind']].capitalize(),
+                                                            value=('- ' if line['kind'] == 'discount' else '')
+                                                            + str(line.get('amount') or ''))
+                                         for line in (task.order.get('breakdown') or [])
+                                         if line.get('kind') in notes.BREAKDOWN_LABELS])
+               if task.order else None),
         options=[AgentOptionType(title=str(o.get('title') or ''), price=str(o.get('price') or ''),
                                  image=str(o.get('image') or '')) for o in (task.options or [])])
 

@@ -198,7 +198,13 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           <Photo uri={task.order.image} size={72} />
           <View style={styles.orderText}>
             <Text style={styles.title} numberOfLines={3}>{task.order.item}</Text>
-            <Text style={styles.total}>{task.order.total}</Text>
+            {(task.order.breakdown ?? []).map((line) => (
+              <View key={line.label} style={styles.line}>
+                <Text style={styles.lineLabel}>{line.label}</Text>
+                <Text style={styles.lineValue}>{line.value}</Text>
+              </View>
+            ))}
+            <Text style={styles.total}>{task.order.breakdown?.length ? `Total ${task.order.total}` : task.order.total}</Text>
             {task.order.address ? (
               <Text style={styles.address} numberOfLines={2}>Envío a: {task.order.address}</Text>
             ) : null}
@@ -415,6 +421,9 @@ const styles = StyleSheet.create({
   assuranceText: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.onHeroField },
   stepRow: { marginTop: 12, gap: 4 },
   address: { fontSize: 13, color: '#6B7280', marginTop: 4 },
+  line: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
+  lineLabel: { fontSize: 13, color: '#6B7280' },
+  lineValue: { fontSize: 13, color: '#6B7280', fontVariant: ['tabular-nums'] },
   details: { marginTop: 12, borderRadius: 12, backgroundColor: '#F9FAFB', paddingHorizontal: 12 },
   detail: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E7EB' },

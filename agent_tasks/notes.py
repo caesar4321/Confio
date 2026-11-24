@@ -136,6 +136,21 @@ def manual_text(task):
     return text + (OPEN_ACCOUNT if order.get('offer') else '')
 
 
+BREAKDOWN_LABELS = {'products': 'productos', 'shipping': 'envío', 'tax': 'impuestos', 'discount': 'descuento',
+                    'fee': 'cargos', 'other': 'otros cargos'}
+
+
+def breakdown_text(order):
+    """' Total $129.00: productos $85.00 + envío $44.00.' in Confío's own words around the store's figures
+    (operate.breakdown checked they are on the page and add up), or ''."""
+    lines = [line for line in (order or {}).get('breakdown') or [] if line.get('kind') in BREAKDOWN_LABELS]
+    if not lines:
+        return ''
+    parts = [f"{'- ' if line['kind'] == 'discount' else '+ ' if index else ''}{BREAKDOWN_LABELS[line['kind']]} "
+             f"{line['amount']}" for index, line in enumerate(lines)]
+    return f" Total {order.get('total')}: {' '.join(parts)}."
+
+
 def say(text, task):
     """A note's words for this task's store and its country's rail."""
     from . import countries
