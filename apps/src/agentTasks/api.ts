@@ -10,6 +10,7 @@ const TASK_FIELDS = `
   reason
   message
   waitUntil
+  stage
   paymentIntentId
   payQr
   payDetails { label value }
@@ -86,6 +87,8 @@ export type AgentTask = {
   reason: string;
   message: string;
   waitUntil?: string | null;
+  // Where the purchase is, for the card's journey: search | cart | checkout | pay | done.
+  stage?: string | null;
   paymentIntentId?: string | null;
   // The store's own QR the person pays from their bank's app (no Confío payment: QR Bolivia off).
   payQr?: string | null;

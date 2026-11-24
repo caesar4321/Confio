@@ -74,6 +74,7 @@ class AgentTaskType(graphene.ObjectType):
     reason = graphene.String(required=True)
     message = graphene.String(required=True)
     wait_until = graphene.DateTime()
+    stage = graphene.String(required=True, description='search | cart | checkout | pay | done: where the purchase is')
     checkout_handed = graphene.Boolean(
         required=True, description='The person has the checkout: there may be an order even if the task stops')
     payment_intent_id = graphene.UUID()
@@ -93,13 +94,38 @@ WORKING = {
     'working': 'Trabajando en {site}…',
     'awaiting_code': 'Preparando el pago de tu pedido…',
 }
+# What it is doing, by where the purchase is (stage_of): never that anything was bought.
+WORKING_AT = {
+    'search': 'Buscando en {site}…',
+    'cart': 'Preparando tu carrito en {site}…',
+    'checkout': 'Preparando tu pedido en {site}…',
+    'pay': 'Preparando el pago de tu pedido…',
+}
+STAGES = ('search', 'cart', 'checkout', 'pay', 'done')
+
+
+def stage_of(task):
+    """Where the purchase is, for the card's journey: search, cart, checkout, pay, done. Where it
+    stopped stays where it was."""
+    from . import guard
+    if task.state == 'payment_ready':
+        return 'done'
+    if task.phase == 'ordered' or task.state == 'awaiting_code' or task.checkout_at is not None:
+        return 'pay'
+    if task.phase == 'ordering':
+        last = str(((task.trace or [{}])[-1] or {}).get('url') or '')
+        return 'checkout' if last and guard.checkout_address(f'https://{last}') else 'cart'
+    return 'search'
 
 
 def task_type(task):
     if task is None:
         return None
     from . import notes
-    if task.state in WORKING:
+    stage = stage_of(task)
+    if task.state == 'working':
+        message = WORKING_AT.get(stage, WORKING['working']).format(site=task.site)
+    elif task.state in WORKING:
         message = WORKING[task.state].format(site=task.site)
     elif task.state == 'needs_person':
         reason = task.reason
@@ -125,7 +151,7 @@ def task_type(task):
                      for d in ((task.order or {}).get('pay_details') or []) if isinstance(d, dict)]
         if task.state == 'payment_ready' else [],
         open_account_method=str((task.order or {}).get('offer') or '') or None,
-        created_at=task.created_at,
+        created_at=task.created_at, stage=stage,
         order=(AgentOrderType(item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
                               image=str(task.order.get('image') or ''),
                               address=str(task.order.get('address') or '')) if task.order else None),

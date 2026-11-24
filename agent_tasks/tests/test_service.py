@@ -161,6 +161,35 @@ class PayableTests(SimpleTestCase):
                 service.require_payable(account, user, 'MX', {})   # no local account needed to start
 
 
+class JourneyTests(SimpleTestCase):
+    """Where the purchase is, for the card's journey (schema.stage_of), and what it says it is doing."""
+
+    def at(self, **over):
+        from agent_tasks.schema import stage_of
+        task = SimpleNamespace(state='working', phase='', checkout_at=None, trace=[], **over) if 'state' not in over \
+            else SimpleNamespace(**{'phase': '', 'checkout_at': None, 'trace': [], **over})
+        return stage_of(task)
+
+    def test_each_part_of_a_purchase_has_its_station(self):
+        self.assertEqual(self.at(), 'search')
+        self.assertEqual(self.at(state='needs_person'), 'search')   # picking a product
+        self.assertEqual(self.at(state='working', phase='ordering',
+                                 trace=[{'url': 'www.amazon.com.mx/gp/cart/view.html'}]), 'cart')
+        self.assertEqual(self.at(state='working', phase='ordering',
+                                 trace=[{'url': 'www.amazon.com.mx/checkout/p/p-1/spc'}]), 'checkout')
+        self.assertEqual(self.at(state='working', phase='ordered'), 'pay')
+        self.assertEqual(self.at(state='awaiting_code'), 'pay')
+        self.assertEqual(self.at(state='payment_ready', phase='ordered'), 'done')
+        # Where it stopped stays where it was.
+        self.assertEqual(self.at(state='stopped', phase='ordering', trace=[{'url': 'tienda.mx/carrito'}]), 'cart')
+
+    def test_what_it_says_it_is_doing_never_says_bought(self):
+        from agent_tasks.schema import WORKING_AT
+        self.assertEqual(set(WORKING_AT), {'search', 'cart', 'checkout', 'pay'})
+        for words in WORKING_AT.values():
+            self.assertNotRegex(words.lower(), r'compr[eé]|pagu[eé]|pedido hecho|listo')
+
+
 class PersonsTurnTests(ServiceBase):
     def test_the_live_view(self):
         task = self.waiting()

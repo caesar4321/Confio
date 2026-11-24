@@ -104,6 +104,53 @@ it('the order is approved with one tap, showing the item and the total', async (
   expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$112.50' });
 });
 
+it('while it works the journey says where the purchase is, with small talk that never says bought', async () => {
+  mockTask = task({ status: 'working', reason: '', options: [], stage: 'cart', message: 'Preparando tu carrito en amazon.com.mx…' });
+  const tree = await mount();
+  const journey = tree.root.findAll((n) => n.props.accessibilityRole === 'progressbar')[0];
+  expect(journey.props.accessibilityLabel).toBe('Paso 2 de 4: Carrito');
+  const shown = texts(tree);
+  expect(shown).toEqual(expect.arrayContaining(['Buscar', 'Carrito', 'Pedido', 'Pago', 'Poniéndolo en el carrito…']));
+  await act(async () => { jest.advanceTimersByTime(3700); });
+  expect(texts(tree)).toContain('Revisando que solo vaya lo tuyo…');
+  expect(texts(tree).join(' ')).not.toMatch(/compr[eé]|pagu[eé]|pedido hecho/i);
+});
+
+it('when it is their turn the journey stands still: no small talk', async () => {
+  mockTask = task({ stage: 'search' });   // choosing a product
+  const tree = await mount();
+  expect(tree.root.findAll((n) => n.props.accessibilityRole === 'progressbar').length).toBeGreaterThan(0);
+  expect(texts(tree)).not.toContain('Recorriendo los pasillos de amazon.com.mx…');
+});
+
+it('an order that becomes done while the card watches gets its moment, once', async () => {
+  const { Vibration } = require('react-native');
+  const buzz = jest.spyOn(Vibration, 'vibrate').mockImplementation(() => undefined);
+  mockTask = task({ status: 'working', reason: '', options: [], stage: 'pay' });
+  const tree = await mount();
+  expect(tree.root.findAll((n) => n.props.testID === 'purchase-confetti')).toHaveLength(0);
+  mockTask = task({ status: 'payment_ready', reason: '', options: [], stage: 'done', paymentIntentId: 'p-1',
+    message: 'Preparé el pago.' });
+  await act(async () => { jest.advanceTimersByTime(2600); });
+  expect(texts(tree)).toContain('¡Pedido hecho!');
+  expect(tree.root.findAll((n) => n.props.testID === 'purchase-confetti').length).toBeGreaterThan(0);
+  expect(buzz).toHaveBeenCalledTimes(1);
+  const journey = tree.root.findAll((n) => n.props.accessibilityRole === 'progressbar')[0];
+  expect(journey.props.accessibilityLabel).toBe('Pedido hecho');
+  buzz.mockRestore();
+});
+
+it('an order already done when the card opens is shown quietly', async () => {
+  const { Vibration } = require('react-native');
+  const buzz = jest.spyOn(Vibration, 'vibrate').mockImplementation(() => undefined);
+  mockTask = task({ status: 'payment_ready', reason: '', options: [], stage: 'done', paymentIntentId: 'p-1' });
+  const tree = await mount();
+  expect(texts(tree)).toContain('¡Pedido hecho!');
+  expect(tree.root.findAll((n) => n.props.testID === 'purchase-confetti')).toHaveLength(0);
+  expect(buzz).not.toHaveBeenCalled();
+  buzz.mockRestore();
+});
+
 it('a step the agent could not judge is one tap: yes or no', async () => {
   mockTask = task({ reason: 'step', options: [], message: 'amazon.com.mx pide «Guardar para más tarde» para seguir. ¿lo hago?' });
   mockMutate.mockResolvedValue(answered('answerAgentStep', { task: { ...mockTask, status: 'working', reason: '' } }));

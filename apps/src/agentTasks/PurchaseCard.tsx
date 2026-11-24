@@ -15,6 +15,8 @@ import { Text, TextInput } from '../components/common/AppText';
 import { Button } from '../components/common/Button';
 import { colors } from '../config/theme';
 import { saveImageToGallery } from '../utils/saveImageToGallery';
+import { PurchaseDone } from './PurchaseDone';
+import { PurchaseJourney } from './PurchaseJourney';
 import {
   ACTIVE, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentTask, CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTION,
   GET_AGENT_TASK, GIVE_AGENT_CODE, SIGN_IN_AGENT_STORE,
@@ -47,6 +49,9 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
   const busy = useRef(false);
   const alive = useRef(true);
   const pending = useRef<number | null>(null);
+  // The last status this card drew, and whether it saw the order become done.
+  const watched = useRef<string | null>(null);
+  const celebrate = useRef(false);
   useEffect(() => () => { alive.current = false; }, []);
 
   const load = useCallback(async () => {
@@ -147,15 +152,25 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
   }
   const waiting = task.status === 'needs_person';
   const working = ACTIVE.has(task.status) && !waiting;
+  const done = task.status === 'payment_ready';
+  // The order became done while this card was watching: its moment plays once. A card that
+  // opens on an order already done (an old message scrolled back) shows it quietly.
+  if (task.status !== watched.current) {
+    if (done && watched.current !== null && ACTIVE.has(watched.current)) {
+      celebrate.current = true;
+    }
+    watched.current = task.status;
+  }
   return (
     <View style={styles.card}>
       <View style={styles.head}>
-        {working ? <ActivityIndicator size="small" color={colors.primaryDark} /> : (
-          <Icon name={task.status === 'payment_ready' ? 'check-circle' : waiting ? 'shopping-bag' : 'info'} size={18}
-            color={colors.primaryDark} />
-        )}
+        <Icon name={ACTIVE.has(task.status) || done ? 'shopping-bag' : 'info'} size={18} color={colors.primaryDark} />
         <Text style={styles.site} numberOfLines={1}>{task.site}</Text>
       </View>
+      {done ? <PurchaseDone celebrate={celebrate.current} /> : null}
+      {/* Where the purchase is: alive while the assistant works, still when it is the person's turn. */}
+      <PurchaseJourney stage={done ? 'done' : task.stage} working={working} site={task.site}
+        stopped={!ACTIVE.has(task.status) && !done} />
       {/* The server's words: they name the right way to pay for the store's country. */}
       <Text style={styles.message}>{task.message}</Text>
       {waiting && task.reason === 'choose' ? (
