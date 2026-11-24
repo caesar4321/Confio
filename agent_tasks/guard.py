@@ -337,7 +337,9 @@ def stage_of(page, *, on_checkout):
     if final_step(page.text, page.elements):
         return 'final'
     if re.search(r'/(cart|carrito|carrinho|cesta|bag|basket|sacola)\b', path):
-        return 'money' if on_checkout and _MONEY.search(fold(page.text[:100000])) else 'open'
+        # The cart: setting other items aside, quantities, the way on. (A last page under a cart address,
+        # with its total and its method, was already 'final' above.)
+        return 'open'
     if on_checkout:
         # A checkout step that shows money: edits, choices and plain ways on only (its final button by its
         # words still goes to the person). With no figure at all (a sign-in or an offer step): free.

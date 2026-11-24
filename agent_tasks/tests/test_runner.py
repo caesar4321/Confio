@@ -1476,6 +1476,18 @@ class CheckoutTests(StepBase):
             self.assertIn('not a control I may press', task.history[-1]['result'])
         self.reader.click.assert_not_called()
 
+    def test_amazons_cart_page_lets_the_model_set_other_items_aside(self):
+        # The founder's cart, 03:21: the real page, with prices and the way to the checkout on it.
+        cart = snap('Carrito Turin Magno Chocolates $89.00 Volteck Adaptador $159.00 Subtotal (2 productos): $248.00',
+                    'https://www.amazon.com.mx/gp/cart/view.html', elements=[
+                        element('Proceder al pago', ref=0), element('Eliminar Volteck Adaptador | Eliminar', ref=1),
+                        element('Guardar para más tarde Volteck Adaptador de Enchufe Tipo E a Tipo A', ref=2)])
+        for on_checkout in (True, False):
+            stage = guard.stage_of(cart, on_checkout=on_checkout)
+            self.assertEqual(stage, 'open')
+            for ref in (1, 2):
+                self.assertTrue(guard.may_press(cart.element(ref), on_checkout=on_checkout, stage=stage, page=cart))
+
     def test_another_item_in_the_cart_is_set_aside_not_ordered(self):
         # The founder's cart, 2026-11-24: a plug adapter already in it beside the chocolate.
         for label in ('Guardar para más tarde Volteck Adaptador de Enchufe Tipo E a Tipo A', 'Eliminar Volteck Adaptador'):
