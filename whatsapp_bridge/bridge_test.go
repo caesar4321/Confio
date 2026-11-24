@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -291,5 +293,30 @@ func TestProxiesPerCountryAreStickyPerLink(t *testing.T) {
 	}
 	if _, err := parseProxies(`{"BO": "http://u:p@x:1"}`); err == nil {
 		t.Fatal("a bad URL accepted")
+	}
+}
+
+type captureLog struct{ lines *[]string }
+
+func (c captureLog) Warnf(msg string, args ...any) {
+	*c.lines = append(*c.lines, fmt.Sprintf(msg, args...))
+}
+func (c captureLog) Errorf(msg string, args ...any) {}
+func (c captureLog) Infof(msg string, args ...any)  {}
+func (c captureLog) Debugf(msg string, args ...any) {}
+func (c captureLog) Sub(string) waLog.Logger        { return c }
+
+func TestPairingLogKeepsTheShapeNotTheValues(t *testing.T) {
+	var lines []string
+	l := pairingLog{Logger: captureLog{&lines}}.Sub("Recv")
+	l.Debugf("%s", `<notification from="s.whatsapp.net" type="link_code_companion_reg" id="123"><link_code_companion_reg stage="primary_hello" jid="59171234567@s.whatsapp.net"><link_code_pairing_ref>SECRETREF</link_code_pairing_ref></link_code_companion_reg></notification>`)
+	l.Debugf("%s", `<message from="59171234567@s.whatsapp.net">hola</message>`)
+	if len(lines) != 1 {
+		t.Fatalf("lines: %v", lines)
+	}
+	got := lines[0]
+	if strings.Contains(got, "59171234567") || strings.Contains(got, "SECRETREF") || !strings.Contains(got, `stage="primary_hello"`) ||
+		!strings.Contains(got, "link_code_pairing_ref") {
+		t.Fatalf("logged: %s", got)
 	}
 }

@@ -56,7 +56,7 @@ func (b *bridge) pair(link, grant, phone, country string, seconds int) (string, 
 	}
 	d := &device{link: link, grant: grant, phone: phone, country: country, started: time.Now(),
 		until: time.Now().Add(time.Duration(seconds) * time.Second)}
-	d.client = whatsmeow.NewClient(b.container.NewDevice(), clientLog())
+	d.client = whatsmeow.NewClient(b.container.NewDevice(), newPairingLog())
 	// Paired from the same place it will live: the person's country, from the first socket on.
 	if err := b.route(d); err != nil {
 		log.Printf("link %s: %v", link, err)
@@ -147,6 +147,10 @@ func (b *bridge) watchCodes(ctx context.Context, d *device, qr <-chan whatsmeow.
 			}
 			b.enqueue(context.Background(), d.link, d.grant, "code", map[string]any{"code": code})
 			return // the new socket has its own watcher
+		case item.Event == whatsmeow.QRChannelEventPasskeyRequest:
+			// WhatsApp asks this device to prove the account's passkey (WhatsApp Web does it in the browser). A
+			// server cannot: logged so the cause is plain.
+			log.Printf("op=pair link=%s result=passkey_requested", d.link)
 		case item.Event == whatsmeow.QRChannelEventError:
 			log.Printf("link %s: pairing error: %v", d.link, item.Error)
 		}
