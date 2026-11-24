@@ -86,12 +86,12 @@ def run_with_tools(
 _CHAT_COMPLETIONS_BACKENDS = {
     'gemini': {
         'name': 'Gemini', 'key': 'GEMINI_API_KEY', 'model': 'GEMINI_MODEL',
-        'model_default': 'gemini-3.6-flash',
+        'model_default': 'gemini-3.8-flash',
         'base_url': 'https://generativelanguage.googleapis.com/v1beta/openai',
     },
     'grok': {
         'name': 'Grok', 'key': 'GROK_API_KEY', 'model': 'GROK_MODEL',
-        'model_default': 'grok-4.3', 'base_url': 'https://api.x.ai/v1',
+        'model_default': 'grok-4.7', 'base_url': 'https://api.x.ai/v1',
     },
     'deepseek': {
         'name': 'DeepSeek', 'key': 'DEEPSEEK_API_KEY', 'model': 'DEEPSEEK_MODEL',
@@ -377,7 +377,7 @@ def _claude_text(content) -> str:
 
 def _claude_post(system, messages, specs, *, max_tokens):
     body = {
-        'model': getattr(settings, 'CONFIO_AI_AGENT_MODEL', '') or getattr(settings, 'CLAUDE_MODEL', 'claude-sonnet-4-6'),
+        'model': getattr(settings, 'CONFIO_AI_AGENT_MODEL', '') or getattr(settings, 'CLAUDE_MODEL', 'claude-opus-5-5'),
         'max_tokens': max_tokens,
         'system': system,
         'messages': messages,

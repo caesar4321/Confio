@@ -405,8 +405,8 @@ class Command(BaseCommand):
         command, _ = _split_command(getattr(event, 'raw_text', '') or '')
         escalation = force_backend == 'openai' and command == '/astra'
         openai_model = (
-            getattr(settings, 'CONFIO_AI_ESCALATION_MODEL', 'gpt-6-astra')
-            if escalation else getattr(settings, 'OPENAI_MODEL', 'gpt-6-sol')
+            getattr(settings, 'CONFIO_AI_ESCALATION_MODEL', 'gpt-6.2-astra')
+            if escalation else getattr(settings, 'OPENAI_MODEL', 'gpt-6.2-sol')
         )
         openai_effort = (
             getattr(settings, 'CONFIO_AI_ESCALATION_REASONING_EFFORT', 'high')

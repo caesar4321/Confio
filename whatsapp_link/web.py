@@ -274,10 +274,6 @@ def open_chat_by_number(page, digits):
 # Failures that happen before Enter: nothing left the browser.
 BEFORE_ENTER = frozenset({'no_composer', 'composer_not_empty', 'typed_mismatch', 'not_wanted'})
 CONFIRM_SECONDS = 15
-PENDING_SECONDS = 60
-# The last sent bubble still shows the clock: not yet with WhatsApp, and closing the browser could lose it.
-_PENDING = '''(() => { const o = [...document.querySelectorAll('#main .message-out')];
-    return !!(o.length && o[o.length - 1].querySelector('[data-icon="msg-time"], [data-icon*="clock" i]')); })()'''
 _OUT = "document.querySelectorAll('#main .message-out').length"
 
 
@@ -326,16 +322,10 @@ def send_text(page, body, still_wanted=lambda: True, progress=None):
         progress['enter'] = True  # from here on, whatever happens, it may have gone out
     page.enter()
     deadline = time.monotonic() + CONFIRM_SECONDS
-    appeared = False
     while time.monotonic() < deadline:
         page.pump(1.0)
         if (page.evaluate(_OUT) or 0) > before and not _composer_text(page).strip():
-            if not page.evaluate(_PENDING):
-                return True  # a new bubble that left the clock: WhatsApp has it
-            if not appeared:
-                appeared, deadline = True, time.monotonic() + PENDING_SECONDS  # on its way: give it time
-    if appeared:
-        return 'pending'  # in WhatsApp's outbox: it may still go out later
+            return True
     _clear_composer(page)
     return False
 

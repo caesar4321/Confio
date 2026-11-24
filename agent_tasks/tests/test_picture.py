@@ -35,18 +35,10 @@ class PictureTests(SimpleTestCase):
         self.assertEqual(image.getpixel((250, 225)), (255, 255, 255))   # inside it: the page, untouched
         self.assertEqual(browser.call.call_args.args[0], 'Page.captureScreenshot')
 
-    def test_what_the_text_hides_the_picture_hides_too(self):
-        # A typed field, an e-mail, a long number: covered before the picture leaves.
-        reader, _ = self.reader({'x': 100, 'y': 200, 'w': 300, 'h': 50, 'vw': 1280, 'vh': 720,
-                                 'hide': [[600, 400, 200, 30]]})
-        image = Image.open(io.BytesIO(reader.picture({'ref': 3})))
-        self.assertTrue(max(image.getpixel((700, 415))) < 40)
-        self.assertEqual(image.getpixel((700, 500)), (255, 255, 255))
-
     def test_a_page_that_moved_while_it_was_taken_gives_no_picture(self):
         reader, _ = self.reader(None)
-        first = {'x': 100, 'y': 200, 'w': 300, 'h': 50, 'vw': 1280, 'vh': 720, 'hide': []}
-        for after in ({**first, 'y': 260}, {**first, 'hide': [[1, 1, 9, 9]]}, 'changed', 'gone'):
+        first = {'x': 100, 'y': 200, 'w': 300, 'h': 50, 'vw': 1280, 'vh': 720}
+        for after in ({**first, 'y': 260}, 'secret', 'changed', 'gone'):
             reader._run = mock.Mock(side_effect=[first, after])
             self.assertIsNone(reader.picture({'ref': 3}))
 

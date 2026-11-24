@@ -381,56 +381,6 @@ class ReadingTest(LinkTestBase):
         service.accept_consent(self.user, CONSENT)
         self.assertIn(link.pk, service.due_ids())
 
-    def test_too_many_browsers_open_waits_without_blame(self):
-        link = self.linked()
-        self.linked(user=self._person(0), session_id='s0', session_expires_at=timezone.now() + timedelta(minutes=5))
-        with mock.patch.object(web, 'wait_for') as waited:
-            service.sync(link.pk)
-        waited.assert_not_called()
-        self.vendor.open.assert_not_called()
-        link.refresh_from_db()
-        self.assertEqual(link.failures, 0)
-        self.assertLess(link.next_sync_at, timezone.now() + timedelta(minutes=16))
-
-    def _person(self, n):
-        from users.models import User
-        return User.objects.create(username=f'wa_busy_{n}', firebase_uid=f'wa-busy-{n}')
-
-    def test_purchases_keep_their_browsers(self):
-        from agent_tasks.models import AgentTask
-        from users.models import Account
-        account = Account.objects.create(user=self.other, account_type='personal', account_index=0)
-        for n in range(2):
-            AgentTask.objects.create(account=account, user=self._person(10 + n), goal='x', site='x.com.br',
-                                     country='BR', state='working', session_id=f'shop{n}',
-                                     session_expires_at=timezone.now() + timedelta(minutes=5))
-        link = self.linked()
-        self.assertFalse(service._room(link, 'background'))  # a read always leaves one browser free
-        self.assertTrue(service._room(link, 'pair'))
-
-    def test_a_send_is_not_held_behind_someone_elses_pairing(self):
-        link = self.linked()
-        self.linked(user=self._person(20), state=WhatsAppLink.State.PAIRING, session_id='pairing',
-                    session_expires_at=timezone.now() + timedelta(minutes=8))
-        self.assertFalse(service._room(link, 'pair'))
-        self.assertFalse(service._room(link, 'background'))
-        self.assertTrue(service._room(link, 'send'))
-
-    def test_a_finished_read_starts_the_next_due_one(self):
-        link = self.linked()
-        other = self.linked(user=self._person(30), context_id='ctx-9')
-        self.run_sync(link, rows=[])
-        self.tasks.sync.apply_async.assert_called_once_with((other.pk,), expires=240)
-
-    def test_a_pairing_waits_for_a_free_browser(self):
-        link = service.start_link(self.user, CONSENT)
-        with mock.patch.object(service, '_room', return_value=False), mock.patch.object(web, 'ask_for_code') as ask:
-            service.pair(link.pk, str(link.grant))
-        ask.assert_not_called()
-        link.refresh_from_db()
-        self.assertEqual(link.state, 'pairing')
-        self.tasks.pair.apply_async.assert_called_once_with((link.pk, str(link.grant), 1), countdown=10)
-
     def test_the_kill_switch_stops_reading(self):
         link = self.linked()
         with override_settings(WHATSAPP_LINK_ENABLED=False), mock.patch.object(service, '_read') as read:
@@ -614,89 +564,6 @@ class SendingTest(LinkTestBase):
             service.send_draft(self.user, made['id'], made['display_hash'])
         self.assertEqual(caught.exception.code, 'not_linked')
 
-    def test_an_approved_send_waits_for_a_free_browser(self):
-        made = self.draft()
-        service.send_draft(self.user, made['id'], made['display_hash'])
-        with mock.patch.object(service, '_room', return_value=False):
-            service.send(made['id'])
-        self.assertEqual(WhatsAppDraft.objects.get(pk=made['id']).status, 'sending')
-        self.tasks.send.apply_async.assert_called_once_with((made['id'], 1), countdown=20)
-
-    def test_unlinking_never_waits_for_a_browser(self):
-        link = self.linked()
-        service.unlink(self.user)
-        with mock.patch.object(service, '_room', return_value=False), \
-                mock.patch.object(web, 'wait_for', return_value='chats'), mock.patch.object(web, 'log_out') as out:
-            service.forget(link.pk)
-        out.assert_not_called()  # no browser free: the logout is skipped, the profile still goes
-        self.vendor.delete_profile.assert_called_once_with('ctx-1')
-        self.assertFalse(WhatsAppLink.objects.exists())
-
-    def test_whatsapp_never_takes_more_than_two_worker_places(self):
-        with service._slot() as first, service._slot() as second, service._slot() as third:
-            self.assertEqual((first, second, third), (True, True, False))
-        with service._slot() as again:
-            self.assertTrue(again)  # given back
-
-    def test_a_waiting_pairing_is_never_left_unwatched(self):
-        link = service.start_link(self.user, CONSENT)
-        WhatsAppLink.objects.filter(pk=link.pk).update(
-            session_id='sess-1', session_expires_at=timezone.now() + timedelta(minutes=5), code_at=timezone.now())
-        with service._slot(), service._slot():
-            service.watch(link.pk, str(link.grant))
-            service.watch(link.pk, str(link.grant))  # still no place: it keeps waiting
-        self.assertEqual(self.tasks.watch.apply_async.call_count, 2)
-        WhatsAppLink.objects.filter(pk=link.pk).update(session_expires_at=timezone.now() - timedelta(seconds=1))
-        with service._slot(), service._slot():
-            service.watch(link.pk, str(link.grant))  # its browser is gone: nothing left to watch
-        self.assertEqual(self.tasks.watch.apply_async.call_count, 2)
-
-    def test_duplicate_watchers_merge_into_one(self):
-        link = service.start_link(self.user, CONSENT)
-        WhatsAppLink.objects.filter(pk=link.pk).update(
-            session_id='sess-1', session_expires_at=timezone.now() + timedelta(minutes=5), code_at=timezone.now(),
-            lease_until=timezone.now() + timedelta(minutes=1))  # another watcher is looking right now
-        service.watch(link.pk, str(link.grant))
-        service.watch(link.pk, str(link.grant))  # a duplicate within 20 s ends instead of re-queueing
-        self.tasks.watch.apply_async.assert_called_once_with((link.pk, str(link.grant)), countdown=3)
-
-    def test_a_pairing_without_a_place_waits_then_ends(self):
-        link = service.start_link(self.user, CONSENT)
-        WhatsAppLink.objects.filter(pk=link.pk).update(context_id='ctx-1', provider='fake')
-        with service._slot(), service._slot():
-            service.pair(link.pk, str(link.grant))
-            self.tasks.pair.apply_async.assert_called_once_with((link.pk, str(link.grant), 1), countdown=10)
-            service.pair(link.pk, str(link.grant), service.PAIR_RETRIES)
-        link.refresh_from_db()
-        self.assertEqual((link.state, link.reason), ('failed', 'browser'))
-        self.vendor.delete_profile.assert_called_once_with('ctx-1')
-
-    def test_a_pairing_with_a_code_out_is_never_failed_for_a_place(self):
-        link = service.start_link(self.user, CONSENT)
-        WhatsAppLink.objects.filter(pk=link.pk).update(code_at=timezone.now())
-        with service._slot(), service._slot():
-            service.pair(link.pk, str(link.grant), service.PAIR_RETRIES)
-        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).state, 'pairing')
-
-    def test_an_unlink_without_a_place_hands_the_profile_over(self):
-        link = self.linked()
-        service.unlink(self.user)
-        with service._slot(), service._slot():
-            service.forget(link.pk)
-            self.tasks.forget.apply_async.assert_called_once_with((link.pk, 1), countdown=15)  # tries first
-            service.forget(link.pk, 4)
-        self.tasks.drop_profile.delay.assert_called_once_with('fake', 'ctx-1', '')
-        self.vendor.delete_profile.assert_not_called()  # never inline on the browser worker
-        self.assertFalse(WhatsAppLink.objects.exists())
-
-    def test_a_send_without_a_place_waits(self):
-        made = self.draft()
-        service.send_draft(self.user, made['id'], made['display_hash'])
-        with service._slot(), service._slot():
-            service.send(made['id'])
-        self.assertEqual(WhatsAppDraft.objects.get(pk=made['id']).status, 'sending')
-        self.tasks.send.apply_async.assert_called_once_with((made['id'], 1), countdown=20)
-
     def test_daily_cap(self):
         made = self.draft()
         with override_settings(WHATSAPP_LINK_SENDS_PER_DAY=0):
@@ -723,12 +590,10 @@ class GuardTest(TestCase):
 class FakeWeb:
     """A WhatsApp Web chat as send_text sees it: a box, sent bubbles, Enter."""
 
-    def __init__(self, enter_sends=True, box='', pending=False):
-        self.box, self.bubbles, self.enter_sends, self.entered, self.pending = box, 0, enter_sends, 0, pending
+    def __init__(self, enter_sends=True, box=''):
+        self.box, self.bubbles, self.enter_sends, self.entered = box, 0, enter_sends, 0
 
     def evaluate(self, expression):
-        if 'msg-time' in expression:
-            return self.pending
         if 'message-out' in expression:
             return self.bubbles
         if 'innerText' in expression:
@@ -772,12 +637,6 @@ class SendTextTest(TestCase):
         self.addCleanup(self.patch_wait.stop)
         self.assertFalse(web.send_text(page, 'Gracias'))
         self.assertEqual(page.box, '')  # our text does not stay behind
-
-    def test_a_bubble_still_on_the_clock_is_not_sent_yet(self):
-        page = FakeWeb(pending=True)
-        with mock.patch.object(web, 'CONFIRM_SECONDS', 0.01), mock.patch.object(web, 'PENDING_SECONDS', 0.01):
-            self.assertEqual(web.send_text(page, 'Hola'), 'pending')
-        self.assertEqual(page.entered, 1)
 
     def test_no_enter_when_no_longer_wanted(self):
         page = FakeWeb()

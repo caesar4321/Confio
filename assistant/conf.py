@@ -15,7 +15,7 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_MODEL': 'gpt-6-luna',
     'CONFIO_ASSISTANT_REASONING_EFFORT': 'low',
     # Only the analyze_finances tool reaches the frontier model.
-    'CONFIO_ASSISTANT_ANALYSIS_MODEL': 'gpt-6.1-sol',
+    'CONFIO_ASSISTANT_ANALYSIS_MODEL': 'gpt-6.2-sol',
     'CONFIO_ASSISTANT_ANALYSIS_REASONING_EFFORT': 'medium',
     'CONFIO_ASSISTANT_TRANSCRIBE_MODEL': 'gpt-transcribe',
     'CONFIO_ASSISTANT_MAX_TOOL_STEPS': 4,
@@ -61,6 +61,7 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_PRICES': {
         'gpt-6-luna': ('0.10', '0.01', '0.50'),
         'gpt-6.1-sol': ('2.00', '0.10', '10.00'),
+        'gpt-6.2-sol': ('2.00', '0.10', '10.00'),
         'claude-haiku-5-5': ('0.10', '0.01', '0.50'),
     },
     'CONFIO_ASSISTANT_TRANSCRIBE_PRICE_PER_MINUTE': '0.0045',

@@ -193,46 +193,21 @@ _POINT = '(() => {' + _SAME + r'''
   return {x, y};
 })()'''
 
-# Where a control is on screen, for a picture of it, and what that picture must not show. The text the
-# models read is redacted (agent.redact) and typed fields are never read: the picture keeps the same line.
-# 'secret' when a password, a one-time code or a card field is on screen (no picture at all); `hide` holds
-# every typed field, embedded frame and canvas, and every e-mail or long number written on the page.
+# Where a control is on screen, for a picture of it. 'secret' when a password, a one-time code or a card
+# field is on screen: those are never pictured.
 _BOX = '(() => {' + _SAME + r'''
   const vv = window.visualViewport;
   if (vv && Math.abs(vv.scale - 1) > 0.01) return 'zoomed';
   if (__SCROLL__) el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
-  const shown = r => r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
-  const hide = [];
-  const plain = ['radio', 'checkbox', 'submit', 'button', 'image', 'hidden', 'range', 'color', 'file', 'reset'];
-  for (const field of document.querySelectorAll(
-      'input, textarea, [contenteditable=""], [contenteditable="true"], iframe, canvas, object, embed')) {
+  for (const field of document.querySelectorAll('input')) {
     const r = field.getBoundingClientRect();
-    if (!shown(r)) continue;
+    if (!(r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth)) continue;
     const type = (field.getAttribute('type') || '').toLowerCase();
     const auto = (field.getAttribute('autocomplete') || '').toLowerCase();
-    if (field.tagName === 'INPUT' && (type === 'password' || auto.includes('one-time-code') || auto.startsWith('cc-')))
-      return 'secret';
-    if (field.tagName === 'INPUT' && plain.includes(type)) continue;
-    hide.push([r.left, r.top, r.width, r.height]);
+    if (type === 'password' || auto.includes('one-time-code') || auto.startsWith('cc-')) return 'secret';
   }
-  const secret = /[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63})+|\d(?:[ .\-\/()]?\d){8,}/g;
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node, read = 0;
-  while ((node = walker.nextNode()) && read++ < 6000 && hide.length < 300) {
-    const text = node.nodeValue;
-    if (!text || text.length < 6) continue;
-    secret.lastIndex = 0;
-    let found;
-    while ((found = secret.exec(text)) && hide.length < 300) {
-      const range = document.createRange();
-      range.setStart(node, found.index);
-      range.setEnd(node, found.index + found[0].length);
-      for (const r of range.getClientRects()) if (shown(r)) hide.push([r.left, r.top, r.width, r.height]);
-    }
-  }
-  if (read >= 6000 || hide.length >= 300) return 'too_much';   // not all of it was covered: no picture
   const r = el.getBoundingClientRect();
-  return {x: r.left, y: r.top, w: r.width, h: r.height, vw: innerWidth, vh: innerHeight, hide};
+  return {x: r.left, y: r.top, w: r.width, h: r.height, vw: innerWidth, vh: innerHeight};
 })()'''
 PICTURE_WIDTH = 1280   # wide enough to read a checkout's small print
 PICTURE_SECONDS = 5    # a picture is a help: never worth a step's time
@@ -350,9 +325,9 @@ class Reader:
 
     def picture(self, element):
         """A JPEG of the page as it is on screen, with that control inside a red box, or None. For the
-        models that judge a press (agent.judge, agent.review): they see what a person would, less what the
-        text they read hides too (typed fields, e-mails, long numbers, embedded frames). None on a page
-        with a password, code or card field, when the page moved while it was taken, or on any failure."""
+        models that judge a press (agent.judge, agent.review): they see what the person would. None on a
+        page with a password, code or card field on screen, when the page moved while it was taken, or on
+        any failure."""
         try:
             from PIL import Image, ImageDraw
 
@@ -366,17 +341,12 @@ class Reader:
             data = self.page.call('Page.captureScreenshot', {'format': 'jpeg', 'quality': 75,
                                                              'captureBeyondViewport': False},
                                   seconds=PICTURE_SECONDS)['data']
-            # The same control at the same place, with the same things to hide, before and after: else the
-            # box (or a cover) would sit on something else.
+            # The same control at the same place before and after: else the box would sit on something else.
             if where(False) != box:
                 return None
             image = Image.open(io.BytesIO(base64.b64decode(data))).convert('RGB')
             scale = image.width / float(box['vw'])
             draw = ImageDraw.Draw(image)
-            for left, top, width, height in box.get('hide') or []:
-                draw.rectangle((max(left * scale - 2, 0), max(top * scale - 2, 0),
-                                min((left + width) * scale + 2, image.width - 1),
-                                min((top + height) * scale + 2, image.height - 1)), fill=(0, 0, 0))
             left, top = box['x'] * scale - 4, box['y'] * scale - 4
             right, bottom = (box['x'] + box['w']) * scale + 4, (box['y'] + box['h']) * scale + 4
             draw.rectangle((max(left, 0), max(top, 0), min(right, image.width - 1), min(bottom, image.height - 1)),

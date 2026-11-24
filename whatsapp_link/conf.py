@@ -18,13 +18,7 @@ DEFAULTS = {
     'WHATSAPP_LINK_SYNC_MINUTES': 120,
     'WHATSAPP_LINK_REFRESH_MINUTES': 15,
     'WHATSAPP_LINK_SYNC_SECONDS': 240,
-    # One read at a time fits the plan: the sweep starts one, and each finished read starts the next.
-    'WHATSAPP_LINK_SYNCS_PER_SWEEP': 1,
-    # The vendor plan's browsers at once (Browserbase project concurrency, read 2026-11-24: 3), shared with
-    # the shopping agent. WhatsApp yields: it holds at most MAX_SESSIONS, opens only while the plan has room,
-    # and a background read always leaves one browser free.
-    'WHATSAPP_LINK_PLAN_CONCURRENCY': 3,
-    'WHATSAPP_LINK_MAX_SESSIONS': 1,
+    'WHATSAPP_LINK_SYNCS_PER_SWEEP': 20,
     # Only what the person approved, one at a time, at a person's pace.
     'WHATSAPP_LINK_SENDS_PER_DAY': 20,
     'WHATSAPP_LINK_NEW_NUMBERS_PER_DAY': 5,

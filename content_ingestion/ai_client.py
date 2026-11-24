@@ -122,7 +122,7 @@ def complete_script(
     if not api_key:
         raise AIClientError('OpenAI script writer requires OPENAI_API_KEY.')
 
-    model = model or getattr(settings, 'OPENAI_MODEL', 'gpt-6-sol')
+    model = model or getattr(settings, 'OPENAI_MODEL', 'gpt-6.2-sol')
     max_tokens = getattr(settings, 'CONFIO_AI_SCRIPT_MAX_TOKENS', 7000)
     payload = {
         'model': model,
@@ -365,7 +365,7 @@ def _complete_openai(prompt: str, system: str = '') -> str:
     if not api_key:
         raise AIClientError('OpenAI is selected, but OPENAI_API_KEY is not configured.')
 
-    model = getattr(settings, 'OPENAI_MODEL', 'gpt-6-sol')
+    model = getattr(settings, 'OPENAI_MODEL', 'gpt-6.2-sol')
     payload = {
         'model': model,
         'instructions': system,
@@ -445,7 +445,7 @@ def _complete_grok(prompt: str, system: str = '') -> str:
         prompt=prompt,
         system=system,
         api_key=_provider_api_key('grok'),
-        model=getattr(settings, 'GROK_MODEL', 'grok-4.3'),
+        model=getattr(settings, 'GROK_MODEL', 'grok-4.7'),
         base_url='https://api.x.ai/v1',
         provider_name='Grok',
     )
@@ -474,7 +474,7 @@ def _complete_gemini(
     if not api_key:
         raise AIClientError('Gemini is selected, but GEMINI_API_KEY is not configured.')
 
-    model = getattr(settings, 'GEMINI_MODEL', 'gemini-3.6-flash')
+    model = getattr(settings, 'GEMINI_MODEL', 'gemini-3.8-flash')
     url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
     parts = []
     for video_url in youtube_urls or []:
@@ -620,7 +620,7 @@ def _complete_claude(prompt: str, system: str = '') -> str:
     if not api_key:
         raise AIClientError('Claude is selected, but CLAUDE_API_KEY is not configured.')
 
-    model = getattr(settings, 'CLAUDE_MODEL', 'claude-sonnet-4-6')
+    model = getattr(settings, 'CLAUDE_MODEL', 'claude-opus-5-5')
     response = requests.post(
         'https://api.anthropic.com/v1/messages',
         headers={

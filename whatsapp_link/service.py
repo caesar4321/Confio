@@ -22,7 +22,7 @@ from datetime import timedelta
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
-from django.db import DatabaseError, transaction
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
@@ -42,8 +42,7 @@ REASK_BEFORE = 30  # past this in a watch, a lapsed code is asked again by the n
 SETTLE_AFTER_LINK = 30  # WhatsApp copies the chat list to a new device: let it start before closing
 SENDING_STUCK = timedelta(minutes=12)  # past the lease wait (about 200 s) and the task's limits
 MAX_BACKOFF = timedelta(hours=12)
-SEND_BUSY_TRIES = 40  # 20 s apart: longer than a pairing (10 min) holds its browser
-PAIR_RETRIES = 80  # 4 to 10 s apart: longer than a lease (5 min) a killed task may leave behind
+PAIR_RETRIES = 80  # 4 s apart: longer than a lease (5 min) a killed task may leave behind
 DRAFT_HOURS = 24
 MAX_BODY = 2000
 CONSENT_VERSION = 1
@@ -90,8 +89,6 @@ REASONS = {
     'gone': GONE,
     'not_own_phone': 'El WhatsApp de este navegador no es el de tu número en Confío. Lo desvinculé.',
     'phone_mismatch': 'WhatsApp mostró otro número. Revisa tu número en Confío e inténtalo de nuevo.',
-    'pending': ('Tu mensaje quedó en espera en WhatsApp y puede salir más tarde. Revisa el chat en tu teléfono '
-                'antes de repetirlo.'),
     'partial_sent': 'Salió solo una parte del mensaje. Revisa el chat en tu teléfono antes de repetirlo.',
 }
 
@@ -207,60 +204,11 @@ def _vendor(link=None):
     return browsers.provider((link.provider if link is not None else '') or None)
 
 
-SLOTS = 2  # WhatsApp tasks at once on the shared browser worker (3 processes): a purchase always has one
-SLOT_SECONDS = 300  # past every browser task's hard time limit: a killed worker's slot frees itself
-
-
-@contextlib.contextmanager
-def _slot():
-    """One of WhatsApp's two places on the browser worker, held for the whole task, or False."""
-    token = uuid.uuid4().hex
-    for number in range(SLOTS):
-        key = f'whatsapp-link:slot:{number}'
-        try:
-            taken = cache.add(key, token, SLOT_SECONDS)
-        except Exception:  # noqa: BLE001 - no counter, no slot
-            taken = False
-        if taken:
-            try:
-                yield True
-            finally:
-                try:
-                    if cache.get(key) == token:
-                        cache.delete(key)
-                except Exception:  # noqa: BLE001 - it expires on its own
-                    pass
-            return
-    yield False
-
-
-OPEN_LOCK = 47113503  # pg advisory lock: one WhatsApp browser opens at a time, so the room check holds
-
-
-def _room(link, kind) -> bool:
-    """Whether WhatsApp may open one more browser now. The plan's browsers are shared with purchases.
-
-    background (reads): WhatsApp's share, and one browser always left free.
-    pair: WhatsApp's share.
-    send: any free browser, one past WhatsApp's share: an approved message never waits behind a pairing."""
-    from agent_tasks.models import AgentTask
-    now = timezone.now()
-    # Browsers only: worker places are bounded by _slot.
-    ours = WhatsAppLink.objects.exclude(pk=link.pk).exclude(session_id='').filter(session_expires_at__gt=now).count()
-    # Every purchase under way counts, also one whose browser is about to open: it was admitted first.
-    shopping = AgentTask.objects.filter(state__in=AgentTask.ACTIVE).count()
-    free = conf.get('WHATSAPP_LINK_PLAN_CONCURRENCY') - ours - shopping - (1 if kind == 'background' else 0)
-    share = conf.get('WHATSAPP_LINK_MAX_SESSIONS') + (1 if kind == 'send' else 0)
-    return ours < share and free > 0
-
-
-def _open(link, seconds, *, kind='pair'):
+def _open(link, seconds):
     """A browser on the person's own profile. Creates the profile on first use.
-    Only when the plan has room (`_room`); busy otherwise.
 
     The profile and session ids are bookkeeping, written by row whatever the
     grant: a vendor profile nobody recorded could never be deleted."""
-    from django.db import connection
     provider = _vendor()
     if not link.context_id:
         context = provider.create_profile()
@@ -270,32 +218,13 @@ def _open(link, seconds, *, kind='pair'):
             raise browsers.BrowserUnavailable('link gone')
         link.context_id, link.provider = context, provider.name
     _close(link)
-    session = None
-    try:
-        # Checked, opened and recorded under one lock: two workers never both see the last free browser.
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                # Never waited for: another open in progress is a busy browser plan, retried like one.
-                cursor.execute('SELECT pg_try_advisory_xact_lock(%s)', [OPEN_LOCK])
-                got = cursor.fetchone()[0]
-            if not got or not _room(link, kind):
-                raise browsers.BrowserUnavailable('no browser free for WhatsApp now', 'busy')
-            session = provider.open(profile_id=link.context_id, country='', seconds=seconds, solve_captchas=False,
-                                    viewport=conf.get('WHATSAPP_LINK_VIEWPORT'),
-                                    region=conf.get('WHATSAPP_LINK_REGION'))
-            recorded = WhatsAppLink.objects.filter(pk=link.pk).update(
-                session_id=session.id, sealed_connect_url=_seal(session.connect_url),
-                session_expires_at=session.expires_at)
-            if not recorded:
-                raise browsers.BrowserUnavailable('link gone')
-    except BaseException:
-        # Opened and not recorded (an error, a time limit, a failed commit): nobody would count or close it.
-        if session is not None:
-            try:
-                provider.close(session.id)
-            except browsers.BrowserUnavailable:
-                pass
-        raise
+    session = provider.open(profile_id=link.context_id, country='', seconds=seconds, solve_captchas=False,
+                            viewport=conf.get('WHATSAPP_LINK_VIEWPORT'), region=conf.get('WHATSAPP_LINK_REGION'))
+    if not WhatsAppLink.objects.filter(pk=link.pk).update(
+            session_id=session.id, sealed_connect_url=_seal(session.connect_url),
+            session_expires_at=session.expires_at):
+        provider.close(session.id)
+        raise browsers.BrowserUnavailable('link gone')
     link.session_id, link.session_expires_at = session.id, session.expires_at
     return session.connect_url
 
@@ -479,25 +408,8 @@ def dismiss(user, notice_id):
 # ------------------------------------------------------------------ pairing (browser worker)
 
 def pair(link_id, grant, tries=0):
-    with _slot() as placed:
-        if placed:
-            return _pair(link_id, grant, tries)
-    # Both of WhatsApp's places on the browser worker are taken: this waits, nothing is spent.
-    waiting = WhatsAppLink.objects.filter(pk=link_id, grant=grant, state=WhatsAppLink.State.PAIRING,
-                                          code_at__isnull=True).exclude(reason='unlinking')
-    if tries < PAIR_RETRIES and enabled() and waiting.exists():
-        from . import tasks
-        tasks.pair.apply_async((link_id, grant, tries + 1), countdown=10)
-        return
-    with _taken(link_id, grant) as link:
-        if link is not None and link.state == WhatsAppLink.State.PAIRING and link.code_at is None:
-            # Nobody is asking WhatsApp for a code right now: ended, its browser and profile with it.
-            _fail(link, 'browser' if enabled() else 'whatsapp')
-
-
-def _pair(link_id, grant, tries):
     from . import tasks
-    again, busy = None, False
+    again = None
     with _taken(link_id, grant) as link:
         if link is None:
             # Another pairing or watch still holds the browser: come back until it lets go.
@@ -506,8 +418,7 @@ def _pair(link_id, grant, tries):
             if tries < PAIR_RETRIES and enabled() and waiting.exists():
                 tasks.pair.apply_async((link_id, grant, tries + 1), countdown=4)
             elif not enabled():
-                waiting.filter(code_at__isnull=True).update(state=WhatsAppLink.State.FAILED, reason='whatsapp',
-                                                            sealed_phone='')
+                waiting.filter(code_at__isnull=True).update(state=WhatsAppLink.State.FAILED, reason='whatsapp')
             return
         if link.state != WhatsAppLink.State.PAIRING or link.reason == 'unlinking' or link.code_at is not None:
             return  # a code for this pairing is out: the person may be typing it, its browser stays
@@ -537,34 +448,16 @@ def _pair(link_id, grant, tries):
                 _close(link)
         except web.WebError as exc:
             _fail(link, exc.code if exc.code in REASONS else 'whatsapp')
-        except (browsers.BrowserUnavailable, CdpError) as exc:
-            if getattr(exc, 'code', '') == 'busy' and tries < PAIR_RETRIES:
-                busy = True  # every browser is in use: the pairing waits its turn, nothing is spent
-            else:
-                _fail(link, 'browser')
+        except (browsers.BrowserUnavailable, CdpError):
+            _fail(link, 'browser')
         except BaseException:
             _fail(link, 'whatsapp')  # a time limit or anything unforeseen: never a pairing left open
             raise
-    if busy:
-        tasks.pair.apply_async((link_id, grant, tries + 1), countdown=10)
     if again:
         tasks.watch.apply_async((link_id, again), countdown=2)
 
 
 def watch(link_id, grant):
-    with _slot() as placed:
-        if placed:
-            return _watch(link_id, grant)
-    # No place now: the pairing's browser stays open and is looked at again in a moment, for as long as it
-    # lives. No de-duplication here: an extra chain is cheap and merges once a place frees (the leased path).
-    if enabled() and WhatsAppLink.objects.filter(
-            pk=link_id, grant=grant, state=WhatsAppLink.State.PAIRING, session_expires_at__gt=timezone.now()).exclude(
-            session_id='').exists():
-        from . import tasks
-        tasks.watch.apply_async((link_id, grant), countdown=3)
-
-
-def _watch(link_id, grant):
     """Until the person types the code: keeps the code fresh and sees the link happen."""
     from . import tasks
     again = soon = False
@@ -672,31 +565,6 @@ def _fail(link, reason):
 # ------------------------------------------------------------------ unlinking
 
 def forget(link_id, tries=0):
-    with _slot() as placed:
-        if placed:
-            return _forget(link_id, tries)
-    from . import tasks
-    if tries < 4:
-        # A place usually frees within a minute: try for the logout a few times first.
-        if WhatsAppLink.objects.filter(pk=link_id, reason='unlinking').exists():
-            tasks.forget.apply_async((link_id, tries + 1), countdown=15)
-        return
-    # Still no place: no logout, and the vendor delete goes to the task that retries it (analytics
-    # worker). The phone drops the device later on its own.
-    with _taken(link_id, seconds=timedelta(minutes=1)) as row:
-        if row is None:
-            if WhatsAppLink.objects.filter(pk=link_id, reason='unlinking').exists():
-                tasks.forget.apply_async((link_id, tries + 1), countdown=15)
-            return
-        if row.reason != 'unlinking':
-            return
-        if row.context_id:
-            tasks.drop_profile.delay(row.provider, row.context_id, row.session_id)
-            WhatsAppLink.objects.filter(pk=row.pk, reason='unlinking').update(context_id='', session_id='')
-        WhatsAppLink.objects.filter(pk=row.pk, reason='unlinking').delete()
-
-
-def _forget(link_id, tries):
     """Log the browser out of WhatsApp (the device leaves the person's list), then delete the profile and the row."""
     with _taken(link_id, seconds=timedelta(minutes=3)) as link:
         if link is None:
@@ -710,8 +578,7 @@ def _forget(link_id, tries):
             # Tried once: a retry only deletes, it never opens another paid browser.
             WhatsAppLink.objects.filter(pk=link.pk).update(state=WhatsAppLink.State.GONE)
             try:
-                # Within the shared slots like everything else; with none free, the logout is skipped (below).
-                with _guarded(_open(link, 120, kind='send')) as page:
+                with _guarded(_open(link, 120)) as page:
                     page.goto(web.HOME)
                     if web.wait_for(page, ('chats', 'login'), 45) == 'chats':
                         web.log_out(page)
@@ -752,32 +619,9 @@ def _queue_sync(link_id):
 
 
 def sync(link_id):
-    read = False
-    try:
-        read = _sync(link_id)
-    finally:
-        if read and enabled():
-            # One read at a time fits the plan: when one ends, the next due one starts, not the next sweep.
-            for due in due_ids()[:1]:
-                if due != link_id:
-                    _queue_sync(due)
-
-
-def _sync(link_id):
     cache.delete(f'whatsapp-link:queued:{link_id}')
     if not enabled():
         return
-    with _slot() as placed:
-        if placed:
-            return _sync_placed(link_id)
-    # No place now: later, with a little spread so waiting reads do not all come back together.
-    import random
-    WhatsAppLink.objects.filter(pk=link_id, state=WhatsAppLink.State.LINKED, next_sync_at__lte=timezone.now()).update(
-        next_sync_at=timezone.now() + timedelta(minutes=10, seconds=random.randint(0, 300)))
-    return False
-
-
-def _sync_placed(link_id):
     now = timezone.now()
     interval = timedelta(minutes=conf.get('WHATSAPP_LINK_SYNC_MINUTES'))
     with _taken(link_id) as link:
@@ -811,11 +655,6 @@ def _sync_placed(link_id):
                     _mine(link).update(next_sync_at=now + GONE_CONFIRM)
             return
         except (browsers.BrowserUnavailable, CdpError) as exc:
-            if getattr(exc, 'code', '') == 'busy':
-                import random
-                # Others are reading: soon, no blame, spread so the waiting ones do not return together.
-                _mine(link).update(next_sync_at=now + timedelta(minutes=10, seconds=random.randint(0, 300)))
-                return False
             logger.warning('WhatsApp sync %s failed: %s', link.pk, type(exc).__name__)
             _backoff(link, now, interval)
             return
@@ -833,7 +672,6 @@ def _sync_placed(link_id):
     if found and _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').exists():
         noun = 'mensaje importante' if found == 1 else 'mensajes importantes'
         _notify(link.user, f'Tienes {found if found < 10 else "más de 9"} {noun} en WhatsApp. Míralos en Confío IA.')
-    return True
 
 
 def _unlink_changed(user):
@@ -856,7 +694,7 @@ def _gone_seen(link):
 
 
 def _read(link):
-    with _guarded(_open(link, conf.get('WHATSAPP_LINK_SYNC_SECONDS'), kind='background')) as page:
+    with _guarded(_open(link, conf.get('WHATSAPP_LINK_SYNC_SECONDS'))) as page:
         for attempt in range(2):
             page.goto(web.HOME)
             seen = web.wait_for(page, ('chats', 'login', 'phone', 'code'), 60)
@@ -1029,29 +867,13 @@ def send_draft(user, draft_id, shown_hash):
 
 
 def send(draft_id, tries=0):
-    with _slot() as placed:
-        if placed:
-            return _send(draft_id, tries)
-    # No place now: the approved message waits its turn; nothing was typed.
-    draft = WhatsAppDraft.objects.filter(pk=draft_id, status=WhatsAppDraft.Status.SENDING).first()
-    if draft is None:
-        return
-    WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(sending_at=timezone.now())
-    if tries < SEND_BUSY_TRIES:
-        from . import tasks
-        tasks.send.apply_async((draft_id, tries + 1), countdown=20)
-    else:
-        _sent(draft, WhatsAppDraft.Status.DRAFT, 'browser')
-
-
-def _send(draft_id, tries):
     from . import tasks
     draft = WhatsAppDraft.objects.filter(pk=draft_id, status=WhatsAppDraft.Status.SENDING).first()
     if draft is None:
         return
     with _taken(draft.link_id) as link:
         if link is None:
-            if tries < SEND_BUSY_TRIES:
+            if tries < 10:
                 tasks.send.apply_async((draft_id, tries + 1), countdown=20)  # a read holds the browser: wait for it
             else:
                 _sent(draft, WhatsAppDraft.Status.DRAFT, 'browser')
@@ -1059,7 +881,7 @@ def _send(draft_id, tries):
         # The clock for "silent too long" starts now that a worker holds the browser.
         WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(sending_at=timezone.now())
         fields = _unseal(draft.sealed, {})
-        typed = busy = False
+        typed = False
         progress = {}
 
         def still_wanted():
@@ -1075,7 +897,7 @@ def _send(draft_id, tries):
             if link.state != WhatsAppLink.State.LINKED or link.reason == 'unlinking':
                 _sent(draft, WhatsAppDraft.Status.DRAFT, 'gone')
                 return
-            with _guarded(_open(link, 260, kind='send')) as page:  # a long text is typed at a person's pace
+            with _guarded(_open(link, 180)) as page:
                 if fields.get('phone'):
                     web.open_chat_by_number(page, fields['phone'])
                 else:
@@ -1086,30 +908,17 @@ def _send(draft_id, tries):
                     web.open_chat_by_name(page, fields['chat'])
                 typed = True
                 delivered = web.send_text(page, fields['body'], still_wanted, progress)
-            if delivered == 'pending':
-                _sent(draft, WhatsAppDraft.Status.UNKNOWN, 'pending')
-            else:
-                _sent(draft, WhatsAppDraft.Status.SENT if delivered else WhatsAppDraft.Status.UNKNOWN,
-                      '' if delivered else 'unknown')
+            _sent(draft, WhatsAppDraft.Status.SENT if delivered else WhatsAppDraft.Status.UNKNOWN,
+                  '' if delivered else 'unknown')
         except web.WebError as exc:
             # Refused before Enter: nothing left. After it: unknown, never sent again.
             unsure = typed and exc.code not in web.BEFORE_ENTER
             reason = (exc.code if exc.code == 'partial_sent' else 'unknown') if unsure else exc.code
             _sent(draft, WhatsAppDraft.Status.UNKNOWN if unsure else WhatsAppDraft.Status.DRAFT,
                   reason if reason in REASONS else 'whatsapp')
-        except DatabaseError:
-            # Before Enter nothing left; after it, unknown. Never left in "sending".
-            entered = progress.get('enter')
-            _sent(draft, WhatsAppDraft.Status.UNKNOWN if entered else WhatsAppDraft.Status.DRAFT,
-                  'unknown' if entered else 'browser')
-        except (browsers.BrowserUnavailable, CdpError) as exc:
-            if getattr(exc, 'code', '') == 'busy' and not typed and tries < SEND_BUSY_TRIES:
-                busy = True  # every browser is in use: the approved send waits its turn
-                return
-            # Before Enter nothing left (a line that did go out is partial_sent, a WebError).
-            entered = progress.get('enter')
-            _sent(draft, WhatsAppDraft.Status.UNKNOWN if entered else WhatsAppDraft.Status.DRAFT,
-                  'unknown' if entered else 'browser')
+        except (browsers.BrowserUnavailable, CdpError):
+            _sent(draft, WhatsAppDraft.Status.UNKNOWN if typed else WhatsAppDraft.Status.DRAFT,
+                  'unknown' if typed else 'browser')
         except SoftTimeLimitExceeded:
             # Before Enter nothing left (the box was cleared on the way out): it can be sent again.
             entered = progress.get('enter')
@@ -1118,8 +927,6 @@ def _send(draft_id, tries):
             raise
         finally:
             _close(link)
-            if busy:
-                tasks.send.apply_async((draft_id, tries + 1), countdown=20)
 
 
 def _sent(draft, status_, reason):
@@ -1153,7 +960,7 @@ def sweep():
     keep = now - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))
     WhatsAppNotice.objects.filter(created_at__lt=keep).delete()
     WhatsAppDraft.objects.filter(expires_at__lte=now).exclude(status=WhatsAppDraft.Status.SENDING).delete()
-    for link in _leavers()[:20]:
+    for link in _leavers():
         try:
             unlink(link.user)
         except SoftTimeLimitExceeded:
@@ -1170,7 +977,7 @@ def sweep():
         tasks.sweep_vendor.apply_async(expires=240)
 
 
-VENDOR_SECONDS = 50  # on the shared analytics worker: short
+VENDOR_SECONDS = 90
 
 
 def sweep_vendor():

@@ -204,7 +204,7 @@ SAMPLE_MONTH = {'disponible': True, 'mes': 'octubre 2026', 'mes_en_curso': True,
 COUNTRY = {'fees': 'CO', 'venezuela': 'VE'}
 
 # One judge for every run, whatever --model is under test.
-JUDGE_MODEL = 'gpt-6.1-sol'
+JUDGE_MODEL = 'gpt-6.2-sol'
 
 
 def judge(category, question, reply):

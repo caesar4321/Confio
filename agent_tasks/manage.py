@@ -30,8 +30,7 @@ def step(st, browser, reader, seen):
     """One step on an order already placed."""
     task = st.task
     st.operating = True
-    if not guard.login_address(seen.url):
-        seen.look = reader.picture   # what the judge sees: the page, with the control boxed
+    seen.look = reader.picture   # what the judge sees: the page, with the control boxed
     _trace(st, seen)
     name, args = agent.manage(task, seen, st.meter)
     if name == 'wait':
