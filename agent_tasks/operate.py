@@ -301,7 +301,8 @@ def checkout(step, browser, reader, seen):
     if name != 'press':
         return step.remember(f'{name}'[:30], 'refused')
     did = f'press "{label}"'
-    if element.get('tag') == 'a' and not sites.within(element.get('href') or '', task.site, house=True):
+    if element.get('tag') == 'a' and not guard.toggle_link(element.get('href')) \
+            and not sites.within(element.get('href') or '', task.site, house=True):
         return step.remember(did, 'refused: it leaves the store')
     if after:
         # Only the way to this order's pages: never a button, never anything that acts.

@@ -1569,6 +1569,21 @@ class CheckoutTests(StepBase):
         for url in (f'{BASE}/logout', f'{BASE}/account/delete', f'{BASE}/unsubscribe', f'{BASE}/gp/flex/sign-out'):
             self.assertTrue(guard.account_address(url), url)
 
+    def test_a_pages_own_toggle_links_are_not_refused_by_their_address(self):
+        # Recorded on Amazon México: "Ver más", "Ver más opciones" are javascript:void(0) links.
+        for label in ('Ver más', 'Ver más opciones', 'Mostrar más métodos de pago'):
+            self.assertEqual(guard.hard_refusal(element(label, tag='a', href='javascript:void(0)'), on_checkout=True), '')
+        self.assertNotEqual(guard.hard_refusal(element('Realizar pedido', tag='a', href='javascript:void(0)'),
+                                               on_checkout=True), '')
+        self.assertNotEqual(guard.hard_refusal(element('Ver', tag='a', href='javascript:fetch("/x")'),
+                                               on_checkout=True), '')
+        # And the checkout presses it: it stays on the page.
+        page = snap('Selecciona un método de pago', CHECKOUT, elements=[
+            element('Mostrar más métodos de pago', ref=0, tag='a', href='javascript:void(0)')])
+        self.operate.return_value = ('press', {'ref': 0})
+        self.step(self.make_task(phase='ordering'), page)
+        self.reader.click.assert_called_once()
+
     def test_an_unsure_edit_by_its_whole_words_goes_ahead(self):
         self.judge.side_effect = None
         self.judge.return_value = ('unsure', 'which method is selected is not shown')

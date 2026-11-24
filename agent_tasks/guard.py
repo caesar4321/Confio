@@ -313,6 +313,11 @@ _FINAL_SAFE = re.compile(
 _WAY_ON = re.compile(r'(continuar|continue|siguiente|next|proceder|proceed|seguir|avanzar|avancar|prosseguir)')
 
 
+def toggle_link(href):
+    """A link that only runs the page's own script where it is (javascript:void(0), '#'): it goes nowhere."""
+    return bool(re.fullmatch(r'\s*(javascript:\s*(void\(0\)|void 0|;)?\s*;?|#)\s*', str(href or '').strip().lower()))
+
+
 def hard_refusal(element, *, on_checkout, page=None):
     """What code reads for sure, before any model: '' or the kind of act ('places_order', 'card', 'account',
     'acts'). A deny-list only: what it does not name, the click judge decides (and may refuse more)."""
@@ -324,10 +329,14 @@ def hard_refusal(element, *, on_checkout, page=None):
     if parts and _DECLINE.fullmatch(parts[0]) and not any(_JOIN.search(part) for part in parts) \
             and not any(_FINAL_LOOK.search(part) or _FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part)
                         for part in parts) and not any(card_words(part) for part in parts) and not element.get('cut') \
-            and not (element.get('tag') == 'a' and urlsplit(href).scheme not in ('http', 'https')) \
+            and not (element.get('tag') == 'a' and urlsplit(href).scheme not in ('http', 'https')
+                     and not re.fullmatch(r'\s*javascript:\s*void\(0\)\s*;?\s*', href.strip().lower())) \
             and not re.search(r'/(logout|signout|sign-out|delete\w*|unsubscribe|close\w*)(/|$)', path):
         return ''
-    if element.get('tag') == 'a' and (urlsplit(href).scheme not in ('http', 'https') or acts(href)):
+    # A page's own toggles ("Ver más", "Ver más opciones de pago") are javascript:void(0) links: what they do
+    # is read by their words (below) and the judge. Any other script or scheme in a link: never.
+    toggle = toggle_link(href)
+    if element.get('tag') == 'a' and not toggle and (urlsplit(href).scheme not in ('http', 'https') or acts(href)):
         return 'acts'
     if _ACCOUNT_PATH.search(path):
         return 'account'
