@@ -8,8 +8,10 @@ STARTED = 'Voy a buscarlo en {site}.'
 CARRY_ON = (' Desde ahí sigue tú con la compra: elige {pay}, confirma el pedido y, con {qr} en pantalla, '
             'toca "Ya terminé".')
 NEEDS_PERSON = {
+    # What is true (vault.py): kept, encrypted, used only to sign in there, and theirs to delete.
     'login': ('Para comprar en {site} necesito entrar con tu cuenta de esa tienda. Escríbela en la tarjeta: se '
-              'guarda cifrada y solo se usa para iniciar sesión ahí.'),
+              'guarda cifrada y solo se usa para iniciar sesión ahí. Puedes borrarla cuando quieras en «Tiendas '
+              'con tu sesión».'),
     'login_again': '{site} no me dejó entrar con esos datos. Revísalos y escríbelos otra vez.',
     'otp': '{site} te envió un código de verificación. Escríbelo en la tarjeta.',
     # {{item}} and {{total}} are the order's (operate._order).

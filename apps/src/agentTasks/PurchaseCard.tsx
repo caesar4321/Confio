@@ -347,6 +347,14 @@ function SignIn({ site, sending, onSend }: {
         autoCorrect={false} placeholder="Contraseña de la tienda" placeholderTextColor="#9CA3AF"
         accessibilityLabel="Contraseña de la tienda" />
       <Button title="Entrar" onPress={send} loading={sending} disabled={!identifier.trim() || !password} />
+      {/* What is true, said plainly: it is kept, encrypted, for signing in at this store only. */}
+      <View style={styles.assurance} accessible accessibilityRole="text">
+        <Icon name="lock" size={14} color={colors.onHeroField} />
+        <Text style={styles.assuranceText}>
+          Se guarda cifrada y solo se usa para iniciar sesión en {site}. Puedes borrarla cuando quieras en «Tiendas
+          con tu sesión».
+        </Text>
+      </View>
     </View>
   );
 }
@@ -366,6 +374,9 @@ function Code({ sending, onSend }: { sending: boolean; onSend: (code: string) =>
 
 const styles = StyleSheet.create({
   qrBox: { marginTop: 12, alignItems: 'center' },
+  assurance: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: 10,
+    backgroundColor: colors.primaryLight },
+  assuranceText: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.onHeroField },
   stepRow: { marginTop: 12, gap: 4 },
   address: { fontSize: 13, color: '#6B7280', marginTop: 4 },
   details: { marginTop: 12, borderRadius: 12, backgroundColor: '#F9FAFB', paddingHorizontal: 12 },

@@ -92,6 +92,16 @@ it('the sign-in is typed in the card, sent once, and the password is not kept', 
   expect(mockMutate.mock.calls[0][0].fetchPolicy).toBe('no-cache');
 });
 
+it('the sign-in says what is true about it: kept encrypted, theirs to delete, never "not stored"', async () => {
+  mockTask = task({ reason: 'login', options: [], message: 'Para comprar en amazon.com.mx necesito entrar…' });
+  const tree = await mount();
+  const said = texts(tree).join(' ').replace(/\s+/g, ' ');
+  expect(said).toContain('Se guarda cifrada y solo se usa para iniciar sesión en amazon.com.mx');
+  expect(said).toContain('Puedes borrarla cuando quieras');
+  expect(said).not.toMatch(/no (la |se )?guard|nunca la vemos/i);
+  expect(tree.root.findAll((n) => (n.type as any) === 'Icon' && n.props.name === 'lock').length).toBeGreaterThan(0);
+});
+
 it('the order is approved with one tap, showing the item and the total', async () => {
   mockTask = task({ reason: 'approve', options: [], message: 'Listo para pedir…',
     order: { item: 'Chocolate Ibarra 540 g', total: '$112.50', image: 'https://img.example/b.jpg' } });

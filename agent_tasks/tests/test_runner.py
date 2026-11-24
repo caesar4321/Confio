@@ -1053,7 +1053,10 @@ class SignInTests(StepBase):
         task = self.step(self.make_task(), SIGN_IN())
         self.assertEqual((task.state, task.reason), ('needs_person', 'login'))
         self.reader.type.assert_not_called()
+        # What is true about it: kept encrypted, theirs to delete. Never "we do not store it".
         self.assertIn('cifrada', self.post.call_args.args[1])
+        self.assertIn('borrarla cuando quieras', self.post.call_args.args[1])
+        self.assertNotRegex(self.post.call_args.args[1].lower(), r'no (la |se )?guard')
 
     def test_the_saved_account_is_typed_by_the_runner_and_no_model_sees_it(self):
         vault.save(self.user, SITE, 'ana@example.com', 'hunter2!')

@@ -79,8 +79,9 @@ export const AgentStoresScreen: React.FC = () => {
       <Header navigation={navigation as any} title="Tiendas con tu sesión" backgroundColor={colors.heroField}
         isLight showBackButton />
       <Text style={styles.intro}>
-        Cuando inicias sesión en una tienda desde el asistente, esa sesión se guarda para tu próxima compra. Tu
-        contraseña nunca la vemos ni la guardamos.
+        Cuando inicias sesión en una tienda desde el asistente, tu cuenta de esa tienda y su sesión se guardan
+        cifradas para tu próxima compra, y solo se usan para iniciar sesión ahí. Aquí puedes borrarlas cuando
+        quieras.
       </Text>
       {message ? (
         <InlineBanner message={message.text} variant={message.ok ? 'success' : 'error'} onDismiss={() => setMessage(null)}
