@@ -90,9 +90,17 @@ def _press(page, expression, code):
     page.pump(0.8)
 
 
+# On screen, not one of the copies WhatsApp Web keeps in hidden panels (seen 2026-11-24: "Link with phone number
+# instead." sits at x=-998 and swallows the click).
+# Only sideways: a real button below the fold is still one (_box scrolls it into view).
+_VISIBLE = ("(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > 0 "
+            "&& r.left < innerWidth && getComputedStyle(e).visibility !== 'hidden'; })")
+
+
 def _button(label_pattern):
     return (f"[...document.querySelectorAll('[role=button], button')]"
-            f".find(e => /{label_pattern}/i.test((e.innerText || e.getAttribute('aria-label') || '').trim()))")
+            f".find(e => /{label_pattern}/i.test((e.innerText || e.getAttribute('aria-label') || '').trim()) "
+            f"&& {_VISIBLE}(e))")
 
 
 def _pace(low=0.06, high=0.16):

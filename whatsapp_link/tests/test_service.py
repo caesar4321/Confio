@@ -832,6 +832,12 @@ class SendTextTest(TestCase):
                         web.ask_for_code(page, PHONE)
                     self.assertEqual(caught.exception.code, 'phone_mismatch')
 
+    def test_buttons_are_only_the_visible_ones(self):
+        # WhatsApp Web keeps copies of its buttons off screen (x=-998): those are never clicked.
+        self.assertIn('getBoundingClientRect', web._button('^Next$'))
+        self.assertIn('r.right > 0', web._button('^Next$'))
+        self.assertNotIn('innerHeight', web._button('^Next$'))  # below the fold is still a real button
+
     def test_signed_in_number(self):
         page = mock.Mock()
         page.evaluate.return_value = '"59171234567:12@c.us"'

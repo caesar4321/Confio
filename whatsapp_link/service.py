@@ -537,6 +537,8 @@ def _pair(link_id, grant, tries):
             else:
                 _close(link)
         except web.WebError as exc:
+            # The step's name only (no number, no code): what to look at when WhatsApp Web changes.
+            logger.warning('WhatsApp pairing %s stopped at %s', link.pk, exc.code)
             _fail(link, exc.code if exc.code in REASONS else 'whatsapp')
         except (browsers.BrowserUnavailable, CdpError) as exc:
             if getattr(exc, 'code', '') == 'busy' and tries < PAIR_RETRIES:
@@ -630,6 +632,7 @@ def _watch_once(link):
                 page.pump(3.0)
         return True
     except web.WebError as exc:
+        logger.warning('WhatsApp pairing %s stopped at %s', link.pk, exc.code)
         _fail(link, exc.code if exc.code in REASONS else 'whatsapp')
     except (browsers.BrowserUnavailable, CdpError):
         _fail(link, 'browser')
