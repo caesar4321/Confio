@@ -1,4 +1,4 @@
-// "Correo y calendario": one state per source, and never a dead end. Mounted
+// "WhatsApp, correo y calendario": one state per source, and never a dead end. Mounted
 // once inside the assistant, so the sheets it opens sit above the chat.
 import React, { useEffect, useState } from 'react';
 import { AccessibilityInfo, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -11,6 +11,10 @@ import { colors } from '../../config/theme';
 import CalendarConnectSheet from '../calendar/CalendarConnectSheet';
 import MailSheet from '../mail/MailSheet';
 import { closeMailSession, mailSession } from '../mail/session';
+import WhatsAppSheet from '../whatsapp/WhatsAppSheet';
+import { whatsAppView } from '../whatsapp/rules';
+import { closeWhatsAppSession, whatsAppSession } from '../whatsapp/session';
+import { useWhatsApp } from '../whatsapp/useWhatsApp';
 import { ANSWER_CONNECTION, type Connections } from './api';
 import { gmailView, type Build } from './rules';
 import { closeConnections, keepTypedEmail, typedEmail, useConnectionsOpen, type Where } from './store';
@@ -98,13 +102,14 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
       <SafeAreaProvider>
         <SafeAreaView style={styles.screen}>
           <View style={styles.header}>
-            <Text style={styles.title}>Correo y calendario</Text>
+            <Text style={styles.title}>WhatsApp, correo y calendario</Text>
             <Pressable style={styles.close} onPress={closeConnections} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={24} color={colors.textFlat} />
             </Pressable>
           </View>
           <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+              <WhatsAppRow userId={userId} />
               <View style={styles.source}>
                 <View style={styles.sourceTitle}>
                   <Icon name="mail" size={18} color={colors.successText} />
@@ -188,6 +193,61 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
         </SafeAreaView>
       </SafeAreaProvider>
     </Modal>
+  );
+}
+
+/** Its own query: an older server without WhatsApp just shows no row. */
+function WhatsAppRow({ userId }: { userId: string }) {
+  const { link: fresh, refetch } = useWhatsApp(userId, 'cache-and-network');
+  // A failed read must not pull the sheet from under them; the open state survives the lock (session.ts).
+  const [last, setLast] = useState(fresh);
+  useEffect(() => {
+    if (fresh) {
+      setLast(fresh);
+    }
+  }, [fresh]);
+  const link = fresh ?? last;
+  const [open, setOpenState] = useState(() => whatsAppSession(userId).open);
+  const setOpen = (value: boolean) => {
+    if (value) {
+      whatsAppSession(userId).open = true;
+    } else {
+      closeWhatsAppSession(userId);
+    }
+    setOpenState(value);
+  };
+  if (!link) {
+    return null;
+  }
+  const view = whatsAppView(link);
+  return (
+    <View style={styles.source}>
+      <View style={styles.sourceTitle}>
+        <Icon name="message-circle" size={18} color={colors.successText} />
+        <Text style={styles.name}>WhatsApp</Text>
+        {view.badge ? <Text style={styles.badge}>{view.badge}</Text> : null}
+      </View>
+      <Text style={styles.text}>{view.body}</Text>
+      {view.action ? (
+        <Pressable
+          style={styles.button}
+          onPress={() => setOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${view.actionLabel}: WhatsApp`}
+        >
+          <Text style={styles.buttonText}>{view.actionLabel}</Text>
+        </Pressable>
+      ) : null}
+      {open ? (
+        <WhatsAppSheet
+          userId={userId}
+          onClose={() => {
+            setOpen(false);
+            refetch().catch(() => undefined);
+          }}
+        />
+      ) : null}
+    </View>
   );
 }
 

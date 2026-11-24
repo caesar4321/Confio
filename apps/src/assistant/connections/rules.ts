@@ -1,5 +1,16 @@
 // What to show, decided here so it can be tested without a screen.
 import type { Connections } from './api';
+import type { WhatsAppLink } from '../whatsapp/api';
+
+/** WhatsApp is offered to whoever can link it now (their own number in Confío) and has not. */
+export const offersWhatsApp = (link: WhatsAppLink | null) => link?.state === 'none' && !!link.ownPhoneHint;
+
+export const WHATSAPP_CARD = {
+  title: 'Vincula tu WhatsApp',
+  body: 'Tu asistente te avisa de cobros, pedidos y citas que llegan por WhatsApp, y respondes desde aquí, '
+    + 'enviando solo lo que tú apruebas.',
+  cta: 'Ver cómo funciona',
+};
 
 export const SNOOZE_DAYS = 14;
 
@@ -95,8 +106,10 @@ export function promptKind(input: {
   build: Build;
   snoozedUntil: number;
   now: number;
+  /** WhatsApp can be linked now and is not (offersWhatsApp). */
+  whatsApp?: boolean;
 }): 'card' | 'chip' | null {
-  const { data, build, starters, snoozedUntil, now } = input;
+  const { data, build, starters, snoozedUntil, now, whatsApp = false } = input;
   if (!data) {
     return null;
   }
@@ -108,7 +121,8 @@ export function promptKind(input: {
     return 'card';
   }
   // Their answer and their "Ahora no" hold.
-  return unanswered(data) && snoozedUntil <= now ? 'card' : 'chip';
+  // `whatsApp` already holds WhatsApp's own "Ahora no"; the mail one never hides it.
+  return whatsApp || (unanswered(data) && snoozedUntil <= now) ? 'card' : 'chip';
 }
 
 /** The only case where "Ahora no" matters, so the only one that reads the keystore. */
@@ -120,7 +134,7 @@ const END = '(?![a-záéíóúñê])';
 const ASK = '(?:lee[rs]?|leas|revis[a-záéíóú]*|mira[rs]?|busca[rs]?|conect[a-záéíóú]*|vincul[a-záéíóú]*|integr[a-záéíóú]*'
   + '|sincroniz[a-záéíóú]*|acced[a-záéíóú]*|resum[a-záéíóú]*|organiz[a-záéíóú]*|chec[a-záéíóú]*|chequ?e[a-záéíóú]*'
   + '|ver|veas|tengo|tienes|hay|lê|ler)';
-const THING = '(?:gmail|correos?|e-?mails?|mails?|bandeja|inbox|calendarios?|google calendar|citas|eventos|reuniones)';
+const THING = '(?:whats ?app|wsp|gmail|correos?|e-?mails?|mails?|bandeja|inbox|calendarios?|google calendar|citas|eventos|reuniones)';
 const INTENT = new RegExp(
   `${START}${ASK}\\s+(?:(?:a|al|con|de|en|el|la|los|las|mi|mis|tu|meu|meus|últimos)\\s+){0,3}${THING}${END}`
   + `|${START}mis (?:citas|eventos|reuniones) (?:de|para) (?:hoy|mañana|esta semana)${END}`,

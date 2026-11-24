@@ -697,6 +697,24 @@ class SendingTest(LinkTestBase):
         self.assertEqual(WhatsAppDraft.objects.get(pk=made['id']).status, 'sending')
         self.tasks.send.apply_async.assert_called_once_with((made['id'], 1), countdown=20)
 
+    def test_a_new_version_replaces_the_unsent_one(self):
+        old = self.draft(body='Primera versión')
+        new = service.create_draft(self.user, chat='Farmacia Central', body='Segunda versión')
+        # A late "Enviar" for the first version (stalled in the network) sends nothing.
+        with self.assertRaises(service.LinkRefused) as caught:
+            service.send_draft(self.user, old['id'], old['display_hash'])
+        self.assertEqual(caught.exception.code, 'not_found')
+        service.send_draft(self.user, new['id'], new['display_hash'])
+        self.tasks.send.delay.assert_called_once_with(new['id'])
+
+    def test_no_new_message_while_one_is_on_its_way(self):
+        sending = self.draft()
+        service.send_draft(self.user, sending['id'], sending['display_hash'])
+        with self.assertRaises(service.LinkRefused) as caught:
+            service.create_draft(self.user, chat='Farmacia Central', body='Otra cosa')
+        self.assertEqual(caught.exception.code, 'on_its_way')
+        self.assertEqual(WhatsAppDraft.objects.get(pk=sending['id']).status, 'sending')
+
     def test_daily_cap(self):
         made = self.draft()
         with override_settings(WHATSAPP_LINK_SENDS_PER_DAY=0):

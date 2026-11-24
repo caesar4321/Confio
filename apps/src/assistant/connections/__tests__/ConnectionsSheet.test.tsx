@@ -21,6 +21,9 @@ jest.mock('../store', () => ({
   typedEmail: () => mockTyped,
 }));
 jest.mock('../useConnections', () => ({ useConnections: jest.fn() }));
+let mockLink: any = null;
+jest.mock('../../whatsapp/useWhatsApp', () => ({ useWhatsApp: () => ({ link: mockLink, refetch: jest.fn(async () => ({})) }) }));
+jest.mock('../../whatsapp/WhatsAppSheet', () => 'WhatsAppSheet');
 
 function show(gmail: GmailState, mail = false) {
   const data: Connections = {
@@ -46,6 +49,22 @@ function show(gmail: GmailState, mail = false) {
 beforeEach(() => {
   mockAnswer.mockClear();
   mockTyped = undefined;
+  mockLink = null;
+});
+
+it('an older server without WhatsApp shows no WhatsApp row', () => {
+  expect(show('soon').words()).not.toContain('Vincular WhatsApp');
+});
+
+it('WhatsApp: links the number of their own Confío account', async () => {
+  mockLink = {
+    state: 'none', code: null, codeAt: null, phoneHint: null, reason: null, reasonMessage: null, linkedAt: null,
+    lastSyncAt: null, ownPhoneHint: '4567', consentVersion: 1, consentOutdated: false, notices: [],
+  };
+  const { words, press } = show('soon');
+  expect(words()).toContain('terminado en 4567');
+  await press('Vincular WhatsApp');
+  expect(words()).toContain('WhatsAppSheet');
 });
 
 it('full: says so, asks for no address, and takes the waitlist answer', async () => {

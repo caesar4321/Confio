@@ -70,6 +70,7 @@ MESSAGES = {
     'not_found': 'Ese mensaje ya no existe.',
     'changed': 'El mensaje cambió. Revísalo otra vez antes de enviarlo.',
     'busy': 'Ya estoy enviando ese mensaje.',
+    'on_its_way': 'Tu mensaje anterior todavía se está enviando. Espera a que termine y revisa el chat en tu teléfono.',
     'unlinking': 'Estoy terminando de desvincular tu WhatsApp. Inténtalo en un minuto.',
     'body': f'Escribe un mensaje de hasta {MAX_BODY} caracteres.',
     'chat': 'Dime a qué chat de tu WhatsApp o a qué número.',
@@ -973,8 +974,17 @@ def create_draft(user, *, chat=None, phone=None, body=None, instructions=None, n
         _claim(user, 'write', LIMITS['write'])
         body = classify.write(str(instructions)[:1000], chat or 'un número nuevo')
     fields = {'chat': chat, 'phone': digits, 'body': _body(body)}
-    draft = WhatsAppDraft.objects.create(link=link, sealed=_seal(fields),
-                                         expires_at=timezone.now() + timedelta(hours=DRAFT_HOURS))
+    with transaction.atomic():
+        # One message at a time. While one is on its way no new one is written: if the person could not see it
+        # (a stalled request, an app closed mid-send), writing it again would send it twice.
+        if WhatsAppDraft.objects.select_for_update().filter(link=link, status=WhatsAppDraft.Status.SENDING).exists():
+            raise LinkRefused('on_its_way')
+        # And a new one replaces the unsent others, so a late "Enviar" for an older version (a request stalled in
+        # the network) finds nothing to send instead of sending it too. Locked like send_draft.
+        stale = WhatsAppDraft.objects.select_for_update().filter(link=link, status=WhatsAppDraft.Status.DRAFT)
+        WhatsAppDraft.objects.filter(pk__in=list(stale.values_list('pk', flat=True))).delete()
+        draft = WhatsAppDraft.objects.create(link=link, sealed=_seal(fields),
+                                             expires_at=timezone.now() + timedelta(hours=DRAFT_HOURS))
     return present(draft, fields)
 
 

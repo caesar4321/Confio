@@ -1,14 +1,17 @@
 // How people find out: a card on the assistant's opening, a chip that stays,
-// and one of them again when they ask about mail or calendar themselves.
+// and one of them again when they ask about WhatsApp, mail or calendar themselves.
 import React, { useEffect } from 'react';
 import { AppState, Pressable, StyleSheet, View } from 'react-native';
+import { useApolloClient } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
-import { cardText, mentionsConnections, promptKind, unanswered } from './rules';
+import { cardText, mentionsConnections, offersWhatsApp, promptKind, unanswered, WHATSAPP_CARD } from './rules';
 import { openConnections, readSnooze, snooze, useKnownSnooze, type Where } from './store';
 import { useConnections, useViewer } from './useConnections';
+import { REFRESH_WHATSAPP } from '../whatsapp/api';
+import { useWhatsApp } from '../whatsapp/useWhatsApp';
 
 type Props = {
   where: Where;
@@ -30,15 +33,31 @@ function Viewer({ where, starters }: { where: Where; starters: boolean }) {
 
 function Prompt({ userId, where, starters }: { userId: string; where: Where; starters: boolean }) {
   const { connections, build, refetch } = useConnections(userId, starters ? 'cache-and-network' : 'cache-first');
+  const { link } = useWhatsApp(userId, starters ? 'cache-and-network' : 'cache-first');
+  const whatsApp = offersWhatsApp(link);
+  // Opening Confío IA asks for a fresh read of a linked WhatsApp (the server throttles it).
+  const client = useApolloClient();
+  const linked = starters && link?.state === 'linked';
+  useEffect(() => {
+    if (linked) {
+      client.mutate({ mutation: REFRESH_WHATSAPP, fetchPolicy: 'no-cache' }).catch(() => undefined);
+    }
+  }, [linked, client]);
   // undefined until read: the card must not flash for someone who said "Ahora no".
-  const until = useKnownSnooze(userId);
-  const snoozeMatters = starters && !!connections && unanswered(connections);
+  // One per source: putting WhatsApp off never hides the mail card, nor the reverse.
+  const until = useKnownSnooze(userId, 'mail');
+  const untilWhatsApp = useKnownSnooze(userId, 'whatsapp');
+  const mailMatters = starters && !!connections && unanswered(connections);
+  const whatsAppMatters = starters && !!connections && whatsApp;
 
   useEffect(() => {
-    if (snoozeMatters && until === undefined) {
-      void readSnooze(userId);
+    if (mailMatters && until === undefined) {
+      void readSnooze(userId, 'mail');
     }
-  }, [snoozeMatters, until, userId]);
+    if (whatsAppMatters && untilWhatsApp === undefined) {
+      void readSnooze(userId, 'whatsapp');
+    }
+  }, [mailMatters, whatsAppMatters, until, untilWhatsApp, userId]);
 
   // Inicio stays mounted: a place given meanwhile shows on coming back to the app.
   const shows = starters && !!connections;
@@ -54,21 +73,27 @@ function Prompt({ userId, where, starters }: { userId: string; where: Where; sta
     return () => subscription?.remove();
   }, [shows, refetch]);
 
-  if (!connections || (snoozeMatters && until === undefined)) {
+  if (!connections || (mailMatters && until === undefined) || (whatsAppMatters && untilWhatsApp === undefined)) {
     return null;
   }
-  const kind = promptKind({ data: connections, build, starters, snoozedUntil: until ?? 0, now: Date.now() });
+  const now = Date.now();
+  const offerWhatsApp = whatsApp && (untilWhatsApp ?? 0) <= now;
+  const kind = promptKind({ data: connections, build, starters, snoozedUntil: until ?? 0, now, whatsApp: offerWhatsApp });
   const open = () => openConnections(userId, where);
   if (kind === 'chip') {
     return (
       <Pressable style={styles.chip} onPress={open} accessibilityRole="button">
-        <Icon name="mail" size={14} color={colors.successText} />
-        <Text style={styles.chipText}>Correo y calendario</Text>
+        <Icon name="link" size={14} color={colors.successText} />
+        <Text style={styles.chipText}>WhatsApp, correo y calendario</Text>
       </Pressable>
     );
   }
-  const ready = connections.gmail === 'invited' || connections.gmail === 'reconnect';
-  const { title, body, cta } = cardText(connections);
+  // Only a build that can open Gmail has something waiting there (promptKind says the same).
+  const ready = build.mail && (connections.gmail === 'invited' || connections.gmail === 'reconnect');
+  // Something waits on them in Gmail first; otherwise WhatsApp, which anyone can link today.
+  const showsWhatsApp = offerWhatsApp && !ready;
+  const { title, body, cta } = showsWhatsApp ? WHATSAPP_CARD : cardText(connections);
+  const source = showsWhatsApp ? 'whatsapp' : 'mail';
   return (
     <View style={styles.card}>
       <View style={styles.titleRow}>
@@ -81,10 +106,16 @@ function Prompt({ userId, where, starters }: { userId: string; where: Where; sta
           <Text style={styles.primaryText}>{cta}</Text>
         </Pressable>
         {ready ? null : (
-          <Pressable style={styles.later} onPress={() => void snooze(userId)} accessibilityRole="button">
+          <Pressable style={styles.later} onPress={() => void snooze(userId, undefined, source)} accessibilityRole="button">
             <Text style={styles.laterText}>Ahora no</Text>
           </Pressable>
         )}
+        {showsWhatsApp ? (
+          // A no that holds: the chip stays for whoever changes their mind.
+          <Pressable style={styles.later} onPress={() => void snooze(userId, 365, 'whatsapp')} accessibilityRole="button">
+            <Text style={styles.laterText}>No me interesa</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
