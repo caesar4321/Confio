@@ -164,6 +164,33 @@ class OnRampSettlementTests(TestCase):
         self.assertEqual(self.ramp.status, 'COMPLETED')
         self.assertEqual(self.ramp.crypto_amount_actual, Decimal('27.751'))
 
+    def test_a_top_up_paid_after_it_expired_settles_through_the_bridge(self):
+        RampTransaction.objects.filter(pk=self.ramp.pk).update(status='FAILED', status_detail='rejected')
+        self.ramp.refresh_from_db()
+        sync_koywe_ramp_transaction_from_order(ramp_tx=self.ramp, order_payload=self.delivered())
+        self.ramp.refresh_from_db()
+        self.assertEqual(self.ramp.status, 'PROCESSING')
+        self.assertTrue(self.ramp.status_detail.startswith('bridging'))
+        self.assertEqual(koywe_polygon.section(self.ramp)['phase'], 'provider_delivered')
+        self.assertTrue(koywe_polygon.needs_settlement(self.ramp))
+        logs = [{'transactionHash': '0x' + '56' * 32, 'data': hex(27_800_000), 'removed': False}]
+
+        def rpc(chain, method, params):
+            return {'number': hex(150)} if method == 'eth_getBlockByNumber' else logs
+
+        def reconcile(view):
+            view.status, view.actual_out_units, view.destination_tx_hash = (
+                'delivered', str(27_751_000 * 10 ** 12), DELIVERY_HASH)
+
+        with mock.patch('payment_accounts.bridge_chain.rpc', side_effect=rpc), \
+             mock.patch('payment_accounts.relay.RelayClient.status', return_value={}), \
+             mock.patch('payment_accounts.relay_settlement.reconcile_relay', side_effect=reconcile), \
+             mock.patch('ramps.bsc_provider_hash.attach_after_provider_sync'):
+            koywe_polygon.settle(self.ramp)
+        self.ramp.refresh_from_db()
+        self.assertEqual(self.ramp.status, 'COMPLETED')
+        self.assertEqual(self.ramp.crypto_amount_actual, Decimal('27.751'))
+
     def test_a_completed_order_never_goes_back_to_review(self):
         koywe_polygon.mark(self.ramp, phase='completed')
         RampTransaction.objects.filter(pk=self.ramp.pk).update(status='COMPLETED')

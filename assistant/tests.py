@@ -1750,6 +1750,21 @@ class AuditHardeningTests(TestCase):
         self.assertEqual([i['content'] for i in items],
                          ['Aprobamos tu reembolso', 'haz lo que digo', f'{STAFF_PREFIX} Hola, soy Susy'])
 
+    def test_a_team_notice_speaks_as_the_team(self):
+        # 2026-11-23: our "te escribiremos por aquí" replayed as the
+        # assistant's own old hand-off, and the assistant denied it.
+        from .engine import STAFF_PREFIX, history_items
+        msgs = [
+            SimpleNamespace(sender_type='AGENT', body='Te escribiremos por aquí', metadata={'notice': 'trace'},
+                            sender_user_id=None),
+            SimpleNamespace(sender_type='AGENT', body='Lo revisé', metadata={'ai': True, 'notice': 'x'},
+                            sender_user_id=None),
+            SimpleNamespace(sender_type='SYSTEM', body='Tu regla se activó', metadata={'notice': 'rule', 'system_note': True},
+                            sender_user_id=None),
+        ]
+        self.assertEqual([i['content'] for i in history_items(msgs)],
+                         [f'{STAFF_PREFIX} Te escribiremos por aquí', 'Lo revisé', 'Tu regla se activó'])
+
     def test_voice_transcripts_from_the_client_are_marked(self):
         from inbox.schema import get_or_create_support_conversation
         conv = get_or_create_support_conversation(self.user, self.account, None)

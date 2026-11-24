@@ -2289,8 +2289,10 @@ def history_items(messages, photos=None):
             # Lines a client relayed (voice captions) and handoff notes for the
             # team are not things the user or the assistant said in this chat.
             continue
-        is_staff = (message.sender_type == 'AGENT' and not metadata.get('ai')
-                    and getattr(message, 'sender_user_id', None) is not None)
+        # A notice the team sent from an ops script counts too: replayed as the
+        # assistant's own words, its "we'll write to you here" read as an old
+        # hand-off and the assistant denied it (2026-11-23).
+        is_staff = context_rules.is_team(message)
         if message.sender_type == 'AGENT' and metadata.get('recalled'):
             # It used stored data: never replayed, so that data cannot be
             # carried into a turn that acts (assistant/context.py).
@@ -2298,7 +2300,7 @@ def history_items(messages, photos=None):
             continue
         is_photo = message.sender_type == 'USER' and photo_rules.is_photo(message)
         if not is_staff:
-            # Only a real person on the team may speak as the team.
+            # Only the team (a person, or a notice it sent) may speak as the team.
             body = _STAFF_PREFIX_SPOOF.sub('', body).strip()
             if not body and not is_photo:
                 continue

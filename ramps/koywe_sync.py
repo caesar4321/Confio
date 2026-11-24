@@ -36,6 +36,11 @@ _KOYWE_PROCESSING_STATUSES = {
     'FIAT_SENT',
 }
 _KOYWE_PENDING_STATUSES = {'WAITING'}
+# Koywe statuses that say a top-up's money arrived. PENDING is paid (WAITING
+# is unpaid); PAYMENT_CREATED is not.
+_KOYWE_PAID_STATUSES = _KOYWE_COMPLETED_STATUSES | {
+    'PAYMENT_RECEIVED', 'PENDING', 'EXECUTING', 'IN_PROGRESS', 'CRYPTO_TX_SENT',
+}
 
 _STATUS_ORDER = {'PENDING': 0, 'PROCESSING': 1, 'AML_REVIEW': 1, 'COMPLETED': 2, 'FAILED': 2}
 
@@ -754,7 +759,12 @@ def _sync_koywe_ramp_transaction_from_order(
     # they stay consistent with the current (higher) status rather than drifting.
     incoming_rank = _STATUS_ORDER.get(ramp_status, 0)
     current_rank = _STATUS_ORDER.get(ramp_tx.status, 0)
-    if incoming_rank >= current_rank:
+    # A top-up that expired at Koywe can still be paid: the payment network
+    # may confirm it days later (2026-11-24: a Bolivia QR provider outage held
+    # a weekend's payments). Once Koywe reports the money, the order is live
+    # again and settles like any other, never left failed beside a deposit.
+    paid_late = direction == 'on_ramp' and ramp_tx.status == 'FAILED' and status_raw in _KOYWE_PAID_STATUSES
+    if paid_late or incoming_rank >= current_rank:
         ramp_tx.status = ramp_status
         ramp_tx.status_detail = normalized_detail if not status_details else f'{normalized_detail}: {status_details}'
         if ramp_status == 'COMPLETED':

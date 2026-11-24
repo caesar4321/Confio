@@ -1657,3 +1657,74 @@ class KoyweWebhookMissingSecretTests(SimpleTestCase):
         from ramps.koywe_sync import verify_koywe_webhook_signature
 
         self.assertFalse(verify_koywe_webhook_signature({'signature': 'anything'}))
+
+
+@mock.patch('ramps.bsc_provider_hash.attach_after_koywe_sync')
+@mock.patch('ramps.deposit_linking.link_koywe_ramp_to_deposit')
+class KoywePaidAfterExpiryTests(TestCase):
+    """2026-11-24: a Bolivia QR payment confirmed three days after its order
+    expired stayed FAILED in the history while the money arrived."""
+
+    def setUp(self):
+        from users.models import User
+        self.user = User.objects.create_user(username='koywe-late', firebase_uid='koywe-late')
+
+    def _ramp(self):
+        return RampTransaction.objects.create(
+            provider='koywe', direction='on_ramp', status='FAILED', status_detail='rejected',
+            country_code='BO', actor_user=self.user, provider_order_id='late-1', fiat_amount=Decimal('500'))
+
+    def _sync(self, ramp, status):
+        sync_koywe_ramp_transaction_from_order(
+            ramp_tx=ramp, order_payload={'orderId': 'late-1', 'status': status,
+                                         'amountIn': '500', 'amountOut': '38.01'})
+        ramp.refresh_from_db()
+        return ramp
+
+    def test_delivered_after_expiry_completes(self, *_):
+        ramp = self._sync(self._ramp(), 'DELIVERED')
+        self.assertEqual(ramp.status, 'COMPLETED')
+        self.assertIsNotNone(ramp.completed_at)
+
+    def test_a_paid_status_after_expiry_reopens_and_says_so(self, *_):
+        from notifications.models import Notification
+        for status in ('PAYMENT_RECEIVED', 'PENDING'):  # raw PENDING is paid; WAITING is not
+            with self.subTest(status=status):
+                RampTransaction.objects.filter(provider_order_id='late-1').delete()
+                Notification.objects.filter(user=self.user).delete()
+                ramp = self._sync(self._ramp(), status)
+                self.assertEqual(ramp.status, 'PROCESSING')
+                self.assertEqual(Notification.objects.filter(user=self.user, title='Pago recibido').count(), 1)
+
+    def test_the_poller_skips_expired_top_ups_between_hourly_reads(self, *_):
+        self._ramp()
+        client = mock.Mock(is_configured=True)
+        with mock.patch('ramps.tasks.KoyweClient', return_value=client), \
+             mock.patch('ramps.tasks._expired_top_ups_due', return_value=False):
+            poll_koywe_ramp_transactions()
+        client.get_ramp_order_status.assert_not_called()
+
+    def test_the_poller_rereads_a_recent_expired_top_up(self, *_):
+        from datetime import timedelta
+        from django.utils import timezone
+        recent = self._ramp()
+        old = RampTransaction.objects.create(
+            provider='koywe', direction='on_ramp', status='FAILED', status_detail='rejected',
+            country_code='BO', actor_user=self.user, provider_order_id='late-old')
+        RampTransaction.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=8))
+        client = mock.Mock(is_configured=True)
+        client.get_ramp_order_status.return_value = SimpleNamespace(
+            raw_response={'orderId': 'late-1', 'status': 'DELIVERED', 'amountIn': '500', 'amountOut': '38.01'},
+            next_action_url=None)
+        with mock.patch('ramps.tasks.KoyweClient', return_value=client), \
+             mock.patch('ramps.tasks._expired_top_ups_due', return_value=True):
+            poll_koywe_ramp_transactions()
+        self.assertEqual([c.kwargs['order_id'] for c in client.get_ramp_order_status.call_args_list], ['late-1'])
+        recent.refresh_from_db()
+        self.assertEqual(recent.status, 'COMPLETED')
+
+    def test_no_payment_keeps_it_failed(self, *_):
+        for status in ('REJECTED', 'WAITING', 'PAYMENT_CREATED'):
+            with self.subTest(status=status):
+                RampTransaction.objects.filter(provider_order_id='late-1').delete()
+                self.assertEqual(self._sync(self._ramp(), status).status, 'FAILED')

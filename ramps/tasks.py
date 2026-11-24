@@ -91,6 +91,12 @@ def sync_koywe_bank_info():
     return f'Synced {total_synced} Koywe bank entries'
 
 
+def _expired_top_ups_due() -> bool:
+    """Once an hour of the quarter-hourly poll: most expired top-ups were
+    never paid, so each is read 168 times in its week, not 672."""
+    return timezone.now().minute < 15
+
+
 @shared_task
 def poll_koywe_ramp_transactions():
     """
@@ -110,6 +116,10 @@ def poll_koywe_ramp_transactions():
         # Unpaid deposits occupy the per-user slot even after seven days.
         # Keep reconciling them; age alone must neither release nor strand it.
         | Q(direction='on_ramp', status='PENDING')
+        # A top-up Koywe expired can still be paid late (2026-11-24, a QR
+        # outage); its webhook may be lost, so re-read recent ones hourly.
+        | (Q(created_at__gte=threshold, direction='on_ramp', status='FAILED', status_detail__startswith='rejected')
+           if _expired_top_ups_due() else Q(pk__in=[]))
         | Q(direction='off_ramp', status='FAILED', status_detail__startswith='invalid_withdrawals_details')
         | Q(direction='off_ramp', status='FAILED', status_detail__startswith='refund_')
         | Q(koywe_refund__state__in=['pending', 'requesting', 'unknown', 'requested', 'started', 'in_progress'])

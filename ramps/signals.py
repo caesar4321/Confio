@@ -790,7 +790,10 @@ def _notify_ramp_status(ramp_tx: RampTransaction, *, created: bool, previous_sta
         notification_type = NotificationTypeChoices.RAMP_PENDING
         title = 'Operación en proceso'
         message = f'Tu {label} está en proceso.'
-    elif previous_status != ramp_tx.status and ramp_tx.status == 'PROCESSING' and previous_status == 'PENDING':
+    elif previous_status != ramp_tx.status and ramp_tx.status == 'PROCESSING' and (
+            previous_status == 'PENDING'
+            or (is_on_ramp and ramp_tx.provider == 'koywe' and previous_status == 'FAILED')):
+        # From FAILED: a top-up Koywe reports paid after it expired (koywe_sync).
         notification_type = NotificationTypeChoices.RAMP_PROCESSING
         title = 'Pago recibido'
         message = f'Recibimos tu pago de {amount_words} {token_display}. Tu {label} se acreditará en breve.' if is_on_ramp else f'Recibimos tu solicitud de {label}. Se acreditará en breve.'
