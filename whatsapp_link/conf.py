@@ -15,7 +15,7 @@ DEFAULTS = {
     # How long a pairing code is asked again for the person to type it.
     'WHATSAPP_LINK_PAIRING_SECONDS': 600,
     # Messages that arrive close together are looked at together, this long after the first.
-    'WHATSAPP_LINK_BATCH_SECONDS': 90,
+    'WHATSAPP_LINK_BATCH_SECONDS': 30,
     # Only what the person approved, one at a time, at a person's pace.
     'WHATSAPP_LINK_SENDS_PER_DAY': 20,
     'WHATSAPP_LINK_NEW_NUMBERS_PER_DAY': 5,

@@ -1367,6 +1367,9 @@ export default function AssistantSheet({ home }: { home?: AssistantHomeProps } =
 
   const mood: MascotMood = recordingMs !== null ? 'listening' : thinking ? 'thinking' : speaking ? 'talking' : 'idle';
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
+  // The newest message offers WhatsApp replies or holds a reply's card (whatsapp_link/chat.py): that is the one
+  // thing to do now. The default chips and cards would push it up and compete with it.
+  const awaitingWhatsApp = !!reversed[0]?.actions?.some((a) => a.type === 'whatsapp_reply' || a.type === 'whatsapp_draft');
   // Chips and the one-time question, ranked on the server for this person;
   // the built-in STARTERS stay as the fallback (older server, offline).
   const { data: suggestionData, refetch: refetchSuggestions } = useQuery(GET_ASSISTANT_SUGGESTIONS, {
@@ -1522,7 +1525,7 @@ export default function AssistantSheet({ home }: { home?: AssistantHomeProps } =
               ListHeaderComponent={
                 // The chips sit under the last message (the list is inverted)
                 // and scroll with it, so they never cover the conversation.
-                guideEl ? guideEl : showStarters ? (
+                guideEl ? guideEl : showStarters && !awaitingWhatsApp ? (
                   <View style={styles.starters}>
                     {/* The start of a visit on Inicio: the same open question
                         as an empty thread, over this person's own chips. */}
@@ -1562,7 +1565,7 @@ export default function AssistantSheet({ home }: { home?: AssistantHomeProps } =
                       <TypingDots />
                     </View>
                   </View>
-                ) : aiEnabled && mode === 'AI' ? (
+                ) : aiEnabled && mode === 'AI' && !awaitingWhatsApp ? (
                   <ConnectionsPrompt where={embedded ? 'home' : 'box'} starters={false} messages={sentThisOpen ? messages : undefined} />
                 ) : null
               }

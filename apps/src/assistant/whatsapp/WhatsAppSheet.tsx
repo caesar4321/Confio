@@ -14,24 +14,11 @@ import WhatsAppLogo from '../../assets/svg/WhatsApp.svg';
 
 import { Text, TextInput } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
+import { ACCEPT_WHATSAPP_CONSENT, REFRESH_WHATSAPP, START_WHATSAPP_LINK, UNLINK_WHATSAPP, WHATSAPP_CONSENT_VERSION } from './api';
 import {
-  ACCEPT_WHATSAPP_CONSENT,
-  CREATE_WHATSAPP_DRAFT,
-  DISMISS_WHATSAPP_NOTICE,
-  GET_WHATSAPP_DRAFT,
-  REFRESH_WHATSAPP,
-  SEND_WHATSAPP_DRAFT,
-  START_WHATSAPP_LINK,
-  UNLINK_WHATSAPP,
-  WHATSAPP_CONSENT_VERSION,
-  type WhatsAppDraft,
-  type WhatsAppNotice,
-} from './api';
-import {
-  CONSENT_DATA, CONSENT_POINTS, CONSENT_RISK, NOTICE_LABELS, PAIRING_STEPS, checkedAgo, codeForCopy, consentText, draftView,
-  initialOf, mergeDraft, validPhone,
+  CONSENT_DATA, CONSENT_POINTS, CONSENT_RISK, PAIRING_STEPS, checkedAgo, codeForCopy, consentText, validPhone,
 } from './rules';
-import { SEND_TIMEOUT_MS, SENT_GRACE_MS, forgetWhatsAppSession, whatsAppSession } from './session';
+import { forgetWhatsAppSession } from './session';
 import { useWhatsApp } from './useWhatsApp';
 import { CountryFlag } from '../../components/CountryFlag';
 import { RampCountryPicker } from '../../components/ramps/RampCountryPicker';
@@ -65,72 +52,9 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
       ? splitPhone(`+${value.replace(/\D/g, '')}`, country ? String(country[2]) : null)
       : { country, number: value });
   };
-  // These survive the app lock (session.ts). The last known draft shows at once, then is read back.
-  const saved = whatsAppSession(userId);
-  const [replyingId, setReplyingIdState] = useState<string | null>(saved.replyingId);
-  const [body, setBodyState] = useState(saved.body);
-  const [draft, setDraftState] = useState<WhatsAppDraft | null>(saved.draft);
-  const setReplyingId = (value: string | null) => { saved.replyingId = value; setReplyingIdState(value); };
-  const setBody = (value: string) => { saved.body = value; setBodyState(value); };
-  // Written to the session always, also while the lock has the sheet unmounted: what comes back must be true.
-  const setDraft = useCallback((value: WhatsAppDraft | null) => {
-    saved.draft = value;
-    if (value && value.status !== 'draft') {
-      saved.body = '';  // on its way or gone: the box never offers it again
-    } else if (value && !saved.body) {
-      saved.body = value.body;  // back to a draft (nothing was typed): its text to change, if they want
-    }
-    if (open.current) {
-      setDraftState(value);
-    }
-  }, [saved]);
-  const replying = link?.notices.find((notice) => notice.id === replyingId) ?? null;
   const open = useRef(true);
   useEffect(() => () => {
     open.current = false;
-  }, []);
-
-  const readDraft = useCallback(async (id: string) => {
-    const mine = ++saved.reads;
-    try {
-      const { data } = await client.query<any>({ query: GET_WHATSAPP_DRAFT, variables: { id }, fetchPolicy: 'no-cache' });
-      const now = (data?.whatsAppDraft ?? null) as WhatsAppDraft | null;
-      // Only the newest answer counts (a slow "sending" never overwrites a "sent"), and only for the draft
-      // still shown: one closed or replaced meanwhile never comes back.
-      if (saved.draft?.id !== id) {
-        // Changed meanwhile by another mount of this sheet (the lock): show what the session holds now.
-        if (open.current) {
-          setDraftState(saved.draft);
-          setBodyState(saved.body);
-        }
-        return now;
-      }
-      if (mine !== saved.reads) {
-        return now;
-      }
-      const tapped = saved.tapped?.id === id
-        && (!saved.tapped.settled || Date.now() - saved.tapped.at < SENT_GRACE_MS);
-      if (now?.status === 'draft' && tapped) {
-        return now;  // read before the send reached the server: it stays on its way
-      }
-      if (!now && saved.draft?.status === 'sending' && ++saved.missing < 3) {
-        return now;  // one empty answer is a hiccup, not "no sé si salió"
-      }
-      saved.missing = 0;
-      setDraft(mergeDraft(saved.draft, now));
-      return now;
-    } catch {
-      return undefined;  // unknown: what is shown (the last known draft) stays
-    }
-  }, [client, setDraft, saved]);
-
-  // Back from the lock with a draft on its way or done: its true state, from the server.
-  useEffect(() => {
-    if (saved.draft) {
-      void readDraft(saved.draft.id);
-    }
-    // Once, on mounting.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const run = useCallback(async (mutation: DocumentNode, field: string, variables?: Record<string, unknown>,
@@ -176,23 +100,9 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
     }
   }, [linked, client]);
 
-  // A sent draft is watched until it is no longer on its way.
-  useEffect(() => {
-    if (draft?.status !== 'sending') {
-      return undefined;
-    }
-    const timer = setInterval(() => void readDraft(draft.id), 3000);
-    return () => clearInterval(timer);
-  }, [draft?.status, draft?.id, readDraft]);
-
   const unlinkNow = async () => {
     if (await run(UNLINK_WHATSAPP, 'unlinkWhatsApp')) {
       forgetWhatsAppSession(userId);  // nothing of this WhatsApp is carried into a next one
-      if (open.current) {
-        setDraftState(null);
-        setReplyingIdState(null);
-        setBodyState('');
-      }
     }
   };
   const startLink = () => void run(START_WHATSAPP_LINK, 'startWhatsAppLink', {
@@ -210,61 +120,6 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
       ],
     );
   };
-  const prepare = async () => {
-    if (!replying || !body.trim()) {
-      return;
-    }
-    const result = await run(CREATE_WHATSAPP_DRAFT, 'createWhatsAppDraft', { noticeId: replying.id, body: body.trim() });
-    if (result?.draft && open.current) {
-      setDraft(result.draft);
-    }
-  };
-  const send = async () => {
-    if (!draft) {
-      return;
-    }
-    const tapped = draft;
-    // On its way from the tap: until the server says otherwise it is "sending", never a draft to send again.
-    // A wrong "sending" only waits for the next read; a wrong "draft" could send it twice.
-    saved.tapped = { id: tapped.id, at: Date.now(), settled: false };
-    saved.reads += 1;  // a read already asked never lands after this
-    saved.missing = 0;
-    setDraft({ ...tapped, status: 'sending', reason: null });
-    let refusal: string | null = null;
-    const result = await run(SEND_WHATSAPP_DRAFT, 'sendWhatsAppDraft', { id: tapped.id, displayHash: tapped.displayHash },
-      (code) => { refusal = code; }, SEND_TIMEOUT_MS);
-    if (result?.draft) {
-      // Accepted: every read from now on sees it on its way.
-      saved.tapped = null;
-      saved.reads += 1;
-      setDraft(mergeDraft(saved.draft, result.draft));
-      return;
-    }
-    if (refusal === 'not_found') {
-      // Gone (expired, or replaced by a newer version): never sent. The text stays to write it again.
-      saved.tapped = null;
-      setBody(tapped.body);
-      setDraft(null);
-      return;
-    }
-    if (refusal !== null) {
-      saved.tapped = null;  // the server said no: what it has is the truth, a draft included
-    } else if (saved.tapped?.id === tapped.id) {
-      saved.tapped = { ...saved.tapped, at: Date.now(), settled: true };  // no answer: the grace starts now
-      if (open.current) {
-        setMessage(null);  // not "inténtalo de nuevo": it may be on its way; the card says how it went
-      }
-    }
-    // Refused, or the answer was lost: what the server has now (it may be on its way already).
-    await readDraft(tapped.id);
-  };
-  const finishReply = () => {
-    setReplyingId(null);
-    setDraft(null);
-    setBody('');
-  };
-  const sending = draft?.status === 'sending';
-
   const outdatedApp = !!link && link.consentVersion > WHATSAPP_CONSENT_VERSION;
   // The number is asked only to link (not while reviewing a change of what we do).
   const linking = !!link && link.state !== 'pairing' && link.state !== 'linked';
@@ -431,99 +286,28 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
     } else if (link.state === 'linked') {
       const checked = checkedAgo(link.lastSyncAt, Date.now());
       hero = { title: 'WhatsApp vinculado', chip: link.phoneHint ? `Activo · terminado en ${link.phoneHint}` : 'Activo', live: true };
+      // What arrives is told in the Confío IA conversation, and answered there (whatsapp_link/chat.py): this screen
+      // only manages the link.
       content = (
         <>
-          {draft && !replying ? (
-            // Its notice is gone (dismissed, expired) while this reply is on its way: still shown.
-            <Reply
-              notice={null}
-              body={body}
-              setBody={setBody}
-              draft={draft}
-              busy={busy}
-              prepare={() => undefined}
-              send={() => void send()}
-              edit={() => setDraft(null)}
-              close={finishReply}
-            />
-          ) : null}
-          <View style={styles.sectionHead}>
-            <Text style={styles.section}>Importante</Text>
-            {link.notices.length ? <View style={styles.count}><Text style={styles.countText}>{link.notices.length}</Text></View> : null}
-            <View style={styles.flex} />
-            {checked ? <Text style={styles.checked}>{checked}</Text> : null}
+          <View style={styles.list}>
+            {LINKED_POINTS.map((point, index) => (
+              <View key={point.text} style={[styles.listRow, index > 0 && styles.listDivider]}>
+                <View style={styles.tile}>
+                  <Icon name={point.icon} size={18} color={colors.successText} />
+                </View>
+                <Text style={styles.listText}>{point.text}</Text>
+              </View>
+            ))}
           </View>
-          {link.notices.length ? link.notices.map((notice) => (
-            <View key={notice.id} style={styles.card}>
-              <View style={styles.cardHead}>
-                <View style={[styles.avatar, { backgroundColor: avatarColor(notice.chat) }]}>
-                  <Text style={styles.avatarText}>{initialOf(notice.chat)}</Text>
-                </View>
-                <View style={styles.flex}>
-                  <Text style={styles.chat} numberOfLines={1}>{notice.chat}</Text>
-                  <View style={styles.kindRow}>
-                    <Icon name={NOTICE_ICONS[notice.kind] ?? 'star'} size={12} color={colors.primaryDeep} />
-                    <Text style={styles.kind}>{NOTICE_LABELS[notice.kind] ?? 'Parece importante'}</Text>
-                  </View>
-                </View>
-                {notice.time ? <Text style={styles.time}>{notice.time}</Text> : null}
-              </View>
-              <View style={styles.bubble}>
-                <Text style={styles.bubbleText} numberOfLines={3}>{notice.preview}</Text>
-              </View>
-              {notice.summary ? <Text style={styles.summary}>{notice.summary}</Text> : null}
-              {replying?.id === notice.id ? (
-                <Reply
-                  notice={notice}
-                  body={body}
-                  setBody={setBody}
-                  draft={draft}
-                  busy={busy}
-                  prepare={() => void prepare()}
-                  send={() => void send()}
-                  edit={() => {
-                    if (draft) {
-                      setBody(draft.body);  // the text to change, also after a lock emptied the box
-                    }
-                    setDraft(null);
-                  }}
-                  close={finishReply}
-                />
-              ) : (
-                <View style={styles.row}>
-                  <Pill
-                    label="Responder"
-                    icon="corner-up-left"
-                    filled
-                    a11y={`Responder a ${notice.chat}`}
-                    onPress={() => { finishReply(); setReplyingId(notice.id); }}
-                    disabled={busy || sending}
-                  />
-                  <Pill
-                    label="Listo"
-                    icon="check"
-                    a11y={`Listo: ${notice.chat}`}
-                    onPress={() => void run(DISMISS_WHATSAPP_NOTICE, 'dismissWhatsAppNotice', { id: notice.id })}
-                    disabled={busy || sending}
-                  />
-                </View>
-              )}
-            </View>
-          )) : (
-            <View style={styles.empty}>
-              <View style={styles.emptyIcon}>
-                <Icon name="coffee" size={28} color={colors.successText} />
-              </View>
-              <Text style={styles.emptyTitle}>Todo tranquilo</Text>
-              <Text style={styles.text}>Te avisamos cuando llegue algo importante.</Text>
-            </View>
-          )}
+          {checked ? <Text style={styles.checked}>{checked}</Text> : null}
           <Pressable style={styles.unlink} onPress={unlink} disabled={busy} accessibilityRole="button" accessibilityLabel="Desvincular WhatsApp">
             <Icon name="link-2" size={15} color={colors.error.icon} />
             <Text style={styles.unlinkText}>Desvincular WhatsApp</Text>
           </Pressable>
         </>
       );
+      footer = <Action label="Ir a mi conversación" onPress={onClose} />;
     } else {
       const again = link.state !== 'none';
       hero = {
@@ -660,66 +444,6 @@ function Pulse() {
   );
 }
 
-type ReplyProps = {
-  notice: WhatsAppNotice | null;
-  body: string;
-  setBody: (value: string) => void;
-  draft: WhatsAppDraft | null;
-  busy: boolean;
-  prepare: () => void;
-  send: () => void;
-  edit: () => void;
-  close: () => void;
-};
-
-function Reply({ notice, body, setBody, draft, busy, prepare, send, edit, close }: ReplyProps) {
-  if (!draft && notice) {
-    return (
-      <View style={styles.compose}>
-        <TextInput
-          style={styles.input}
-          value={body}
-          onChangeText={setBody}
-          multiline
-          maxLength={2000}
-          placeholder="Escribe tu respuesta"
-          placeholderTextColor={colors.muted}
-          accessibilityLabel={`Tu respuesta a ${notice.chat}`}
-        />
-        <Action label="Revisar antes de enviar" onPress={prepare} disabled={busy || !body.trim()} />
-        <Secondary label="Cancelar" onPress={close} disabled={busy} />
-      </View>
-    );
-  }
-  if (!draft) {
-    return null;
-  }
-  const view = draftView(draft);
-  return (
-    <View style={styles.approval}>
-      <View style={styles.approvalHead}>
-        <WhatsAppLogo width={16} height={16} />
-        <Text style={styles.approvalHeading}>{view.heading}</Text>
-      </View>
-      <View style={styles.outgoing}>
-        <Text style={styles.sent} selectable>{draft.body}</Text>
-        {draft.status === 'sent' ? <Icon name="check" size={14} color={colors.successText} style={styles.tick} /> : null}
-      </View>
-      {view.status ? <Text style={styles.detail} accessibilityLiveRegion="polite">{view.status}</Text> : null}
-      {view.canSend ? (
-        <>
-          <Action label="Enviar" onPress={send} disabled={busy} />
-          {notice
-            ? <Secondary label="Cambiar el texto" onPress={edit} disabled={busy} />
-            // Its message is gone from the list: no box to change it in, only to let it go.
-            : <Secondary label="Descartar" onPress={close} disabled={busy} />}
-        </>
-      ) : null}
-      {view.done ? <Secondary label="Cerrar" onPress={close} /> : null}
-    </View>
-  );
-}
-
 function Action({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {
   return (
     <Pressable
@@ -770,18 +494,11 @@ function Secondary({ label, onPress, disabled = false, a11y }: {
   );
 }
 
-const NOTICE_ICONS: Record<string, string> = {
-  payment: 'dollar-sign',
-  order: 'shopping-bag',
-  delivery: 'truck',
-  appointment: 'calendar',
-  reply: 'message-circle',
-  urgent: 'alert-circle',
-};
-
-// Muted, readable under white initials (all >= 4.5:1 with white).
-const AVATAR_COLORS = ['#047857', '#2563EB', '#7C3AED', '#B45309', '#BE185D', '#0E7490'];
-const avatarColor = (name: string) => AVATAR_COLORS[[...name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % AVATAR_COLORS.length];
+const LINKED_POINTS = [
+  { icon: 'message-circle', text: 'Te aviso de lo importante en nuestra conversación.' },
+  { icon: 'corner-up-left', text: 'Ahí mismo respondes: nada sale sin tu OK.' },
+  { icon: 'eye-off', text: 'No marco nada como leído ni apareces «en línea».' },
+];
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.heroFieldDark },

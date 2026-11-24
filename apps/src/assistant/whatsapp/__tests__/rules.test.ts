@@ -24,7 +24,7 @@ it('every state says what to do next', () => {
   expect(whatsAppView(link({ state: 'linked', consentOutdated: true })).action).toBe('accept');
   expect(whatsAppView(link({ state: 'gone', reasonMessage: 'Se desvinculó.' })).body).toBe('Se desvinculó.');
   expect(whatsAppView(link({ state: 'failed' })).actionLabel).toBe('Intentar de nuevo');
-  expect(whatsAppView(link({ state: 'linked', notices: Array(12).fill({}) })).body).toContain('Más de 9');
+  expect(whatsAppView(link({ state: 'linked', notices: Array(12).fill({}) })).body).toContain('nuestra conversación');
 });
 
 it('the consent says the risks plainly', () => {

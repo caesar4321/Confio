@@ -64,13 +64,12 @@ export function whatsAppView(link: WhatsAppLink): WhatsAppView {
           actionLabel: 'Revisar',
         };
       }
+      // What arrives is told in the Confío IA conversation and answered there: this row only manages the link.
       return {
         badge: 'Vinculado',
-        body: link.notices.length
-          ? `${counted(link.notices.length)} por revisar.`
-          : 'Te avisamos cuando llegue algo importante.',
+        body: 'Te aviso de lo importante en nuestra conversación, y ahí mismo respondes.',
         action: 'open',
-        actionLabel: 'Abrir WhatsApp en Confío',
+        actionLabel: 'Ver vinculación',
       };
     case 'gone':
       return {
@@ -91,7 +90,6 @@ export function whatsAppView(link: WhatsAppLink): WhatsAppView {
   }
 }
 
-const counted = (count: number) => (count === 1 ? '1 mensaje importante' : `${count > 9 ? 'Más de 9' : count} mensajes importantes`);
 
 export const NOTICE_LABELS: Record<string, string> = {
   payment: 'Parece un cobro o un pago',
