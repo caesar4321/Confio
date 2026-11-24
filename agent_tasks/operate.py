@@ -130,8 +130,9 @@ def total_on(page_text, total):
     def figures(labels):
         found = []
         for label in labels.finditer(text):
-            # "Total (2 productos): $500": a count in brackets is not the figure.
-            after = re.sub(r'\([^)]{0,30}\)', ' ', text[label.end():label.end() + 90])
+            # "Total (2 productos): $500", "Total (IVA incluido, en caso de ser aplicable) $129.00" (Amazon
+            # México's real review page): what is in brackets is not the figure, nor in its way.
+            after = re.sub(r'\([^)]{0,80}\)', ' ', text[label.end():label.end() + 160])
             figure = re.match(r'[^\d]{0,40}?(\d[\d.,]*\d|\d)', after)
             if figure:
                 found.append(amount_of(figure.group(1)))

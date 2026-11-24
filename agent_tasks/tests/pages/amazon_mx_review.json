@@ -1,0 +1,382 @@
+{
+ "url": "www.amazon.com.mx/checkout/p/p-000-0000000-0000000/spc",
+ "text": ".com.mx\nFinalizar la compra de manera segura \nCarrito\n¡Felicidades Ana, eres elegible para\n30 días de Prime por $0!\nPrueba Prime gratis\nRealiza tu pedido y paga\n\nAl realizar tu pedido, aceptas el aviso de privacidad y las condiciones de uso de Amazon.\n\nProductos:\n$85.00\nEnvío:\n$44.00\nTotal (IVA incluido, en caso de ser aplicable)\n$129.00\nEnviar a Ana Pérez\n\nCalle Falsa 123, CENTRO, GUADALAJARA, JALISCO, 44100, México\n\nAgregar instrucciones de entrega\nRecolección cerca disponible\nCambiar\nPagar con Mastercard 1111\nPago a meses no disponible\nAgregar tarjeta de regalo o código promocional\nCambiar\n¿Deseas ahorrar tiempo en tu próximo pedido e ir directamente a esta página al realizar el proceso de finalización de la compra?\nRevisa tu opción de envío. Marca esta casilla para establecer como predeterminadas tus opciones de envío y pago.\nPrueba Amazon Prime GRATIS por 30 días\nPrueba Amazon Prime GRATIS por 30 días\nObtén tu pedido con envíos GRATIS Miércoles, 25 de nov.\nEnvíos GRATIS en 1 - 2 días\nPrime Video GRATIS con anuncios limitados\nEnvíos GRATIS en Rappi Restaurantes\nEmpieza tu prueba gratis\nLlega 26 nov 2026\n\nSi realizas tu pedido en 22 horas y 29 minutos\n\nElige tu opción de entrega:\nmiércoles 25 de nov\nEnvíos rápidos y GRATIS\nENVÍO Envío en 2 días GRATIS con tu prueba gratis de Prime\njueves 26 de nov\n$44.00 Envío estándar\nviernes 27 de nov, 8:00 a.m. - 9:00 p.m.\n$44.00 Entrega Programada\nCambiar fecha y hora de entrega\nMañana, miércoles 25 de nov",
+ "title": "Haz tu pedido - Finaliza la compra con Amazon",
+ "elements": [
+  {
+   "ref": "0",
+   "tag": "a",
+   "href": "/ref=nav_logo",
+   "label": ".com.mx | Amazon.com.mx",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "1",
+   "tag": "a",
+   "href": "void(0)",
+   "role": "button",
+   "label": "Finalizar la compra de manera segura | Más información sobre finalizar la compra de manera segura",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "2",
+   "tag": "a",
+   "href": "/gp/cart/view.html",
+   "label": "Carrito | Volver al carrito",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "False"
+  },
+  {
+   "ref": "3",
+   "tag": "input",
+   "type": "submit",
+   "label": "Prueba Prime gratis",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "4",
+   "tag": "input",
+   "type": "submit",
+   "label": "Realiza tu pedido y paga",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "5",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "aviso de privacidad",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "6",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "condiciones de uso",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "7",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/address",
+   "label": "Enviar a Ana Pérez Calle Falsa 123, CENTRO, GUADALAJARA, JALISCO, 44100, México",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "8",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/spc",
+   "label": "Agregar instrucciones de entrega",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "9",
+   "tag": "a",
+   "href": "void(0)",
+   "role": "button",
+   "label": "Recolección cerca disponible",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "10",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/address",
+   "label": "Cambiar | Cambiar dirección de entrega",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "11",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/pay",
+   "label": "Pagar con Mastercard 1111 Pago a meses no disponible",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "12",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/pay",
+   "label": "Agregar tarjeta de regalo o código promocional",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "13",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/pay",
+   "label": "Cambiar | Cambiar el método de pago",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "14",
+   "tag": "label",
+   "label": "Revisa tu opción de envío. Marca esta casilla para establecer como predeterminadas tus opciones de envío y pago.",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "15",
+   "tag": "input",
+   "type": "checkbox",
+   "label": "Revisa tu opción de envío. Marca esta casilla para establecer como predeterminadas tus opciones de envío y pago.",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "16",
+   "tag": "input",
+   "type": "submit",
+   "label": "Empieza tu prueba gratis",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "17",
+   "tag": "input",
+   "type": "radio",
+   "label": "miércoles 25 de nov Envíos rápidos y GRATIS ENVÍO Envío en 2 días GRATIS con tu prueba gratis de Prime",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "18",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/spc",
+   "role": "button",
+   "label": "miércoles 25 de nov Envíos rápidos y GRATIS ENVÍO Envío en 2 días GRATIS con tu prueba gratis de Prime | Logotipo de Ama",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "19",
+   "tag": "label",
+   "label": "jueves 26 de nov $44.00 Envío estándar",
+   "checked": "True",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "20",
+   "tag": "input",
+   "type": "radio",
+   "label": "jueves 26 de nov | $44.00 Envío estándar | jueves 26 de nov $44.00 Envío estándar",
+   "checked": "True",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "21",
+   "tag": "label",
+   "label": "viernes 27 de nov, 8:00 a.m. - 9:00 p.m. $44.00 Entrega Programada Cambiar fecha y hora de entrega",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "22",
+   "tag": "input",
+   "type": "radio",
+   "label": "viernes 27 de nov, 8:00 a.m. - 9:00 p.m. | $44.00 Entrega Programada | viernes 27 de nov, 8:00 a.m. - 9:00 p.m. $44.00 E",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "23",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/spc",
+   "label": "Cambiar fecha y hora de entrega",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "24",
+   "tag": "label",
+   "label": "Mañana, miércoles 25 de nov $59.00 1 día",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "25",
+   "tag": "input",
+   "type": "radio",
+   "label": "Mañana, miércoles 25 de nov | $59.00 1 día | Mañana, miércoles 25 de nov $59.00 1 día",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "26",
+   "tag": "a",
+   "href": "/sp",
+   "label": "Amazon México",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "27",
+   "tag": "button",
+   "label": "Cantidad mínima alcanzada. Eliminar producto",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "28",
+   "tag": "button",
+   "label": "Aumentar la cantidad de productos",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "29",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/gift",
+   "label": "Añadir opciones de regalo | Turin Magno Chocolates 73.6 g",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "30",
+   "tag": "input",
+   "type": "submit",
+   "label": "Realiza tu pedido y paga",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "31",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "aviso de privacidad",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "32",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "condiciones de uso",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "33",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Páginas de ayuda",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "34",
+   "tag": "a",
+   "href": "/gp/help/contact-us/general-questions.html",
+   "label": "contacta con nosotros",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "35",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Política de devoluciones",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "36",
+   "tag": "a",
+   "href": "/gp/cart/view.html",
+   "label": "Volver al carrito",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "37",
+   "tag": "button",
+   "label": "Inicio de página",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "38",
+   "tag": "a",
+   "href": "/ref=footer_logo",
+   "label": "Amazon Mexico Home",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "39",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Ayuda",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "False"
+  },
+  {
+   "ref": "40",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Condiciones de uso",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "41",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Aviso de privacidad",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "False"
+  }
+ ],
+ "recorded": "Amazon México, the order review page (/spc), 2026-11-24. Name, address, card digits and order id replaced."
+}

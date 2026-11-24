@@ -161,7 +161,7 @@ _NEVER = re.compile(
     r'|delete (address|account)|cerrar sesion|sair|log ?out|sign ?out|prime|meli\+|suscri\w*|subscri\w*|assin\w*'
     r'|gift ?card|tarjeta de regalo|vale[- ]presente|1[- ]clic\w*|cerrar (mi |tu )?cuenta|close (your )?account'
     r'|(establecer|hacer|definir|set|make|tornar) (como |as )?(predeterminad\w*|padrao|default)'
-    r'|garantia\w*|warranty|insurance)\b')
+    r'|garantia\w*|warranty|insurance|prueba gratis|prueba gratuita|free trial|teste gratis|periodo de prueba)\b')
 _ACCOUNT_PATH = re.compile(r'/(logout|signout|sign-out|cancel\w*|delete\w*|unsubscribe|subscri\w*|prime|membership'
                            r'|gift-?cards?)(/|$)')
 # A button that reads as the last one of a checkout.
@@ -335,8 +335,11 @@ def hard_refusal(element, *, on_checkout, page=None):
         return ''
     # A page's own toggles ("Ver más", "Ver más opciones de pago") are javascript:void(0) links: what they do
     # is read by their words (below) and the judge. Any other script or scheme in a link: never.
-    toggle = toggle_link(href)
-    if element.get('tag') == 'a' and not toggle and (urlsplit(href).scheme not in ('http', 'https') or acts(href)):
+    # A link that is a script of its own (not the page's plain toggle): never. What a real address does is
+    # not guessed from its words: on Amazon's review page every link lives under /checkout/.../pay|address,
+    # and "Cambiar el método de pago" is exactly what the agent must press. The browser's never-load filter
+    # (account_address) and the judge cover where a link goes.
+    if element.get('tag') == 'a' and not toggle_link(href) and urlsplit(href).scheme not in ('http', 'https'):
         return 'acts'
     if _ACCOUNT_PATH.search(path):
         return 'account'
@@ -365,7 +368,8 @@ def final_step(text, elements=()):
     """A page that shows the order's total and how it is paid: where the order is placed."""
     from .operate import _GRAND_TOTAL, _METHOD_LABEL
     folded = fold(text[:100000])
-    total = _GRAND_TOTAL.search(folded) or re.search(r'\btotal\b[^\d]{0,30}\d', folded)
+    # "Total (IVA incluido, en caso de ser aplicable) $129.00": what is in brackets is not in the way.
+    total = _GRAND_TOTAL.search(folded) or re.search(r'\btotal\b[^\d]{0,30}\d', re.sub(r'\([^)]{0,80}\)', ' ', folded))
     return bool(total) and (
         bool(_METHOD_LABEL.search(folded)) or any(element.get('checked') for element in elements))
 
@@ -410,7 +414,8 @@ def ship_to(text):
     method = _METHOD_LABEL.search(folded)
     best = min(found, key=lambda m: abs(m.start() - method.start())) if method else found[-1]
     block = re.split(r'\b(cambiar|editar|alterar|change|modificar|trocar|metodo de pago|forma de pago|total'
-                     r'|llega|llegada|entrega estimada|pide en|arrives?|chega|receba|enviar a|enviando a)\b'
+                     r'|llega|llegada|entrega estimada|pide en|arrives?|chega|receba|enviar a|enviando a'
+                     r'|agregar|anadir|adicionar|recoleccion|instrucciones)\b'
                      r'|\ben \d+ ?h(rs?|oras?)?\b', folded[best.end():best.end() + 140])[0]
     return ' '.join(block.split())[:120]
 
