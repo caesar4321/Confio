@@ -110,7 +110,9 @@ class LoggingGraphQLView(GraphQLView):
                     'reportWalletRecoveryDiagnostic', 'analyzeAssistantCalendar',
                     'AssistantMail', 'assistantMail',
                     # A store's sign-in and one-time code (agent_tasks): never in a log.
-                    'signInAgentStore', 'giveAgentCode'))
+                    'signInAgentStore', 'giveAgentCode',
+                    # The person's WhatsApp: phone, pairing code, chats, messages (whatsapp_link).
+                    'WhatsApp', 'whatsApp'))
                 if _should_log_graphql_request_details():
                     logger.info("GraphQL Query: %s", '[redacted]' if sensitive else query)
                     logger.info("GraphQL Variables: %s", '[redacted]' if sensitive else body.get('variables', {}))

@@ -34,7 +34,9 @@ class BrowserProvider:
     def delete_profile(self, profile_id: str) -> None:
         raise NotImplementedError
 
-    def open(self, *, profile_id: str, country: str, seconds: int) -> Session:
+    def open(self, *, profile_id: str, country: str, seconds: int, viewport: dict | None = None,
+             region: str | None = None, solve_captchas: bool = True) -> Session:
+        """`viewport` and `region` default to the shopping agent's (a phone screen, the vendor's region)."""
         raise NotImplementedError
 
     def close(self, session_id: str) -> None:
