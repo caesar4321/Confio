@@ -6,7 +6,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 from django.utils import timezone
 
-from agent_tasks import countries, runner, spei
+from agent_tasks import countries, runner, sites, spei
 from agent_tasks.models import AgentTask
 from agent_tasks.tests.test_runner import came_of
 from agent_tasks.tests.base import picture
@@ -141,6 +141,28 @@ class MexicoTests(StepBase):
         self.mode.return_value = ('manual', 'mx_clabe')
         changed = tuple('$1,250.00' if node == '$1,249.00' else node for node in MERCADO_PAGO)
         self.assertEqual(self.outcome(changed), 'unpaid')
+
+    def test_mercado_pagos_own_ticket_is_read_and_its_payment_number_is_the_reference(self):
+        # Mercado Libre México pays SPEI through Mercado Pago: the CLABE is on its ticket, with no reference.
+        ticket = ('Paga con transferencia SPEI', 'CLABE', '646 180 157 000 000 004', 'Monto a transferir', '$1,249.00',
+                  'Vence el 25 de noviembre')
+        url = 'https://www.mercadopago.com.mx/payments/131234567890/ticket'
+        self.prepare.return_value = SimpleNamespace(currency='MXN', amount_exact=True, amount_local=Decimal('1249.00'),
+                                                    internal_id='i', payee_level='store_checkout',
+                                                    rail_method_id='mx_clabe')
+        self.browser.capture.return_value = (picture(url=url, text=ticket), picture(url=url, text=ticket))
+        self.reading()
+        self.task.save()
+        with mock.patch.object(runner.Step, 'save', lambda step, **fields: AgentTask.objects.filter(
+                pk=step.task.pk).update(**{k: v for k, v in fields.items() if k != 'payment_intent'})), \
+                mock.patch('payment_accounts.payment_intents.cancel'), mock.patch('agent_tasks.runner.post_payment'):
+            self.step(self.task)
+        self.assertEqual(came_of(self.task), 'prepared')
+        self.assertEqual(self.prepare.call_args.kwargs['request']['reference'], '131234567890')
+        # Its ticket only: no other Mercado Pago page, and no reference-less page of the store's.
+        self.assertFalse(sites.house_ticket('https://www.mercadopago.com.mx/activities', 'mercadolibre.com.mx'))
+        self.assertFalse(sites.house_ticket(url, 'amazon.com.mx'))
+        self.assertEqual(spei.read(ticket)[1], 'code')
 
     def test_a_card_for_another_amount_is_refused(self):
         self.assertEqual(self.outcome(MERCADO_PAGO, amount='1249.01'), 'unpaid')

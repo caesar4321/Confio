@@ -66,7 +66,20 @@ ALSO = {'mercadolivre.com.br': ('mercadolivre.com', 'mercadolibre.com'), 'magazi
 # A store's payment house: its checkout pages only, never the wallet.
 CHECKOUT_HOUSE = {'mercadolivre.com.br': (
     frozenset({'www.mercadopago.com.br', 'mercadopago.com.br', 'www.mercadopago.com'}),
+    re.compile(r'/(checkout|payments/\d+/ticket)(/|$)', re.I)),
+    # Mercado Libre México pays SPEI through Mercado Pago: its CLABE is on Mercado Pago's own ticket page.
+    'mercadolibre.com.mx': (
+    frozenset({'www.mercadopago.com.mx', 'mercadopago.com.mx', 'www.mercadopago.com'}),
     re.compile(r'/(checkout|payments/\d+/ticket)(/|$)', re.I))}
+# The payment house's own page with one payment's instructions (a CLABE, a code): Mercado Pago writes it,
+# not a seller. Where an order's payment may be read off the house.
+_HOUSE_TICKET = re.compile(r'/payments/\d+/ticket/?$', re.I)
+
+
+def house_ticket(url, site):
+    """The store's payment house's own instructions page for one payment (runner.after_checkout)."""
+    pay = CHECKOUT_HOUSE.get(site)
+    return bool(pay and host_of(url) in pay[0] and _HOUSE_TICKET.search(urlsplit(str(url)).path))
 
 _HOST = re.compile(r'(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}')
 _CATEGORY = frozenset(('com net org gov gob edu co mil jus leg art blog ind inf log srv tur eco app dev ac ne or go '

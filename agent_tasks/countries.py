@@ -142,11 +142,11 @@ class SpeiRail(Rail):
     opens = 'mx_clabe'
     numeric = '484'
 
-    def read(self, shots):
+    def read(self, shots, *, reference_optional=False):
         """(clabe, request fields, '') or ('', {}, why)."""
         from . import spei
-        details, why = spei.read(shots[0].text)
-        again, _ = spei.read(shots[1].text)
+        details, why = spei.read(shots[0].text, reference_optional=reference_optional)
+        again, _ = spei.read(shots[1].text, reference_optional=reference_optional)
         if why or again != details:
             return '', {}, why or 'screen'
         return details['clabe'], {'amount_local': str(details['amount']), 'reference': details['reference']}, ''

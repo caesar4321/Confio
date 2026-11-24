@@ -287,7 +287,8 @@ def checkout(step, browser, reader, seen):
         reason = args.get('reason')
         return step.stop(reason if reason in step.GIVE_UP else 'cannot_do')
     if name == 'payment_shown' and after:
-        if not guard.order_address(seen.url) or not sites.within(seen.url, task.site):
+        if not sites.house_ticket(seen.url, task.site) and (
+                not guard.order_address(seen.url) or not sites.within(seen.url, task.site)):
             return step.remember('payment_shown', 'refused: this is not the order\'s own page')
         # The runner reads it off this tab, as it is on screen. No model reads a payment.
         return step.save(state='awaiting_code', reason='', shown_target=browser.target)

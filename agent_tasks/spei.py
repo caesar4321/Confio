@@ -106,7 +106,7 @@ def _reference(text, after=()):
     return value if _REFERENCE.fullmatch(value) and any(c.isdigit() for c in value) else None
 
 
-def read(text):
+def read(text, *, reference_optional=False):
     """({'clabe', 'amount', 'reference'}, '') or (None, why): 'code' when
     something is missing, 'several' when anything is doubtful: two
     candidates, a labelled value that does not read, a numeric reference,
@@ -131,9 +131,12 @@ def read(text):
     values = [{value for _, value in found} for found in (clabes, amounts, references)]
     if any(len(found) > 1 for found in values) or len(anywhere) > 1:
         return None, 'several'
-    if not all(values) or anywhere != values[0]:
+    # A CLABE made for this one payment (the payment house's own ticket) needs no reference of its own.
+    needed = values[:2] if reference_optional and not values[2] else values
+    if not all(needed) or anywhere != values[0]:
         return None, 'code'
     positions = [position for found in (clabes, amounts, references) for position, _ in found]
     if max(positions) - min(positions) > _TOGETHER:
         return None, 'several'
-    return {'clabe': values[0].pop(), 'amount': values[1].pop(), 'reference': values[2].pop()}, ''
+    return {'clabe': values[0].pop(), 'amount': values[1].pop(),
+            'reference': values[2].pop() if values[2] else ''}, ''

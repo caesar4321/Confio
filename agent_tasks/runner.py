@@ -545,7 +545,8 @@ class Step:
             return self.unread('screen')
         # The store's own pages: anyone can create a page at a payment house. And the order's
         # own page (a checkout or an order address): never a shopping page a seller writes on.
-        if not sites.within(shots[0].url, task.site) or not guard.order_address(shots[0].url):
+        if not sites.house_ticket(shots[0].url, task.site) and (
+                not sites.within(shots[0].url, task.site) or not guard.order_address(shots[0].url)):
             return self.unread('offsite')
         if same_page(shots[0].url) in (task.visited_pages or []):
             return self.unread('code')  # a shopping page: a QR there is a seller's picture
@@ -557,7 +558,11 @@ class Step:
         if rail.kind == 'qr':
             (code, why), extra = code_on_screen(shots, rail), {}
         else:
-            code, extra, why = rail.read(shots)
+            ticket = sites.house_ticket(shots[0].url, task.site)
+            code, extra, why = rail.read(shots, reference_optional=ticket)
+            if code and ticket and not extra.get('reference'):
+                # Mercado Pago's own payment number, from its ticket's address: the transfer's concept.
+                extra = {**extra, 'reference': re.search(r'/payments/(\d+)/ticket', urlsplit(shots[0].url).path).group(1)}
         if not code:
             return self.unread(why)
         from . import service
