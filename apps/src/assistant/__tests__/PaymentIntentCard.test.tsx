@@ -250,6 +250,9 @@ it('follows the payment: paying, then paid with its receipt; never "paid" before
   expect(texts(tree)).toContain('Pagando…');
   expect(texts(tree)).not.toContain('Pagado');
   expect(mockPoll).toBe(5000);
+  // Still paying after the watch: it keeps asking, less often, until the server says it settled.
+  await act(async () => { jest.advanceTimersByTime(3 * 60 * 1000 + 10); });
+  expect(mockPoll).toBe(20000);
   await press(tree, 'Ver el estado del pago');
   await act(async () => { jest.advanceTimersByTime(10); });
   expect(mockNavigate).toHaveBeenLastCalledWith('Main', { screen: 'LocalTransferStatus', params: { journeyId: 'journey-1' } });
@@ -258,6 +261,7 @@ it('follows the payment: paying, then paid with its receipt; never "paid" before
   mockIntent = intent({ status: 'paid', journeyId: 'journey-1' });
   tree = await mount();
   expect(texts(tree)).toEqual(expect.arrayContaining(['Pagado', 'Ver comprobante']));
+  expect(mockPoll).toBe(0);   // settled: it asks for nothing
   expect(labels(tree).some((l) => l.startsWith('Revisar y pagar'))).toBe(false);
   await act(async () => tree.unmount());
 

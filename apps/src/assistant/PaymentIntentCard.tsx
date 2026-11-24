@@ -38,8 +38,11 @@ const local = (intent: PaymentIntent, value = intent.amountLocal) => `${amount(v
 const STAGES = { checking: 'Revisando que nada cambió…', face: 'Confirma con tu rostro', signing: 'Firmando el pago…' } as const;
 // The sheet's own slide-out, before anything else may present.
 const SHEET_CLOSES_MS = 400;
-// After an approval, how long the card keeps asking the server about it.
+// After an approval, how long the card asks the server about it often.
 const WATCH_MS = 3 * 60 * 1000;
+// Past that, while the server still says money is moving, it keeps asking, less often: a payment that takes
+// longer than the watch (a SPEI paid at 3 min 2 s, 2026-11-24) is never left saying "Pagando…".
+const SLOW_POLL_MS = 20 * 1000;
 
 /** Re-renders once a second while `until` is ahead, for the countdown. */
 function useCountdown(until: string | undefined, running: boolean) {
@@ -142,11 +145,12 @@ export function PaymentIntentCard({ messageId, onLeaveBox }: {
 }) {
   const [watchUntil, setWatchUntil] = useState(0);
   const [stage, setStage] = useState<keyof typeof STAGES | null>(null);
+  const [moving, setMoving] = useState(false);
   const { data, loading, refetch } = useQuery(GET_MESSAGE_PAYMENT_INTENT, {
     variables: { messageId },
     fetchPolicy: 'cache-and-network',
     // Only while money may be moving: a card at rest asks for nothing.
-    pollInterval: !stage && watchUntil > Date.now() ? 5000 : 0,
+    pollInterval: stage ? 0 : watchUntil > Date.now() ? 5000 : moving ? SLOW_POLL_MS : 0,
   });
   const intent: PaymentIntent | null = data?.assistantPaymentIntent ?? null;
   const state = intent ? intentState(intent) : null;
@@ -158,11 +162,12 @@ export function PaymentIntentCard({ messageId, onLeaveBox }: {
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   useCountdown(intent?.expiresAt, state?.key === 'open' && !stage);
-  // The server says money is moving: keep watching until it settles.
+  // The server says money is moving: keep watching until it settles, however long that takes.
   useEffect(() => {
     if (state?.key === 'paying') {
       setWatchUntil(Date.now() + WATCH_MS);
     }
+    setMoving(state?.key === 'paying');
   }, [state?.key]);
   // Stop asking once the watch runs out, without waiting for another render.
   useEffect(() => {
