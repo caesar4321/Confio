@@ -167,7 +167,8 @@ def start(account, user, *, goal, site, meta=None):
     if open_order is not None:
         raise TaskRefused('checkout_open', MESSAGES['checkout_open'].format(site=open_order.site))
     # Cancelled before its browser ever opened (no provider yet) costs nothing.
-    free = Q(state='cancelled', provider='')
+    # A browser never opened (cancelled first, or the vendor refused it) costs nothing and is not counted.
+    free = Q(provider='') & ~Q(state__in=AgentTask.ACTIVE)
     if (mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(free).count()
             >= conf.get('AGENT_TASKS_PER_DAY')):
         raise TaskRefused('daily_limit')

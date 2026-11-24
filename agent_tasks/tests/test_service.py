@@ -106,6 +106,13 @@ class StartTests(ServiceBase):
         AgentTask.objects.filter(user=self.user, state__in=AgentTask.ACTIVE).update(state='stopped')
         self.refused('daily_limit', self.start, goal='y otra')
 
+    @override_settings(AGENT_TASKS_PER_DAY=2)
+    def test_a_purchase_whose_browser_the_vendor_refused_is_free(self):
+        # The founder's evening, 2026-11-24: two refused by the vendor's plan, then "limit reached".
+        self.make_task(state='stopped', reason='busy', provider='')
+        self.make_task(state='stopped', reason='busy', provider='')
+        self.start(goal='chocolate')
+
     def test_nothing_is_started_without_a_browser_worker(self):
         self.worker.return_value = False
         self.refused('unavailable', self.start)

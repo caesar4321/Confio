@@ -6,11 +6,15 @@ defaults stay reversed:
   recordSession  off: store passwords are typed in this browser;
   logSession     off: the same, in network and console logs.
 """
+import logging
+
 import requests
 from django.utils.dateparse import parse_datetime
 
 from .. import conf
 from . import BrowserProvider, BrowserUnavailable, Session
+
+logger = logging.getLogger(__name__)
 
 TIMEOUT = 20
 VIEWPORT = {'width': 412, 'height': 915}  # the live view is read on a phone
@@ -50,22 +54,31 @@ class Browserbase(BrowserProvider):
     def delete_profile(self, profile_id):
         self._call('DELETE', f'/contexts/{profile_id}', ok=(200, 204, 404))
 
-    def open(self, *, profile_id, country, seconds):
+    def open(self, *, profile_id, country, seconds, viewport=None, region=None, solve_captchas=True):
         body = {
             'keepAlive': True,  # each step reconnects, so no worker waits on a person
             'timeout': max(MIN_SECONDS, min(int(seconds), MAX_SECONDS)),
-            'region': conf.get('BROWSERBASE_REGION'),
+            'region': region or conf.get('BROWSERBASE_REGION'),
             'browserSettings': {
-                'solveCaptchas': True,
+                'solveCaptchas': bool(solve_captchas),
                 'recordSession': False,
                 'logSession': False,
-                'viewport': VIEWPORT,
+                'viewport': viewport or VIEWPORT,
                 'context': {'id': profile_id, 'persist': True},
             },
         }
-        if conf.get('AGENT_TASKS_GEO_PROXY'):
+        if country and conf.get('AGENT_TASKS_GEO_PROXY'):
             body['proxies'] = [{'type': 'browserbase', 'geolocation': {'country': country}}]
-        data = self._call('POST', '/sessions', body=body)
+        try:
+            data = self._call('POST', '/sessions', body=body)
+        except BrowserUnavailable as exc:
+            if exc.code != 'quota' or 'proxies' not in body:
+                raise
+            # The plan has no proxies (Browserbase's free plan answers 402): the store's own country
+            # is a nicety, a browser is not. Opened from Browserbase's own address instead.
+            logger.warning('Browserbase refused the %s proxy (plan): opening without it', country)
+            body = {key: value for key, value in body.items() if key != 'proxies'}
+            data = self._call('POST', '/sessions', body=body)
         expires = parse_datetime(str(data.get('expiresAt') or ''))
         url = str(data.get('connectUrl') or '')
         if not data.get('id') or not url.startswith('wss://') or expires is None:

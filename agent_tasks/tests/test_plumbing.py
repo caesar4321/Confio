@@ -29,6 +29,24 @@ class BrowserbaseTests(SimpleTestCase):
         self.assertNotIn('proxies', body)
         self.assertEqual(body['browserSettings']['context'], {'id': 'p', 'persist': True})
 
+    @override_settings(AGENT_TASKS_GEO_PROXY=True)
+    def test_a_plan_without_proxies_still_opens_a_browser(self):
+        refused = mock.Mock(status_code=402, content=b'{}')
+        made = mock.Mock(status_code=201, content=b'{}')
+        made.json.return_value = {'id': 's', 'connectUrl': 'wss://x', 'expiresAt': '2026-11-22T12:00:00Z'}
+        with mock.patch('agent_tasks.browsers.browserbase.requests.request', side_effect=[refused, made]) as sent:
+            session = Browserbase().open(profile_id='p', country='MX', seconds=900)
+        self.assertEqual(session.id, 's')
+        first, second = (call.kwargs['json'] for call in sent.call_args_list)
+        self.assertEqual(first['proxies'][0]['geolocation'], {'country': 'MX'})
+        self.assertNotIn('proxies', second)
+        # Any other refusal is not retried.
+        with mock.patch('agent_tasks.browsers.browserbase.requests.request',
+                        return_value=mock.Mock(status_code=429, content=b'{}')) as sent:
+            with self.assertRaises(browsers.BrowserUnavailable):
+                Browserbase().open(profile_id='p', country='MX', seconds=900)
+        self.assertEqual(sent.call_count, 1)
+
     def test_an_error_carries_a_code_and_never_the_body(self):
         for status, code in ((402, 'quota'), (429, 'busy'), (500, 'unavailable')):
             with self.subTest(status=status), self.answer({'connectUrl': 'wss://secret'}, status):
