@@ -572,6 +572,7 @@ class ReadingTest(LinkTestBase):
         service.accept_consent(self.user, CONSENT)
         self.assertIn(link.pk, service.due_ids())
 
+    @override_settings(WHATSAPP_LINK_PLAN_CONCURRENCY=3, WHATSAPP_LINK_MAX_SESSIONS=1)   # a small plan: its share is used
     def test_too_many_browsers_open_waits_without_blame(self):
         link = self.linked()
         self.linked(user=self._person(0), session_id='s0', session_expires_at=timezone.now() + timedelta(minutes=5))
@@ -587,6 +588,7 @@ class ReadingTest(LinkTestBase):
         from users.models import User
         return User.objects.create(username=f'wa_busy_{n}', firebase_uid=f'wa-busy-{n}')
 
+    @override_settings(WHATSAPP_LINK_PLAN_CONCURRENCY=3, WHATSAPP_LINK_MAX_SESSIONS=1)   # a small plan, two purchases on it
     def test_purchases_keep_their_browsers(self):
         from agent_tasks.models import AgentTask
         from users.models import Account
@@ -599,6 +601,7 @@ class ReadingTest(LinkTestBase):
         self.assertFalse(service._room(link, 'background'))  # a read always leaves one browser free
         self.assertTrue(service._room(link, 'pair'))
 
+    @override_settings(WHATSAPP_LINK_PLAN_CONCURRENCY=3, WHATSAPP_LINK_MAX_SESSIONS=1)   # a small plan, its share in use
     def test_a_send_is_not_held_behind_someone_elses_pairing(self):
         link = self.linked()
         self.linked(user=self._person(20), state=WhatsAppLink.State.PAIRING, session_id='pairing',
@@ -1027,3 +1030,10 @@ class SendTextTest(TestCase):
         self.assertEqual(web.signed_in_number(page), '59171234567')
         page.evaluate.return_value = ''
         self.assertEqual(web.signed_in_number(page), '')
+
+
+class PlanTest(LinkTestBase):
+    def test_on_the_developer_plan_whatsapp_has_two_browsers_and_purchases_keep_room(self):
+        from whatsapp_link import conf
+        self.assertEqual((conf.get('WHATSAPP_LINK_PLAN_CONCURRENCY'), conf.get('WHATSAPP_LINK_MAX_SESSIONS')),
+                         (25, service.SLOTS))
