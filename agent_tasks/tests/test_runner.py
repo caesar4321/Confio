@@ -1277,6 +1277,15 @@ class CheckoutTests(StepBase):
             self.assertIn('not a control I may press', task.history[-1]['result'])
         self.reader.click.assert_not_called()
 
+    def test_another_item_in_the_cart_is_set_aside_not_ordered(self):
+        # The founder's cart, 2026-11-24: a plug adapter already in it beside the chocolate.
+        for label in ('Guardar para más tarde Volteck Adaptador de Enchufe Tipo E a Tipo A', 'Eliminar Volteck Adaptador'):
+            with self.subTest(label=label):
+                self.assertTrue(guard.may_press(element(label), on_checkout=False))
+        for label in ('Eliminar mi cuenta', 'Eliminar dirección', 'Comprar ahora'):
+            with self.subTest(label=label):
+                self.assertFalse(guard.may_press(element(label), on_checkout=False))
+
     def test_amazons_prime_offer_is_declined_never_joined(self):
         # The founder's order, 2026-11-24: Amazon's /checkout/p/.../pip page between the sign-in and the review.
         self.assertTrue(guard.may_press(element('No gracias | No gracias, continuar sin Amazon Prime'),

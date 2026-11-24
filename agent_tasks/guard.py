@@ -202,6 +202,12 @@ _JOIN = re.compile(r'\b(probar|prueba|experimentar|suscrib\w*|unete|unirme|join|
                    r'|empezar|gratis|free trial)\b')
 
 
+# In the cart: setting another item aside or changing how many, so only the goal is ordered. Never
+# anything about the person's account (_NEVER and _ACCOUNT_PATH still apply).
+_CART_EDIT = re.compile(r'\b(eliminar|remover|quitar|remove|delete|excluir|guardar para mas tarde|save for later'
+                        r'|salvar para depois|guardar|cantidad|quantidade|quantity|disminuir|reducir|diminuir)\b')
+
+
 def may_press(element, *, on_checkout):
     """A control a checkout model may click: a choice, a link, or a button whose words are on the list."""
     parts = _parts(element)
@@ -229,7 +235,7 @@ def may_press(element, *, on_checkout):
         return not _ACCOUNT_PATH.search(urlsplit(element.get('href') or '').path.lower())
     if not parts:
         return False
-    allowed = _MAY_PRESS if on_checkout else _ENTER_CHECKOUT
+    allowed = _MAY_PRESS if on_checkout else re.compile(f'{_ENTER_CHECKOUT.pattern}|{_CART_EDIT.pattern}')
     if not on_checkout and any(_FINAL_BUTTON.fullmatch(p) or _FINAL_WORDS.search(p) for p in parts):
         return False   # a final button on a page not recognised as a checkout is still a final button
     return all(allowed.search(part) for part in parts) and not (on_checkout and any(_FINAL_LOOK.search(p) for p in parts))

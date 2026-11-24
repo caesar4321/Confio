@@ -203,7 +203,8 @@ How to work:
   {pay} for this order, give_up(no_payment).
 - Only the item of the goal, in the quantity asked (one, if not said). If you are still on its product page or the
   cart does not hold it yet, press its "add to cart" ("Agregar al carrito", "Adicionar ao carrinho") first. If the
-  cart holds anything else, remove it.
+  cart holds anything else (the person's own earlier items), set it aside with "Guardar para más tarde" / "Save for
+  later" when the store offers it, so it stays theirs; otherwise remove it ("Eliminar").
 - When the page shows the final button that places the order, call ready_to_order with its number, the item's
   name and the order total exactly as the page writes it. You can never press that button: the person approves
   the total first. If <done> says they approved, call ready_to_order again and it is pressed for you.
