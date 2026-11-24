@@ -159,16 +159,22 @@ _NEVER = re.compile(
     r'\b(cancelar (el |o )?(pedido|compra|orden)|cancel (the )?order|volver a comprar|comprar de nuevo'
     r'|comprar novamente|buy (it )?again|reorder|eliminar (la |mi )?(direccion|cuenta|tarjeta)|excluir (endereco|conta)'
     r'|delete (address|account)|cerrar sesion|sair|log ?out|sign ?out|prime|meli\+|suscri\w*|subscri\w*|assin\w*'
-    r'|gift ?card|tarjeta de regalo|vale[- ]presente|1[- ]clic\w*)\b')
+    r'|gift ?card|tarjeta de regalo|vale[- ]presente|1[- ]clic\w*|cerrar (mi |tu )?cuenta|close (your )?account'
+    r'|(establecer|hacer|definir|set|make|tornar) (como |as )?(predeterminad\w*|padrao|default)'
+    r'|garantia\w*|warranty|insurance)\b')
 _ACCOUNT_PATH = re.compile(r'/(logout|signout|sign-out|cancel\w*|delete\w*|unsubscribe|subscri\w*|prime|membership'
                            r'|gift-?cards?)(/|$)')
 # A button that reads as the last one of a checkout.
 _FINAL_LOOK = re.compile(r'\b(confirmar|confirma|realizar|realiza|hacer|haz|fazer|finalizar|finaliza|completar|completa'
-                         r'|concluir|place|submit|complete|pagar|paga|pay|comprar|compra|buy|gerar|generar)\b')
+                         r'|concluir|place|submit|complete|pagar|paga|pay|comprar|compra|buy|gerar|generar|ordenar'
+                         r'|order|procesar|process|pedir|terminar|tramitar|abonar|enviar (el |mi |tu )?(pedido|orden)'
+                         r'|send order|reservar)\b')
 _CONFIRMED = re.compile(
     r'pedido (realizado|confirmado|recibido|registrado)|gracias por (tu|su) (compra|pedido)|tu pedido (fue|ha sido)'
     r'|order (placed|confirmed|received)|thank you.{0,20}order|pedido (efetuado|feito|recebido)'
-    r'|obrigado pela (sua )?compra|compra (realizada|confirmada)')
+    r'|obrigado pela (sua )?compra|compra (realizada|confirmada)|pedido (esta|fue|foi) (confirmado|recibido|realizado)'
+    r'|compra (esta|fue|foi) (confirmada|realizada)|recibimos tu (pedido|compra)|recebemos (seu|o seu) pedido'
+    r'|pendiente de pago|aguardando pagamento|numero de pedido|order number')
 # A whole path segment that names an order's own page. Never a substring: a seller names
 # a product "Compra Fácil" and its slug would read as an order.
 _ORDER_SEGMENT = re.compile(
@@ -194,9 +200,12 @@ _CARD = re.compile(r'\b(tarjeta|cartao|card|credito|debito|credit|debit|visa|mas
                    r'|terminada en|final \d{4}|meses sin intereses|parcel\w*|cuotas)\b|\*{2,} ?\d{4}')
 
 
-# Declining an offer (Prime, a warranty, insurance), as the button itself reads: always the safe answer.
+# Declining an offer, as the button itself reads: fixed phrases, or "sin/sem/no quiero" + a named offer.
+_OFFER = (r'(amazon )?(prime|garantia( extendida)?|seguro|proteccion|protecao|plan|membresia|suscripcion|assinatura'
+          r'|meli\+?)')
 _DECLINE = re.compile(r'(no,? gracias|nao,? obrigado|no,? thanks|ahora no|agora nao|not now|omitir|pular|skip'
-                      r'|continuar sin \w+( \w+)?|seguir sin \w+( \w+)?|continuar sem \w+( \w+)?|continue without \w+)')
+                      r'|(sin|sem|no quiero|nao quero|continuar sin|seguir sin|continuar sem|continue without) '
+                      + _OFFER + r')')
 # Joining it, whatever else the button says.
 _JOIN = re.compile(r'\b(probar|prueba|experimentar|suscrib\w*|unete|unirme|join|start|try|activar|assinar|comecar'
                    r'|empezar|gratis|free trial)\b')
@@ -208,38 +217,152 @@ _CART_EDIT = re.compile(r'\b(eliminar|remover|quitar|remove|delete|excluir|guard
                         r'|salvar para depois|guardar|cantidad|quantidade|quantity|disminuir|reducir|diminuir)\b')
 
 
-def may_press(element, *, on_checkout):
-    """A control a checkout model may click: a choice, a link, or a button whose words are on the list."""
+# Closing what covers the page (a popup, a cookie banner): on any page.
+_DISMISS = re.compile(r'(cerrar|close|fechar|x|aceptar|accept|aceitar|entendido|ok|got it|ahora no|not now)')
+
+
+def may_press(element, *, on_checkout, stage='open', page=None):
+    """A control the checkout model may click. Code holds the lines nothing undoes, everywhere: the
+    final button (named with ready_to_order, pressed after the person approves), a card, the person's
+    account or a subscription, and leaving the store (operate.checkout checks an anchor's address).
+
+    `stage` says how free the model is beside those lines:
+    - 'open' (the cart and the checkout's steps: sign-in, offers, delivery): anything else;
+    - 'final' (a page that shows the order's total and its payment method): only choices, edits and
+      ways on ("Cambiar", "Usar este método", "Continuar"); any other button may be the one that places
+      it, so it is named for the person's approval (operate._order);
+    - 'shopping' (a product's page, which its seller writes): its add to cart, a variant, the way to the
+      cart, closing a popup."""
     parts = _parts(element)
     # "No gracias" on Amazon's Prime offer: its aria label names Prime, its own text declines it.
-    if parts and _DECLINE.fullmatch(parts[0]) and not any(_JOIN.search(part) for part in parts) \
-            and not any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in parts) \
-            and not _ACCOUNT_PATH.search(urlsplit(element.get('href') or '').path.lower()):
+    declines = bool(parts) and bool(_DECLINE.fullmatch(parts[0])) and not any(_JOIN.search(part) for part in parts) \
+        and not any(_FINAL_LOOK.search(part) or _FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part)
+                    for part in parts) \
+        and not _ACCOUNT_PATH.search(urlsplit(element.get('href') or '').path.lower()) \
+        and not any(card_words(part) for part in parts) and not element.get('cut') \
+        and not (stage in ('final', 'money') and (element.get('type') == 'submit' or (
+            element.get('tag') == 'a' and urlsplit(element.get('href') or '').scheme not in ('http', 'https'))))
+    if declines:
         return True
-    if any(_NEVER.search(part) for part in parts):
+    # The person's account, a subscription, another order, a gift card: never.
+    if any(_NEVER.search(part) for part in parts) or _ACCOUNT_PATH.search(urlsplit(element.get('href') or '').path.lower()):
         return False
-    # A label for the final button, or a tab or option that holds it, presses that button.
-    # A radio or checkbox submits nothing: "Pagar con SPEI" there is the method, chosen.
+    # A card is never added nor chosen: the order is paid by the country's own rail.
+    if any(card_words(part) for part in parts):
+        return False
     tick = (element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')) \
         or element.get('role') in ('radio', 'checkbox')
+    # The final button, under any tag (a label or tab that holds it presses it too). A radio or checkbox
+    # submits nothing: "Pagar con SPEI" there is the method, chosen.
     if not tick and any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in parts):
         return False
-    if element.get('tag') in ('label', 'select') or element.get('role') in ('radio', 'checkbox', 'option', 'tab') \
-            or (element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')):
+    real_tick = element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')
+    if real_tick and any(_FINAL_WORDS.search(part) for part in parts):
+        return False   # "Confirmar pedido" on a checkbox is still the order
+    if real_tick or element.get('tag') == 'select':
         return True
-    if element.get('tag') == 'a':
-        # An anchor dressed as the final button is that button, whatever its tag.
-        if any(_FINAL_LOOK.search(part) or _FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part)
-               for part in parts):
-            return False
-        return not _ACCOUNT_PATH.search(urlsplit(element.get('href') or '').path.lower())
+    if tick:   # a store's own role on a div: never one whose words may place the order
+        return not any(_FINAL_LOOK.search(part) for part in parts)
+    if element.get('role') in ('option', 'tab'):
+        return stage not in ('final', 'money')   # there a store's own role names nothing
     if not parts:
         return False
-    allowed = _MAY_PRESS if on_checkout else re.compile(f'{_ENTER_CHECKOUT.pattern}|{_CART_EDIT.pattern}')
-    if not on_checkout and any(_FINAL_BUTTON.fullmatch(p) or _FINAL_WORDS.search(p) for p in parts):
-        return False   # a final button on a page not recognised as a checkout is still a final button
-    return all(allowed.search(part) for part in parts) and not (on_checkout and any(_FINAL_LOOK.search(p) for p in parts))
+    if element.get('tag') == 'a' and (urlsplit(element.get('href') or '').scheme not in ('http', 'https')
+                                      or (stage != 'after' and acts(element.get('href') or ''))):
+        return False   # a link that is no real address, or one whose address acts
+    if element.get('cut') and stage in ('final', 'money', 'open'):
+        return False   # a label too long to read whole: what it says past the cut is never guessed
+    if any(_FINAL_LOOK.search(part) for part in parts) and not (
+            not on_checkout and element.get('tag') != 'a' and all(_ENTER_CHECKOUT.fullmatch(part) for part in parts)):
+        return False
+    if stage in ('final', 'money'):
+        # Only what edits or chooses, by its whole label, or a plain way on. On the last page (its total and
+        # its payment method) a way on only beside the page's own final button: else it may be the one, and
+        # is named for approval. A link that is no real address, or this same page, acts by script: never.
+        if element.get('tag') == 'a':
+            href = urlsplit(element.get('href') or '')
+            here = urlsplit(page.url) if page is not None else None
+            if href.scheme not in ('http', 'https') or acts(element.get('href') or '') or (
+                    here is not None and (href.netloc, href.path, href.query) == (here.netloc, here.path, here.query)):
+                return False
+        if all(_FINAL_SAFE.fullmatch(part) for part in parts):
+            return True
+        if not all(_WAY_ON.fullmatch(part) for part in parts):
+            return False
+        return stage == 'money' or (page is not None and any(
+            final_button(other) for other in page.elements if other is not element
+            and other.get('on_screen', True) and not other.get('disabled') and other.get('tag') != 'a'))
+    if stage == 'shopping':
+        return element.get('tag') == 'a' or all(
+            _ADD_TO_CART.fullmatch(part) or _ENTER_CHECKOUT.search(part) or _DISMISS.fullmatch(part)
+            for part in parts)
+    return True
 
+
+# On the last page: what edits or chooses, by its whole label.
+_NOUN = (r'(direccion|direccion de envio|metodo de pago|forma de pago|opcion de envio|opcion|envio|entrega|endereco'
+         r'|forma de pagamento|opcao de envio|address|payment method|shipping option|delivery option|cantidad'
+         r'|quantidade|quantity)')
+_FINAL_SAFE = re.compile(
+    r'(cambiar|editar|modificar|alterar|trocar|change|edit|ver( mas| todo| detalles?)?|mostrar( mas)?|show( more)?'
+    r'|ocultar|hide|cerrar|close|fechar|seleccionar|elegir|escolher|selecionar|select|choose|quitar|eliminar'
+    r'|remover|remove|(usar|use|utilizar) (este|esta|this|esse|essa) ' + _NOUN
+    + r'|(entregar|enviar|deliver|ship) (a|to|para) (esta|this|essa) ' + _NOUN
+    + r'|(cambiar|editar|change|alterar|elegir|seleccionar) (la |el |o |a |the )?' + _NOUN + r')')
+# A plain way on, its whole label.
+_WAY_ON = re.compile(r'(continuar|continue|siguiente|next|proceder|proceed|seguir|avanzar|avancar|prosseguir)')
+
+
+def final_step(text, elements=()):
+    """A page that shows the order's total and how it is paid: where the order is placed."""
+    from .operate import _GRAND_TOTAL, _METHOD_LABEL
+    folded = fold(text[:100000])
+    total = _GRAND_TOTAL.search(folded) or re.search(r'\btotal\b[^\d]{0,30}\d', folded)
+    return bool(total) and (
+        bool(_METHOD_LABEL.search(folded)) or any(element.get('checked') for element in elements))
+
+
+_MONEY = re.compile(r'(\$|r\$|s/\.?|bs\.?|gs\.?|mxn|brl|bob|usd|cop|clp|pen|ars|eur|€)\s?\d'
+                    r'|\d[\d.,]*\s?(mxn|brl|bob|usd|cop|clp|pen|ars|pyg|uyu|gs|soles|pesos|reais|bolivianos)\b'
+                    r'|\btotal\b[^\d]{0,30}\d')
+
+
+def stage_of(page, *, on_checkout):
+    """How free the checkout model is on this page (may_press)."""
+    path = urlsplit(page.url).path.lower()
+    if login_address(page.url):
+        return 'open'
+    if not on_checkout and product_address(page.url):
+        return 'shopping'   # a product's own page, which its seller writes: never the last page
+    if final_step(page.text, page.elements):
+        return 'final'
+    if re.search(r'/(cart|carrito|carrinho|cesta|bag|basket|sacola)\b', path):
+        return 'money' if on_checkout and _MONEY.search(fold(page.text[:100000])) else 'open'
+    if on_checkout:
+        # A checkout step that shows money: edits, choices and plain ways on only (its final button by its
+        # words still goes to the person). With no figure at all (a sign-in or an offer step): free.
+        return 'money' if _MONEY.search(fold(page.text[:100000])) else 'open'
+    return 'shopping'
+
+
+def ship_to(text):
+    """The delivery address as the checkout writes it (folded), or '': part of what the person approves."""
+    from .operate import _METHOD_LABEL
+    folded = fold(text[:100000])
+    found = list(re.finditer(
+        r'\b(enviar a|enviando a|enviaremos a|direccion de envio|direccion de entrega|entregar a|entregando a'
+        r'|entrega en|envio a|se enviara a|endereco de entrega|entregar em|enviar para|shipping address'
+        r'|deliver(ing)? to|ship(ping)? to|domicilio( de entrega)?|recibir en|recibe en)\b\s*'
+        r'((cambiar|editar|alterar|change)\s*)?', folded))
+    if not found:
+        return ''
+    # The checkout's own address block: the label nearest its payment method (not a header's location bar).
+    method = _METHOD_LABEL.search(folded)
+    best = min(found, key=lambda m: abs(m.start() - method.start())) if method else found[-1]
+    block = re.split(r'\b(cambiar|editar|alterar|change|modificar|trocar|metodo de pago|forma de pago|total'
+                     r'|llega|llegada|entrega estimada|pide en|arrives?|chega|receba|enviar a|enviando a)\b'
+                     r'|\ben \d+ ?h(rs?|oras?)?\b', folded[best.end():best.end() + 140])[0]
+    return ' '.join(block.split())[:120]
 
 def final_looking(element):
     """A control that could be the one that places the order (named, never pressed, by a model)."""
@@ -282,6 +405,12 @@ def order_address(url):
     # Elsewhere an order's word AND an order's number: "/pedido/123", never "/loja/compras".
     return any(_ORDER_SEGMENT.fullmatch(segment) for segment in segments) \
         and any(re.search(r'\d', segment) for segment in segments)
+
+
+def product_address(url):
+    parts = urlsplit(url or '')
+    return bool(_PRODUCT_HOST.match((parts.hostname or '').lower())
+                or any(_PRODUCT_SEGMENT.fullmatch(segment) for segment in _segments(parts, fragment=False)))
 
 
 def login_address(url):

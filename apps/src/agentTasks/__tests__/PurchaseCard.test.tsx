@@ -104,6 +104,13 @@ it('the order is approved with one tap, showing the item and the total', async (
   expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$112.50' });
 });
 
+it('the order card says where it is delivered', async () => {
+  mockTask = task({ reason: 'approve', options: [],
+    order: { item: 'Chocolate Ibarra', total: '$189.00', image: '', address: 'ana perez, calle 1 #23, cdmx' } });
+  const tree = await mount();
+  expect(texts(tree)).toContain('Envío a: ana perez, calle 1 #23, cdmx');
+});
+
 it('a code the store sent is typed in the card', async () => {
   mockTask = task({ reason: 'otp', options: [], message: 'amazon.com.mx te envió un código…' });
   mockMutate.mockResolvedValue(answered('giveAgentCode'));

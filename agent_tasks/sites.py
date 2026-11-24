@@ -43,6 +43,19 @@ KNOWN = {
     'falabella.com.co': ('falabella',),
     'falabella.com.pe': ('falabella',),
 }
+# Many sellers under one store: a seller's words reach the order's page there (titles, messages), so no
+# account read off it is ever handed to the person (manual.py). Every known store counts as one.
+_MARKETPLACE = re.compile(r'(^|\.)(mercadoli(vre|bre)|amazon|falabella|ripley|linio|paris|exito|juntoz|dafiti'
+                          r'|shopee|aliexpress|temu|shein|walmart|liverpool|coppel|claroshop|sears|elektra|plazavea'
+                          r'|oechsle|hiraoka|tiendamia|olx|fravega|garbarino|tiendabna|carrefour|jumbo|lider|alkosto'
+                          r'|ktronix|olimpica|americanas|magazineluiza|magalu|casasbahia|kabum|netshoes|centauro'
+                          r'|etsy|ebay|wish|tokopedia)\.')
+
+
+def marketplace(site):
+    return site in KNOWN or site in CHECKOUT_HOUSE or bool(_MARKETPLACE.search(f'.{site}'))
+
+
 # Other names of a known store.
 ALSO = {'mercadolivre.com.br': ('mercadolivre.com', 'mercadolibre.com'), 'magazineluiza.com.br': ('magalu.com',),
         # Mercado Libre signs in on its .com host in every country.

@@ -321,7 +321,7 @@ def approve(account, user, task_id, total=None):
         # The card they tapped showed another order: they approve what they saw, or nothing.
         raise TaskRefused('not_open')
     # Bound to that item, that total, that button, on that page; used once (operate._order).
-    order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item')}
+    order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item', 'address')}
     order['approved']['manual'] = bool(order.get('manual'))   # who pays it, as their card said
     return _answered(account, user, task_id, 'approve', order=order)
 

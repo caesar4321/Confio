@@ -362,7 +362,10 @@ class Step:
                 return self.stop('cannot_do')
             self.save(pending_url='')
             browser.goto(address)
-            return self.remember('open the chosen product', 'ok')
+            self.remember('open the chosen product', 'ok')
+            # Picked: from its own page the agent buys it, pressing what the store needs (its add to
+            # cart included) under the checkout's lines (operate.py, guard.may_press).
+            return self.hand_checkout()
         reader = pages.Reader(browser)
         seen = reader.read()
         self.seen_url = seen.url
@@ -450,10 +453,9 @@ class Step:
             service.require_payable(self.task.account, self.task.user, self.task.country, app_meta(self.task))
         except service.TaskRefused:
             return self.stop('cannot_pay')
-        # The item is in the cart: from here the agent works the checkout itself (operate.py).
-        from . import operate
-        return self.remember('ready for the checkout', 'the item is in the cart: go to the checkout',
-                             phase='ordering')
+        # From here the agent buys it itself (operate.py): into the cart if it is not there, then the checkout.
+        return self.remember('ready for the checkout', 'add the item to the cart if it is not there, then go to '
+                                                       'the checkout', phase='ordering')
 
     def act(self, browser, reader, seen, name, args):
         task = self.task
@@ -639,10 +641,13 @@ class Step:
             if not amount_ok or fields.get('58') not in (None, rail.country) \
                     or (rail.numeric and fields.get('53') not in (None, rail.numeric)):
                 return self.stop('unpaid')
+            if rail.kind == 'manual' and not (fields.get('58') == rail.country and rail.numeric
+                                              and fields.get('53') == rail.numeric and '54' in fields):
+                code = ''   # nothing vouches for a QR there: only one that says this order's own amount
             pay_qr = code
         details = [{'label': label, 'value': str(value)} for label, value in details if str(value or '').strip()]
-        if not pay_qr and not details:
-            return self.stop('unpaid')
+        if not pay_qr and not any(item['label'] != 'Monto' for item in details):
+            return self.stop('unpaid')   # an amount alone pays nothing
         if not any(item['label'] == 'Monto' for item in details):
             details.insert(0, {'label': 'Monto', 'value': str(order.get('total'))})
         self.save(order={**order, 'pay_qr': pay_qr, 'pay_details': details, 'offer': offer},
@@ -652,36 +657,24 @@ class Step:
         notes.post(task, text, 'payment', push='payment', push_body=text)
 
     def read_manual(self, shots, rail):
-        """A country Confío pays no store in: the data the model pointed at, kept only where the
-        order's page writes it (in both pictures), the amount the person approved, and its QR if any."""
-        from . import operate
+        """A country Confío pays no store in: what the order's page prints beside the store's own
+        payment labels (manual.py, never the model's copy), for the amount the person approved,
+        and its QR when the QR itself says this country, currency and amount."""
+        from . import manual
         task = self.task
         order = task.order or {}
-        shown = order.get('shown') or {}
-
-        def written(value):
-            value = re.sub(r'\s+', ' ', guard.fold(value)).strip()
-            if len(value) < 2:
-                return False
-            return all(value in re.sub(r'\s+', ' ', guard.fold(' '.join((*shot.text, *shot.words))))
-                       for shot in shots)
-
-        amount = shown.get('amount') or ''
-        if not amount or not written(amount):
-            return self.unread('code')
         try:
-            if operate.amount_of(amount) != Decimal(str(order.get('amount'))):
-                return self.stop('unpaid')   # another order's (or a seller's) amount
-        except Exception:  # noqa: BLE001
+            approved = Decimal(str(order.get('amount')))
+        except Exception:  # noqa: BLE001 - no amount the person approved: nothing to hand them
             return self.stop('unpaid')
-        labels = (('method', 'Medio'), ('reference', 'Referencia'), ('account', 'Cuenta'), ('bank', 'Banco'),
-                  ('holder', 'Titular'), ('deadline', 'Paga antes de'))
-        details = [('Monto', amount)] + [(label, shown[key]) for key, label in labels
-                                        if shown.get(key) and written(shown[key])]
+        details, why = manual.read(shots, approved, str(order.get('item') or ''),
+                                   marketplace=sites.marketplace(task.site))
+        if why == 'several':
+            return self.unread(why)   # doubtful: nothing is handed over, not even a QR beside it
         code, _ = code_on_screen(shots, rail)
-        if not code and not any(label in ('Referencia', 'Cuenta') for label, _ in details):
-            return self.unread('code')   # nothing to pay it with: back to the agent to find the page
-        return self.hand_manual(rail, code=code, details=details)
+        if why and not code:
+            return self.unread(why)
+        return self.hand_manual(rail, code=code, details=[('Monto', str(order.get('total')))] + (details or []))
 
     def unread(self, why):
         from . import operate

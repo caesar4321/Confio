@@ -15,7 +15,7 @@ const TASK_FIELDS = `
   payDetails { label value }
   openAccountMethod
   options { title price image }
-  order { item total image }
+  order { item total image address }
 `;
 
 export const GET_AGENT_TASK = gql`
@@ -70,7 +70,7 @@ export const FORGET_AGENT_STORE = gql`
 `;
 
 export type AgentOption = { title: string; price: string; image: string };
-export type AgentOrder = { item: string; total: string; image: string };
+export type AgentOrder = { item: string; total: string; image: string; address?: string | null };
 
 export type AgentTask = {
   id: string;

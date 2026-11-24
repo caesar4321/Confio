@@ -7,7 +7,7 @@ from unittest import mock
 from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
-from agent_tasks import agent, browsers, countries, guard, operate, runner, service, vault
+from agent_tasks import agent, browsers, countries, guard, operate, runner, service, sites, vault
 from agent_tasks.cdp import CdpError
 from agent_tasks.models import AgentProfile, AgentTask
 
@@ -255,10 +255,8 @@ class HandOverTests(StepBase):
         self.browser.goto.assert_called_with(f'{BASE}/p/B')
         self.assertEqual(task.pending_url, '')
         self.decide.assert_not_called()
-        self.decide.return_value = ('offer_products', {'items': [{'ref': 1, 'title': 'x', 'price': ''}]})
-        task = self.step(task, self.results())
-        self.assertEqual(task.state, 'working')
-        self.assertIn('already offered', task.history[-1]['result'])
+        # Picked: the agent buys it from its page (its add to cart included) under the checkout's lines.
+        self.assertEqual((task.state, task.phase), ('working', 'ordering'))
 
     def test_a_pick_that_is_not_there_or_not_asked_is_refused(self):
         task = self.offered()
@@ -839,58 +837,122 @@ class BoliviaTests(StepBase):
         self.assertEqual(self.outcome([(BO_QR, 150)], method='br_qr'), 'unpaid')
 
 
-@override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE',))
+@override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE', 'AR'))
 class ManualCountryTests(StepBase):
-    """A country Confío pays no store in: the person pays the order's own data from their bank."""
+    """A country Confío pays no store in: what the order's page prints beside the store's own labels."""
 
-    SHOWN = {'method': 'Transferencia bancaria', 'amount': 'S/ 189,00', 'reference': 'PED-55120',
-             'account': '191-2345678-0-12', 'bank': 'BCP', 'holder': 'Tienda SAC', 'deadline': ''}
-    PAGE = ('Gracias por tu compra', 'Pedido PED-55120', 'Medio de pago: Transferencia bancaria', 'Transfiere S/ 189,00 a', 'BCP cuenta 191-2345678-0-12',
-            'a nombre de Tienda SAC', 'Indica la referencia PED-55120')
+    PAGE = ('Gracias por tu compra', 'Pedido 55120', 'Chocolate Sublime 6 unidades', 'Transferencia bancaria',
+            'Monto a pagar', 'S/ 189,00', 'Banco', 'BCP', 'Cuenta', '191-2345678-0-12', 'Titular', 'Tienda SAC',
+            'Referencia', 'PED-55120', 'Vence', '26 de noviembre')
 
     def setUp(self):
         super().setUp()
         self.read = self.patch('agent_tasks.qr.read', return_value=[])
 
-    def outcome(self, shown=None, page=None):
+    def outcome(self, page=None, site='tienda.com.pe', country='PE', item='Chocolate Sublime', again=None):
         self.task = self.make_task(state='awaiting_code', checkout_at=timezone.now(), shown_target='tab',
-                                   site='tienda.com.pe', country='PE', phase='ordered',
-                                   order={'amount': '189.00', 'total': 'S/ 189,00', 'pressed': True,
-                                          'shown': shown or self.SHOWN})
-        url = 'https://tienda.com.pe/pedido/55120'
-        self.browser.capture.return_value = (picture(url=url, text=page or self.PAGE),
-                                             picture(url=url, text=page or self.PAGE))
+                                   site=site, country=country, phase='ordered',
+                                   order={'amount': '189.00', 'total': 'S/ 189,00', 'pressed': True, 'item': item})
+        url = f'https://www.{site}/compras/2000005' if site in sites.KNOWN else f'https://{site}/pedido/55120'
+        page = page or self.PAGE
+        self.browser.capture.return_value = (picture(url=url, text=page), picture(url=url, text=again or page))
         self.reading()
         self.task.save()
         task = self.step(self.task)
         AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
         return task
 
-    def test_what_the_order_page_writes_is_handed_to_them(self):
+    def details(self, task):
+        return {d['label']: d['value'] for d in (task.order or {}).get('pay_details') or []}
+
+    def test_what_the_page_prints_beside_its_labels_is_handed_to_them(self):
         task = self.outcome()
         self.assertEqual((task.state, task.reason), ('payment_ready', 'manual'))
-        details = {d['label']: d['value'] for d in task.order['pay_details']}
-        self.assertEqual(details, {'Monto': 'S/ 189,00', 'Medio': 'Transferencia bancaria',
-                                   'Referencia': 'PED-55120', 'Cuenta': '191-2345678-0-12', 'Banco': 'BCP',
-                                   'Titular': 'Tienda SAC'})
+        self.assertEqual(self.details(task), {'Monto': 'S/ 189,00', 'Cuenta': '191-2345678-0-12',
+                                              'Referencia': 'PED-55120', 'Titular': 'Tienda SAC', 'Banco': 'BCP',
+                                              'Paga antes de': '26 de noviembre'})
         from agent_tasks.schema import task_type
-        self.assertEqual(len(task_type(task).pay_details), 6)
+        self.assertIn('Nadie en Confío verificó', task_type(task).message)
 
-    def test_only_what_the_page_writes_is_kept(self):
-        task = self.outcome(shown={**self.SHOWN, 'account': '999-0000000-0-99', 'holder': 'Otra SAC'})
-        details = {d['label'] for d in task.order['pay_details']}
-        self.assertNotIn('Cuenta', details)
-        self.assertNotIn('Titular', details)
-        self.assertIn('Referencia', details)
+    def test_an_account_in_the_items_title_is_never_taken(self):
+        page = tuple('Chocolate Cuenta 191-2345678-0-12' if node == 'Chocolate Sublime 6 unidades' else node
+                     for node in self.PAGE)
+        task = self.outcome(page=page, item='Chocolate Cuenta 191-2345678-0-12')
+        self.assertNotEqual(task.state, 'payment_ready')
+
+    def test_two_accounts_are_never_chosen_between(self):
+        page = (*self.PAGE, 'Cuenta', '999-0000000-0-99')
+        task = self.outcome(page=page)
+        self.assertNotEqual(task.state, 'payment_ready')
+
+    def test_a_transfer_with_no_account_goes_back_to_the_agent(self):
+        page = tuple(node for node in self.PAGE if node not in ('Cuenta', '191-2345678-0-12'))
+        task = self.outcome(page=page)
+        self.assertEqual(task.history[-1]['did'], runner.UNREAD)
 
     def test_another_amount_is_never_handed_over(self):
-        page = tuple(node.replace('189,00', '19,00') for node in self.PAGE)
-        task = self.outcome(shown={**self.SHOWN, 'amount': 'S/ 19,00'}, page=page)
-        self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'))
+        page = tuple('S/ 19,00' if node == 'S/ 189,00' else node for node in self.PAGE)
+        task = self.outcome(page=page)
+        self.assertNotEqual(task.state, 'payment_ready')
+        self.assertEqual(task.history[-1]['did'], runner.UNREAD)   # back to the agent, a few times at most
 
-    def test_nothing_to_pay_it_with_goes_back_to_the_agent(self):
-        task = self.outcome(shown={**self.SHOWN, 'reference': 'X-1', 'account': 'Y-2'})
-        self.assertEqual(task.history[-1]['did'], runner.UNREAD)
+    def test_a_sellers_account_above_the_stores_block_is_never_chosen(self):
+        seller = ('Mensaje del vendedor', 'Total', 'S/ 189,00', 'Cuenta', '0000003100099999999999',
+                  *(f'Linea {n}' for n in range(20)))
+        task = self.outcome(page=(*seller, *self.PAGE))
+        self.assertNotEqual(task.state, 'payment_ready')
+
+    def test_an_account_number_and_a_cci_are_both_handed_over(self):
+        page = ('Gracias', 'Chocolate Sublime 6 unidades', 'Transferencia bancaria', 'Monto a pagar',
+                'S/ 189.00 (incluye S/ 28.83 IGV)', 'Banco', 'BCP', 'Nro. de cuenta', '191-2345678-0-12',
+                'Cuenta interbancaria (CCI)', '002-191-002345678012-55', 'Titular', 'Tienda SAC')
+        task = self.outcome(page=page)
+        details = self.details(task)
+        self.assertEqual((details.get('Cuenta'), details.get('CCI')), ('191-2345678-0-12', '002-191-002345678012-55'))
+
+    def test_a_cbu_and_its_alias_on_an_argentine_store(self):
+        page = ('¡Gracias por tu compra!', 'Chocolate Águila', 'Transferencia bancaria', 'Total', '$ 189,00',
+                'CBU: 0170099220000067797370', 'Alias: tienda.cacao.mp', 'Titular: Cacao SRL')
+        task = self.outcome(page=page, site='tiendacacao.com.ar', country='AR', item='Chocolate Águila')
+        self.assertEqual(self.details(task), {'Monto': 'S/ 189,00', 'CBU/CVU': '0170099220000067797370',
+                                              'Alias': 'tienda.cacao.mp', 'Titular': 'Cacao SRL'})
+
+    def test_a_product_code_is_never_the_payment_reference(self):
+        page = (*self.PAGE[:3], 'Código: RM-1234', *self.PAGE[3:])
+        task = self.outcome(page=page)
+        self.assertEqual(self.details(task)['Referencia'], 'PED-55120')
+
+    def test_a_voucher_with_transfer_words_in_the_footer_is_still_one(self):
+        page = ('Gracias', 'Chocolate', 'Paga en efectivo', 'Monto a pagar', 'S/ 189,00', 'Código CIP', '2398 4471',
+                'Paga antes de', '26/11 23:59', *(f'Linea {n}' for n in range(20)),
+                'Medios de pago: transferencia, Rapipago')
+        task = self.outcome(page=page, item='Chocolate')
+        self.assertEqual(self.details(task).get('Referencia'), '2398 4471')
+
+    def test_the_two_pictures_must_agree(self):
+        changed = tuple('PED-99999' if node == 'PED-55120' else node for node in self.PAGE)
+        task = self.outcome(again=changed)
+        self.assertEqual(task.history[-1]['result'], 'screen')
+
+    def test_on_a_marketplace_only_the_stores_payment_code_is_taken(self):
+        page = ('Compra 2000005', 'Chocolate', 'Pagá en Rapipago', 'Monto a pagar', '$ 189,00',
+                'Código de pago', '3456 7890 1234', 'Cuenta', '0000003100012345678901', 'Titular', 'Juan P')
+        task = self.outcome(page=page, site='mercadolibre.com.ar', country='AR', item='Chocolate')
+        self.assertEqual((task.state, self.details(task)), ('payment_ready', {'Monto': 'S/ 189,00',
+                                                                             'Referencia': '3456 7890 1234'}))
+
+    def test_on_a_marketplace_a_transfer_is_never_handed_over(self):
+        page = ('Compra 2000005', 'Chocolate', 'Transferí al CBU', 'Monto a pagar', '$ 189,00',
+                'CBU', '0000003100012345678901', 'Titular', 'Juan P')
+        task = self.outcome(page=page, site='mercadolibre.com.ar', country='AR', item='Chocolate')
+        self.assertNotEqual(task.state, 'payment_ready')
+
+    def test_a_qr_there_counts_only_when_it_names_this_orders_amount(self):
+        from agent_tasks import manual
+        with mock.patch('agent_tasks.runner.code_on_screen', return_value=('QRSIMPLE:no-emv-at-all', '')):
+            task = self.outcome()
+        self.assertEqual(task.order['pay_qr'], '')   # an opaque QR is not shown; the labelled data is
+        self.assertIn('Cuenta', self.details(task))
 
 
 class PayModeTests(SimpleTestCase):
@@ -1110,6 +1172,99 @@ class CheckoutTests(StepBase):
             self.assertEqual(self.reader.click.called, pressed, ref)
         self.assertIsNone(task.checkout_at)
 
+    def test_tonights_amazon_controls_are_the_models_to_press(self):
+        # The founder's Amazon México runs, 2026-11-24, each stopped by a word list: now pressed.
+        product = f'{BASE}/p/MLB1'
+        for label, url in (('Agregar al Carrito | Agregar al carrito', product),
+                           ('Ir al carrito', product), ('1 Carrito | 1 artículo en el carrito', product),
+                           ('Guardar para más tarde Volteck Adaptador de Enchufe Tipo E a Tipo A', f'{BASE}/gp/cart'),
+                           ('No gracias | No gracias, continuar sin Amazon Prime', CHECKOUT),
+                           ('Usar esta dirección', CHECKOUT), ('Envío estándar gratis', CHECKOUT),
+                           ('Proceder al pago | Proceed to checkout', f'{BASE}/gp/cart'), ('Cerrar', CHECKOUT)):
+            with self.subTest(label=label):
+                self.assertTrue(guard.may_press(element(label), on_checkout=url == CHECKOUT), label)
+        # The four lines hold, on or off a recognised checkout.
+        for label in ('Confirmar', 'Realizar pedido', 'Pagar ahora', 'Comprar ahora', 'Agregar tarjeta de crédito',
+                      'Pagar a meses sin intereses', 'Prueba Prime gratis', 'Eliminar mi cuenta', 'Cerrar sesión'):
+            for on_checkout in (True, False):
+                with self.subTest(label=label, on_checkout=on_checkout):
+                    self.assertFalse(guard.may_press(element(label), on_checkout=on_checkout), label)
+
+    def test_on_the_last_page_an_unknown_button_is_named_for_approval_never_pressed(self):
+        # "Procesar pago" carries no final word: on the page with the total and the method it is the person's.
+        page = snap('Resumen Chocolate Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
+            element('Pix', ref=0, role='radio', tag='div', checked=True), element('Procesar pago', ref=1),
+            element('Cambiar', ref=2), element('Continuar', ref=3)])
+        task = self.make_task(phase='ordering', goal='chocolate')
+        self.operate.return_value = ('press', {'ref': 1})
+        task = self.step(task, page)
+        self.reader.click.assert_not_called()
+        self.assertIn('ready_to_order', task.history[-1]['result'])
+        for ref in (2, 3):   # an edit stays the model's; "Continuar" with no final button beside it may be the one
+            self.operate.return_value = ('press', {'ref': ref})
+            task = self.step(task, page)
+        self.assertEqual(self.reader.click.call_count, 1)
+        beside = snap(page.text, CHECKOUT, elements=[*page.elements, element('Realizar pedido', ref=4)])
+        self.assertTrue(guard.may_press(element('Continuar'), on_checkout=True, stage='final', page=beside))
+        self.assertFalse(guard.may_press(element('Continuar'), on_checkout=True, stage='final', page=page))
+        self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate', 'total': 'R$ 189,00'})
+        task = self.step(task, page)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+
+    def test_a_checkout_page_with_money_is_held_to_the_last_pages_rules(self):
+        # "Total $1,299.00" with no long total label: still strict on a checkout.
+        page = snap('Revisa tu pedido Total $1,299.00', f'{BASE}/checkout/review',
+                    elements=[element('Procesar pago', ref=0), element('Ordenar', ref=1)])
+        self.assertEqual(guard.stage_of(page, on_checkout=True), 'money')
+        for label in ('Procesar pago', 'Ordenar', 'Enviar orden', 'OK', 'Sin costo adicional', 'Sin comisión | Pagar',
+                      'Usar esta dirección y enviar pedido', 'Continuar y enviar pedido', 'Proceder con el pedido'):
+            for stage in ('money', 'final'):
+                self.assertFalse(guard.may_press(element(label), on_checkout=True, stage=stage, page=page), label)
+        for href in (f'{BASE}/checkout/review#', 'javascript:void(0)'):
+            fake = element('Continuar', tag='a', href=href)
+            self.assertFalse(guard.may_press(fake, on_checkout=True, stage='money', page=page), href)
+        # A middle step's plain way on, and its edits: the model's.
+        for label in ('Continuar', 'Usar esta dirección', 'Usar este método de pago', 'Cambiar dirección',
+                      'No gracias', 'Sin garantía'):
+            self.assertTrue(guard.may_press(element(label), on_checkout=True, stage='money', page=page), label)
+        self.assertEqual(guard.stage_of(snap('Total S/. 120.00', f'{BASE}/checkout/pago', elements=[]),
+                                        on_checkout=True), 'money')
+        # A sign-in or offer step with no figure stays free.
+        offer = snap('¿Quieres Prime?', f'{BASE}/checkout/p/1/pip', elements=[])
+        self.assertEqual(guard.stage_of(offer, on_checkout=True), 'open')
+
+    def test_the_address_is_read_beside_the_payment_not_from_the_header(self):
+        text = ('Enviar a Julian - Ciudad 01000 Buscar ... Enviando a Ana Perez, Calle 1 #23, CDMX Cambiar '
+                'Llega mañana Metodo de pago SPEI Total del pedido $189.00')
+        self.assertEqual(guard.ship_to(text), 'ana perez, calle 1 #23, cdmx')
+        self.assertTrue(guard.may_press(element('Envío estándar (Predeterminada)', role='radio'), on_checkout=True,
+                                        stage='final'))
+        self.assertTrue(guard.may_press(element('Sin garantía'), on_checkout=True))
+
+    def test_a_product_page_is_its_add_to_cart_and_the_way_on(self):
+        product = snap('Chocolate Abuelita. Agrega la garantía!', f'{BASE}/p/MLB1', elements=[
+            element('Agregar al carrito', ref=0), element('Agregar garantía extendida', ref=1),
+            element('Ver más productos del vendedor', ref=2, tag='a', href=f'{BASE}/loja/x'),
+            element('Seguir al vendedor', ref=3), element('Cerrar', ref=4)])
+        stage = guard.stage_of(product, on_checkout=False)
+        self.assertEqual(stage, 'shopping')
+        pressed = {label: guard.may_press(element(label), on_checkout=False, stage=stage)
+                   for label in ('Agregar al carrito', 'Agregar garantía extendida', 'Seguir al vendedor', 'Cerrar',
+                                 'Ir al carrito')}
+        self.assertEqual(pressed, {'Agregar al carrito': True, 'Agregar garantía extendida': False,
+                                   'Seguir al vendedor': False, 'Cerrar': True, 'Ir al carrito': True})
+
+    def test_the_delivery_address_is_part_of_the_approval(self):
+        page = checkout_page(extra='Enviar a Ana Pérez, Calle 1 #23, CDMX Cambiar')
+        self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
+        task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
+        self.assertIn('calle 1', task.order['address'])
+        task = service.approve(self.account, self.user, task.internal_id)
+        moved = checkout_page(extra='Enviar a Otra Persona, Av 9, GDL Cambiar')
+        task = self.step(task, moved)
+        self.reader.click.assert_not_called()   # another address: asked again
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+
     def test_what_changes_the_account_or_buys_something_else_is_never_pressed(self):
         task = self.make_task(phase='ordering')
         for label in ('Cancelar pedido', 'Prueba Prime gratis', 'Comprar novamente', 'Eliminar dirección',
@@ -1231,7 +1386,10 @@ class CheckoutTests(StepBase):
     @override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE',))
     def test_where_the_person_pays_it_any_way_but_a_card_or_a_wallet(self):
         for method, approved in (('Transferencia bancaria', True), ('PagoEfectivo', True), ('PayPal', False),
-                                 ('Tarjeta de crédito', False), ('Mercado Pago', False)):
+                                 ('Tarjeta de crédito', False), ('Mercado Pago', False),
+                                 ('PagoEfectivo (banca móvil, Yape, Plin, agentes)', True), ('PSE', False),
+                                 ('QR de Mercado Pago', False), ('Yape', False), ('MODO', False),
+                                 ('Transferencia con Bancolombia', False), ('Efectivo en Rapipago', True)):
             with self.subTest(method=method):
                 AgentTask.objects.filter(user=self.user).update(state='cancelled')
                 page = checkout_page(total='S/ 189,00', url='https://tienda.com.pe/checkout/review', method=method)
@@ -1240,8 +1398,49 @@ class CheckoutTests(StepBase):
                                                 country='PE'), page)
                 self.assertEqual(task.reason == 'approve', approved, task.history[-1])
 
-    def test_another_total_item_or_page_is_never_pressed_it_is_asked_again(self):
-        for change in ({'total': 'R$ 249,00'}, {'url': f'{BASE}/checkout/other'}):
+    def test_the_same_purchase_on_the_next_page_is_pressed_under_its_approval(self):
+        task = self.approved()
+        self.operate.return_value = self.ORDER
+        task = self.step(task, checkout_page(url=f'{BASE}/checkout/other'))
+        self.reader.click.assert_called_once()
+
+    def test_an_approved_way_on_keeps_the_approval_for_the_stores_final_button(self):
+        # Amazon's payment step: "Continuar" on the page with the total and the method, approved; then the review.
+        page = snap('Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
+            element('Pix', ref=0, role='radio', tag='input', type='radio', checked=True), element('Continuar', ref=1)])
+        self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
+        task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
+        self.assertEqual(task.reason, 'approve')
+        task = service.approve(self.account, self.user, task.internal_id)
+        task = self.step(task, page)
+        self.reader.click.assert_called_once()
+        self.assertEqual((task.phase, task.order['stepped']), ('ordering', 1))   # not called an order
+        self.reader.click.reset_mock()
+        self.operate.return_value = self.ORDER
+        task = self.step(task, checkout_page())   # the review's own final button: same purchase, no new ask
+        self.reader.click.assert_called_once()
+        self.assertEqual(task.phase, 'ordered')
+
+    def test_an_approved_way_on_that_leaves_the_checkout_is_taken_as_the_order(self):
+        # It may have placed the order: never a second one under the same approval.
+        page = snap('Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
+            element('Pix', ref=0, tag='input', type='radio', checked=True), element('Continuar', ref=1)])
+        self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
+        task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
+        task = self.step(service.approve(self.account, self.user, task.internal_id), page)
+        self.reader.click.reset_mock()
+        task = self.step(task, snap('Gracias Tu pedido está en camino', f'{BASE}/checkout/done', elements=[]))
+        self.assertEqual((task.phase, task.order['approved']), ('ordered', None))
+        self.reader.click.assert_not_called()
+
+    def test_a_press_after_the_approval_ends_it(self):
+        task = self.approved()
+        self.operate.return_value = ('press', {'ref': 0})   # the Pix choice: anything at all
+        task = self.step(task, checkout_page())
+        self.assertIsNone(task.order['approved'])
+
+    def test_another_total_or_item_is_never_pressed_it_is_asked_again(self):
+        for change in ({'total': 'R$ 249,00'},):
             task = self.approved()
             page = checkout_page(**change)
             self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra',

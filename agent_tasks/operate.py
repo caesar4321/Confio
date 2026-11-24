@@ -55,10 +55,19 @@ _METHOD_LABEL = re.compile(r'(metodo|forma|medio|meio) de (pago|pagamento)|payme
 # Where the person pays it themselves: a way to pay with no card and no account of theirs at a
 # wallet the agent would have to sign in to (never PSE, PayPal, Mercado Pago, instalments).
 MANUAL_WORDS = re.compile(r'\b(transferencia|transferencia bancaria|deposito|efectivo|oxxo|pago movil|pagomovil'
-                          r'|pagoefectivo|efecty|baloto|rapipago|pago facil|pagofacil|khipu|servipag|abitab|redpagos'
-                          r'|qr|yape|plin|spei|pix|sinpe|ach|bancard|tigo money)\b')
-# What the person needs to pay it themselves, as the order's page writes it.
-SHOWN_KEYS = ('method', 'amount', 'reference', 'account', 'bank', 'holder', 'deadline')
+                          r'|pagoefectivo|efecty|baloto|rapipago|pago facil|pagofacil|servipag|abitab|redpagos'
+                          r'|qr|spei|pix|sinpe)\b')
+# Completed inside the checkout (a bank login, an app approval, a wallet): never "paid later", even
+# when the label also says "transferencia" or "QR".
+MANUAL_NEVER = re.compile(r'\b(pse|mercado ?pago|paypal|khipu|webpay|yape|plin|niubiz|tigo money|bancard|nequi'
+                          r'|daviplata|tarjeta|credito|debito|cuotas|mach|onepay|modo|uala|cuenta dni|billetera'
+                          r'|bancolombia|boton de pago|boton bancolombia|transferencia con|pago con qr|wallet)\b')
+# A cash or voucher network paid later at an agent or from any bank: itself even when its label lists the
+# apps that can pay it ("PagoEfectivo (banca móvil, Yape, Plin, agentes)").
+MANUAL_VOUCHER = re.compile(r'\b(pagoefectivo|rapipago|pago facil|pagofacil|oxxo|efecty|baloto|servipag|abitab'
+                            r'|redpagos)\b')
+# Ways on the person approved before the store's own final button ("Continuar" on the last page).
+MAX_APPROVED_STEPS = 3
 RAIL_WORDS = {'BR': re.compile(r'\bpix\b'), 'MX': re.compile(r'\b(spei|transferencia)\b'), 'BO': re.compile(r'\bqr\b')}
 
 
@@ -105,6 +114,7 @@ def amount_of(text):
 _TOTAL_LABEL = re.compile(r'(?<!sub)\btotal\b|\bvoce pagara\b|\bpagaras\b|\bvas a pagar\b|\bvai pagar\b')
 # A checked option naming another way to pay: the page's text never outweighs it.
 _OTHER_METHOD = re.compile(r'\b(oxxo|boleto|efectivo|dinheiro|deposito|paypal|mercado ?pago|saldo|cuotas|parcel\w*'
+                           r'|dinero en cuenta|puntos|points|rewards|cashback|bono|credito en cuenta'
                            r'|seven|7-eleven|kueski|aplazo|paycash|pse|nequi|yape|tigo|lotérica|loterica'
                            r'|contra ?entrega|cash)\b')
 _GRAND_TOTAL =re.compile(r'\b(total (del pedido|de la orden|da compra|do pedido|a pagar|da sua compra|de tu compra)'
@@ -243,9 +253,24 @@ def checkout(step, browser, reader, seen):
         seen.url, task.site)
     if not after and guard.order_placed(seen) and guard.order_address(seen.url) and on_checkout \
             and step.same_page(seen.url) not in (task.visited_pages or []):
+        if (task.order or {}).get('stepped') and (task.order or {}).get('approved'):
+            # The approved "Continuar" was the store's last step: the order the person approved.
+            return step.remember('the store shows the approved order as placed', 'ok', phase='ordered',
+                                 checkout_at=timezone.now(),
+                                 order={**(task.order or {}), 'pressed': True, 'approved': None})
         # The store says an order exists and nobody named it: said as it is, and its payment is looked for.
         return step.remember('the store shows an order as placed', 'not approved here', phase='ordered',
                              checkout_at=timezone.now(), order={**(task.order or {}), 'unapproved': True})
+    order_now = task.order or {}
+    if not after and order_now.get('stepped') and order_now.get('approved'):
+        approved_total = (order_now.get('approved') or {}).get('total') or ''
+        still = on_checkout and total_on(seen.text, approved_total) and any(
+            guard.final_looking(other) or guard.final_button(other) for other in seen.elements)
+        if not still:
+            # The approved way on led somewhere that is not this purchase's checkout any more: it may have
+            # placed the order. Never a second one: the approval is gone and the order's page is looked for.
+            return step.remember('after the approved step', 'the order may be placed', phase='ordered',
+                                 checkout_at=timezone.now(), order={**order_now, 'pressed': True, 'approved': None})
     if not ordering(task):
         try:
             # Nobody is asked to approve an order they could not pay here.
@@ -263,11 +288,8 @@ def checkout(step, browser, reader, seen):
     if name == 'payment_shown' and after:
         if not guard.order_address(seen.url) or not sites.within(seen.url, task.site):
             return step.remember('payment_shown', 'refused: this is not the order\'s own page')
-        # The runner reads it off this tab, as it is on screen. Where the person pays it themselves, the
-        # model's copy is only a pointer: the runner keeps what it finds written there, character for character.
-        shown = {key: guard.clean(str(args.get(key) or ''), 120) for key in SHOWN_KEYS}
-        return step.save(state='awaiting_code', reason='', shown_target=browser.target,
-                         order={**(task.order or {}), 'shown': shown})
+        # The runner reads it off this tab, as it is on screen. No model reads a payment.
+        return step.save(state='awaiting_code', reason='', shown_target=browser.target)
     element = seen.element(args.get('ref'))
     # Off screen is fine: the real click scrolls it into view and refuses it if anything covers it.
     if element is None or element.get('disabled'):
@@ -282,18 +304,23 @@ def checkout(step, browser, reader, seen):
         return step.remember(did, 'refused: it leaves the store')
     if after:
         # Only the way to this order's pages: never a button, never anything that acts.
-        if element.get('tag') != 'a' or not guard.may_press(element, on_checkout=False) \
+        # (After the order, only the order's own pages: operate checks order_address below.)
+        if element.get('tag') != 'a' or not guard.may_press(element, on_checkout=False, stage='after') \
                 or guard.final_looking(element) \
                 or not guard.order_address(urljoin(seen.url, element.get('href') or '')):
             return step.remember(did, 'refused: after the order only links to its pages may be opened')
-    elif not guard.may_press(element, on_checkout=on_checkout):
-        return step.remember(did, 'refused: not a control I may press here. If it places the order, '
+    elif not guard.may_press(element, on_checkout=on_checkout, stage=guard.stage_of(seen, on_checkout=on_checkout),
+                             page=seen):
+        return step.remember(did, 'refused: not a control I may press here. If it places or pays the order, '
                                   'call ready_to_order with it.')
     where = step.fingerprint(seen.url)
     if sum(entry.get('at') == where and entry.get('did') == did[:120] for entry in (task.history or [])[-8:]) \
             >= MAX_SAME_PRESS:
         return step.remember(did, 'refused: already pressed twice here; do something else')
     history = [*(task.history or []), {'did': did[:120], 'result': 'pressed', 'at': where}][-step.HISTORY_KEPT:]
+    if (task.order or {}).get('approved') and not after:
+        # Anything pressed after the person approved may change what is bought: asked again at the final button.
+        step.save(order={**(task.order or {}), 'approved': None, 'stepped': 0})
     step.save(history=history, steps=task.steps + 1, failures=0)
     refused = reader.click(element)
     if refused:
@@ -305,11 +332,14 @@ def _method_refusal(task, seen):
     """'' when the store's local payment method is the one selected and no card is."""
     from . import countries
     rail = RAIL_WORDS.get(task.country)
-    if rail is None and countries.rail(task.country) is not None:
+    manual = rail is None and countries.rail(task.country) is not None
+    if manual:
         rail = MANUAL_WORDS   # a country where the person pays it from their bank or in cash
     if rail is None:
         return 'this store\'s country has no payment method here'
     chosen = [guard.fold(element.get('label')) for element in seen.elements if element.get('checked')]
+    if manual and any(MANUAL_NEVER.search(label) and not MANUAL_VOUCHER.search(label) for label in chosen):
+        return 'that way to pay is completed inside the checkout: choose one paid later from a bank or in cash'
     if any(guard.card_words(label) for label in chosen):
         return 'a card is selected: choose the local payment method'
     # Another way to pay ticked beside it (a balance, instalments): the order is not paid by the rail alone.
@@ -333,7 +363,9 @@ def _method_refusal(task, seen):
         block = block[:end.start()] if end else block
         if re.search(r'[a-z]', block):
             blocks.append(block)   # an empty one is a heading whose method sits elsewhere
-    if any(rail.search(block) for block in blocks) and not any(guard.card_words(block) for block in blocks):
+    if any(rail.search(block) for block in blocks) and not any(guard.card_words(block) for block in blocks) \
+            and not (manual and any(MANUAL_NEVER.search(block) and not MANUAL_VOUCHER.search(block)
+                                    for block in blocks)):
         return ''
     return 'the local payment method is not the one selected'
 
@@ -343,7 +375,19 @@ def _order(step, browser, reader, seen, element, label, args, on_checkout):
     clicked only for what they approved, where they approved it."""
     from . import service
     task = step.task
-    if not on_checkout or not guard.final_looking(element):
+    # The final button by its words, or, on the page that shows the total and the method, any button the
+    # model may not press there ("Procesar pago", "Enviar orden"): it may be the one, so the person approves it.
+    # Only the page that shows the order's total and its payment method names a button by its place: a
+    # middle step's "Continuar" is never the order (its own final button goes by its words).
+    last = guard.stage_of(seen, on_checkout=on_checkout) == 'final'
+    final = guard.final_looking(element) or (
+        last
+        and (element.get('tag') in ('button', 'input', 'a') or element.get('role') == 'button')
+        and element.get('type') not in ('radio', 'checkbox', 'text', 'email', 'password', 'hidden')
+        and not guard.may_press(element, on_checkout=True, stage='final', page=seen)
+        and not any(guard._NEVER.search(part) or guard.card_words(part) for part in guard._parts(element))
+        and not guard.account_address(element.get('href') or ''))
+    if not (on_checkout or last) or not final:
         return step.remember('ready_to_order', 'refused: that is not the final button of a checkout page')
     total = guard.clean(agent.redact(args.get('total')), 40)
     amount = amount_of(total)
@@ -359,16 +403,33 @@ def _order(step, browser, reader, seen, element, label, args, on_checkout):
         return step.remember('ready_to_order', 'refused: the item is not on this page')
     where = step.fingerprint(seen.url)
     order = {'item': item, 'total': total, 'amount': format(amount, 'f'), 'button': label, 'page': where,
-             'image': picked.get('image', '')}
+             'image': picked.get('image', ''), 'address': guard.ship_to(seen.text)}
     # Who pays it is part of what they approve: said before they confirm, and asked again if it changed.
     mode, offer = service.pay_mode(task, step.app_meta())
     order = {**order, 'manual': mode == 'manual', 'offer': offer}
     approved = (task.order or {}).get('approved') or {}
-    if approved != {'total': total, 'button': label, 'page': where, 'item': item, 'manual': mode == 'manual'}:
+    # What the person approves is the purchase: this item, this total, this address, who pays. Not one
+    # button: a "Continuar" they approved on the last page leads to the store's own final button.
+    if {key: approved.get(key) for key in ('total', 'item', 'manual', 'address')} != {
+            'total': total, 'item': item, 'manual': mode == 'manual', 'address': order['address']}:
         # A new order, or one that changed: the person is asked (again). Its note is fixed words:
         # what the store wrote is shown only on the card.
         return step.hand_over('approve', order=order, body=notes.say(
             notes.NEEDS_PERSON['approve_manual' if mode == 'manual' else 'approve'], task))
+    if not guard.final_looking(element):
+        # Approved, but its words do not place an order ("Continuar" on the last page): pressed, and the
+        # approval stays for the store's own final button, for the same purchase. A few at most.
+        stepped = int((task.order or {}).get('stepped') or 0)
+        if stepped >= MAX_APPROVED_STEPS:
+            return step.remember('ready_to_order', 'refused: pressed enough ways on; name the button that places it')
+        step.save(order={**order, 'approved': approved, 'stepped': stepped + 1},
+                  history=[*(task.history or []), {'did': f'press "{label}" (approved)', 'result': total,
+                                                   'at': where}][-step.HISTORY_KEPT:], steps=task.steps + 1)
+        refused = reader.click(element)
+        if refused:
+            return step.remember('ready_to_order', f'not pressed: {refused}')
+        browser.pump(3)
+        return None
     # Used once, and written down first: an answer lost on the way is never a second order.
     step.save(order={**order, 'pressed': True}, phase='ordered', checkout_at=timezone.now(),
               history=[*(task.history or []), {'did': 'pressed the final button', 'result': total}][-step.HISTORY_KEPT:],

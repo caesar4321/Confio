@@ -187,8 +187,19 @@ class ManualRail(Rail):
         return set()
 
 
+# ISO 4217 numeric of each country's own currency, as an EMV code writes it (tag 53).
+_NUMERIC = {'AR': '032', 'CL': '152', 'CO': '170', 'PE': '604', 'EC': '840', 'UY': '858', 'PY': '600', 'VE': '928',
+            'GT': '320', 'CR': '188', 'PA': '590', 'DO': '214', 'SV': '840', 'HN': '340', 'NI': '558'}
+
+
+@dataclass(frozen=True)
+class _Manual(ManualRail):
+    numeric: str = ''
+
+
 def manual_rail(country):
-    return ManualRail(
+    return _Manual(
+        numeric=_NUMERIC.get(country, ''),
         country=country, method_id='', currency='', payees=frozenset(), name='un pago sin tarjeta',
         qr='los datos de pago', paste='paga el pedido desde tu banco con los datos que muestra la tienda',
         vouches='Son los datos que mostró la tienda en tu pedido; nadie verificó a quién pertenece la cuenta.')

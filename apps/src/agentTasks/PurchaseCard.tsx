@@ -176,6 +176,9 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           <View style={styles.orderText}>
             <Text style={styles.title} numberOfLines={3}>{task.order.item}</Text>
             <Text style={styles.total}>{task.order.total}</Text>
+            {task.order.address ? (
+              <Text style={styles.address} numberOfLines={2}>Envío a: {task.order.address}</Text>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -338,6 +341,7 @@ function Code({ sending, onSend }: { sending: boolean; onSend: (code: string) =>
 
 const styles = StyleSheet.create({
   qrBox: { marginTop: 12, alignItems: 'center' },
+  address: { fontSize: 13, color: '#6B7280', marginTop: 4 },
   details: { marginTop: 12, borderRadius: 12, backgroundColor: '#F9FAFB', paddingHorizontal: 12 },
   detail: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#E5E7EB' },

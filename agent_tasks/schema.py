@@ -55,6 +55,7 @@ class AgentOrderType(graphene.ObjectType):
     item = graphene.String(required=True)
     total = graphene.String(required=True)
     image = graphene.String(required=True)
+    address = graphene.String(description='Where it is delivered, as the checkout writes it: part of the approval.')
 
 
 class AgentPayDetailType(graphene.ObjectType):
@@ -125,7 +126,8 @@ def task_type(task):
         open_account_method=str((task.order or {}).get('offer') or '') or None,
         created_at=task.created_at,
         order=(AgentOrderType(item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
-                              image=str(task.order.get('image') or '')) if task.order else None),
+                              image=str(task.order.get('image') or ''),
+                              address=str(task.order.get('address') or '')) if task.order else None),
         options=[AgentOptionType(title=str(o.get('title') or ''), price=str(o.get('price') or ''),
                                  image=str(o.get('image') or '')) for o in (task.options or [])])
 
