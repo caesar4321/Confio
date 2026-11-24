@@ -259,7 +259,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     // Calendar titles the person ticked.
     'AnalyzeAssistantCalendar',
     // WhatsApp replies the person writes, and the number they type to link (assistant/whatsapp/api.ts).
-    'CreateWhatsAppDraft', 'SendWhatsAppDraft', 'StartWhatsAppLink',
+    'CreateWhatsAppDraft', 'SendWhatsAppDraft', 'StartWhatsAppLink', 'PrepareWhatsAppReply', 'UpdateWhatsAppDraft',
     // Wallet recovery diagnostics describe a user's backup files. Shapes
     // only by construction, but never echo them into error logs.
     'ReportWalletRecoveryDiagnostic',

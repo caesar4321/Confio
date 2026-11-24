@@ -728,7 +728,9 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         # payment is replaced by the reason the server gave.
         result.reply = result.payment_refusal
     from_memory = bool(turn_context is not None and turn_context.used_data)
-    if waiting or from_memory or result.rule_proposal or result.payment_intent:
+    # A WhatsApp reply card (whatsapp_link/chat.py, posted by its tool) is a card too: no offer beside it.
+    whatsapp_card = bool(getattr(result, 'whatsapp_card', False))
+    if waiting or from_memory or result.rule_proposal or result.payment_intent or whatsapp_card:
         # No offers while a person is handling their case, and none beside a
         # Cuenta inteligente proposal (its chip is the reply's one chip). The
         # proposal chip targets 'smart_account_rule', so it stays.
@@ -737,7 +739,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         from . import paid_chips
         from .engine import allowed_destinations
         if (not waiting and not from_memory and not result.rule_proposal and not result.payment_intent
-                and not result.pending_action and not result.declined):
+                and not result.pending_action and not result.declined and not whatsapp_card):
             earlier = ' · '.join(m.body or '' for m in [m for m in history if m.sender_type == 'USER'][-3:-1])
             paid_chip = paid_chips.choose(viewer, clean, result, set(allowed_destinations(viewer)), earlier)
     except Exception:  # noqa: BLE001 - a probe must never break the answer
@@ -1300,7 +1302,9 @@ def append_voice_transcript(conversation, user, entries):
 
 
 def _last_message(conversation):
-    return conversation.messages.exclude(sender_type='SYSTEM').order_by('-created_at', '-id').first()
+    # A WhatsApp notice the server posted (whatsapp_link/chat.py) answers nobody: it never hides their last message.
+    return conversation.messages.exclude(sender_type='SYSTEM').exclude(metadata__has_key='whatsapp').order_by(
+        '-created_at', '-id').first()
 
 
 def unanswered_after_handoff(conversation, state):

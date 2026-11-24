@@ -222,7 +222,23 @@ class SendWhatsAppDraft(_DraftResult, graphene.Mutation):
         return _run(cls, info, lambda user: _draft(service.send_draft(user, _uuid(id), display_hash)))
 
 
+class PrepareWhatsAppReply(_DraftResult, graphene.Mutation):
+    """A reply chip in the Confío IA conversation: that reply to that message, on a card the person sends with a
+    tap (the card appears in the conversation; refetch the thread)."""
+
+    class Arguments:
+        notice_id = graphene.ID(required=True)
+        body = graphene.String(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, notice_id, body):
+        from . import chat
+        return _run(cls, info, lambda user: _draft(chat.prepare(user, body, notice_id=notice_id)))
+
+
 class Mutation(graphene.ObjectType):
+    prepare_whats_app_reply = PrepareWhatsAppReply.Field()
     start_whats_app_link = StartWhatsAppLink.Field()
     unlink_whats_app = UnlinkWhatsApp.Field()
     accept_whats_app_consent = AcceptWhatsAppConsent.Field()

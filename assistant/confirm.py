@@ -277,7 +277,7 @@ def busy(result, count_writes=True):
     (result.writes): code's question replaces the reply, and would hide that."""
     return bool(result.pending_action or result.payment_intent or result.rule_proposal or result.declined
                 or result.pending_categorization or result.pending_watch or (count_writes and result.writes)
-                or getattr(result, 'store_task_started', False)
+                or getattr(result, 'store_task_started', False) or getattr(result, 'whatsapp_card', False)
                 or any(action.get('type') in ('trade', 'form') for action in result.actions))
 
 

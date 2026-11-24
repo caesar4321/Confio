@@ -379,6 +379,8 @@ def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pe
             reason='unlinking', grant=uuid.uuid4(), sealed_code='', code_at=None, sealed_phone='', next_sync_at=None,
             updated_at=timezone.now())
     _forget_pushes(user.pk)
+    from . import chat
+    chat.erase(user)  # what the assistant said about it in the conversation goes too
     _end_record(user.pk, ended_by)
     from . import tasks
     transaction.on_commit(lambda: tasks.forget.delay(link.pk))
@@ -613,6 +615,8 @@ def _gone(link, reason='gone', ended_by=WhatsAppLinkRecord.EndedBy.PHONE):
     link.inbox.all().delete()
     link.drafts.exclude(status=WhatsAppDraft.Status.SENDING).delete()
     _end_record(link.user_id, ended_by)
+    from . import chat
+    chat.erase(link.user)
     _notify(link.user, REASONS.get(reason) or GONE)
 
 
@@ -685,25 +689,31 @@ def sync(link_id):
         WhatsAppInbox.objects.filter(pk__in=[row.pk for row in taken]).delete()
     finally:
         cache.delete(lease)
-    logger.info('WhatsApp classify link=%s messages=%d important=%d ms=%d', link.pk, len(taken), found,
+    logger.info('WhatsApp classify link=%s messages=%d important=%d ms=%d', link.pk, len(taken), len(found),
                 (time.monotonic() - started) * 1000)
     _mine(link).update(last_sync_at=timezone.now())
     if found and _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').exists():
-        noun = 'mensaje importante' if found == 1 else 'mensajes importantes'
-        _notify(link.user, f'Tienes {found if found < 10 else "más de 9"} {noun} en WhatsApp. Míralos en Confío IA.')
+        from . import chat
+        for notice, replies in found:
+            chat.tell(link, notice, replies)  # Confío IA says it in the conversation, with replies to pick
+        count = len(found)
+        noun = 'mensaje importante' if count == 1 else 'mensajes importantes'
+        # Fixed words: a lock screen never shows what someone wrote. It opens the conversation.
+        _notify(link.user, f'Tienes {count if count < 10 else "más de 9"} {noun} en WhatsApp. Te lo cuento en '
+                           'Confío IA.', {'kind': 'messages'})
     if WhatsAppInbox.objects.filter(link=link).exists():
         _queue_sync(link.pk)
 
 
-def _store(link, messages) -> int:
-    """One look per chat: its newest lines, oldest first. Returns how many notices are new."""
+def _store(link, messages) -> list:
+    """One look per chat: its newest lines, oldest first. Returns the new notices, each with its suggested replies."""
     chats = {}
     for message in messages:
         if not message.get('chat') or not message.get('text'):
             continue
         chats.setdefault(message['chat'], []).append(message)
     if not chats:
-        return 0
+        return []
     looked = []
     for chat, lines in chats.items():
         lines.sort(key=lambda line: line.get('at') or 0)
@@ -711,10 +721,10 @@ def _store(link, messages) -> int:
         looked.append({'chat': chat, 'name': lines[-1].get('name') or '', 'phone': lines[-1].get('phone') or '',
                        'preview': preview, 'at': lines[-1].get('at') or 0})
     verdicts = classify.important([{'chat': row['name'], 'preview': row['preview']} for row in looked])
-    found = 0
+    found = []
     with transaction.atomic():
         if _mine(link).select_for_update().filter(state=WhatsAppLink.State.LINKED).first() is None:
-            return 0  # unlinked meanwhile: write nothing
+            return []  # unlinked meanwhile: write nothing
         for row, verdict in zip(looked, verdicts):
             if not verdict:
                 continue
@@ -725,7 +735,8 @@ def _store(link, messages) -> int:
                 'sealed': _seal({'chat': row['name'], 'jid': row['chat'], 'phone': row['phone'],
                                  'preview': row['preview'], 'summary': verdict['summary'],
                                  'time': when.strftime('%H:%M') if when else ''})})
-            found += int(made)
+            if made:
+                found.append((_notice, verdict.get('replies') or []))
     return found
 
 
@@ -897,8 +908,10 @@ def _sent(draft, status_, reason):
     fields = {}
     if status_ in (WhatsAppDraft.Status.SENT, WhatsAppDraft.Status.UNKNOWN):
         fields = {'sealed': _seal({}), 'expires_at': timezone.now() + timedelta(hours=1)}  # the text goes now
-    WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(
-        status=status_, reason=reason, **fields)
+    if WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(
+            status=status_, reason=reason, **fields):
+        from . import chat
+        chat.outcome(draft.pk)  # Confío IA says how it went
 
 
 # ------------------------------------------------------------------ sweep
@@ -917,9 +930,10 @@ def sweep():
     """Erases what must not stay and restarts what a restart lost."""
     from . import tasks
     now = timezone.now()
-    # A send that never reported back: unknown, so it is never sent twice.
-    WhatsAppDraft.objects.filter(status=WhatsAppDraft.Status.SENDING, sending_at__lt=now - SENDING_STUCK).update(
-        status=WhatsAppDraft.Status.UNKNOWN, reason='unknown', sealed=_seal({}), expires_at=now + timedelta(hours=1))
+    # A send that never reported back: unknown, so it is never sent twice (and the assistant says so).
+    for stuck in WhatsAppDraft.objects.filter(status=WhatsAppDraft.Status.SENDING,
+                                              sending_at__lt=now - SENDING_STUCK)[:50]:
+        _sent(stuck, WhatsAppDraft.Status.UNKNOWN, 'unknown')
     if conf.get('WHATSAPP_LINK_KEEP_DAYS'):
         WhatsAppNotice.objects.filter(created_at__lt=now - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))).delete()
     WhatsAppDraft.objects.filter(expires_at__lte=now).exclude(status=WhatsAppDraft.Status.SENDING).delete()

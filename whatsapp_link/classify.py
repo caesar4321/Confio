@@ -52,20 +52,39 @@ def important(rows):
             'reply (una persona o negocio le pregunta algo y espera respuesta), urgent (una emergencia o algo que '
             'no puede esperar). none para saludos, cadenas, publicidad, stickers, audios sin contexto, estafas '
             'evidentes y cualquier duda. summary: de qué trata, en español, hasta 12 palabras, sin números ni '
-            'enlaces.',
+            'enlaces. replies: para los importantes, 2 o 3 respuestas cortas que la persona podría enviar (hasta 12 '
+            'palabras cada una), escritas como ella, en el idioma del mensaje, distintas entre sí (por ejemplo '
+            'confirmar, pedir un dato, posponer); sin montos, números de cuenta, enlaces ni datos que no estén en el '
+            'mensaje; vacío para none.',
             {'chats': [{'i': i, 'chat': row['chat'], 'vista_previa': row['preview']} for i, row in enumerate(part)]},
             'whatsapp_important',
             {'type': 'object', 'additionalProperties': False, 'required': ['items'], 'properties': {'items': {
                 'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
-                                           'required': ['i', 'kind', 'summary'], 'properties': {
+                                           'required': ['i', 'kind', 'summary', 'replies'], 'properties': {
                     'i': {'type': 'integer'}, 'kind': {'type': 'string', 'enum': [*KINDS, 'none']},
-                    'summary': {'type': 'string'}}}}}})
+                    'summary': {'type': 'string'}, 'replies': {'type': 'array', 'items': {'type': 'string'}}}}}}})
         for item in found.get('items') or []:
             if not isinstance(item, dict) or not isinstance(item.get('i'), int) or not 0 <= item['i'] < len(part):
                 continue
             if item.get('kind') in KINDS:
-                verdicts[start + item['i']] = {'kind': item['kind'], 'summary': _line(item.get('summary'), MAX_SUMMARY)}
+                verdicts[start + item['i']] = {'kind': item['kind'], 'summary': _line(item.get('summary'), MAX_SUMMARY),
+                                               'replies': suggestions(item.get('replies'))}
     return verdicts
+
+
+MAX_REPLY = 80
+
+
+def suggestions(values):
+    """Up to 3 short replies the person could send, cleaned like any model line: never a link, number or
+    address (a sender could steer the model into writing one)."""
+    out = []
+    for value in values if isinstance(values, list) else []:
+        text = re.sub(r'https?://\S+|www\.\S+|\S+@\S+|\d{3,}', '', str(value or ''))
+        text = re.sub(r'\s+', ' ', text).strip()[:MAX_REPLY]
+        if text and text not in out:
+            out.append(text)
+    return out[:3]
 
 
 def write(instructions, chat):

@@ -57,6 +57,7 @@ import {
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
 import { TAP_ONLY_KEYS, cardFor, openDestination, resolveNavigate } from './destinations';
+import { WhatsAppDraftCard, WhatsAppReplyChips } from './whatsapp/ChatCards';
 import { requestGuideWalk } from './guidePointer';
 import ConnectionsHost from './connections/ConnectionsHost';
 import ConnectionsPrompt from './connections/ConnectionsPrompt';
@@ -383,6 +384,11 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
       {!message.pending && message.actions.some((a) => a.target === PAYMENT_TARGET)
         // (In the floating box, a modal, it sends the person to Inicio to approve.)
         ? <PaymentIntentCard messageId={message.id} onLeaveBox={roomy ? undefined : onWalk} /> : null}
+      {/* WhatsApp (whatsapp_link/chat.py): replies to choose under a message that arrived, and the card a
+          reply waits on until the person taps Enviar. */}
+      {message.pending ? null : <WhatsAppReplyChips actions={message.actions} />}
+      {message.pending ? null : message.actions.filter((a) => a.type === 'whatsapp_draft' && a.target).slice(0, 1)
+        .map((a) => <WhatsAppDraftCard key={`${message.id}:wa`} draftId={String(a.target)} />)}
       {/* A stock bought or sold here: one card per answer, approved on the card. */}
       {message.pending ? null : message.actions.map(resolveTrade).filter(Boolean).slice(0, 1).map((trade) => (
         <StockTradeCard key={`${message.id}:trade`} messageId={message.id} action={trade!}

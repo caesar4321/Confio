@@ -103,3 +103,10 @@ export const GET_WHATSAPP_DRAFT = gql`
     whatsAppDraft(id: $id) { ${DRAFT} }
   }
 `;
+
+// A reply chip in the Confío IA conversation: that reply, on a card the person sends with a tap.
+export const PREPARE_WHATSAPP_REPLY = gql`
+  mutation PrepareWhatsAppReply($noticeId: ID!, $body: String!) {
+    prepareWhatsAppReply(noticeId: $noticeId, body: $body) { success error errorCode draft { ${DRAFT} } }
+  }
+`;
