@@ -349,6 +349,11 @@ def hard_refusal(element, *, on_checkout, page=None):
         return 'card'
     tick = (element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')) \
         or element.get('role') in ('radio', 'checkbox')
+    # A label of a radio or checkbox on this page is that choice: Amazon México's SPEI option reads
+    # "Transferencia electrónica (Finaliza tu pago con SPEI antes de 30 minutos)".
+    if not tick and element.get('tag') == 'label' and page is not None:
+        tick = any(other.get('tag') == 'input' and other.get('type') in ('radio', 'checkbox')
+                   and other.get('label') == element.get('label') for other in page.elements)
     if any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in parts):
         return 'places_order'
     if not tick and any(_FINAL_LOOK.search(part) for part in parts) and not (
@@ -470,7 +475,11 @@ def order_address(url):
 
 
 def product_address(url):
+    """A product's own page. Never a checkout's: Amazon's is /checkout/p/p-703…/spc, and that "p" is not a
+    product (2026-11-24, the review page itself was refused as one)."""
     parts = urlsplit(url or '')
+    if checkout_address(urlunsplit(parts._replace(fragment=''))):
+        return False
     return bool(_PRODUCT_HOST.match((parts.hostname or '').lower())
                 or any(_PRODUCT_SEGMENT.fullmatch(segment) for segment in _segments(parts, fragment=False)))
 

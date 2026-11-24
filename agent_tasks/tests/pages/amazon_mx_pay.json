@@ -1,0 +1,312 @@
+{
+ "url": "www.amazon.com.mx/checkout/p/p-000-0000000-0000000/pay",
+ "text": ".com.mx\nFinalizar la compra de manera segura \nCarrito\nUsar este método de pago\nProductos:\n$55.48\nEnvío:\n$44.00\nTotal (IVA incluido, en caso de ser aplicable)\n$99.48\nEnviar a Ana Pérez\n\nCalle Falsa 123, CENTRO, GUADALAJARA, JALISCO, 44100, México\n\nAgregar instrucciones de entrega\nRecolección cerca disponible\nCambiar\nMétodo de pago\nMis tarjetas\nNombre en la tarjeta\nVencimiento\nMasterCard que termina en 1111\nBancoque termina en 1111\nANA PEREZ\n01/2030\nPago a meses no disponible ¿Por qué?\nAgregar una tarjeta de crédito o débitoAmazon acepta las principales tarjetas de crédito\nTus servicios de pago\nPaga en efectivo en tienda\nPaga en efectivo en tienda\nPaga antes de 72 horas\n\nPaga en OXXO, 7-Eleven, +5 tiendas\nTu saldo disponible\nIngresa un código de tarjeta de regalo o de promoción\nAplicar\nTransferencia electrónica\nTransferencia electrónica (Finaliza tu pago con SPEI antes de 30 minutos)\nPaga con SPEI\nPaga dentro de 72 horas. Una vez realizada tu orden, compartiremos la cuenta CLABE de 18 dígitos así como una guía para completar el pago.Conoce más aquí\nPlanes de Pago\n\tPaga en quincenas con Kueski Pay >\nHasta 12 pagos quincenales, sin tarjeta.Conocer más\n\t\nOtros métodos de pago\nAgregar un nuevo vale de despensaUsa tus vales de despensa de SiVale, Edenred, Pluxee y Efectivale para comprar artículos elegibles.\nUsar este método de pago\nLlega 26 nov 2026\n\nDe la Rosa Coconugs Chocolate con Coco, 336 g\nRevisar el pedido\n\n¿Necesitas ayuda? Explora nuestras Pági",
+ "title": "Haz tu pedido - Finaliza la compra con Amazon",
+ "elements": [
+  {
+   "ref": "0",
+   "tag": "a",
+   "href": "/ref=nav_logo",
+   "label": ".com.mx | Amazon.com.mx",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "1",
+   "tag": "a",
+   "href": "void(0)",
+   "role": "button",
+   "label": "Finalizar la compra de manera segura | Más información sobre finalizar la compra de manera segura",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "2",
+   "tag": "a",
+   "href": "/gp/cart/view.html",
+   "label": "Carrito | Volver al carrito",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "False"
+  },
+  {
+   "ref": "3",
+   "tag": "input",
+   "type": "submit",
+   "label": "Usar este método de pago",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "4",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/address",
+   "label": "Enviar a Ana Pérez Calle Falsa 123, CENTRO, GUADALAJARA, JALISCO, 44100, México",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "5",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/pay",
+   "label": "Agregar instrucciones de entrega",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "6",
+   "tag": "a",
+   "href": "void(0)",
+   "role": "button",
+   "label": "Recolección cerca disponible",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "7",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/address",
+   "label": "Cambiar | Cambiar dirección de entrega",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "8",
+   "tag": "label",
+   "label": "MasterCard que termina en 1111",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "9",
+   "tag": "input",
+   "type": "radio",
+   "label": "MasterCard que termina en 1111",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "10",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html/ref=ox_spc_company",
+   "label": "¿Por qué?",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "11",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/pay",
+   "label": "Agregar una tarjeta de crédito o débito",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "12",
+   "tag": "label",
+   "label": "Paga en efectivo en tienda",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "13",
+   "tag": "input",
+   "type": "radio",
+   "label": "Paga en efectivo en tienda",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "14",
+   "tag": "a",
+   "href": "void(0)",
+   "label": "Paga en OXXO, 7-Eleven, +5 tiendas",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "15",
+   "tag": "input",
+   "type": "text",
+   "label": "Introducir código",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "16",
+   "tag": "input",
+   "type": "submit",
+   "label": "Aplicar | Apply",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "17",
+   "tag": "label",
+   "label": "Transferencia electrónica (Finaliza tu pago con SPEI antes de 30 minutos)",
+   "checked": "True",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "18",
+   "tag": "input",
+   "type": "radio",
+   "label": "Transferencia electrónica (Finaliza tu pago con SPEI antes de 30 minutos)",
+   "checked": "True",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "19",
+   "tag": "a",
+   "href": "/gp/browse.html",
+   "label": "Conoce más aquí",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "20",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/pay",
+   "label": "Paga en quincenas con Kueski Pay >",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "21",
+   "tag": "a",
+   "href": "/b",
+   "label": "Conocer más",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "22",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/pay",
+   "label": "Agregar un nuevo vale de despensa",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "23",
+   "tag": "input",
+   "type": "submit",
+   "label": "Usar este método de pago",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "24",
+   "tag": "a",
+   "href": "/checkout/p/p-000-0000000-0000000/spc",
+   "label": "Revisar el pedido",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "25",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Páginas de ayuda",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "26",
+   "tag": "a",
+   "href": "/gp/help/contact-us/general-questions.html",
+   "label": "contacta con nosotros",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "27",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Política de devoluciones",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "28",
+   "tag": "a",
+   "href": "/gp/cart/view.html",
+   "label": "Volver al carrito",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "29",
+   "tag": "button",
+   "label": "Inicio de página",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "30",
+   "tag": "a",
+   "href": "/ref=footer_logo",
+   "label": "Amazon Mexico Home",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "31",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Ayuda",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "False"
+  },
+  {
+   "ref": "32",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Condiciones de uso",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "True"
+  },
+  {
+   "ref": "33",
+   "tag": "a",
+   "href": "/gp/help/customer/display.html",
+   "label": "Aviso de privacidad",
+   "checked": "False",
+   "disabled": "False",
+   "on_screen": "False"
+  }
+ ],
+ "recorded": "Amazon México, choosing the payment method (/pay), SPEI chosen, 2026-11-24. Names, address, card digits and order id replaced."
+}

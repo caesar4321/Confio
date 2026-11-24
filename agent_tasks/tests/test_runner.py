@@ -1644,6 +1644,26 @@ class CheckoutTests(StepBase):
             self.assertIn('refused', task.history[-1]['result'])
         self.reader.click.assert_not_called()
 
+    def test_amazons_real_spei_review_page_goes_to_the_persons_approval_then_is_pressed(self):
+        # The founder's 10:36 run, replayed through the real order step on the recorded page.
+        from agent_tasks.tests.test_real_pages import recorded
+        real = recorded('amazon_mx_review_spei')
+        item = 'De la Rosa Coconugs Chocolate con Coco, 336 g'
+        page = snap(f'{real.text}\n{item}', real.url, elements=real.elements)   # the item prints below the first 1500 chars
+        final = next(index for index, e in enumerate(real.elements) if e['label'] == 'Realiza tu pedido y paga')
+        task = self.make_task(phase='ordering', site='amazon.com.mx', country='MX', goal='un chocolate',
+                              options=[{'title': item, 'price': '$55.48', 'image': '', 'href': 'https://www.amazon.com.mx/dp/B0X'}])
+        self.operate.return_value = ('ready_to_order', {'ref': final, 'item': item, 'total': '$99.48'})
+        task = self.step(task, page)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'), task.history[-1])
+        self.assertEqual((task.order['total'], task.order['item']), ('$99.48', item))
+        self.assertIn('calle falsa 123', task.order['address'])
+        self.reader.click.assert_not_called()
+        task = self.step(service.approve(self.account, self.user, task.internal_id, total='$99.48'), page)
+        self.reader.click.assert_called_once()
+        self.assertEqual(self.reader.click.call_args.args[0]['label'], 'Realiza tu pedido y paga')
+        self.assertEqual(task.phase, 'ordered')
+
     def test_amazons_cart_page_lets_the_model_set_other_items_aside(self):
         # The founder's cart, 03:21: the real page, with prices and the way to the checkout on it.
         cart = snap('Carrito Turin Magno Chocolates $89.00 Volteck Adaptador $159.00 Subtotal (2 productos): $248.00',

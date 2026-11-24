@@ -21,7 +21,17 @@ from decimal import Decimal, InvalidOperation
 _CLABE_LABEL = re.compile(r'^(clabe( interbancaria)?|cuenta clabe|clabe spei|numero de clabe)$')
 _AMOUNT_LABEL = re.compile(r'^(monto|importe|total a pagar|monto a pagar|monto a transferir|monto exacto'
                            r'|importe a pagar|importe a transferir|cantidad a transferir|cantidad a pagar'
-                           r'|total a transferir)$')
+                           r'|total a transferir|total del pedido|total de la orden|monto total|importe total'
+                           r'|total de tu pedido|pago total)$')
+# The order's own number, where the page prints no transfer reference (a CLABE made for that one order).
+_ORDER_NUMBER = re.compile(r'\b(pedido|orden|order)\s*(n\.?\s*[oº°]\.?|no\.?|num\.?|numero|number|#)?\s*:?\s*#?\s*'
+                           r'(\d{3}-\d{7}-\d{7}|\d{6,20})\b', re.I)
+
+
+def order_number(text):
+    """The order number a page prints ("Pedido n.º 701-1234567-1234567"), digits and spaces only, or ''."""
+    found = _ORDER_NUMBER.search(' '.join(str(node) for node in (text or ())))
+    return re.sub(r'[^0-9]+', ' ', found.group(3)).strip() if found else ''
 _REFERENCE_LABEL = re.compile(r'^(referencia|numero de referencia|referencia de pago|concepto|concepto de pago'
                               r'|referencia/concepto)$')
 # A "referencia numérica" is a SPEI field of its own, which the payout cannot fill (it sends a concepto): refused.

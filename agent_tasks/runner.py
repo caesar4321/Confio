@@ -564,10 +564,18 @@ class Step:
             (code, why), extra = code_on_screen(shots, rail), {}
         else:
             ticket = sites.house_ticket(shots[0].url, task.site)
-            code, extra, why = rail.read(shots, reference_optional=ticket)
-            if code and ticket and not extra.get('reference'):
-                # Mercado Pago's own payment number, from its ticket's address: the transfer's concept.
-                extra = {**extra, 'reference': re.search(r'/payments/(\d+)/ticket', urlsplit(shots[0].url).path).group(1)}
+            # A CLABE made for this one order (Mercado Pago's ticket; a known store's own order page: Amazon
+            # México "compartirá la cuenta CLABE de 18 dígitos") may come with no reference printed.
+            code, extra, why = rail.read(shots, reference_optional=ticket or task.site in sites.KNOWN)
+            if code and not extra.get('reference'):
+                from . import spei
+                if ticket:
+                    # Mercado Pago's own payment number, from its ticket's address: the transfer's concept.
+                    concept = re.search(r'/payments/(\d+)/ticket', urlsplit(shots[0].url).path).group(1)
+                else:
+                    # The order's own number as the page prints it, else the store's name.
+                    concept = spei.order_number(shots[0].text) or ('Pedido ' + re.sub(r'[^A-Za-z0-9]+', ' ', task.site))
+                extra = {**extra, 'reference': concept.strip()[:40]}
         if not code:
             return self.unread(why)
         from . import service

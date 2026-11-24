@@ -69,3 +69,47 @@ class AmazonMexicoReviewTests(SimpleTestCase):
     def test_the_address_is_the_orders(self):
         self.assertEqual(guard.ship_to(self.page.text),
                          'ana perez calle falsa 123, centro, guadalajara, jalisco, 44100, mexico')
+
+
+class AmazonMexicoPayTests(SimpleTestCase):
+    """Choosing how to pay (/checkout/p/.../pay), with SPEI chosen and a saved card listed."""
+
+    def setUp(self):
+        self.page = recorded('amazon_mx_pay')
+
+    def floor(self, label):
+        element = next(e for e in self.page.elements if e['label'].startswith(label))
+        return guard.hard_refusal(element, on_checkout=True, page=self.page)
+
+    def test_spei_and_the_way_on_are_the_models(self):
+        for label in ('Transferencia electrónica (Finaliza tu pago con SPEI', 'Usar este método de pago',
+                      'Revisar el pedido'):
+            with self.subTest(label=label):
+                self.assertEqual(self.floor(label), '')
+
+    def test_amazon_says_it_will_share_a_clabe_after_the_order(self):
+        self.assertIn('cuenta CLABE de 18 dígitos', self.page.text)
+
+
+class AmazonMexicoSpeiReviewTests(SimpleTestCase):
+    """The order review page paying with SPEI: the page the founder's 10:36 run stopped on."""
+
+    def setUp(self):
+        self.page = recorded('amazon_mx_review_spei')
+        self.final = next(e for e in self.page.elements if e['label'] == 'Realiza tu pedido y paga')
+
+    def test_a_checkout_address_is_never_a_products_page(self):
+        # /checkout/p/p-000…/spc: that "p" refused the final button as "on a product page".
+        self.assertFalse(guard.product_address(self.page.url))
+        self.assertTrue(guard.product_address('https://www.amazon.com.mx/De-la-Rosa/dp/B0X'))
+        self.assertTrue(guard.product_address('https://tienda.mx/p/123'))
+
+    def test_spei_is_read_as_the_method_after_the_address_s_own_cambiar(self):
+        # "… Cambiar  Pagando con SPEI  Agregar tarjeta de regalo …"
+        self.assertEqual(operate._method_refusal(SimpleNamespace(country='MX'), self.page), '')
+
+    def test_the_final_button_is_named_never_pressed_and_the_total_is_the_pages(self):
+        self.assertTrue(guard.final_looking(self.final))
+        self.assertEqual(guard.hard_refusal(self.final, on_checkout=True, page=self.page), 'places_order')
+        self.assertTrue(operate.total_on(self.page.text, '$99.48'))
+        self.assertFalse(operate.total_on(self.page.text, '$55.48'))

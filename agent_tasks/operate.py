@@ -429,12 +429,15 @@ def _method_refusal(task, seen):
     for found in _METHOD_LABEL.finditer(text):
         if re.search(r'\b(cambiar|editar|alterar|change|modificar|trocar|elige|elegir|escolher|escolha|selecciona'
                      r'|seleciona|otro|outra|outro|otra|agregar|adicionar|add)\b\W*(el |la |o |a |tu |seu |sua )?$',
-                     text[max(0, found.start() - 25):found.start()]):
-            continue  # "Cambiar método de pago": a link, not the method
+                     text[max(0, found.start() - 25):found.start()]) and not found.group(0).startswith('pag'):
+            # "Cambiar método de pago": a link, not the method. Never "Pagando con SPEI" after the address's
+            # own "Cambiar" (Amazon México's review page): that IS the method.
+            continue
         block = text[found.end():found.end() + 120]
         # Only that method's own words: up to its "change" link or the next section's label.
-        end = re.search(r'\b(cambiar|editar|alterar|change|modificar|trocar|total|subtotal|resumen|resumo|entrega)\b',
-                        block)
+        # ("Pagando con SPEI  Agregar tarjeta de regalo…": the next link is not the method.)
+        end = re.search(r'\b(cambiar|editar|alterar|change|modificar|trocar|total|subtotal|resumen|resumo|entrega'
+                        r'|agregar|anadir|adicionar|add)\b', block)
         block = block[:end.start()] if end else block
         if re.search(r'[a-z]', block):
             blocks.append(block)   # an empty one is a heading whose method sits elsewhere

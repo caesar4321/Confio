@@ -164,6 +164,28 @@ class MexicoTests(StepBase):
         self.assertFalse(sites.house_ticket(url, 'amazon.com.mx'))
         self.assertEqual(spei.read(ticket)[1], 'code')
 
+    def test_a_known_stores_clabe_with_no_reference_uses_the_orders_number(self):
+        # Amazon México: "compartiremos la cuenta CLABE de 18 dígitos". A CLABE for that one order, no reference.
+        AgentTask.objects.filter(pk=self.task.pk).update(site='amazon.com.mx')
+        self.task.refresh_from_db()
+        text = ('Gracias, tu pedido fue recibido', 'Pedido n.º 701-1234567-7654321', 'Paga con SPEI',
+                'CLABE', '646 180 157 000 000 004', 'Total del pedido', '$1,249.00')
+        url = 'https://www.amazon.com.mx/gp/buy/thankyou/handlers/display.html'
+        self.prepare.return_value = SimpleNamespace(currency='MXN', amount_exact=True, amount_local=Decimal('1249.00'),
+                                                    internal_id='i', payee_level='store_checkout',
+                                                    rail_method_id='mx_clabe')
+        self.browser.capture.return_value = (picture(url=url, text=text), picture(url=url, text=text))
+        self.reading()
+        self.task.save()
+        with mock.patch.object(runner.Step, 'save', lambda step, **fields: AgentTask.objects.filter(
+                pk=step.task.pk).update(**{k: v for k, v in fields.items() if k != 'payment_intent'})), \
+                mock.patch('payment_accounts.payment_intents.cancel'), mock.patch('agent_tasks.runner.post_payment'):
+            self.step(self.task)
+        self.assertEqual(came_of(self.task), 'prepared')
+        request = self.prepare.call_args.kwargs['request']
+        self.assertEqual((request['amount_local'], request['reference']), ('1249.00', '701 1234567 7654321'))
+        self.assertEqual(spei.order_number(('Tu pedido', 'sin número')), '')
+
     def test_a_card_for_another_amount_is_refused(self):
         self.assertEqual(self.outcome(MERCADO_PAGO, amount='1249.01'), 'unpaid')
 
