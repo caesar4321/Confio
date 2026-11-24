@@ -38,12 +38,19 @@ DEFAULTS = {
     'AGENT_TASKS_MODEL_TIMEOUT_SECONDS': 40,
     # The click judge (agent.judge): '' is the agent's own model.
     'AGENT_TASKS_JUDGE_MODEL': '',
+    # The click judge's first reader: Google's Decisions API, another model family than the one that drives,
+    # so a page that fools the driver is less likely to fool the judge. '' turns it off. Below the confidence,
+    # or on any failure, the judge model above reads the click (Google: keep a second check on high stakes).
+    'AGENT_TASKS_DECISION_MODEL': 'gemini-decision-1',
+    'AGENT_TASKS_DECISION_CONFIDENCE': 0.90,   # 11-24 recorded pages: every answer at or above it was right
+    'AGENT_TASKS_DECISION_TIMEOUT_SECONDS': 10,
     # USD per 1M tokens: (input, cached input, output).
     'AGENT_TASKS_PRICES': {
         'gpt-6.1-terra': ('1.00', '0.05', '5.00'),
         'gpt-6-luna': ('0.10', '0.01', '0.50'),
         'gpt-6.1-sol': ('2.00', '0.10', '10.00'),
         'gpt-6.2-sol': ('2.00', '0.10', '10.00'),
+        'gemini-decision-1': ('0.10', '0.10', '0'),
     },
 
     # Ceilings, enforced here and never by the model.

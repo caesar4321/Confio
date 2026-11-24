@@ -4,7 +4,7 @@ import io
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from PIL import Image
 
 from agent_tasks import agent, page as pages
@@ -52,6 +52,7 @@ class PictureTests(SimpleTestCase):
         self.assertIsNone(reader.picture({'ref': 0}))
 
 
+@override_settings(AGENT_TASKS_DECISION_MODEL='')   # the judge model's own reading; never a real call
 class ReadersSeeTests(SimpleTestCase):
     TASK = SimpleNamespace(site='loja.com.br', country='BR', goal='chocolate', user_id=None)
 
