@@ -19,7 +19,7 @@ class _ReadOnly(admin.ModelAdmin):
 
 class AgentTaskAdmin(_ReadOnly):
     exclude = ('connect_url', 'session_id', 'lease', 'history', 'goal', 'shown_target', 'visited_pages', 'options', 'order',
-               'pending_url', 'secret_once', 'counts')
+               'pending_url', 'secret_once', 'counts', 'trace')
     list_display = ('internal_id', 'user', 'site', 'state', 'reason', 'steps', 'cost_usd', 'created_at')
     list_filter = ('state', 'reason')
     search_fields = ('internal_id', 'site', 'user__username', 'user__email')

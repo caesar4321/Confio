@@ -14,6 +14,8 @@ NEEDS_PERSON = {
     'otp': '{site} te envió un código de verificación. Escríbelo en la tarjeta.',
     # {{item}} and {{total}} are the order's (operate._order).
     # Fixed words: what the store wrote (the item, the total) is shown only on the card.
+    # The click judge could not tell: never a dead end, the person says yes or no.
+    'step': '{site} pide «{{step}}» para seguir. No sé si conviene: ¿lo hago?',
     'approve': 'Tu pedido en {site} está listo, a pagar con {pay}. Revísalo en la tarjeta y confírmalo: lo hago yo.',
     # Confío cannot pay this one: said before they confirm, so nobody orders what they cannot pay.
     'approve_manual': ('Tu pedido en {site} está listo. Esta vez no puedo pagarlo yo: cuando lo haga, te muestro '

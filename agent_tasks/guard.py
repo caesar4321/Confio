@@ -313,6 +313,40 @@ _FINAL_SAFE = re.compile(
 _WAY_ON = re.compile(r'(continuar|continue|siguiente|next|proceder|proceed|seguir|avanzar|avancar|prosseguir)')
 
 
+def hard_refusal(element, *, on_checkout, page=None):
+    """What code reads for sure, before any model: '' or the kind of act ('places_order', 'card', 'account',
+    'acts'). A deny-list only: what it does not name, the click judge decides (and may refuse more)."""
+    parts = _parts(element)
+    href = element.get('href') or ''
+    if element.get('tag') == 'a' and (urlsplit(href).scheme not in ('http', 'https') or acts(href)):
+        return 'acts'
+    if _ACCOUNT_PATH.search(urlsplit(href).path.lower()):
+        return 'account'
+    if parts and _DECLINE.fullmatch(parts[0]) and not any(_JOIN.search(part) for part in parts) \
+            and not any(_FINAL_LOOK.search(part) or _FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part)
+                        for part in parts) and not any(card_words(part) for part in parts) and not element.get('cut'):
+        return ''   # "No gracias" to an offer: its other wordings may name Prime
+    if any(_NEVER.search(part) for part in parts):
+        return 'account'
+    if any(card_words(part) for part in parts):
+        return 'card'
+    tick = (element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')) \
+        or element.get('role') in ('radio', 'checkbox')
+    if any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in parts):
+        return 'places_order'
+    if not tick and any(_FINAL_LOOK.search(part) for part in parts) and not (
+            not on_checkout and element.get('tag') != 'a' and all(_ENTER_CHECKOUT.fullmatch(part) for part in parts)):
+        return 'places_order'
+    # The page that shows the order's total and how it is paid: a plain way on with no final button of its own
+    # beside it may be the one that places it.
+    if page is not None and not tick and final_step(page.text, page.elements) \
+            and parts and all(_WAY_ON.fullmatch(part) for part in parts) and not any(
+                final_button(other) for other in page.elements if other is not element
+                and other.get('on_screen', True) and not other.get('disabled') and other.get('tag') != 'a'):
+        return 'places_order'
+    return ''
+
+
 def final_step(text, elements=()):
     """A page that shows the order's total and how it is paid: where the order is placed."""
     from .operate import _GRAND_TOTAL, _METHOD_LABEL

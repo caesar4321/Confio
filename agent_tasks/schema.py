@@ -107,7 +107,8 @@ def task_type(task):
             reason = 'login_again'
         if reason == 'approve' and (task.order or {}).get('manual'):
             reason = 'approve_manual'   # the card they confirm on says they pay it themselves
-        message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task)
+        message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task).replace(
+            '{step}', str(((task.order or {}).get('ask_step') or {}).get('label') or '')[:80])
     elif task.state == 'payment_ready' and task.reason == 'manual':
         message = notes.manual_text(task)
     elif task.state == 'payment_ready':
@@ -251,6 +252,20 @@ class ApproveAgentOrder(_Result):
             return _failure(cls, exc)
 
 
+class AnswerAgentStep(_Result):
+    """Yes or no to one step the agent could not judge by itself ("¿lo hago?")."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        yes = graphene.Boolean(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, yes):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.answer_step(*_owner(info), id, bool(yes))))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
 class CancelAgentTask(_ById):
     class Arguments:
         id = graphene.UUID(required=True)
@@ -312,5 +327,6 @@ class Mutation(graphene.ObjectType):
     sign_in_agent_store = SignInAgentStore.Field()
     give_agent_code = GiveAgentCode.Field()
     approve_agent_order = ApproveAgentOrder.Field()
+    answer_agent_step = AnswerAgentStep.Field()
     open_agent_live_view = OpenAgentLiveView.Field()
     forget_agent_store = ForgetAgentStore.Field()

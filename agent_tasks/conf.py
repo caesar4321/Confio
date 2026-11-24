@@ -36,6 +36,8 @@ DEFAULTS = {
     'AGENT_TASKS_QUEUE': 'browser',
     'AGENT_TASKS_MODEL': 'gpt-6.1-terra',
     'AGENT_TASKS_MODEL_TIMEOUT_SECONDS': 40,
+    # The click judge (agent.judge): '' is the agent's own model.
+    'AGENT_TASKS_JUDGE_MODEL': '',
     # USD per 1M tokens: (input, cached input, output).
     'AGENT_TASKS_PRICES': {
         'gpt-6.1-terra': ('1.00', '0.10', '5.00'),

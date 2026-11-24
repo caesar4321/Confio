@@ -32,6 +32,12 @@ export const GET_AGENT_STORES = gql`
 
 const RESULT = `success errors errorCode task { ${TASK_FIELDS} }`;
 
+export const ANSWER_AGENT_STEP = gql`
+  mutation AnswerAgentStep($id: UUID!, $yes: Boolean!) {
+    answerAgentStep(id: $id, yes: $yes) { ${RESULT} }
+  }
+`;
+
 export const CHOOSE_AGENT_OPTION = gql`
   mutation ChooseAgentOption($id: UUID!, $index: Int!) {
     chooseAgentOption(id: $id, index: $index) { ${RESULT} }

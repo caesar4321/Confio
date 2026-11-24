@@ -278,6 +278,7 @@ def checkout(step, browser, reader, seen):
         except service.TaskRefused:
             return step.stop('cannot_pay')
         step.save(phase='ordering')
+    _trace(step, seen)
     name, args = agent.operate(task, seen, step.meter, after=after)
     if name == 'wait':
         step.delay = 2
@@ -309,11 +310,22 @@ def checkout(step, browser, reader, seen):
                 or guard.final_looking(element) \
                 or not guard.order_address(urljoin(seen.url, element.get('href') or '')):
             return step.remember(did, 'refused: after the order only links to its pages may be opened')
-    elif not guard.may_press(element, on_checkout=on_checkout, stage=guard.stage_of(seen, on_checkout=on_checkout),
-                             page=seen):
-        return step.remember(did, 'refused: not a control I may press here. If it places or pays the order, '
-                                  'call ready_to_order with it.')
     where = step.fingerprint(seen.url)
+    allowed = (task.order or {}).get('allowed_step') or {}
+    if allowed:
+        # A yes is for the very next step only: used now or gone.
+        step.save(order={**(task.order or {}), 'allowed_step': None})
+    if after:
+        pass
+    elif allowed and allowed == _identity(element, label, where):
+        # The person said yes to this very control on this very page ("¿Lo hago?"): still never past the floor.
+        hard = guard.hard_refusal(element, on_checkout=on_checkout, page=seen)
+        if hard:
+            step.remember(did, f'refused: {hard}')
+            return None
+    else:
+        if _judged(step, seen, element, label, did, where, on_checkout) is REFUSED:
+            return None
     if sum(entry.get('at') == where and entry.get('did') == did[:120] for entry in (task.history or [])[-8:]) \
             >= MAX_SAME_PRESS:
         return step.remember(did, 'refused: already pressed twice here; do something else')
@@ -326,6 +338,66 @@ def checkout(step, browser, reader, seen):
     if refused:
         return step.remember(did, f'refused: {refused}')
     browser.pump(2)
+
+
+REFUSED = object()
+
+
+TRACE_KEPT = 12
+
+
+def _trace(step, seen):
+    """What this page held, as the browser read it: its address (no query), its controls, a little text."""
+    parts = urlsplit(seen.url or '')
+    page = {'url': f'{parts.hostname or ""}{parts.path[:200]}', 'title': str(seen.title or '')[:120],
+            'text': agent.redact(seen.text[:1500]),
+            'elements': [{key: (str(element.get(key))[:120] if key != 'href' else urlsplit(str(element.get(key) or '')).path[:120])
+                          for key in ('ref', 'label', 'tag', 'type', 'role', 'href', 'checked', 'disabled', 'on_screen')
+                          if element.get(key) not in (None, '')} for element in seen.elements[:150]]}
+    step.save(trace=[*(step.task.trace or []), page][-TRACE_KEPT:])
+
+
+def _identity(element, label, where):
+    """What a yes is for: this control (its words, kind and target) on this page."""
+    return {'label': label[:120], 'at': where, 'tag': str(element.get('tag') or ''), 'type': str(element.get('type') or ''),
+            'href': urlsplit(str(element.get('href') or '')).path[:200]}
+
+
+def _judged(step, seen, element, label, did, where, on_checkout):
+    """None to press it, REFUSED when it was refused (and said so). Code refuses what it reads for sure
+    (guard.hard_refusal: final words, a card, the account, a link that acts); the judge (agent.judge) may
+    refuse more, never less."""
+    hard = guard.hard_refusal(element, on_checkout=on_checkout, page=seen)
+    if hard == 'places_order':
+        step.remember(did, 'refused: it places or pays the order. Call ready_to_order with it.')
+        return REFUSED
+    if hard:
+        step.remember(did, f'refused: {hard}. Never a card nor anything about the account: find another way.')
+        return REFUSED
+    try:
+        verdict, why = agent.judge(step.task, seen, element, step.meter)
+    except agent.AgentUnavailable:
+        verdict, why = 'unsure', 'the check could not run'
+    parts = guard._parts(element)
+    if verdict == 'unsure' and parts and all(guard._FINAL_SAFE.fullmatch(part) for part in parts):
+        verdict = 'safe'   # an edit or a choice by its whole words ("Usar este método de pago"), past the floor
+    if verdict == 'safe':
+        return None
+    if verdict == 'places_order':
+        step.remember(did, f'refused: it places or pays the order ({why}). Call ready_to_order with it.')
+        return REFUSED
+    if verdict in ('card', 'account'):
+        step.remember(did, f'refused: {why}. Never a card nor anything about the account: find another way.')
+        return REFUSED
+    # Unsure on a checkout page that shows money: it may be the order. The person approves the purchase
+    # itself (item, total, address), never a bare step.
+    if on_checkout and guard._MONEY.search(guard.fold(seen.text[:100000])):
+        step.remember(did, f'refused: it may place the order ({why}). If it does, call ready_to_order with it.')
+        return REFUSED
+    # Unsure elsewhere: never a dead end. The person says yes or no in the chat, once, for this very step.
+    step.hand_over('step', order={**(step.task.order or {}), 'ask_step': _identity(element, label, where)},
+                          body=notes.say(notes.NEEDS_PERSON['step'], step.task).replace('{step}', label[:80]))
+    return REFUSED
 
 
 def _method_refusal(task, seen):
@@ -377,18 +449,20 @@ def _order(step, browser, reader, seen, element, label, args, on_checkout):
     task = step.task
     # The final button by its words, or, on the page that shows the total and the method, any button the
     # model may not press there ("Procesar pago", "Enviar orden"): it may be the one, so the person approves it.
-    # Only the page that shows the order's total and its payment method names a button by its place: a
-    # middle step's "Continuar" is never the order (its own final button goes by its words).
-    last = guard.stage_of(seen, on_checkout=on_checkout) == 'final'
-    final = guard.final_looking(element) or (
-        last
-        and (element.get('tag') in ('button', 'input', 'a') or element.get('role') == 'button')
-        and element.get('type') not in ('radio', 'checkbox', 'text', 'email', 'password', 'hidden')
-        and not guard.may_press(element, on_checkout=True, stage='final', page=seen)
-        and not any(guard._NEVER.search(part) or guard.card_words(part) for part in guard._parts(element))
-        and not guard.account_address(element.get('href') or ''))
-    if not (on_checkout or last) or not final:
-        return step.remember('ready_to_order', 'refused: that is not the final button of a checkout page')
+    # Never a card, the account or a link that acts, whatever any model says.
+    if guard.hard_refusal(element, on_checkout=on_checkout, page=seen) not in ('', 'places_order'):
+        return step.remember('ready_to_order', 'refused: that control is a card or the account, never the order')
+    # The store's own final words, or the judge reading this button on this page as the one that places it.
+    final = guard.final_looking(element)
+    if not final:
+        try:
+            verdict, _ = agent.judge(task, seen, element, step.meter)
+        except agent.AgentUnavailable:
+            verdict = 'unsure'
+        final = verdict == 'places_order'
+    if not final or element.get('type') in ('radio', 'checkbox', 'text', 'email', 'password', 'hidden') \
+            or guard.product_address(seen.url):
+        return step.remember('ready_to_order', 'refused: that is not the button that places the order')
     total = guard.clean(agent.redact(args.get('total')), 40)
     amount = amount_of(total)
     if amount is None or amount <= 0 or not total_on(seen.text, total):

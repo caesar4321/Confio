@@ -16,7 +16,7 @@ import { Button } from '../components/common/Button';
 import { colors } from '../config/theme';
 import { saveImageToGallery } from '../utils/saveImageToGallery';
 import {
-  ACTIVE, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentTask, CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTION,
+  ACTIVE, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentTask, CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTION,
   GET_AGENT_TASK, GIVE_AGENT_CODE, SIGN_IN_AGENT_STORE,
 } from './api';
 
@@ -182,6 +182,16 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           </View>
         </View>
       ) : null}
+      {waiting && task.reason === 'step' ? (
+        <View style={styles.stepRow}>
+          <Button title="Sí, hazlo" loading={tapping === 'step:yes'}
+            onPress={() => act('step:yes', ANSWER_AGENT_STEP, { yes: true }, 'answerAgentStep')} />
+          <Pressable onPress={() => act('step:no', ANSWER_AGENT_STEP, { yes: false }, 'answerAgentStep')}
+            accessibilityRole="button" style={styles.link} disabled={tapping !== null}>
+            <Text style={styles.linkText}>No</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {waiting && task.reason === 'approve' && task.order ? (
         <Button title="Confirmar pedido" loading={tapping === 'approve'}
           onPress={() => { act('approve', APPROVE_AGENT_ORDER, { total: task.order!.total }, 'approveAgentOrder'); }} />
@@ -341,6 +351,7 @@ function Code({ sending, onSend }: { sending: boolean; onSend: (code: string) =>
 
 const styles = StyleSheet.create({
   qrBox: { marginTop: 12, alignItems: 'center' },
+  stepRow: { marginTop: 12, gap: 4 },
   address: { fontSize: 13, color: '#6B7280', marginTop: 4 },
   details: { marginTop: 12, borderRadius: 12, backgroundColor: '#F9FAFB', paddingHorizontal: 12 },
   detail: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth,

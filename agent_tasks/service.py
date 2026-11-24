@@ -326,6 +326,23 @@ def approve(account, user, task_id, total=None):
     return _answered(account, user, task_id, 'approve', order=order)
 
 
+def answer_step(account, user, task_id, yes):
+    """The person said yes or no to one step the click judge could not tell ("¿lo hago?"). Yes: that very
+    control, on that very page, is pressed once (operate.checkout). No: the agent finds another way."""
+    task = get(account, user, task_id)
+    order = dict(task.order or {})
+    asked = order.pop('ask_step', None) or {}
+    if not asked.get('label'):
+        raise TaskRefused('not_open')
+    if yes:
+        order['allowed_step'] = asked
+        entry = {'did': f"the person allowed \"{asked['label']}\"", 'result': 'press it now'}
+    else:
+        entry = {'did': f"the person said no to \"{asked['label']}\"", 'result': 'find another way, never that'}
+    return _answered(account, user, task_id, 'step', order=order,
+                     history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
+
+
 def choose(account, user, task_id, index):
     """The person picked one of the products offered in the chat: the agent goes on with it."""
     if not conf.get('AGENT_TASKS_ENABLED'):
@@ -508,7 +525,7 @@ def _sweep():
 
     def scrub(task):
         AgentTask.objects.filter(pk=task.pk).update(goal='', history=[], shown_target='', visited_pages=[],
-                                                    options=[], order={}, pending_url='', secret_once='')
+                                                    options=[], order={}, pending_url='', secret_once='', trace=[])
 
     old = Q(created_at__lt=now - timedelta(days=conf.get('AGENT_TASKS_KEEP_DAYS')))
     _each(AgentTask.objects.exclude(state__in=AgentTask.ACTIVE).exclude(goal='')

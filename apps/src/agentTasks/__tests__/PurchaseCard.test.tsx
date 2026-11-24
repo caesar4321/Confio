@@ -104,6 +104,15 @@ it('the order is approved with one tap, showing the item and the total', async (
   expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$112.50' });
 });
 
+it('a step the agent could not judge is one tap: yes or no', async () => {
+  mockTask = task({ reason: 'step', options: [], message: 'amazon.com.mx pide «Guardar para más tarde» para seguir. ¿lo hago?' });
+  mockMutate.mockResolvedValue(answered('answerAgentStep', { task: { ...mockTask, status: 'working', reason: '' } }));
+  const tree = await mount();
+  const yes = tree.root.findAll((n) => n.props.title === 'Sí, hazlo' && typeof n.props.onPress === 'function')[0];
+  await act(async () => { yes.props.onPress(); });
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, yes: true });
+});
+
 it('the order card says where it is delivered', async () => {
   mockTask = task({ reason: 'approve', options: [],
     order: { item: 'Chocolate Ibarra', total: '$189.00', image: '', address: 'ana perez, calle 1 #23, cdmx' } });

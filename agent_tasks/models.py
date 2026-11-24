@@ -91,6 +91,9 @@ class AgentTask(models.Model):
     cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
     # Short facts for the next step: what was done and what came of it. Never typed text.
     history = models.JSONField(default=list, blank=True)
+    # The last pages the agent saw from the cart on, as the browser read them (their controls, a little text):
+    # what a failure is diagnosed from, never guessed. Cleared with the rest (service.scrub).
+    trace = models.JSONField(default=list, blank=True)
 
     # Products offered to the person in the chat: [{title, price, image, href}], what the
     # store's page showed (third-party text and pictures). They pick one; its page is opened next.

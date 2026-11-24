@@ -51,7 +51,7 @@ HISTORY_KEPT = 30
 CHECKOUT_TURN_MIN = timedelta(minutes=5)
 ASKED = 'asked the person: '
 RESUMED = 'the person took the screen'
-BACK_TO_AGENT = frozenset({'login', 'captcha'})
+BACK_TO_AGENT = frozenset({'login', 'captcha', 'step'})
 # A CAPTCHA is solved by the browser's vendor: the agent only waits for it.
 CAPTCHA, CAPTCHA_TRIES, CAPTCHA_WAIT_SECONDS = 'captcha', 8, 6
 # Products shown in the chat for the person to pick one.
