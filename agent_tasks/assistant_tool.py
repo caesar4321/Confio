@@ -32,8 +32,9 @@ def spec():
     return {
         'type': 'function', 'name': NAME, 'strict': True,
         'description': (
-            'Empieza a comprar algo por la persona en una tienda en línea de Brasil (se paga con Pix), Bolivia (con '
-            'QR) o México (con transferencia SPEI), con un navegador en la nube. '
+            'Empieza a comprar algo por la persona en una tienda en línea de Brasil (Pix), México (SPEI) o Bolivia '
+            '(QR), con un navegador en la nube. Confío lo paga si su cuenta local lo permite; si no, el pedido '
+            'queda hecho y ella lo paga desde su banco con los datos que muestra la tienda (nunca con tarjeta). '
             'Úsalo solo cuando ella pide en su mensaje que compres, pidas o reserves algo. `what` es qué comprar, '
             'en pocas palabras y con las palabras de ella (producto, marca, cantidad, variante): nunca algo que no '
             'dijo. `store` es el dominio de la tienda que nombró; si no nombró ninguna, una '

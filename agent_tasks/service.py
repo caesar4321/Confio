@@ -22,8 +22,8 @@ MESSAGES = {
     'unavailable': 'Todavía no puedo comprar por ti desde aquí.',
     'update_app': 'Actualiza la app para que pueda hacer compras por ti.',
     'not_personal': 'Las compras por ti funcionan solo en tu cuenta personal.',
-    'country': ('Por ahora solo puedo comprar en tiendas de Brasil (.br, con Pix), Bolivia (.bo, con QR) y México '
-                '(.mx, con transferencia SPEI). Escríbeme la dirección de la tienda.'),
+    'country': ('Por ahora compro en tiendas de Brasil (.br), México (.mx) y Bolivia (.bo). Escríbeme la dirección '
+                'de la tienda.'),
     'store': 'No puedo trabajar en ese sitio.',
     'goal': 'Dime en una frase qué quieres comprar.',
     'active_task': 'Acabo de empezar esa compra hace un momento.',
@@ -69,25 +69,42 @@ def require_payable(account, user, country, meta):
     """A purchase this person could not pay here is never started, and they
     are never asked to confirm one: so this is asked at both."""
     from payment_accounts import payment_intents
-    from payment_accounts.schema import _verified_identity
-    from payment_accounts.services import PaymentAccountError
     from security.minors import minor_refusal
     if not user.is_active or not payment_intents.allowed(user):
         raise TaskRefused('unavailable')
     minor = minor_refusal(user)
     if minor:
         raise TaskRefused('unavailable', minor)
+    if countries.rail(country) is None:
+        raise TaskRefused('country')
+    # A verified identity, whoever pays it: the buying agent is not open to accounts nobody verified.
+    # (Where Confío's own rail cannot serve them, pay_mode hands them the store's data instead.)
+    from payment_accounts.schema import _verified_identity
+    from payment_accounts.services import PaymentAccountError
     try:
-        try:
-            identity = _verified_identity(account)
-        except PaymentAccountError:
-            identity = None
-        rail = countries.rail(country)
-        if rail is None:
-            raise TaskRefused('country')
-        rail.ready(account, identity, meta)
+        _verified_identity(account)
     except PaymentAccountError as exc:
-        raise TaskRefused('unavailable', str(exc) or None) from exc
+        raise TaskRefused('unavailable', 'Verifica tu identidad en Confío para que pueda comprar por ti.') from exc
+    # Whether Confío pays it or the person does from their bank is pay_mode's, at the order.
+
+
+def pay_mode(task, meta):
+    """('confio', '') or ('manual', the local account to offer): asked at the order card and
+    again once the order is placed (an account opened meanwhile pays it)."""
+    from payment_accounts.schema import _verified_identity
+    from payment_accounts.services import PaymentAccountError
+    rail = countries.rail(task.country)
+    if rail is None:
+        return 'manual', ''
+    try:
+        identity = _verified_identity(task.account)
+    except PaymentAccountError:
+        identity = None
+    try:
+        return rail.pay_mode(task.account, identity, meta)
+    except Exception:  # noqa: BLE001 - an answer nobody could read is the person's own bank, never a card
+        logger.warning('agent task pay mode failed', exc_info=True)
+        return 'manual', ''
 
 
 # A browser worker leaves a mark that lasts a few minutes: when it answers the
@@ -294,6 +311,7 @@ def approve(account, user, task_id, total=None):
         raise TaskRefused('not_open')
     # Bound to that item, that total, that button, on that page; used once (operate._order).
     order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item')}
+    order['approved']['manual'] = bool(order.get('manual'))   # who pays it, as their card said
     return _answered(account, user, task_id, 'approve', order=order)
 
 

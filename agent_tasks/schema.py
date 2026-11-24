@@ -57,6 +57,12 @@ class AgentOrderType(graphene.ObjectType):
     image = graphene.String(required=True)
 
 
+class AgentPayDetailType(graphene.ObjectType):
+    """One line of the data the person pays the order with, as the store's order page writes it."""
+    label = graphene.String(required=True)
+    value = graphene.String(required=True)
+
+
 class AgentTaskType(graphene.ObjectType):
     id = graphene.UUID(required=True)
     goal = graphene.String(required=True)
@@ -71,6 +77,10 @@ class AgentTaskType(graphene.ObjectType):
         required=True, description='The person has the checkout: there may be an order even if the task stops')
     payment_intent_id = graphene.UUID()
     pay_qr = graphene.String(description="The store's QR the person pays from their bank's app (no Confío payment).")
+    pay_details = graphene.List(graphene.NonNull(AgentPayDetailType), required=True,
+                                description='What the person pays the order with from their bank (no Confío payment).')
+    open_account_method = graphene.String(
+        description='The local account (LocalAccountApplication methodId) that would let Confío pay it next time.')
     created_at = graphene.DateTime(required=True)
     order = graphene.Field(AgentOrderType, description='With reason `approve`: confirm with approveAgentOrder')
     options = graphene.List(graphene.NonNull(AgentOptionType), required=True,
@@ -94,9 +104,11 @@ def task_type(task):
         reason = task.reason
         if reason == 'login' and int((task.counts or {}).get('asked_login') or 0) > 1:
             reason = 'login_again'
+        if reason == 'approve' and (task.order or {}).get('manual'):
+            reason = 'approve_manual'   # the card they confirm on says they pay it themselves
         message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task)
     elif task.state == 'payment_ready' and task.reason == 'manual':
-        message = notes.say(notes.PAYMENT_MANUAL, task).replace('{total}', str((task.order or {}).get('total') or ''))
+        message = notes.manual_text(task)
     elif task.state == 'payment_ready':
         message = notes.say(notes.PAYMENT_READY, task)
     else:
@@ -107,6 +119,10 @@ def task_type(task):
         payment_intent_id=task.payment_intent.internal_id if task.payment_intent_id else None,
         # The store's own QR, for the person to pay from their bank (only when Confío cannot).
         pay_qr=str((task.order or {}).get('pay_qr') or '') or None if task.state == 'payment_ready' else None,
+        pay_details=[AgentPayDetailType(label=str(d.get('label') or ''), value=str(d.get('value') or ''))
+                     for d in ((task.order or {}).get('pay_details') or []) if isinstance(d, dict)]
+        if task.state == 'payment_ready' else [],
+        open_account_method=str((task.order or {}).get('offer') or '') or None,
         created_at=task.created_at,
         order=(AgentOrderType(item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
                               image=str(task.order.get('image') or '')) if task.order else None),

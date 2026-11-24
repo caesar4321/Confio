@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useApolloClient } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
+import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import Share from 'react-native-share';
 import ViewShot from 'react-native-view-shot';
@@ -34,7 +35,9 @@ function Photo({ uri, size }: { uri: string; size: number }) {
   return <Image source={{ uri }} style={[styles.photo, box]} resizeMode="contain" onError={() => setFailed(true)} />;
 }
 
-export function PurchaseCard({ taskId, onStores }: { taskId: string; onStores?: () => void }) {
+export function PurchaseCard({ taskId, onStores, onOpen }: {
+  taskId: string; onStores?: () => void; onOpen?: (screen: string, params?: Record<string, unknown>) => void;
+}) {
   const client = useApolloClient();
   const [task, setTask] = useState<AgentTask | null | undefined>(undefined);
   const [note, setNote] = useState<string | null>(null);
@@ -181,6 +184,11 @@ export function PurchaseCard({ taskId, onStores }: { taskId: string; onStores?: 
           onPress={() => { act('approve', APPROVE_AGENT_ORDER, { total: task.order!.total }, 'approveAgentOrder'); }} />
       ) : null}
       {task.status === 'payment_ready' && task.payQr ? <StoreQr code={task.payQr} total={task.order?.total ?? ''} /> : null}
+      {task.status === 'payment_ready' && task.payDetails?.length ? <PayDetails details={task.payDetails} /> : null}
+      {task.status === 'payment_ready' && task.openAccountMethod && onOpen ? (
+        <Button title="Abrir mi cuenta local" variant="secondary"
+          onPress={() => onOpen('LocalAccountApplication', { methodId: task.openAccountMethod })} />
+      ) : null}
       {note ? <Text style={styles.note}>{note}</Text> : null}
       {ACTIVE.has(task.status) ? (
         <Pressable onPress={cancel} accessibilityRole="button" style={styles.link} disabled={tapping !== null}>
@@ -191,6 +199,25 @@ export function PurchaseCard({ taskId, onStores }: { taskId: string; onStores?: 
           <Text style={styles.linkText}>Tiendas con tu sesión</Text>
         </Pressable>
       ) : null}
+    </View>
+  );
+}
+
+// What the store's order page says to pay it with, each line copied with a tap.
+function PayDetails({ details }: { details: { label: string; value: string }[] }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  return (
+    <View style={styles.details}>
+      {details.map((item) => (
+        <Pressable key={item.label} accessibilityRole="button" accessibilityLabel={`Copiar ${item.label}`}
+          style={styles.detail} onPress={() => { Clipboard.setString(item.value); setCopied(item.label); }}>
+          <View style={styles.detailText}>
+            <Text style={styles.detailLabel}>{item.label}</Text>
+            <Text style={styles.detailValue} selectable>{item.value}</Text>
+          </View>
+          <Icon name={copied === item.label ? 'check' : 'copy'} size={16} color={colors.primaryDark} />
+        </Pressable>
+      ))}
     </View>
   );
 }
@@ -311,6 +338,12 @@ function Code({ sending, onSend }: { sending: boolean; onSend: (code: string) =>
 
 const styles = StyleSheet.create({
   qrBox: { marginTop: 12, alignItems: 'center' },
+  details: { marginTop: 12, borderRadius: 12, backgroundColor: '#F9FAFB', paddingHorizontal: 12 },
+  detail: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB' },
+  detailText: { flex: 1, marginRight: 8 },
+  detailLabel: { fontSize: 12, color: '#6B7280' },
+  detailValue: { fontSize: 15, color: '#111827', marginTop: 2 },
   qrInner: { alignItems: 'center', padding: 16, backgroundColor: '#FFFFFF', borderRadius: 12 },
   qrActions: { marginTop: 12, alignSelf: 'stretch', gap: 4 },
   card: {

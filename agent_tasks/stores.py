@@ -12,7 +12,8 @@ from . import guard, sites
 
 KNOWN = sites.KNOWN
 # What reads as an address, not as a typo like "azul.grande".
-_ADDRESS = re.compile(r'^(https://|www\.)|\.(br|com|net|store|shop)(/|$)')
+_ADDRESS = re.compile(r'^(https://|www\.)|\.(br|com|net|store|shop|mx|bo|ar|cl|co|pe|ec|uy|py|ve|gt|cr|pa|do|sv|hn'
+                      r'|ni)(/|$)')
 _LOOK_ALIKE = str.maketrans('01', 'ol')
 # Words that only happen to hold a store's name.
 _OWN_WORDS = ('amazonia', 'amazonica', 'amazonas', 'brenner', 'centauros', 'abuser', 'mainbuser')
@@ -75,7 +76,10 @@ def imitates(site):
 
 
 _COUNTRY_WORDS = {'MX': ('mexico', 'mexicana', 'mexicano', 'cdmx'), 'BR': ('brasil', 'brazil', 'brasileira'),
-                  'BO': ('bolivia', 'boliviana', 'boliviano')}
+                  'BO': ('bolivia', 'boliviana', 'boliviano'), 'AR': ('argentina', 'argentino'),
+                  'CO': ('colombia', 'colombiana', 'colombiano'), 'PE': ('peru', 'peruana', 'peruano'),
+                  'CL': ('chile', 'chilena', 'chileno'), 'VE': ('venezuela', 'venezolana', 'venezolano'),
+                  'EC': ('ecuador', 'ecuatoriana', 'ecuatoriano'), 'UY': ('uruguay', 'uruguaya', 'uruguayo')}
 
 
 def said_country(texts):

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest import mock
 from datetime import timedelta
 
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
 from agent_tasks import assistant_tool, browsers, runner, service
@@ -44,7 +44,7 @@ class StartTests(ServiceBase):
                            ('update_app', {'meta': {}}),
                            ('update_app', {'meta': {'HTTP_X_CONFIO_VERSION': '5.4.0'}}),
                            ('store', {'site': 'mercadolivre-ofertas.com'}), ('store', {'site': 'itau.com.br'}),
-                           ('country', {'site': 'tienda.com.pe'}), ('goal', {'goal': 'x'}), ('goal', {'goal': 'x' * 401})):
+                           ('country', {'site': 'tienda.es'}), ('goal', {'goal': 'x'}), ('goal', {'goal': 'x' * 401})):
             with self.subTest(code=code, over=str(over)[:50]):
                 self.refused(code, self.start, **over)
         self.assertFalse(AgentTask.objects.exists())
@@ -127,6 +127,20 @@ class StartTests(ServiceBase):
         user, account = self.person()
         self.make_task(user=user, account=account, state='stopped')
         self.refused('busy', self.start)
+
+
+class PayableTests(SimpleTestCase):
+    def test_nobody_unverified_gets_the_buying_agent_whoever_would_pay(self):
+        from payment_accounts.services import PaymentAccountError
+        user, account = SimpleNamespace(is_active=True), SimpleNamespace()
+        with mock.patch('payment_accounts.payment_intents.allowed', return_value=True), \
+                mock.patch('security.minors.minor_refusal', return_value=''):
+            with mock.patch('payment_accounts.schema._verified_identity', side_effect=PaymentAccountError('x')):
+                with self.assertRaises(service.TaskRefused) as refused:
+                    service.require_payable(account, user, 'MX', {})
+            self.assertIn('Verifica tu identidad', str(refused.exception))
+            with mock.patch('payment_accounts.schema._verified_identity', return_value=object()):
+                service.require_payable(account, user, 'MX', {})   # no local account needed to start
 
 
 class PersonsTurnTests(ServiceBase):

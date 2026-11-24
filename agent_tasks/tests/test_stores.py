@@ -83,3 +83,23 @@ class OrdinaryWordTests(SimpleTestCase):
         for value in ('caixa-de-som.com.br', 'neon-led.com.br', 'pedra-stone.com.br', 'xp-games.com.br'):
             with self.subTest(value=value):
                 self.assertEqual(sites.store(value), value)
+
+
+class OtherCountriesTests(SimpleTestCase):
+    """Stores where the person pays it from their bank: the real ones are stores, never look-alikes."""
+
+    def test_mercado_libre_in_each_country_is_itself(self):
+        for site in ('mercadolibre.com.ar', 'mercadolibre.com.co', 'mercadolibre.com.pe', 'mercadolibre.cl',
+                     'mercadolibre.com.ve'):
+            with self.subTest(site=site):
+                self.assertFalse(stores.imitates(site))
+                self.assertEqual(sites.store(f'https://www.{site}/x'), site)
+
+    def test_the_name_is_the_one_in_the_persons_country(self):
+        self.assertEqual(stores.choose(None, ['cómprame un cargador en mercado libre'], 'AR'), 'mercadolibre.com.ar')
+        self.assertEqual(stores.choose(None, ['cómprame un cargador en mercado libre'], 'PE'), 'mercadolibre.com.pe')
+        self.assertEqual(stores.said_country(['de Colombia']), 'CO')
+
+    def test_an_address_with_its_country_domain_is_one(self):
+        self.assertEqual(stores.written(['compra esto en tienda.com.pe por favor']), {'tienda.com.pe'})
+        self.assertEqual(stores.written(['en liverpool.com.mx']), {'liverpool.com.mx'})

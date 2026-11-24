@@ -32,11 +32,24 @@ KNOWN = {
     'amazon.com.mx': ('amazon',),
     'walmart.com.mx': ('walmart',),
     'liverpool.com.mx': ('liverpool',),
+    # Where the person pays it from their bank (countries.ManualRail). Same names: settled by their country.
+    'mercadolibre.com.ar': ('mercado libre', 'mercadolibre', 'meli'),
+    'mercadolibre.com.co': ('mercado libre', 'mercadolibre', 'meli'),
+    'mercadolibre.com.pe': ('mercado libre', 'mercadolibre', 'meli'),
+    'mercadolibre.cl': ('mercado libre', 'mercadolibre', 'meli'),
+    'mercadolibre.com.uy': ('mercado libre', 'mercadolibre', 'meli'),
+    'mercadolibre.com.ve': ('mercado libre', 'mercadolibre', 'meli'),
+    'mercadolibre.com.ec': ('mercado libre', 'mercadolibre', 'meli'),
+    'falabella.com.co': ('falabella',),
+    'falabella.com.pe': ('falabella',),
 }
 # Other names of a known store.
 ALSO = {'mercadolivre.com.br': ('mercadolivre.com', 'mercadolibre.com'), 'magazineluiza.com.br': ('magalu.com',),
         # Mercado Libre signs in on its .com host in every country.
-        'mercadolibre.com.mx': ('mercadolibre.com',)}
+        'mercadolibre.com.mx': ('mercadolibre.com',),
+        **{site: ('mercadolibre.com',) for site in ('mercadolibre.com.ar', 'mercadolibre.com.co', 'mercadolibre.com.pe',
+                                                     'mercadolibre.cl', 'mercadolibre.com.uy', 'mercadolibre.com.ve',
+                                                     'mercadolibre.com.ec')}}
 # A store's payment house: its checkout pages only, never the wallet.
 CHECKOUT_HOUSE = {'mercadolivre.com.br': (
     frozenset({'www.mercadopago.com.br', 'mercadopago.com.br', 'www.mercadopago.com'}),

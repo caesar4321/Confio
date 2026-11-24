@@ -43,12 +43,28 @@ class Rail:
         raise NotImplementedError
 
     kind = 'qr'            # read as one QR on screen (runner.code_on_screen)
-    can_go_manual = False  # when Confío cannot pay it, the person pays the store's own code
+    can_go_manual = True   # when Confío cannot pay it, the person pays the store's own code
+    opens = ''             # the local account (LocalAccountApplication) that lets Confío pay it
+    numeric = ''           # ISO 4217 numeric, as an EMV code carries it (tag 53)
 
     def manual(self, meta):
-        """True when Confío cannot pay this rail's code now: the order is still placed and the
-        person is handed the store's own QR to pay from their bank's app."""
+        """True when Confío cannot pay this rail for anyone now (a switch)."""
         return False
+
+    def pay_mode(self, account, identity, meta):
+        """('confio', '') when Confío pays this rail's code for this person now. Else
+        ('manual', offer): the order is still placed and the person pays the store's own
+        payment data from their bank; `offer` is the local account that would let Confío
+        pay it next time ('' when none can be opened for them)."""
+        from payment_accounts.local_money import REGION_UNSUPPORTED_MESSAGE
+        from payment_accounts.services import PaymentAccountError
+        if self.manual(meta):
+            return 'manual', ''
+        try:
+            self.ready(account, identity, meta)
+        except PaymentAccountError as exc:
+            return 'manual', '' if str(exc) == REGION_UNSUPPORTED_MESSAGE else self.opens
+        return 'confio', ''
 
     def request(self, meta):
         return {'method_id': self.method_id, 'meta': dict(meta or {})}
@@ -56,6 +72,9 @@ class Rail:
 
 @dataclass(frozen=True)
 class PixRail(Rail):
+    opens = 'br_qr'
+    numeric = '986'
+
     def codes(self, texts):
         from payment_accounts import payment_intents
         return {text for text in texts if payment_intents.find_pix_codes(text) == [text]}
@@ -102,7 +121,7 @@ class BoliviaQrRail(Rail):
     def written(self, words):
         return set()  # nothing on a page can be told to be one
 
-    can_go_manual = True
+    numeric = '068'
 
     def ready(self, account, identity, meta):
         # Payable either way: by Confío when QR Bolivia is on, else by the person's own bank (manual).
@@ -120,6 +139,8 @@ class SpeiRail(Rail):
     the order's reference as text (spei.py). Paid at exactly that amount with
     that reference; the account is the store's as its checkout showed it."""
     kind = 'text'
+    opens = 'mx_clabe'
+    numeric = '484'
 
     def read(self, shots):
         """(clabe, request fields, '') or ('', {}, why)."""
@@ -134,6 +155,43 @@ class SpeiRail(Rail):
         from payment_accounts import local_money
         local_money.require_rail(account, identity, local_money.METHODS['mx_clabe'])
         local_money._active_pair(account, 'MEX', 'MXN')
+
+
+@dataclass(frozen=True)
+class ManualRail(Rail):
+    """A country where Confío pays no store yet: the agent still buys, with a way to pay
+    that is never a card (a transfer, a deposit, cash at a shop, a bank QR), and the
+    person pays it from their bank with the store's own data off the order's page."""
+    kind = 'manual'
+
+    def pay_mode(self, account, identity, meta):
+        return 'manual', ''
+
+    def ready(self, account, identity, meta):
+        return None
+
+    def codes(self, texts):
+        # Any QR that is not a link and not another country's code: the person's bank reads it.
+        from payment_accounts import local_money
+        found = set()
+        for text in texts:
+            if not 16 <= len(text) <= _BO_MAX or _link(text):
+                continue
+            fields = local_money.emv_fields(re.sub(r'^[^:]{1,20}:', '', text))
+            if fields and fields.get('58') not in (None, self.country):
+                continue
+            found.add(text)
+        return found
+
+    def written(self, words):
+        return set()
+
+
+def manual_rail(country):
+    return ManualRail(
+        country=country, method_id='', currency='', payees=frozenset(), name='un pago sin tarjeta',
+        qr='los datos de pago', paste='paga el pedido desde tu banco con los datos que muestra la tienda',
+        vouches='Son los datos que mostró la tienda en tu pedido; nadie verificó a quién pertenece la cuenta.')
 
 
 def _link(text):
@@ -174,7 +232,12 @@ _TLD = {'br': 'BR', 'bo': 'BO', 'mx': 'MX'}
 
 
 def rail(country):
-    return RAILS.get(str(country or '').upper())
+    """The country's rail; a country Confío pays no store in yet, where the person pays (manual)."""
+    from . import conf
+    code = str(country or '').upper()
+    if code in RAILS:
+        return RAILS[code]
+    return manual_rail(code) if code in conf.get('AGENT_TASKS_MANUAL_COUNTRIES') else None
 
 
 def country_of(store, user=None):

@@ -421,6 +421,13 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
             (navigationRef as any).navigate('AgentStores');
           }
         }, roomy ? 0 : 250);
+      }} onOpen={(screen, params) => {
+        onWalk();
+        setTimeout(() => {
+          if (navigationRef.isReady()) {
+            (navigationRef as any).navigate(screen, params);
+          }
+        }, roomy ? 0 : 250);
       }} />
     </>
   );

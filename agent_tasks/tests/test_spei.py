@@ -123,6 +123,25 @@ class MexicoTests(StepBase):
                          ('mx_clabe', '1249.00', '4021775'))
         self.assertEqual(self.prepare.call_args.kwargs['source'], 'agent_checkout')
 
+    def test_without_a_peso_account_the_person_pays_the_clabe_and_is_offered_one(self):
+        self.mode.side_effect = None
+        self.mode.return_value = ('manual', 'mx_clabe')
+        self.assertEqual(self.outcome(MERCADO_PAGO), 'prepared')
+        self.prepare.assert_not_called()
+        self.task.refresh_from_db()
+        details = {d['label']: d['value'] for d in self.task.order['pay_details']}
+        self.assertEqual((details['CLABE'], details['Referencia'], details['Monto']), (CLABE, '4021775', '$1,249.00'))
+        from agent_tasks.schema import task_type
+        shown = task_type(self.task)
+        self.assertEqual(shown.open_account_method, 'mx_clabe')
+        self.assertIn('cuenta local', shown.message)
+
+    def test_without_a_peso_account_another_amount_is_never_handed_over(self):
+        self.mode.side_effect = None
+        self.mode.return_value = ('manual', 'mx_clabe')
+        changed = tuple('$1,250.00' if node == '$1,249.00' else node for node in MERCADO_PAGO)
+        self.assertEqual(self.outcome(changed), 'unpaid')
+
     def test_a_card_for_another_amount_is_refused(self):
         self.assertEqual(self.outcome(MERCADO_PAGO, amount='1249.01'), 'unpaid')
 

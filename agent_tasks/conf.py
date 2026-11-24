@@ -21,6 +21,10 @@ DEFAULTS = {
     'AGENT_TASKS_CAPABLE_HEADER': 'HTTP_X_CONFIO_BROWSER_TASKS',
     # Where a checkout may be paid today: the country's code rail.
     'AGENT_TASKS_COUNTRIES': ('BR', 'BO', 'MX'),
+    # Stores where Confío pays nothing yet: the agent buys and the person pays it from their bank.
+    # None until its reading of the order's data is bound to the store's own labels (a marketplace's
+    # seller writes on the order page too): countries.ManualRail.
+    'AGENT_TASKS_MANUAL_COUNTRIES': (),
 
     'AGENT_TASKS_BROWSER': 'browserbase',
     'BROWSERBASE_API_URL': 'https://api.browserbase.com/v1',

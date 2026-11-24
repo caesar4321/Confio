@@ -187,7 +187,7 @@ _SELLER_SEGMENT = re.compile(r'perfil|profile|loja|lojas|tienda|tiendas|stores?|
 _KNOWN_ORDER_PATHS = (
     (re.compile(r'(^|\.)amazon\.com(\.[a-z]{2})?$|(^|\.)amazon\.[a-z]{2}$'),
      re.compile(r'/(gp/buy/|gp/css/order|gp/your-account/order|your-orders/|checkout/|cpe/yourpayments/)')),
-    (re.compile(r'(^|\.)mercadoli(vre|bre)\.com(\.[a-z]{2})?$'),
+    (re.compile(r'(^|\.)mercadoli(vre|bre)\.(com(\.[a-z]{2})?|[a-z]{2})$'),
      re.compile(r'/(gz/checkout/|checkout/|compras?/\d|my_purchases/|my-purchases/|purchases/\d)')),
 )
 _CARD = re.compile(r'\b(tarjeta|cartao|card|credito|debito|credit|debit|visa|mastercard|amex|american express'

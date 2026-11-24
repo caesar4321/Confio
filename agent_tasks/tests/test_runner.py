@@ -56,6 +56,11 @@ class StepBase(RowsBase):
         self.operate = self.patch('agent_tasks.agent.operate', return_value=('wait', {}))
         self.patch('agent_tasks.operate.MAX_UNREAD', new=10 ** 6)   # a test reads many times over
         self.payable = self.patch('agent_tasks.service.require_payable')
+        # Confío pays it, unless the rail is switched off for everyone (Bolivia): the person's own
+        # account state is what the manual tests set.
+        self.mode = self.patch('agent_tasks.service.pay_mode', side_effect=lambda task, meta: (
+            ('manual', '') if countries.rail(task.country) is not None and countries.rail(task.country).manual(meta)
+            else ('confio', '')))
 
     def reading(self):
         """The order is placed and its payment is about to be read again, with its browser still open."""
@@ -340,6 +345,32 @@ class AfterCheckoutTests(StepBase):
         self.assertEqual(self.prepare.call_args.args[:3], (self.account, self.user, CODE))
         self.assertEqual(self.prepare.call_args.kwargs['request'], {'method_id': 'br_qr', 'meta': {}})
         self.decide.assert_not_called()
+
+    def test_without_a_reais_account_the_person_pays_the_pix_and_is_offered_one(self):
+        self.mode.side_effect = None
+        self.mode.return_value = ('manual', 'br_qr')
+        self.read.return_value = [(CODE, 200)]
+        self.reading()
+        self.task.save()
+        task = self.step(self.task)
+        self.prepare.assert_not_called()
+        self.assertEqual((task.state, task.reason, task.order['pay_qr'], task.order['offer']),
+                         ('payment_ready', 'manual', CODE, 'br_qr'))
+        self.assertIn('la próxima vez lo pago yo', self.post.call_args.args[1])
+
+    def test_a_pix_for_another_amount_or_currency_is_never_handed_over(self):
+        self.mode.side_effect = None
+        self.mode.return_value = ('manual', 'br_qr')
+        for code in (CODE.replace('5303986', '5303986540599.99'), CODE.replace('5303986', '5303840')):
+            with self.subTest(code=code[60:90]):
+                AgentTask.objects.filter(pk=self.task.pk).update(state='awaiting_code', reason='')
+                self.task.refresh_from_db()
+                self.reading()
+                self.task.save()
+                with mock.patch('agent_tasks.runner.code_on_screen', return_value=(code, '')):
+                    task = self.step(self.task)
+                self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'))
+                self.assertNotIn('pay_qr', task.order)
 
     def test_a_card_the_balance_does_not_cover_says_what_is_missing(self):
         intent = SimpleNamespace(total_usd=Decimal('20.00'), internal_id='intent-1')
@@ -808,12 +839,89 @@ class BoliviaTests(StepBase):
         self.assertEqual(self.outcome([(BO_QR, 150)], method='br_qr'), 'unpaid')
 
 
+@override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE',))
+class ManualCountryTests(StepBase):
+    """A country Confío pays no store in: the person pays the order's own data from their bank."""
+
+    SHOWN = {'method': 'Transferencia bancaria', 'amount': 'S/ 189,00', 'reference': 'PED-55120',
+             'account': '191-2345678-0-12', 'bank': 'BCP', 'holder': 'Tienda SAC', 'deadline': ''}
+    PAGE = ('Gracias por tu compra', 'Pedido PED-55120', 'Medio de pago: Transferencia bancaria', 'Transfiere S/ 189,00 a', 'BCP cuenta 191-2345678-0-12',
+            'a nombre de Tienda SAC', 'Indica la referencia PED-55120')
+
+    def setUp(self):
+        super().setUp()
+        self.read = self.patch('agent_tasks.qr.read', return_value=[])
+
+    def outcome(self, shown=None, page=None):
+        self.task = self.make_task(state='awaiting_code', checkout_at=timezone.now(), shown_target='tab',
+                                   site='tienda.com.pe', country='PE', phase='ordered',
+                                   order={'amount': '189.00', 'total': 'S/ 189,00', 'pressed': True,
+                                          'shown': shown or self.SHOWN})
+        url = 'https://tienda.com.pe/pedido/55120'
+        self.browser.capture.return_value = (picture(url=url, text=page or self.PAGE),
+                                             picture(url=url, text=page or self.PAGE))
+        self.reading()
+        self.task.save()
+        task = self.step(self.task)
+        AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        return task
+
+    def test_what_the_order_page_writes_is_handed_to_them(self):
+        task = self.outcome()
+        self.assertEqual((task.state, task.reason), ('payment_ready', 'manual'))
+        details = {d['label']: d['value'] for d in task.order['pay_details']}
+        self.assertEqual(details, {'Monto': 'S/ 189,00', 'Medio': 'Transferencia bancaria',
+                                   'Referencia': 'PED-55120', 'Cuenta': '191-2345678-0-12', 'Banco': 'BCP',
+                                   'Titular': 'Tienda SAC'})
+        from agent_tasks.schema import task_type
+        self.assertEqual(len(task_type(task).pay_details), 6)
+
+    def test_only_what_the_page_writes_is_kept(self):
+        task = self.outcome(shown={**self.SHOWN, 'account': '999-0000000-0-99', 'holder': 'Otra SAC'})
+        details = {d['label'] for d in task.order['pay_details']}
+        self.assertNotIn('Cuenta', details)
+        self.assertNotIn('Titular', details)
+        self.assertIn('Referencia', details)
+
+    def test_another_amount_is_never_handed_over(self):
+        page = tuple(node.replace('189,00', '19,00') for node in self.PAGE)
+        task = self.outcome(shown={**self.SHOWN, 'amount': 'S/ 19,00'}, page=page)
+        self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'))
+
+    def test_nothing_to_pay_it_with_goes_back_to_the_agent(self):
+        task = self.outcome(shown={**self.SHOWN, 'reference': 'X-1', 'account': 'Y-2'})
+        self.assertEqual(task.history[-1]['did'], runner.UNREAD)
+
+
+class PayModeTests(SimpleTestCase):
+    def test_confio_pays_or_the_person_does_and_is_offered_the_account(self):
+        from payment_accounts.local_money import REGION_UNSUPPORTED_MESSAGE
+        from payment_accounts.services import PaymentAccountError
+        rail = countries.RAILS['BR']
+        with mock.patch.object(countries.PixRail, 'ready', return_value=None):
+            self.assertEqual(rail.pay_mode(None, None, {}), ('confio', ''))
+        with mock.patch.object(countries.PixRail, 'ready', side_effect=PaymentAccountError('Tu cuenta local todavía no está activa.')):
+            self.assertEqual(rail.pay_mode(None, None, {}), ('manual', 'br_qr'))
+        with mock.patch.object(countries.PixRail, 'ready', side_effect=PaymentAccountError(REGION_UNSUPPORTED_MESSAGE)):
+            self.assertEqual(rail.pay_mode(None, None, {}), ('manual', ''))
+        with mock.patch.object(countries.SpeiRail, 'ready', side_effect=PaymentAccountError('x')):
+            self.assertEqual(countries.RAILS['MX'].pay_mode(None, None, {}), ('manual', 'mx_clabe'))
+        with mock.patch('ramps.bolivia_qr.enabled', return_value=False):
+            self.assertEqual(countries.RAILS['BO'].pay_mode(None, None, {}), ('manual', ''))
+        with override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE',)):
+            self.assertEqual(countries.rail('PE').pay_mode(None, None, {}), ('manual', ''))
+        self.assertIsNone(countries.rail('PE'))   # held until its reading is bound to the store's labels
+
+
 class CountryTests(SimpleTestCase):
     def test_the_store_says_its_country(self):
         self.assertEqual(countries.country_of('mercadolivre.com.br'), 'BR')
         self.assertEqual(countries.country_of('tienda.com.bo'), 'BO')
         self.assertEqual(countries.country_of('tienda.com.pe'), 'PE')
-        self.assertIsNone(countries.rail('PE'))
+        # Where Confío pays no store yet, the person pays it from their bank; elsewhere, nothing.
+        with override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE',)):
+            self.assertEqual(countries.rail('PE').kind, 'manual')
+        self.assertIsNone(countries.rail('ES'))
 
     def test_bolivia_is_paid_by_confio_for_everyone_or_by_the_person_for_everyone(self):
         rail = countries.RAILS['BO']
@@ -842,7 +950,7 @@ class BoliviaCandidateTests(SimpleTestCase):
         self.assertEqual(rail.codes([BO_QR]), {BO_QR})
 
     def test_a_store_without_a_country_domain_is_refused(self):
-        for store in ('shein.com', 'tienda.co', 'loja.store'):
+        for store in ('shein.com', 'loja.store', 'tienda.es'):
             with self.subTest(store=store):
                 self.assertIsNone(countries.rail(countries.country_of(store)))
 
@@ -1100,6 +1208,37 @@ class CheckoutTests(StepBase):
             task = self.step(task)
         self.assertEqual(came_of(task), 'prepared')
         cancel.assert_not_called()
+
+    def test_an_order_confio_cannot_pay_says_so_before_it_is_confirmed(self):
+        self.mode.side_effect = None
+        self.mode.return_value = ('manual', 'br_qr')
+        task = self.named()
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.assertEqual((task.order['manual'], task.order['offer']), (True, 'br_qr'))
+        self.assertIn('no puedo pagarlo yo', self.post.call_args.args[1])
+        self.assertIn('desde tu banco', self.post.call_args.args[1])
+        # The card they confirm on says it too.
+        from agent_tasks.schema import task_type
+        self.assertIn('no puedo pagarlo yo', task_type(task).message)
+        # Approved as "they pay it": if Confío could pay it by the time it is pressed, they are asked again.
+        task = service.approve(self.account, self.user, task.internal_id)
+        self.assertTrue(task.order['approved']['manual'])
+        self.mode.return_value = ('confio', '')
+        task = self.step(task, checkout_page())
+        self.reader.click.assert_not_called()
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+
+    @override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE',))
+    def test_where_the_person_pays_it_any_way_but_a_card_or_a_wallet(self):
+        for method, approved in (('Transferencia bancaria', True), ('PagoEfectivo', True), ('PayPal', False),
+                                 ('Tarjeta de crédito', False), ('Mercado Pago', False)):
+            with self.subTest(method=method):
+                AgentTask.objects.filter(user=self.user).update(state='cancelled')
+                page = checkout_page(total='S/ 189,00', url='https://tienda.com.pe/checkout/review', method=method)
+                self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate', 'total': 'S/ 189,00'})
+                task = self.step(self.make_task(phase='ordering', goal='chocolate', site='tienda.com.pe',
+                                                country='PE'), page)
+                self.assertEqual(task.reason == 'approve', approved, task.history[-1])
 
     def test_another_total_item_or_page_is_never_pressed_it_is_asked_again(self):
         for change in ({'total': 'R$ 249,00'}, {'url': f'{BASE}/checkout/other'}):

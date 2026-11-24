@@ -173,6 +173,20 @@ AFTER_TOOLS = [
           {'reason': {'type': 'string', 'enum': ['cannot_do']}}),
 ]
 
+# Where the person pays it themselves: the data they need, copied exactly as the page writes it
+# (the runner keeps only what it finds written on the order's own page, character for character).
+MANUAL_AFTER_TOOLS = [
+    AFTER_TOOLS[0],
+    _tool('payment_shown', 'The page in front of you shows the data to pay this order. Copy each item exactly as '
+                           'the page writes it, or "" when the page does not show it.',
+          {'method': _TEXT, 'amount': _TEXT, 'reference': _TEXT, 'account': _TEXT, 'bank': _TEXT,
+           'holder': _TEXT, 'deadline': _TEXT}),
+    *AFTER_TOOLS[2:],
+]
+MANUAL_PAY = ('a way to pay with no card that the person completes later from their own bank or in cash: a bank '
+              'transfer or deposit, cash at a shop (OXXO, PagoEfectivo, Rapipago, Efecty...), Pago Móvil, a bank '
+              'QR. Never a card, credit, PayPal, Mercado Pago, PSE, a wallet login or instalments')
+
 OPERATE = """You operate a web browser in the cart and checkout of one online store, for one person who asked
 for what <goal> says. They are not watching: you do the whole checkout. Choose exactly one action each step.
 
@@ -208,8 +222,11 @@ def operate(task, page, meter, *, after=False):
     """(action, args) in the cart and checkout, or after the order was placed."""
     from . import countries
     rail = countries.rail(task.country)
-    words = {'pay': rail.name if rail else 'the local payment', 'qr': rail.qr if rail else 'the payment data'}
+    manual = rail is None or rail.kind == 'manual'
+    words = {'pay': MANUAL_PAY if manual else rail.name,
+             'qr': 'its payment data (account or reference, amount, deadline)' if manual else rail.qr}
     system = (AFTER if after else OPERATE).format(**words)
+    tools = (MANUAL_AFTER_TOOLS if manual else AFTER_TOOLS) if after else OPERATE_TOOLS
     text = redact(page.text[:60000])
     if len(text) > TEXT_HEAD + TEXT_TAIL:
         text = f'{text[:TEXT_HEAD]}\n[...]\n{text[-TEXT_TAIL:]}'
@@ -219,7 +236,7 @@ def operate(task, page, meter, *, after=False):
     content = (f'<store>{task.site}</store>\n<goal>{redact(task.goal)}</goal>\n'
                f'<done>\n{done.replace("<", "‹") or "- nothing yet"}\n</done>\n<page>\n{seen}\n</page>')
     return _call(conf.get('AGENT_TASKS_MODEL'), system=system, content=content,
-                 tools=AFTER_TOOLS if after else OPERATE_TOOLS, meter=meter, user_id=task.user_id)
+                 tools=tools, meter=meter, user_id=task.user_id)
 
 
 def _elements(page):

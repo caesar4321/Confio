@@ -156,12 +156,16 @@ def _started_a_task(history, message):
     return any(notice.startswith('agent_task:') and notice.endswith(':start') for notice in notices)
 
 
-def payment_texts(history):
+def payment_texts(history, *, spoken=False):
     """The messages a payment code may be read from: what the person typed
     or pasted just now, and the typed message right before it when it is a
     few minutes old ("<código>" and then "págalo"). Never a tapped suggestion,
     a voice transcript, an old message, or anything the person did not write.
-    A latest message that is tapped or spoken gives nothing at all."""
+    A latest message that is tapped or spoken gives nothing at all.
+
+    `spoken`: also a voice note's transcript, for what only starts a store
+    purchase (agent_tasks): nothing is bought there until the person approves
+    the order card in the chat, and no payment code is ever read from it."""
     def own(message):
         metadata = message.metadata or {}
         return (message.sender_type == 'USER' and (message.body or '').strip()
@@ -169,7 +173,7 @@ def payment_texts(history):
 
     def typed(message):
         modality = str((message.metadata or {}).get('modality') or 'TEXT').upper()
-        return modality == 'TEXT' and not is_tapped_text(message.body)
+        return (modality == 'TEXT' or (spoken and modality == 'VOICE_NOTE')) and not is_tapped_text(message.body)
 
     def answered_with_a_card(message):
         # What followed it already carried a prepared payment: that request
@@ -200,12 +204,13 @@ STORE_TASK_WINDOW = timedelta(minutes=15)
 
 
 def store_task_words(history):
-    """The person's own typed messages of the last minutes, oldest first: a
-    purchase is often named a few messages before "hazlo tú" (agent_tasks).
-    Never a tapped suggestion, a voice note, a photo or anyone else's text."""
+    """The person's own messages of the last minutes, typed or said in a voice
+    note, oldest first: a purchase is often named a few messages before "hazlo
+    tú" (agent_tasks). Never a tapped suggestion, a photo or anyone else's text."""
     mine = [m for m in history if m.sender_type == 'USER' and (m.body or '').strip()
             and not (m.metadata or {}).get('client_reported') and not (m.metadata or {}).get('handoff_note')
-            and str((m.metadata or {}).get('modality') or 'TEXT').upper() == 'TEXT' and not is_tapped_text(m.body)]
+            and str((m.metadata or {}).get('modality') or 'TEXT').upper() in ('TEXT', 'VOICE_NOTE')
+            and not is_tapped_text(m.body)]
     latest = getattr(mine[-1], 'created_at', None) if mine else None
     return [m.body.strip() for m in mine
             if latest is not None and getattr(m, 'created_at', None) is not None
@@ -1906,7 +1911,9 @@ class Toolbelt:
         from agent_tasks import assistant_tool
         # What to buy is often said a few messages before "hazlo tú": the person's own recent typed words.
         recent = store_task_words(getattr(self, 'turn_history', None) or [])
-        answer, _ = assistant_tool.call(self.viewer, self.payment_texts, saw_web=self.saw_web, store=store,
+        # Typed or said in a voice note: only the order card in the chat ever buys anything.
+        answer, _ = assistant_tool.call(self.viewer, getattr(self, 'store_texts', None) or self.payment_texts,
+                                        saw_web=self.saw_web, store=store,
                                         recent=recent, what=what)
         if not (isinstance(answer, dict) and answer.get('ok') is False):
             # A purchase started: no question or card of code's may join this reply (confirm.busy) and hide it.
@@ -2515,6 +2522,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
     # own words about a problem, so they never count as context.
     belt.earlier_user_messages = ' · '.join(m for m in said[-4:-1] if not is_tapped_text(m))
     belt.payment_texts = payment_texts(history)
+    belt.store_texts = payment_texts(history, spoken=True)
     try:
         done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                          country=country)

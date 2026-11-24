@@ -4034,6 +4034,19 @@ class PhotoTests(TestCase):
             metadata={'modality': photos.MODALITY})
         self.assertEqual(payment_texts([message]), [])
 
+    def test_a_voice_note_can_ask_for_a_purchase_but_is_never_a_payment_code(self):
+        from . import engine
+
+        conversation = SupportConversation.objects.create(user=self.user, account=self.account, status='OPEN')
+        said = SupportMessage.objects.create(
+            conversation=conversation, sender_type='USER', sender_user=self.user,
+            body='I want an inexpensive Mexican chocolate bar.', metadata={'modality': 'VOICE_NOTE'})
+        # A purchase starts from it (the order card in the chat is what buys); a payment code never.
+        self.assertEqual(engine.payment_texts([said]), [])
+        self.assertEqual(engine.payment_texts([said], spoken=True), ['I want an inexpensive Mexican chocolate bar.'])
+        self.assertEqual([m.body for m in [said] if m.body in engine.store_task_words([said])],
+                         ['I want an inexpensive Mexican chocolate bar.'])
+
     def test_without_photos_a_photo_message_reads_as_text(self):
         from . import photos
 

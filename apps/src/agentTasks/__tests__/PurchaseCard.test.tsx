@@ -149,6 +149,28 @@ it("with QR Bolivia off the store's QR is in the card, to save and pay from the 
   expect(texts(tree)).not.toContain('Cancelar la compra');
 });
 
+it('without a local account the CLABE, amount and reference are in the card, and the account is offered', async () => {
+  mockTask = task({ site: 'amazon.com.mx', status: 'payment_ready', reason: 'manual', waitUntil: null,
+    message: 'Tu pedido en amazon.com.mx está hecho.', payQr: null, openAccountMethod: 'mx_clabe',
+    payDetails: [{ label: 'CLABE', value: '012180001234567897' }, { label: 'Monto', value: '$1,249.00' },
+      { label: 'Referencia', value: '4021775' }],
+    order: { item: 'Chocolate', total: '$1,249.00', image: '' } });
+  const onOpen = jest.fn();
+  let tree!: renderer.ReactTestRenderer;
+  await act(async () => {
+    tree = renderer.create(<PurchaseCards actions={ACTION} messageId="m1" createdAt="2026-11-23T20:00:00Z" onOpen={onOpen} />);
+  });
+  trees.push(tree);
+  const shown = texts(tree);
+  expect(shown).toEqual(expect.arrayContaining(['012180001234567897', '$1,249.00', '4021775']));
+  const clipboard = require('@react-native-clipboard/clipboard');
+  await act(async () => { labelled(tree, 'Copiar CLABE').props.onPress(); });
+  expect((clipboard.default ?? clipboard).setString).toHaveBeenCalledWith('012180001234567897');
+  const open = tree.root.findAll((n) => n.props.title === 'Abrir mi cuenta local' && typeof n.props.onPress === 'function')[0];
+  act(() => { open.props.onPress(); });
+  expect(onOpen).toHaveBeenCalledWith('LocalAccountApplication', { methodId: 'mx_clabe' });
+});
+
 it('no QR is drawn for a card Confío pays', async () => {
   mockTask = task({ status: 'payment_ready', reason: '', paymentIntentId: 'p-1', payQr: null });
   const tree = await mount();

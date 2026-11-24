@@ -12,6 +12,8 @@ const TASK_FIELDS = `
   waitUntil
   paymentIntentId
   payQr
+  payDetails { label value }
+  openAccountMethod
   options { title price image }
   order { item total image }
 `;
@@ -81,6 +83,10 @@ export type AgentTask = {
   paymentIntentId?: string | null;
   // The store's own QR the person pays from their bank's app (no Confío payment: QR Bolivia off).
   payQr?: string | null;
+  // What the person pays the order with from their bank, as the store's order page writes it.
+  payDetails?: { label: string; value: string }[];
+  // The local account (LocalAccountApplication methodId) that lets Confío pay the next one.
+  openAccountMethod?: string | null;
   options: AgentOption[];
   order?: AgentOrder | null;
 };

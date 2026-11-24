@@ -15,6 +15,10 @@ NEEDS_PERSON = {
     # {{item}} and {{total}} are the order's (operate._order).
     # Fixed words: what the store wrote (the item, the total) is shown only on the card.
     'approve': 'Tu pedido en {site} está listo, a pagar con {pay}. Revísalo en la tarjeta y confírmalo: lo hago yo.',
+    # Confío cannot pay this one: said before they confirm, so nobody orders what they cannot pay.
+    'approve_manual': ('Tu pedido en {site} está listo. Esta vez no puedo pagarlo yo: cuando lo haga, te muestro '
+                       '{qr} y lo pagas tú desde tu banco con {pay}. Si puedes pagarlo así, confírmalo en la '
+                       'tarjeta y lo hago.'),
     'captcha': '{site} pide comprobar que eres una persona. Eso lo haces tú.',
     'choose': 'Encontré estas opciones en {site}. Elige una y yo sigo.',
     'details': '{site} pide datos que solo escribes tú.' + CARRY_ON,
@@ -39,8 +43,11 @@ NEEDS_PERSON = {
 }
 MAYBE_NOT_ADDED = ' Puede que no se haya agregado al carrito: si no está, agrégalo tú.'
 # Confío cannot pay this country's code now (QR Bolivia off): the order is placed and the person pays it.
-PAYMENT_MANUAL = ('Tu pedido en {site} está hecho. Págalo tú con el QR de abajo desde la app de tu banco: guárdalo '
-                  'y súbelo allí. Antes de pagar revisa que el monto sea {{total}}.')
+PAYMENT_MANUAL = ('Tu pedido en {site} está hecho. Abajo tienes {qr} tal como lo muestra la tienda: págalo tú '
+                  'desde la app de tu banco. Nadie en Confío verificó a quién pertenece la cuenta: antes de pagar '
+                  'revisa que sea la tienda y que el monto sea {{total}}.')
+# After it, when a local account would let Confío pay the next one.
+OPEN_ACCOUNT = ' Si abres tu cuenta local en Confío, la próxima vez lo pago yo.'
 PAYMENT_READY = ('Preparé el pago con {qr} que se veía en {site}. {vouches} Antes de pagar revisa que el monto y el '
                  'cobro sean los de tu pedido.')
 STOPPED = {
@@ -99,6 +106,13 @@ def stopped_text(task, reason):
     else:
         text = STOPPED.get(reason, STOPPED['error'])
     return say(text, task)
+
+
+def manual_text(task):
+    """The note when the person pays it themselves: the amount, and the account that would let Confío pay it."""
+    order = task.order or {}
+    text = say(PAYMENT_MANUAL, task).replace('{total}', str(order.get('total') or ''))
+    return text + (OPEN_ACCOUNT if order.get('offer') else '')
 
 
 def say(text, task):

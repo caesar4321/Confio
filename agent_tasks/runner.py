@@ -301,7 +301,8 @@ class Step:
                            else 'AGENT_TASKS_CHECKOUT_WAIT_SECONDS')
         # Before they confirm an order at the store: what they have to pay it with. Read
         # before their clock is set. In the chat only: a push shows on the lock screen.
-        extra = notes.balance_line(task) if kind == 'approve' else ''
+        # Not when the person pays it from their bank: their Confío balance is not what pays it.
+        extra = notes.balance_line(task) if kind == 'approve' and not (fields.get('order') or {}).get('manual') else ''
         now = timezone.now()
         until = min(now + timedelta(seconds=seconds), task.session_expires_at - SESSION_MARGIN)
         # Said before they order, not while they are ordering.
@@ -544,14 +545,19 @@ class Step:
         rail = countries.rail(task.country)
         if rail is None:
             return self.stop('unpaid')
+        if rail.kind == 'manual':
+            return self.read_manual(shots, rail)
         if rail.kind == 'qr':
             (code, why), extra = code_on_screen(shots, rail), {}
         else:
             code, extra, why = rail.read(shots)
         if not code:
             return self.unread(why)
-        if rail.manual(app_meta(task)):
-            return self.hand_manual(code)
+        from . import service
+        # Asked again now: an account opened since the order card pays it.
+        mode, offer = service.pay_mode(task, app_meta(task))
+        if mode == 'manual':
+            return self.hand_manual(rail, code=code, extra=extra, offer=offer)
         self.save()
         try:
             intent = payment_intents.prepare(task.account, task.user, code, created_by='assistant',
@@ -562,7 +568,7 @@ class Step:
                 # Confío cannot pay anything for this person right now: their bank can. Never when the
                 # refusal is about the QR itself ('rail', 'no_code', 'no_amount'): the provider is the
                 # one that says it is the store's payment code.
-                return self.hand_manual(code)
+                return self.hand_manual(rail, code=code, extra=extra, offer=rail.opens)
             # Nobody vouched for that code, so it is not handed on as this order's.
             why = guard.clean(str(exc), 200)
             # The screen stays: many refusals pass, and it may be the only place that code is.
@@ -594,27 +600,83 @@ class Step:
         post_payment(task, intent)
 
 
-    def hand_manual(self, code):
-        """Confío cannot pay this country's code now: the person pays the store's own QR from
-        their bank's app. Only for the order the agent placed with their approval."""
+    def hand_manual(self, rail, *, code='', extra=None, details=(), offer=''):
+        """Confío cannot pay it now: the person pays the store's own payment data from their bank.
+        Only for the order the agent placed with their approval, and only data that is this order's."""
         task = self.task
         order = task.order or {}
         if not order.get('pressed') or order.get('unapproved') or not order.get('total'):
             return self.stop('unpaid')
-        # Nobody decodes it for us here: what the code says of itself must be this order's.
-        from payment_accounts import local_money
-        # A bank's QR may carry a scheme prefix ("QRSIMPLE:") before its EMV body.
-        fields = local_money.emv_fields(re.sub(r'^[^:]{1,20}:', '', code)) or {}
+        extra = extra or {}
         try:
-            amount_ok = '54' not in fields or Decimal(fields['54']) == Decimal(str(order.get('amount')))
-        except Exception:
-            amount_ok = False
-        if not amount_ok or fields.get('58') not in (None, 'BO') or fields.get('53') not in (None, '068'):
+            approved = Decimal(str(order.get('amount')))
+        except Exception:  # noqa: BLE001 - no amount the person approved: nothing to hand them
             return self.stop('unpaid')
-        self.save(order={**order, 'pay_qr': code}, state='payment_ready', reason='manual', wait_until=None)
+        pay_qr = ''
+        if rail.kind == 'text':
+            # SPEI: the CLABE, the exact pesos and the reference, read off the order's page (spei.py).
+            try:
+                if Decimal(extra['amount_local']) != approved:
+                    return self.stop('unpaid')
+            except Exception:  # noqa: BLE001
+                return self.stop('unpaid')
+            details = [('CLABE', code), ('Monto', str(order.get('total'))),
+                       ('Referencia', str(extra.get('reference') or ''))]
+        elif code:
+            # Nobody decodes it for us here: what the code says of itself must be this order's.
+            from payment_accounts import local_money
+            # A bank's QR may carry a scheme prefix ("QRSIMPLE:") before its EMV body.
+            fields = local_money.emv_fields(re.sub(r'^[^:]{1,20}:', '', code)) or {}
+            try:
+                amount_ok = '54' not in fields or Decimal(fields['54']) == approved
+            except Exception:  # noqa: BLE001
+                amount_ok = False
+            if not amount_ok or fields.get('58') not in (None, rail.country) \
+                    or (rail.numeric and fields.get('53') not in (None, rail.numeric)):
+                return self.stop('unpaid')
+            pay_qr = code
+        details = [{'label': label, 'value': str(value)} for label, value in details if str(value or '').strip()]
+        if not pay_qr and not details:
+            return self.stop('unpaid')
+        if not any(item['label'] == 'Monto' for item in details):
+            details.insert(0, {'label': 'Monto', 'value': str(order.get('total'))})
+        self.save(order={**order, 'pay_qr': pay_qr, 'pay_details': details, 'offer': offer},
+                  state='payment_ready', reason='manual', wait_until=None)
         close_session(task)
-        text = notes.say(notes.PAYMENT_MANUAL, task).replace('{total}', str(order.get('total')))
+        text = notes.manual_text(task)
         notes.post(task, text, 'payment', push='payment', push_body=text)
+
+    def read_manual(self, shots, rail):
+        """A country Confío pays no store in: the data the model pointed at, kept only where the
+        order's page writes it (in both pictures), the amount the person approved, and its QR if any."""
+        from . import operate
+        task = self.task
+        order = task.order or {}
+        shown = order.get('shown') or {}
+
+        def written(value):
+            value = re.sub(r'\s+', ' ', guard.fold(value)).strip()
+            if len(value) < 2:
+                return False
+            return all(value in re.sub(r'\s+', ' ', guard.fold(' '.join((*shot.text, *shot.words))))
+                       for shot in shots)
+
+        amount = shown.get('amount') or ''
+        if not amount or not written(amount):
+            return self.unread('code')
+        try:
+            if operate.amount_of(amount) != Decimal(str(order.get('amount'))):
+                return self.stop('unpaid')   # another order's (or a seller's) amount
+        except Exception:  # noqa: BLE001
+            return self.stop('unpaid')
+        labels = (('method', 'Medio'), ('reference', 'Referencia'), ('account', 'Cuenta'), ('bank', 'Banco'),
+                  ('holder', 'Titular'), ('deadline', 'Paga antes de'))
+        details = [('Monto', amount)] + [(label, shown[key]) for key, label in labels
+                                        if shown.get(key) and written(shown[key])]
+        code, _ = code_on_screen(shots, rail)
+        if not code and not any(label in ('Referencia', 'Cuenta') for label, _ in details):
+            return self.unread('code')   # nothing to pay it with: back to the agent to find the page
+        return self.hand_manual(rail, code=code, details=details)
 
     def unread(self, why):
         from . import operate
