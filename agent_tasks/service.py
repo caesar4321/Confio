@@ -152,9 +152,11 @@ def worker_alive():
         return False
 
 
-def start(account, user, *, goal, site, meta=None):
-    """A new purchase. `goal` is the person's own words, stored verbatim. An
-    earlier one still going is set aside for it: the person never manages them."""
+def start(account, user, *, goal, site, meta=None, kind='buy'):
+    """A new purchase, or ('manage') help with an order already placed: its state, cancelling it,
+    returning it, a refund. `goal` is the person's own words, stored verbatim. An earlier one still
+    going is set aside for it: the person never manages them."""
+    kind = 'manage' if kind == 'manage' else 'buy'
     if (not conf.get('AGENT_TASKS_ENABLED') or not qr.available() or not conf.browserbase_api_key()
             or not worker_alive()):
         raise TaskRefused('unavailable')
@@ -205,7 +207,8 @@ def start(account, user, *, goal, site, meta=None):
             earlier = list(mine.filter(pk__in=earlier, state='cancelled', reason='replaced', updated_at=now)
                            .values_list('pk', flat=True))
             task = AgentTask.objects.create(account=account, user=user, goal=goal, site=store, country=country,
-                                            app_version=str((meta or {}).get('HTTP_X_CONFIO_VERSION') or '')[:20])
+                                            app_version=str((meta or {}).get('HTTP_X_CONFIO_VERSION') or '')[:20],
+                                            kind=kind)
             runner.kick(task.pk)
     except IntegrityError as exc:
         # The earlier one reached the checkout as this one started: that order stays, said as such.
@@ -324,6 +327,29 @@ def approve(account, user, task_id, total=None):
     order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item', 'address')}
     order['approved']['manual'] = bool(order.get('manual'))   # who pays it, as their card said
     return _answered(account, user, task_id, 'approve', order=order)
+
+
+def answer_request(account, user, task_id, yes, what=None):
+    """Yes or no to the request the agent named about an order already placed (manage.py): yes, exactly
+    that request (the one the card showed: `what`), that button on that page, is pressed once; no, nothing
+    is sent and the task ends, straight from waiting (never through working)."""
+    task = get(account, user, task_id)
+    order = dict(task.order or {})
+    request = order.get('request') or {}
+    if not request.get('label') or task.state != 'needs_person' or task.reason != 'act':
+        raise TaskRefused('not_open')
+    if what is not None and str(what) != request.get('what'):
+        raise TaskRefused('not_open')   # the card they tapped showed another request
+    if not yes:
+        if not runner.end(task, 'stopped', 'declined', only={'state': 'needs_person', 'reason': 'act'}):
+            raise TaskRefused('not_open')
+        task.refresh_from_db()
+        return task
+    order['request_approved'] = request
+    return _answered(account, user, task_id, 'act', order=order,
+                     history=[*(task.history or []), {'did': 'the person approved the request',
+                                                      'result': 'call submit_request with it again'}
+                              ][-runner.Step.HISTORY_KEPT:])
 
 
 def answer_step(account, user, task_id, yes):

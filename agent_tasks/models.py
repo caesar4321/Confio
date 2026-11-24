@@ -107,6 +107,9 @@ class AgentTask(models.Model):
     # Where the purchase is: '' shopping, 'ordering' from the cart on, 'ordered' once the final
     # button was pressed. Kept here, not in the rolling history: safety checks read it.
     phase = models.CharField(max_length=12, blank=True, default='')
+    # What the person asked: 'buy' (find it and order it) or 'manage' (an order already made: see its state,
+    # cancel it, return it, ask for a refund). manage.py works the second.
+    kind = models.CharField(max_length=8, blank=True, default='buy')
     # How many times each thing was tried or asked (sign-ins, asks, CAPTCHA waits, unread payments).
     counts = models.JSONField(default=dict, blank=True)
 

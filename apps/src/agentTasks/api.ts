@@ -11,6 +11,9 @@ const TASK_FIELDS = `
   message
   waitUntil
   stage
+  kind
+  request
+  requestButton
   paymentIntentId
   payQr
   payDetails { label value }
@@ -32,6 +35,12 @@ export const GET_AGENT_STORES = gql`
 `;
 
 const RESULT = `success errors errorCode task { ${TASK_FIELDS} }`;
+
+export const ANSWER_AGENT_REQUEST = gql`
+  mutation AnswerAgentRequest($id: UUID!, $yes: Boolean!, $what: String) {
+    answerAgentRequest(id: $id, yes: $yes, what: $what) { ${RESULT} }
+  }
+`;
 
 export const ANSWER_AGENT_STEP = gql`
   mutation AnswerAgentStep($id: UUID!, $yes: Boolean!) {
@@ -89,6 +98,12 @@ export type AgentTask = {
   waitUntil?: string | null;
   // Where the purchase is, for the card's journey: search | cart | checkout | pay | done.
   stage?: string | null;
+  // 'buy' or 'manage' (an order already placed: its state, cancel, return, refund).
+  kind?: string | null;
+  // The request about an order the person is asked to approve (manage).
+  request?: string | null;
+  // The store's own button that sends it.
+  requestButton?: string | null;
   paymentIntentId?: string | null;
   // The store's own QR the person pays from their bank's app (no Confío payment: QR Bolivia off).
   payQr?: string | null;

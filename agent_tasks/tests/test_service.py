@@ -185,7 +185,7 @@ class JourneyTests(SimpleTestCase):
 
     def test_what_it_says_it_is_doing_never_says_bought(self):
         from agent_tasks.schema import WORKING_AT
-        self.assertEqual(set(WORKING_AT), {'search', 'cart', 'checkout', 'pay'})
+        self.assertEqual(set(WORKING_AT), {'search', 'cart', 'checkout', 'pay', 'manage'})
         for words in WORKING_AT.values():
             self.assertNotRegex(words.lower(), r'compr[eé]|pagu[eé]|pedido hecho|listo')
 
@@ -336,6 +336,18 @@ class ToolTests(ServiceBase):
     def call(self, texts, **over):
         viewer = type('Viewer', (), {'account': self.account, 'user': self.user, 'request_meta': BUILD})()
         return assistant_tool.call(viewer, texts, **{'saw_web': False, **over})
+
+    def test_an_order_question_with_no_store_goes_to_the_last_purchase(self):
+        self.make_task(state='stopped', site='amazon.com.mx', country='MX', checkout_at=timezone.now())
+        with mock.patch('agent_tasks.service.require_payable'):
+            result, task = self.call(['¿dónde está mi pedido?'], store=None, what='dónde está mi pedido', kind='manage')
+        self.assertTrue(result['ok'], result)
+        self.assertEqual((task.kind, task.site), ('manage', 'amazon.com.mx'))
+
+    def test_a_purchase_is_still_a_purchase(self):
+        with mock.patch('agent_tasks.service.require_payable'):
+            result, task = self.call(['compra um cabo no mercado livre'])
+        self.assertEqual(task.kind, 'buy')
 
     def test_the_goal_is_the_persons_words(self):
         result, task = self.call(['compra um cabo no mercado livre'], store='amazon.com.br')

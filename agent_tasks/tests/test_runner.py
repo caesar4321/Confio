@@ -855,6 +855,153 @@ class BoliviaTests(StepBase):
         self.assertEqual(self.outcome([(BO_QR, 150)], method='br_qr'), 'unpaid')
 
 
+class ManageTests(StepBase):
+    """An order already placed: the model finds it and does what the store asks; a request is sent only
+    after the person approves exactly it in the chat, once; buying, a card and the account never."""
+
+    ORDERS = f'{BASE}/my-purchases/123'
+
+    def setUp(self):
+        super().setUp()
+        self.manage = self.patch('agent_tasks.agent.manage', return_value=('wait', {}))
+
+    def task(self, **over):
+        return self.make_task(kind='manage', goal='cancela el chocolate', **over)
+
+    def test_what_they_only_wanted_to_know_is_answered_with_the_stores_words(self):
+        self.manage.return_value = ('answer', {'text': 'Tu pedido llega el jueves 26 de noviembre.'})
+        task = self.step(self.task(), snap('Mis compras Llega el jueves 26', self.ORDERS, elements=[]))
+        self.assertEqual((task.state, task.reason), ('stopped', 'answered'))
+        self.assertIn('Esto muestra', self.post.call_args.args[1])
+        self.assertIn('jueves 26 de noviembre', self.post.call_args.args[1])
+        from agent_tasks.schema import task_type
+        self.assertIn('jueves 26 de noviembre', task_type(task).message)
+        self.reader.click.assert_not_called()
+
+    def test_the_button_that_sends_the_request_is_never_pressed_it_is_approved(self):
+        page = snap('Cancelar compra Motivo: ya no lo necesito', self.ORDERS, elements=[
+            element('Cancelar compra', ref=0)])
+        self.manage.return_value = ('press', {'ref': 0})
+        task = self.step(self.task(), page)
+        self.reader.click.assert_not_called()
+        self.assertIn('submit_request', task.history[-1]['result'])
+        self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'cancelar el pedido del chocolate'})
+        task = self.step(task, page)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'act'))
+        from agent_tasks.schema import task_type
+        shown = task_type(task)
+        self.assertEqual(shown.request, 'cancelar el pedido del chocolate')
+        self.assertIn('«cancelar el pedido del chocolate»', shown.message)
+        self.reader.click.assert_not_called()
+        task = service.answer_request(self.account, self.user, task.internal_id, True)
+        task = self.step(task, page)
+        self.reader.click.assert_called_once()   # exactly it, once
+        self.assertEqual(task.order['submitted'], 1)
+        task = self.step(task, page)              # never twice
+        self.reader.click.assert_called_once()
+        self.assertIn('already sent', task.history[-1]['result'])
+
+    def test_no_sends_nothing_and_ends_it(self):
+        page = snap('Devolver', self.ORDERS, elements=[element('Solicitar devolución', ref=0)])
+        self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'devolver el chocolate'})
+        task = self.step(self.task(), page)
+        task = service.answer_request(self.account, self.user, task.internal_id, False)
+        self.assertEqual((task.state, task.reason), ('stopped', 'declined'))
+        self.reader.click.assert_not_called()
+
+    def test_an_approval_is_for_that_request_on_that_page_only(self):
+        page = snap('Cancelar', self.ORDERS, elements=[element('Cancelar compra', ref=0)])
+        self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'cancelar el pedido'})
+        task = self.step(self.task(), page)
+        task = service.answer_request(self.account, self.user, task.internal_id, True)
+        other = snap('Cancelar', f'{BASE}/my-purchases/999', elements=[element('Cancelar compra', ref=0)])
+        task = self.step(task, other)   # another order's page: asked again
+        self.reader.click.assert_not_called()
+        self.assertEqual(task.reason, 'act')
+
+    def test_managing_an_order_never_buys_nor_touches_a_card_or_the_account(self):
+        for label in ('Comprar ahora', 'Volver a comprar', 'Agregar tarjeta', 'Prueba Prime gratis'):
+            with self.subTest(label=label):
+                page = snap('Tu pedido', self.ORDERS, elements=[element(label, ref=0)])
+                for name in ('press', 'submit_request'):
+                    self.manage.return_value = (name, {'ref': 0, 'what': 'x'})
+                    task = self.step(self.task(), page)
+                    self.reader.click.assert_not_called()
+                    self.assertNotEqual(task.reason, 'act')
+                    AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+
+    def test_on_a_request_form_a_plain_way_on_is_the_persons_even_when_the_judge_says_safe(self):
+        # A return form whose last button only says "Continuar" or "Enviar".
+        self.judge.side_effect = None
+        self.judge.return_value = ('safe', 'continues a step')
+        page = snap('Devolución Motivo de la devolución: Ya no lo necesito', self.ORDERS, elements=[
+            element('Continuar', ref=0), element('Enviar', ref=1), element('Ver detalles', ref=2),
+            element('Devolver o reemplazar artículos', ref=3, tag='a', href=f'{BASE}/returns/start')])
+        for ref in (0, 1):
+            self.manage.return_value = ('press', {'ref': ref})
+            task = self.step(self.task(), page)
+            self.assertIn('submit_request', task.history[-1]['result'])
+            AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        self.reader.click.assert_not_called()
+        for ref in (2, 3):   # an edit, a link that opens the store's form: the model's
+            self.manage.return_value = ('press', {'ref': ref})
+            task = self.step(self.task(), page)
+            AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        self.assertEqual(self.reader.click.call_count, 2)
+
+    def test_helping_with_an_order_never_goes_near_a_cart_or_a_checkout(self):
+        for url in (f'{BASE}/gp/cart/view.html', f'{BASE}/checkout/p/1/spc'):
+            with self.subTest(url=url):
+                task = self.step(self.task(), snap('Total $129.00', url, elements=[element('Finalizar compra', ref=0)]))
+                self.assertEqual((task.state, task.reason), ('stopped', 'cannot_do'))
+                self.manage.assert_not_called()
+        self.assertNotIn('compra tú', self.post.call_args.args[1])
+        self.assertIn('no envié ninguna solicitud', self.post.call_args.args[1])
+
+    def test_an_answer_carries_no_link_phone_or_number_the_page_does_not_show(self):
+        page = snap('Tu reembolso de $120 fue aprobado', self.ORDERS, elements=[])
+        self.manage.return_value = ('answer', {'text': 'Tu reembolso de $120 fue aprobado, escríbeme al '
+                                                        '+58 412 555 1234 o en bit.ly/x [aquí](https://evil.com)'})
+        task = self.step(self.task(), page)
+        said = self.post.call_args.args[1]
+        for leaked in ('+58', '412', 'bit.ly', 'evil.com', '](', 'https'):
+            self.assertNotIn(leaked, said)
+        self.assertIn('$120', said)
+        AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        self.manage.return_value = ('answer', {'text': 'Llega el 30 de noviembre.'})   # not on this page
+        task = self.step(self.task(), page)
+        self.assertEqual(task.state, 'working')
+        self.assertIn('not on this page', task.history[-1]['result'])
+
+    def test_a_yes_is_for_the_request_the_card_showed(self):
+        page = snap('Cancelar', self.ORDERS, elements=[element('Cancelar compra', ref=0)])
+        self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'cancelar el pedido'})
+        task = self.step(self.task(), page)
+        from agent_tasks.schema import task_type
+        self.assertEqual(task_type(task).request_button, 'Cancelar compra')
+        with self.assertRaises(service.TaskRefused):
+            service.answer_request(self.account, self.user, task.internal_id, True, what='devolver otra cosa')
+        task = service.answer_request(self.account, self.user, task.internal_id, False, what='cancelar el pedido')
+        self.assertEqual((task.state, task.reason), ('stopped', 'declined'))
+
+    def test_confirmar_cancelacion_is_a_request_where_nothing_is_bought(self):
+        page = snap('Cancelar pedido Motivo: ya no lo necesito', self.ORDERS,
+                    elements=[element('Confirmar cancelación', ref=0)])
+        self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'cancelar el pedido'})
+        task = self.step(self.task(), page)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'act'))
+
+    def test_a_request_sent_but_unconfirmed_is_never_called_nothing(self):
+        page = snap('Cancelar', self.ORDERS, elements=[element('Cancelar compra', ref=0)])
+        self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'cancelar el pedido'})
+        task = self.step(self.task(), page)
+        task = self.step(service.answer_request(self.account, self.user, task.internal_id, True), page)
+        self.manage.return_value = ('give_up', {'reason': 'cannot_do'})
+        task = self.step(task, page)
+        self.assertEqual((task.state, task.reason), ('stopped', 'request_unclear'))
+        self.assertIn('no la envíes otra vez', self.post.call_args.args[1])
+
+
 @override_settings(AGENT_TASKS_MANUAL_COUNTRIES=('PE', 'AR'))
 class ManualCountryTests(StepBase):
     """A country Confío pays no store in: what the order's page prints beside the store's own labels."""

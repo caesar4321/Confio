@@ -332,7 +332,9 @@ class Step:
         while True:
             from . import operate
             # From the cart on, the store's own redirects (to its checkout, its payment house) are its own.
-            self.only_get, self.delay, self.operating = False, 0, operate.ordering(task)
+            # An order already placed is worked with real clicks, under the same lines (manage.py).
+            self.only_get, self.delay = False, 0
+            self.operating = operate.ordering(task) or getattr(task, 'kind', 'buy') == 'manage'
             browser.refused_document = browser.refused_send = False
             self.before_checkout(browser)
             if task.state != 'working' or time.monotonic() >= until:
@@ -397,6 +399,9 @@ class Step:
             done = operate.sign_in(self, browser, reader, seen)
             if done is not operate.NOT_A_FORM:
                 return done
+        from . import manage
+        if manage.managing(task):
+            return manage.step(self, browser, reader, seen)   # an order already placed
         if guard.is_checkout(seen) or operate.ordering(task):
             return operate.checkout(self, browser, reader, seen)
         name, args = agent.decide(task, seen, self.meter)

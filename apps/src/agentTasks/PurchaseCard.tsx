@@ -18,7 +18,7 @@ import { saveImageToGallery } from '../utils/saveImageToGallery';
 import { PurchaseDone } from './PurchaseDone';
 import { PurchaseJourney } from './PurchaseJourney';
 import {
-  ACTIVE, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentTask, CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTION,
+  ACTIVE, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentTask, CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTION,
   GET_AGENT_TASK, GIVE_AGENT_CODE, SIGN_IN_AGENT_STORE,
 } from './api';
 
@@ -153,6 +153,9 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
   const waiting = task.status === 'needs_person';
   const working = ACTIVE.has(task.status) && !waiting;
   const done = task.status === 'payment_ready';
+  // An order already placed (its state, a cancellation, a return): no purchase journey.
+  const managing = task.kind === 'manage';
+  const answered = managing && task.status === 'stopped' && task.reason === 'answered';
   // The order became done while this card was watching: its moment plays once. A card that
   // opens on an order already done (an old message scrolled back) shows it quietly.
   if (task.status !== watched.current) {
@@ -164,13 +167,18 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
   return (
     <View style={styles.card}>
       <View style={styles.head}>
-        <Icon name={ACTIVE.has(task.status) || done ? 'shopping-bag' : 'info'} size={18} color={colors.primaryDark} />
+        <Icon name={answered ? 'check-circle' : managing ? 'package' : ACTIVE.has(task.status) || done ? 'shopping-bag'
+          : 'info'} size={18} color={colors.primaryDark} />
         <Text style={styles.site} numberOfLines={1}>{task.site}</Text>
       </View>
       {done ? <PurchaseDone celebrate={celebrate.current} /> : null}
       {/* Where the purchase is: alive while the assistant works, still when it is the person's turn. */}
-      <PurchaseJourney stage={done ? 'done' : task.stage} working={working} site={task.site}
-        stopped={!ACTIVE.has(task.status) && !done} />
+      {managing ? (
+        working ? <ActivityIndicator color={colors.primaryDark} style={styles.managing} /> : null
+      ) : (
+        <PurchaseJourney stage={done ? 'done' : task.stage} working={working} site={task.site}
+          stopped={!ACTIVE.has(task.status) && !done} />
+      )}
       {/* The server's words: they name the right way to pay for the store's country. */}
       <Text style={styles.message}>{task.message}</Text>
       {waiting && task.reason === 'choose' ? (
@@ -195,6 +203,28 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
               <Text style={styles.address} numberOfLines={2}>Envío a: {task.order.address}</Text>
             ) : null}
           </View>
+        </View>
+      ) : null}
+      {waiting && task.reason === 'act' && task.request ? (
+        <View style={styles.request}>
+          <Icon name="alert-circle" size={16} color={colors.onHeroField} />
+          <View style={styles.requestBody}>
+            <Text style={styles.requestText}>{task.request}</Text>
+            {task.requestButton ? (
+              <Text style={styles.requestButton}>Botón de {task.site}: «{task.requestButton}»</Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+      {waiting && task.reason === 'act' ? (
+        <View style={styles.stepRow}>
+          <Button title="Sí, envíala" loading={tapping === 'act:yes'}
+            onPress={() => act('act:yes', ANSWER_AGENT_REQUEST, { yes: true, what: task.request }, 'answerAgentRequest')} />
+          <Pressable onPress={() => act('act:no', ANSWER_AGENT_REQUEST, { yes: false, what: task.request },
+            'answerAgentRequest')}
+            accessibilityRole="button" style={styles.link} disabled={tapping !== null}>
+            <Text style={styles.linkText}>No, déjalo así</Text>
+          </Pressable>
         </View>
       ) : null}
       {waiting && task.reason === 'step' ? (
@@ -374,6 +404,12 @@ function Code({ sending, onSend }: { sending: boolean; onSend: (code: string) =>
 
 const styles = StyleSheet.create({
   qrBox: { marginTop: 12, alignItems: 'center' },
+  managing: { alignSelf: 'flex-start' },
+  request: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', padding: 10, borderRadius: 10,
+    backgroundColor: colors.primaryLight },
+  requestBody: { flex: 1, gap: 2 },
+  requestText: { fontSize: 15, fontWeight: '700', color: colors.onHeroField },
+  requestButton: { fontSize: 12, color: colors.onHeroField },
   assurance: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: 10,
     backgroundColor: colors.primaryLight },
   assuranceText: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.onHeroField },

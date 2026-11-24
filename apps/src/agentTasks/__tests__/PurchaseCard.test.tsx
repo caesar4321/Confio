@@ -161,6 +161,19 @@ it('an order already done when the card opens is shown quietly', async () => {
   buzz.mockRestore();
 });
 
+it('a request about an order is shown and sent only on yes', async () => {
+  mockTask = task({ kind: 'manage', reason: 'act', options: [], stage: 'manage', request: 'cancelar el pedido del chocolate',
+    message: 'En amazon.com.mx está lista tu solicitud: «cancelar el pedido del chocolate». ¿La envío?' });
+  mockMutate.mockResolvedValue(answered('answerAgentRequest', { task: { ...mockTask, status: 'working', reason: '' } }));
+  const tree = await mount();
+  expect(texts(tree)).toContain('cancelar el pedido del chocolate');
+  expect(tree.root.findAll((n) => n.props.accessibilityRole === 'progressbar')).toHaveLength(0);   // no purchase journey
+  const yes = tree.root.findAll((n) => n.props.title === 'Sí, envíala' && typeof n.props.onPress === 'function')[0];
+  await act(async () => { yes.props.onPress(); });
+  // The yes is for the request the card showed: the server refuses it for any other.
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, yes: true, what: 'cancelar el pedido del chocolate' });
+});
+
 it('a step the agent could not judge is one tap: yes or no', async () => {
   mockTask = task({ reason: 'step', options: [], message: 'amazon.com.mx pide «Guardar para más tarde» para seguir. ¿lo hago?' });
   mockMutate.mockResolvedValue(answered('answerAgentStep', { task: { ...mockTask, status: 'working', reason: '' } }));

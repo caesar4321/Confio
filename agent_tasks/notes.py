@@ -16,6 +16,8 @@ NEEDS_PERSON = {
     'otp': '{site} te envió un código de verificación. Escríbelo en la tarjeta.',
     # {{item}} and {{total}} are the order's (operate._order).
     # Fixed words: what the store wrote (the item, the total) is shown only on the card.
+    # A request about an order already placed (manage.py), named and approved before it is sent.
+    'act': 'En {site} está lista tu solicitud: «{{what}}». ¿La envío?',
     # The click judge could not tell: never a dead end, the person says yes or no.
     'step': '{site} pide «{{step}}» para seguir. No sé si conviene: ¿lo hago?',
     'approve': 'Tu pedido en {site} está listo, a pagar con {pay}. Revísalo en la tarjeta y confírmalo: lo hago yo.',
@@ -54,7 +56,17 @@ PAYMENT_MANUAL = ('Tu pedido en {site} está hecho. Abajo tienes {qr} tal como l
 OPEN_ACCOUNT = ' Si abres tu cuenta local en Confío, la próxima vez lo pago yo.'
 PAYMENT_READY = ('Preparé el pago con {qr} que se veía en {site}. {vouches} Antes de pagar revisa que el monto y el '
                  'cobro sean los de tu pedido.')
+# An order already placed (manage.py).
+MANAGED = 'Esto muestra {site}: {{text}}'
+SENT = 'Envié tu solicitud en {site}; revísala en tus pedidos de {site}.'
+# How a request ended when it did not end well: never purchase words ("compra tú"), never "nothing happened"
+# after it was sent.
+MANAGE_ENDED = 'No pude terminarlo en {site} y no envié ninguna solicitud. Puedes revisarlo en tus pedidos de {site}.'
 STOPPED = {
+    'answered': 'Esto muestra {site}: {{text}}',
+    'request_unclear': ('Envié tu solicitud en {site}, pero no alcancé a ver su resultado. Revísala en tus pedidos de '
+                        '{site}; no la envíes otra vez sin revisar.'),
+    'declined': 'Listo, no envié nada a {site}.',
     'blocked': '{site} no me dejó continuar. No insistí. Puedes comprar tú y, para pagarlo, {paste}.',
     'not_found': 'No encontré lo que pediste en {site}.',
     'no_payment': '{site} no parece aceptar {pay}, así que no seguí.',
@@ -104,6 +116,11 @@ def shortfall_line(task, intent):
 
 
 def stopped_text(task, reason):
+    if getattr(task, 'kind', 'buy') == 'manage':
+        text = STOPPED[reason] if reason in ('answered', 'declined', 'request_unclear') else MANAGE_ENDED
+        if (task.order or {}).get('submitted') and reason not in ('answered', 'declined'):
+            text = STOPPED['request_unclear']   # sent: never "nothing happened"
+        return say(text, task).replace('{text}', str((task.order or {}).get('answer') or ''))
     if task.checkout_at:
         # The final button was pressed: whatever ended it, an order may exist. Never "compra tú".
         text = STOPPED['cancelled_ordered' if reason in ('cancelled', 'replaced') else 'unpaid']

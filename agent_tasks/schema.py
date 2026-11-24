@@ -74,7 +74,10 @@ class AgentTaskType(graphene.ObjectType):
     reason = graphene.String(required=True)
     message = graphene.String(required=True)
     wait_until = graphene.DateTime()
-    stage = graphene.String(required=True, description='search | cart | checkout | pay | done: where the purchase is')
+    stage = graphene.String(required=True, description='search | cart | checkout | pay | done | manage')
+    kind = graphene.String(required=True, description="buy | manage (an order already placed)")
+    request = graphene.String(description='The request about an order the person is asked to approve (manage).')
+    request_button = graphene.String(description="The store's own button that sends it, as the page writes it.")
     checkout_handed = graphene.Boolean(
         required=True, description='The person has the checkout: there may be an order even if the task stops')
     payment_intent_id = graphene.UUID()
@@ -100,14 +103,17 @@ WORKING_AT = {
     'cart': 'Preparando tu carrito en {site}…',
     'checkout': 'Preparando tu pedido en {site}…',
     'pay': 'Preparando el pago de tu pedido…',
+    'manage': 'Revisando tu pedido en {site}…',
 }
-STAGES = ('search', 'cart', 'checkout', 'pay', 'done')
+STAGES = ('search', 'cart', 'checkout', 'pay', 'done', 'manage')
 
 
 def stage_of(task):
     """Where the purchase is, for the card's journey: search, cart, checkout, pay, done. Where it
     stopped stays where it was."""
     from . import guard
+    if getattr(task, 'kind', 'buy') == 'manage':
+        return 'manage'   # an order already placed: no purchase journey
     if task.state == 'payment_ready':
         return 'done'
     if task.phase == 'ordered' or task.state == 'awaiting_code' or task.checkout_at is not None:
@@ -134,7 +140,8 @@ def task_type(task):
         if reason == 'approve' and (task.order or {}).get('manual'):
             reason = 'approve_manual'   # the card they confirm on says they pay it themselves
         message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task).replace(
-            '{step}', str(((task.order or {}).get('ask_step') or {}).get('label') or '')[:80])
+            '{step}', str(((task.order or {}).get('ask_step') or {}).get('label') or '')[:80]).replace(
+            '{what}', str(((task.order or {}).get('request') or {}).get('what') or '')[:120])
     elif task.state == 'payment_ready' and task.reason == 'manual':
         message = notes.manual_text(task)
     elif task.state == 'payment_ready':
@@ -151,7 +158,11 @@ def task_type(task):
                      for d in ((task.order or {}).get('pay_details') or []) if isinstance(d, dict)]
         if task.state == 'payment_ready' else [],
         open_account_method=str((task.order or {}).get('offer') or '') or None,
-        created_at=task.created_at, stage=stage,
+        created_at=task.created_at, stage=stage, kind=getattr(task, 'kind', 'buy') or 'buy',
+        request=str(((task.order or {}).get('request') or {}).get('what') or '') or None
+        if task.state == 'needs_person' and task.reason == 'act' else None,
+        request_button=str(((task.order or {}).get('request') or {}).get('button') or '') or None
+        if task.state == 'needs_person' and task.reason == 'act' else None,
         order=(AgentOrderType(item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
                               image=str(task.order.get('image') or ''),
                               address=str(task.order.get('address') or '')) if task.order else None),
@@ -278,6 +289,22 @@ class ApproveAgentOrder(_Result):
             return _failure(cls, exc)
 
 
+class AnswerAgentRequest(_Result):
+    """Yes or no to a request about an order already placed (cancel, return, refund): sent only on yes."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        yes = graphene.Boolean(required=True)
+        what = graphene.String(description='The request the card showed: a yes is for that one only')
+
+    @classmethod
+    def mutate(cls, root, info, id, yes, what=None):
+        try:
+            return cls(success=True, errors=[], task=task_type(
+                service.answer_request(*_owner(info), id, bool(yes), what=what)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
 class AnswerAgentStep(_Result):
     """Yes or no to one step the agent could not judge by itself ("¿lo hago?")."""
     class Arguments:
@@ -354,5 +381,6 @@ class Mutation(graphene.ObjectType):
     give_agent_code = GiveAgentCode.Field()
     approve_agent_order = ApproveAgentOrder.Field()
     answer_agent_step = AnswerAgentStep.Field()
+    answer_agent_request = AnswerAgentRequest.Field()
     open_agent_live_view = OpenAgentLiveView.Field()
     forget_agent_store = ForgetAgentStore.Field()

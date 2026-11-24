@@ -389,7 +389,7 @@ def _judged(step, seen, element, label, did, where, on_checkout):
     if verdict == 'places_order':
         step.remember(did, f'refused: it places or pays the order ({why}). Call ready_to_order with it.')
         return REFUSED
-    if verdict in ('card', 'account'):
+    if verdict in ('card', 'account', 'request'):   # a request about an order is manage.py's, never a purchase's
         step.remember(did, f'refused: {why}. Never a card nor anything about the account: find another way.')
         return REFUSED
     # Unsure on a checkout page that shows money: it may be the order. The person approves the purchase
