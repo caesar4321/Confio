@@ -214,6 +214,10 @@ def checkout(step, browser, reader, seen):
     task = step.task
     step.operating = True
     after = ordered(task)
+    if not after and not guard.login_address(seen.url):
+        # What the second readers see: the page, with the control boxed. Never a sign-in page, and never
+        # after the order (its pages show the payment's own code).
+        seen.look = reader.picture
     if not ordering(task):
         try:
             # Nobody is asked to approve an order they could not pay here.
