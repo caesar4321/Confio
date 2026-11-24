@@ -33,7 +33,8 @@ class WhatsAppLinkType(graphene.ObjectType):
     reason_message = graphene.String(description='Show verbatim')
     linked_at = graphene.DateTime()
     last_sync_at = graphene.DateTime()
-    own_phone_hint = graphene.String(description="Last four digits of the person's Confío number: the only one that can be linked")
+    own_phone_hint = graphene.String(description='Deprecated: use suggestedPhone')
+    suggested_phone = graphene.String(description="The account's number, to prefill the field (+digits). Never a proof")
     consent_version = graphene.Int(required=True, description='Show the consent text of this version, then send it back')
     consent_outdated = graphene.Boolean(required=True, description='Linked under an older text: reads wait for acceptWhatsAppConsent')
     notices = graphene.List(graphene.NonNull(WhatsAppNoticeType), required=True)
@@ -113,16 +114,18 @@ def _run(cls, info, action):
 
 
 class StartWhatsAppLink(_Result, graphene.Mutation):
-    """Opens the person's own browser on WhatsApp Web and asks for a pairing code for their own Confío number.
-    Poll whatsAppLink every 2-3 s while state is pairing: the code appears, may change, and the state turns linked."""
+    """Opens the person's own browser on WhatsApp Web and asks for a pairing code for the number they typed
+    (with its country code, starting with +). Poll whatsAppLink every 2-3 s while state is pairing: the code
+    appears, may change, and the state turns linked."""
 
     class Arguments:
+        phone = graphene.String()  # optional in the schema: a missing one gets the person's message, not an error
         consent_version = graphene.Int(required=True)
 
     @classmethod
     @login_required
-    def mutate(cls, root, info, consent_version):
-        return _run(cls, info, lambda user: service.start_link(user, consent_version) and None)
+    def mutate(cls, root, info, consent_version, phone=None):
+        return _run(cls, info, lambda user: service.start_link(user, phone, consent_version) and None)
 
 
 class AcceptWhatsAppConsent(_Result, graphene.Mutation):

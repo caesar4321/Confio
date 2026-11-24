@@ -32,7 +32,7 @@ from agent_tasks.cdp import CdpError, Page
 from users.encryption import decrypt_data, encrypt_data
 
 from . import classify, conf, web
-from .models import WhatsAppDraft, WhatsAppLink, WhatsAppNotice
+from .models import WhatsAppDraft, WhatsAppLink, WhatsAppLinkRecord, WhatsAppNotice
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,8 @@ SEND_BUSY_TRIES = 40  # 20 s apart: longer than a pairing (10 min) holds its bro
 PAIR_RETRIES = 80  # 4 to 10 s apart: longer than a lease (5 min) a killed task may leave behind
 DRAFT_HOURS = 24
 MAX_BODY = 2000
-CONSENT_VERSION = 1
+# 2: the person types the number; Confío writes one note to their own chat when it is linked.
+CONSENT_VERSION = 2
 NOTICE_TYPE = 'whatsapp_link'
 LIMITS = {'link': 10, 'refresh': 30, 'write': 40}
 TITLE = 'Confío IA'
@@ -61,8 +62,9 @@ DIGITS = re.compile(r'\d{4,8}|[A-Z0-9]{6,8}')
 MESSAGES = {
     'unavailable': 'Vincular WhatsApp todavía no está disponible.',
     'not_personal': 'WhatsApp se vincula solo en tu cuenta personal.',
-    'no_phone': 'Primero agrega tu número de teléfono en Confío: solo puedo vincular el WhatsApp de ese número.',
-    'not_own_phone': 'Solo puedo vincular el WhatsApp de tu propio número, el que tienes en Confío.',
+    'number_taken': ('No pude pedir un código para ese número. Si lo vinculaste en otra cuenta de Confío, '
+                     'desvincúlalo allí primero.'),
+    'number_limit': 'Demasiados intentos con ese número hoy. Inténtalo mañana.',
     'consent': 'Acepta primero lo que Confío hará con tu WhatsApp.',
     'already_linked': 'Tu WhatsApp ya está vinculado.',
     'not_linked': 'Primero vincula tu WhatsApp.',
@@ -72,13 +74,14 @@ MESSAGES = {
     'busy': 'Ya estoy enviando ese mensaje.',
     'on_its_way': 'Tu mensaje anterior todavía se está enviando. Espera a que termine y revisa el chat en tu teléfono.',
     'unlinking': 'Estoy terminando de desvincular tu WhatsApp. Inténtalo en un minuto.',
+    'finishing': 'Estoy terminando de vincular tu WhatsApp. Inténtalo en unos minutos.',
     'body': f'Escribe un mensaje de hasta {MAX_BODY} caracteres.',
     'chat': 'Dime a qué chat de tu WhatsApp o a qué número.',
     'phone': 'Escribe el número con el código de país, por ejemplo +591 71234567.',
 }
 # Why a pairing or a send did not finish, in the person's words.
 REASONS = {
-    'phone_invalid': 'WhatsApp no aceptó ese número. Revisa tu número en Confío.',
+    'phone_invalid': 'WhatsApp no aceptó ese número. Revisa el número y su código de país.',
     'timeout': 'El código venció sin que se vinculara. Pide uno nuevo.',
     'browser': 'No pude abrir WhatsApp ahora. Inténtalo en unos minutos.',
     'whatsapp': 'WhatsApp no respondió como esperaba. Inténtalo en unos minutos.',
@@ -89,8 +92,10 @@ REASONS = {
     'typed_mismatch': 'No pude escribir el mensaje tal como lo aprobaste. No se envió.',
     'unknown': 'No sé si el mensaje salió. Revisa el chat en tu teléfono antes de repetirlo.',
     'gone': GONE,
-    'not_own_phone': 'El WhatsApp de este navegador no es el de tu número en Confío. Lo desvinculé.',
-    'phone_mismatch': 'WhatsApp mostró otro número. Revisa tu número en Confío e inténtalo de nuevo.',
+    'not_own_phone': 'El WhatsApp de este navegador no es el número que escribiste. Lo desvinculé.',
+    'number_taken': ('No pude vincular ese número. Si lo vinculaste en otra cuenta de Confío, desvincúlalo allí '
+                     'primero.'),
+    'phone_mismatch': 'WhatsApp mostró otro número. Revisa el número que escribiste e inténtalo de nuevo.',
     'pending': ('Tu mensaje quedó en espera en WhatsApp y puede salir más tarde. Revisa el chat en tu teléfono '
                 'antes de repetirlo.'),
     'partial_sent': 'Salió solo una parte del mensaje. Revisa el chat en tu teléfono antes de repetirlo.',
@@ -156,17 +161,6 @@ def phone_key(digits, secret=None) -> str:
     if not digits:
         return ''
     return salted_hmac('whatsapp_link.source', '\x1f'.join(('phone', digits)), secret=secret).hexdigest()
-
-
-def number_changed(link) -> bool:
-    """The person's Confío number is no longer the one this WhatsApp was linked for.
-    A rotated SECRET_KEY is no change of number: the fallbacks are tried too."""
-    if not link.phone_key:
-        return False
-    from django.conf import settings
-    digits = own_phone(link.user)
-    secrets = [None, *getattr(settings, 'SECRET_KEY_FALLBACKS', [])]
-    return not any(phone_key(digits, secret) == link.phone_key for secret in secrets)
 
 
 def enabled():
@@ -348,7 +342,7 @@ def _notify(user, message, data=None):
         from notifications.utils import create_notification
         # Fixed words and counts only: a lock screen never shows a WhatsApp message.
         create_notification(user=user, notification_type=NotificationType.SYSTEM, title=TITLE, message=message,
-                            data={'type': NOTICE_TYPE, 'screen': 'AssistantThread', **(data or {})})
+                            data={'type': NOTICE_TYPE, 'screen': 'WhatsApp', **(data or {})})
     except SoftTimeLimitExceeded:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -370,13 +364,12 @@ def status(user) -> dict:
     link = WhatsAppLink.objects.filter(user=user).first()
     result = {'state': 'none', 'code': None, 'code_at': None, 'phone_hint': None, 'reason': None,
               'reason_message': None, 'linked_at': None, 'last_sync_at': None, 'own_phone_hint': None,
-              'consent_version': CONSENT_VERSION, 'consent_outdated': False, 'notices': []}
+              'consent_version': CONSENT_VERSION, 'consent_outdated': False, 'suggested_phone': None, 'notices': []}
     phone = own_phone(user)
     result['own_phone_hint'] = phone[-4:] if phone else None
-    if link is not None and link.state == WhatsAppLink.State.LINKED and link.reason != 'unlinking' \
-            and number_changed(link):
-        _unlink_changed(user)
-        return result
+    # A prefill for the field, never a proof: the WhatsApp they linked last (to link it again), else the account's.
+    last = WhatsAppLinkRecord.objects.filter(user=user).order_by('-linked_at').values_list('phone', flat=True).first()
+    result['suggested_phone'] = last or (f'+{phone}' if phone else None)
     if link is None or link.reason == 'unlinking':
         return result
     result.update(state=link.state, phone_hint=link.phone_hint or None, linked_at=link.linked_at,
@@ -387,8 +380,10 @@ def status(user) -> dict:
     if link.state != WhatsAppLink.State.LINKED:
         return result
     result['consent_outdated'] = link.consent_version < CONSENT_VERSION
-    keep = timezone.now() - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))
-    for notice in link.notices.filter(created_at__gte=keep).order_by('-created_at')[:30]:
+    notices = link.notices.all()
+    if conf.get('WHATSAPP_LINK_KEEP_DAYS'):
+        notices = notices.filter(created_at__gte=timezone.now() - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS')))
+    for notice in notices.order_by('-created_at')[:30]:
         data = _unseal(notice.sealed, {})
         result['notices'].append({'id': str(notice.pk), 'kind': notice.kind, 'chat': data.get('chat') or '',
                                   'preview': data.get('preview') or '', 'summary': data.get('summary') or '',
@@ -396,16 +391,60 @@ def status(user) -> dict:
     return result
 
 
-def start_link(user, consent_version):
-    """Asks WhatsApp for a pairing code for the person's own Confío number."""
+NUMBER_PER_DAY = 3  # linking prompts one WhatsApp number can receive a day, from all of Confío
+
+
+def _keys(digits) -> list:
+    """The number's key under the current secret and the rotated ones: a key rotation never frees a number."""
+    from django.conf import settings
+    return [phone_key(digits, secret) for secret in (None, *getattr(settings, 'SECRET_KEY_FALLBACKS', []))]
+
+
+def _number_taken(user, digits, *, linked_only=False, exclude_pk=None) -> bool:
+    states = (WhatsAppLink.State.LINKED,) if linked_only else (WhatsAppLink.State.PAIRING, WhatsAppLink.State.LINKED)
+    rows = WhatsAppLink.objects.filter(phone_key__in=_keys(digits), state__in=states).exclude(reason='unlinking')
+    rows = rows.exclude(pk=exclude_pk) if exclude_pk else rows.exclude(user=user)
+    return rows.exists()
+
+
+def _number_lock(digits):
+    """One pairing decision per number at a time (inside a transaction): two accounts never both get it."""
+    from django.db import connection
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(%s)', [int(phone_key(digits)[:15], 16)])
+
+
+def _claim_number(key):
+    counter = f'whatsapp-link:number:{key}:{timezone.now().date().isoformat()}'
+    try:
+        cache.add(counter, 0, 2 * 86400)
+        count = cache.incr(counter)
+    except Exception:  # noqa: BLE001 - no counter, no prompt
+        count = None
+    if not isinstance(count, int) or count > NUMBER_PER_DAY:
+        raise LinkRefused('number_limit')
+
+
+def start_link(user, phone, consent_version):
+    """Asks WhatsApp for a pairing code for the number the person typed (with its country code).
+
+    The number is theirs to type (sign-up no longer proves a phone). What keeps a stranger's WhatsApp out:
+    WhatsApp asks its owner to type the code in their own phone; one Confío account per WhatsApp number;
+    a few prompts a day per number, from all of Confío; and, once linked, a note in the owner's own chat
+    that says so (warn_self), which a person tricked into typing a code sees in their own WhatsApp."""
     if consent_version != CONSENT_VERSION:
         raise LinkRefused('consent')
-    digits = own_phone(user)
-    if not digits:
-        raise LinkRefused('no_phone')
-    digits = phone_digits(digits)
+    if not str(phone or '').strip().startswith('+'):
+        raise LinkRefused('phone')
+    digits = phone_digits(phone)
+    key = phone_key(digits)
+    # Counted before any answer about the number: no one can try number after number for free.
     _claim(user, 'link', LIMITS['link'])
+    _claim_number(key)
     with transaction.atomic():
+        _number_lock(digits)
+        if _number_taken(user, digits):
+            raise LinkRefused('number_taken')
         link = WhatsAppLink.objects.select_for_update().filter(user=user).first()
         if link is not None and link.reason == 'unlinking':
             raise LinkRefused('unlinking')
@@ -438,18 +477,21 @@ def accept_consent(user, consent_version):
         consent_version=consent_version, next_sync_at=timezone.now())
 
 
-def unlink(user):
+def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pending=False):
     """Erases what came from WhatsApp now; a worker logs the browser out and deletes its profile."""
     with transaction.atomic():
         link = WhatsAppLink.objects.select_for_update().filter(user=user).first()
-        if link is None or link.reason == 'unlinking':
+        if link is None or link.reason == 'unlinking' or (grant is not None and str(link.grant) != str(grant)):
             return False
+        if only_pending and not note_pending(link):
+            return False  # the note was written meanwhile: nothing to undo
         link.notices.all().delete()
         link.drafts.all().delete()
         WhatsAppLink.objects.filter(pk=link.pk).update(
             reason='unlinking', grant=uuid.uuid4(), sealed_code='', code_at=None, sealed_phone='', next_sync_at=None,
             updated_at=timezone.now())
     _forget_pushes(user.pk)
+    _end_record(user.pk, ended_by)
     from . import tasks
     transaction.on_commit(lambda: tasks.forget.delay(link.pk))
     return True
@@ -458,10 +500,8 @@ def unlink(user):
 def refresh(user):
     """Opening Confío IA asks for a fresh read, at most every REFRESH minutes, never past a backoff."""
     link = WhatsAppLink.objects.filter(user=user, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
-    if link is not None and number_changed(link):
-        _unlink_changed(user)
-        return False
-    if link is None or link.failures or link.consent_version < CONSENT_VERSION or _gone_seen(link) is not None:
+    if link is None or link.failures or link.consent_version < CONSENT_VERSION or _gone_seen(link) is not None \
+            or note_pending(link):
         return False
     soon = timezone.now() - timedelta(minutes=conf.get('WHATSAPP_LINK_REFRESH_MINUTES'))
     if link.last_sync_at and link.last_sync_at > soon:
@@ -645,15 +685,44 @@ def _watch_once(link):
 def _linked(link, page=None, number=None):
     """`number`: read from a profile that was signed in before this pairing. It must be the person's own;
     unread ('') is no proof, and the pairing ends (the person can ask again)."""
-    if number is not None and number != _unseal(link.sealed_phone, ''):
+    typed = _unseal(link.sealed_phone, '')
+    if number is not None and number != typed:
         _fail(link, 'not_own_phone' if number else 'whatsapp')
         return
+    # The number WhatsApp itself says is signed in decides (a spelling of the same number, with or without a
+    # 0 or a 9, would otherwise get past one account per number). Unread: the typed one, which WhatsApp paired.
+    signed = number or (_signed_in(page) if page is not None else '')
+    # Only a spelling of the typed number (the same last 8 digits): a profile used before can still hold the
+    # last account's number for a moment, and that one is never recorded, held or written to.
+    digits = signed if signed and typed and signed[-8:] == typed[-8:] else typed
     now = timezone.now()
-    if not _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(
-            state=WhatsAppLink.State.LINKED, reason='', sealed_code='', code_at=None, sealed_phone='', linked_at=now,
-            failures=0, next_sync_at=now + timedelta(minutes=conf.get('WHATSAPP_LINK_SYNC_MINUTES'))):
+    with transaction.atomic():
+        _number_lock(digits)
+        if _number_taken(link.user, digits, linked_only=True, exclude_pk=link.pk):
+            taken = True
+        else:
+            taken = False
+            # The number stays sealed until the note to the person's own chat is written (warn_self), then goes.
+            linked = _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(
+                state=WhatsAppLink.State.LINKED, reason='', sealed_code='', code_at=None, linked_at=now, failures=0,
+                sealed_phone=_seal(digits), phone_key=phone_key(digits), phone_hint=digits[-4:],
+                next_sync_at=now + timedelta(minutes=conf.get('WHATSAPP_LINK_SYNC_MINUTES')))
+            if linked:
+                # With the link itself, so no crash in between loses them and an unlink always finds the record.
+                _end_record(link.user_id, WhatsAppLinkRecord.EndedBy.CONFIO, now)  # left open by a lost unlink
+                WhatsAppLinkRecord.objects.create(
+                    user_id=link.user_id, phone=f'+{digits}', phone_key=phone_key(digits),
+                    phone_hint=digits[-4:], consent_version=link.consent_version, linked_at=now)
+                from . import tasks
+                grant = str(link.grant)
+                transaction.on_commit(lambda: tasks.warn_self.apply_async((link.pk, grant), countdown=5))
+    if taken:
+        _fail(link, 'number_taken')  # another account linked it first: this one never holds it
+        return
+    if not linked:
         _close(link)
         return  # unlinked or asked again meanwhile: nothing to say
+    link.refresh_from_db()
     if page is not None:
         try:
             page.pump(SETTLE_AFTER_LINK)
@@ -661,6 +730,144 @@ def _linked(link, page=None, number=None):
             pass
     _close(link)
     _notify(link.user, 'Tu WhatsApp quedó vinculado. Te aviso cuando llegue algo importante.')
+
+
+# What the owner of the WhatsApp reads in their own chat right after it is linked. Fixed words.
+SELF_NOTE = ('Confío: este WhatsApp se vinculó a una cuenta de Confío (aparece como «Chrome» en Dispositivos '
+             'vinculados). Si no fuiste tú, desvincúlalo ahora y no compartas códigos con nadie.')
+WARN_TRIES = 60  # a minute apart: an hour of a busy plan never drops the note
+
+
+def note_pending(link) -> bool:
+    """Linked, and the note to the owner's own chat not written yet: nothing is read or sent until it is,
+    so keeping every browser busy (to keep the note away) gets nothing."""
+    return link.state == WhatsAppLink.State.LINKED and bool(link.sealed_phone)
+
+
+OPENED_TRIES = 5  # tries that opened a (paid) browser before giving up
+NOT_WRITTEN = ('No pude terminar de vincular tu WhatsApp, así que lo desvinculé. Vuelve a vincularlo en Confío IA '
+               'cuando quieras.')
+
+
+def _typing_key(grant):
+    return f'whatsapp-link:note-entered:{grant}'
+
+
+def _chain_key(grant):
+    return f'whatsapp-link:note-chain:{grant}'
+
+
+NOTE_DEADLINE = timedelta(hours=2)  # a note still not written by then undoes the link, whatever the chains did
+
+
+def _note_failed(link_id, grant):
+    """Fails closed: the link is undone, never left usable without the note."""
+    row = WhatsAppLink.objects.select_related('user').filter(pk=link_id, grant=grant).first()
+    if row is not None and note_pending(row) and unlink(row.user, WhatsAppLinkRecord.EndedBy.NOTE, grant=grant,
+                                                        only_pending=True):
+        logger.error('WhatsApp link %s: the note to its owner could not be confirmed; unlinked', link_id)
+        _notify(row.user, NOT_WRITTEN)
+
+
+def warn_self(link_id, grant, tries=0, opened=0):
+    """The one message Confío writes by itself: a note in the owner's own chat that the link happened. A
+    person tricked into typing a code sees it in their own WhatsApp.
+
+    Fails closed: nothing is read or sent until it is written (note_pending), and if it cannot be written the
+    link is undone. Tried again while nothing could have left; never once Enter may have been pressed (a
+    durable marker says so even if the worker died), so it never arrives twice."""
+    from . import tasks
+    try:
+        cache.set(_chain_key(grant), 1, 300)  # a live chain: the sweep leaves it alone
+    except Exception:  # noqa: BLE001
+        pass
+
+    def later(browser=False):
+        if tries < WARN_TRIES and opened + int(browser) < OPENED_TRIES:
+            try:
+                cache.set(_chain_key(grant), 1, 600)  # still alive while it waits: no second chain from the sweep
+            except Exception:  # noqa: BLE001
+                pass
+            tasks.warn_self.apply_async((link_id, grant, tries + 1, opened + int(browser)), countdown=60)
+            return
+        _note_failed(link_id, grant)
+
+    def written(link):
+        _mine(link).update(sealed_phone='')  # the number is not kept past this
+
+    with _slot() as placed:
+        if not placed:
+            later()
+            return
+        with _taken(link_id, grant) as link:
+            if link is None:
+                if WhatsAppLink.objects.filter(pk=link_id, grant=grant).exists():
+                    later()
+                return
+            digits = _unseal(link.sealed_phone, '')
+            if link.state != WhatsAppLink.State.LINKED or link.reason == 'unlinking' or not digits:
+                return
+            if cache.get(_typing_key(grant)):
+                # Enter may have been pressed by a worker that died, unconfirmed: never typed again, and never
+                # usable unconfirmed either. Undone; linking again writes a new note.
+                _note_failed(link_id, grant)
+                return
+
+            def about_to_enter():
+                # Durable before Enter: whatever happens next, it is never typed again.
+                cache.set(_typing_key(grant), 1, 30 * 86400)
+                return True
+
+            progress, browser = {}, False
+            try:
+                url = _open(link, 180, kind='send')
+            except browsers.BrowserUnavailable:
+                later()  # no browser free: nothing was opened or typed
+                return
+            browser = True
+            try:
+                with _guarded(url) as page:
+                    web.open_chat_by_number(page, digits)
+                    sent = web.send_text(page, SELF_NOTE, about_to_enter, progress)
+                if sent is True or sent == 'pending':
+                    written(link)  # WhatsApp shows it sent, or on its way
+                else:
+                    _note_failed(link_id, grant)  # Enter pressed, nothing confirmed: undone, never typed again
+            except web.WebError as exc:
+                logger.warning('WhatsApp link %s: note to self stopped at %s', link.pk, exc.code)
+                # One line, so nothing leaves before Enter: a "partial" without it (a dropped connection
+                # read as growth) is a refusal, never a written note.
+                if progress.get('enter') or cache.get(_typing_key(grant)):
+                    _note_failed(link_id, grant)  # after Enter, unconfirmed: undone, never typed again
+                else:
+                    later(browser)
+            except (browsers.BrowserUnavailable, CdpError) as exc:
+                logger.warning('WhatsApp link %s: note to self not written (%s)', link.pk, type(exc).__name__)
+                if progress.get('enter') or cache.get(_typing_key(grant)):
+                    _note_failed(link_id, grant)
+                else:
+                    later(browser)
+            except BaseException:
+                # A time limit or anything else: undone once Enter may have been pressed, else tried again.
+                if progress.get('enter') or cache.get(_typing_key(grant)):
+                    _note_failed(link_id, grant)
+                else:
+                    later(browser)
+                raise
+            finally:
+                _close(link)
+
+
+def _end_record(user_id, ended_by, now=None):
+    WhatsAppLinkRecord.objects.filter(user_id=user_id, ended_at__isnull=True).update(
+        ended_at=now or timezone.now(), ended_by=ended_by)
+
+
+def _signed_in(page) -> str:
+    try:
+        return web.signed_in_number(page)
+    except CdpError:
+        return ''
 
 
 def _fail(link, reason):
@@ -790,12 +997,11 @@ def _sync_placed(link_id):
         if link.state != WhatsAppLink.State.LINKED or link.reason == 'unlinking' or not link.next_sync_at \
                 or link.next_sync_at > now:
             return
-        if number_changed(link):
-            # The person changed their number in Confío: this WhatsApp is no longer theirs to read.
-            transaction.on_commit(lambda: _unlink_changed(link.user))
-            return
         if link.consent_version < CONSENT_VERSION:
             _mine(link).update(next_sync_at=None)  # until they accept today's text (accept_consent)
+            return
+        if note_pending(link):
+            _mine(link).update(next_sync_at=now + timedelta(minutes=5))  # nothing is read before the note is written
             return
         _mine(link).update(next_sync_at=now + interval)
         try:
@@ -840,12 +1046,6 @@ def _sync_placed(link_id):
     return True
 
 
-def _unlink_changed(user):
-    if not unlink(user):
-        return  # someone else unlinked it first, and said so
-    _notify(user, 'Desvinculé tu WhatsApp porque cambiaste tu número en Confío. Puedes vincular el nuevo.')
-
-
 GONE_CONFIRM = timedelta(minutes=10)
 
 
@@ -886,6 +1086,7 @@ def _gone(link):
         return
     link.notices.all().delete()
     link.drafts.exclude(status=WhatsAppDraft.Status.SENDING).delete()
+    _end_record(link.user_id, WhatsAppLinkRecord.EndedBy.PHONE)
     _drop_profile(link)
     _notify(link.user, GONE)
 
@@ -944,8 +1145,10 @@ def present(draft, fields=None) -> dict:
 
 def _linked_of(user):
     link = WhatsAppLink.objects.filter(user=user, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
-    if link is None or number_changed(link):
+    if link is None:
         raise LinkRefused('not_linked')
+    if note_pending(link):
+        raise LinkRefused('finishing')
     if link.consent_version < CONSENT_VERSION:
         raise LinkRefused('consent')
     return link
@@ -1021,9 +1224,10 @@ def send_draft(user, draft_id, shown_hash):
         draft = _draft(user, draft_id, lock=True)
         if draft.status != WhatsAppDraft.Status.DRAFT:
             raise LinkRefused('busy')
-        if draft.link.state != WhatsAppLink.State.LINKED or draft.link.reason == 'unlinking' \
-                or number_changed(draft.link):
+        if draft.link.state != WhatsAppLink.State.LINKED or draft.link.reason == 'unlinking':
             raise LinkRefused('not_linked')
+        if note_pending(draft.link):
+            raise LinkRefused('finishing')
         if draft.link.consent_version < CONSENT_VERSION:
             raise LinkRefused('consent')
         fields = _unseal(draft.sealed, {})
@@ -1079,7 +1283,7 @@ def _send(draft_id, tries):
             # Unlinked or deleted since the tap: Enter is not pressed.
             current = _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
             return (WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).exists()
-                    and current is not None and not number_changed(current))
+                    and current is not None)
 
         try:
             if not enabled() or not fields.get('body') or not (fields.get('chat') or fields.get('phone')):
@@ -1163,12 +1367,12 @@ def sweep():
     # A send that never reported back: unknown, so it is never sent twice.
     WhatsAppDraft.objects.filter(status=WhatsAppDraft.Status.SENDING, sending_at__lt=now - SENDING_STUCK).update(
         status=WhatsAppDraft.Status.UNKNOWN, reason='unknown', sealed=_seal({}), expires_at=now + timedelta(hours=1))
-    keep = now - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))
-    WhatsAppNotice.objects.filter(created_at__lt=keep).delete()
+    if conf.get('WHATSAPP_LINK_KEEP_DAYS'):
+        WhatsAppNotice.objects.filter(created_at__lt=now - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))).delete()
     WhatsAppDraft.objects.filter(expires_at__lte=now).exclude(status=WhatsAppDraft.Status.SENDING).delete()
     for link in _leavers()[:20]:
         try:
-            unlink(link.user)
+            unlink(link.user, WhatsAppLinkRecord.EndedBy.ACCOUNT)
         except SoftTimeLimitExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 - one row must not stop the others
@@ -1176,6 +1380,15 @@ def sweep():
     for link_id in WhatsAppLink.objects.filter(reason='unlinking', updated_at__lt=now - timedelta(minutes=5)).exclude(
             lease_until__gt=now).values_list('pk', flat=True)[:20]:
         tasks.forget.delay(link_id)
+    # A note to the owner whose chain was lost (a worker restart): started again, or done if Enter may have gone.
+    # Past the deadline, whatever happened, the link is undone: never usable without the note.
+    for link_id, grant, linked_at in WhatsAppLink.objects.filter(state=WhatsAppLink.State.LINKED).exclude(
+            sealed_phone='').exclude(reason='unlinking').exclude(lease_until__gt=now).values_list(
+            'pk', 'grant', 'linked_at')[:20]:
+        if linked_at and linked_at < now - NOTE_DEADLINE:
+            _note_failed(link_id, grant)
+        elif not cache.get(_chain_key(grant)):
+            tasks.warn_self.apply_async((link_id, str(grant)), countdown=1)
     if enabled():
         for link_id in due_ids():
             _queue_sync(link_id)

@@ -50,6 +50,12 @@ def drop_profile(self, provider_name, context_id, session_id=''):
         raise self.retry(exc=exc)
 
 
+@shared_task(name='whatsapp_link.warn_self', ignore_result=True, soft_time_limit=240, time_limit=285)
+def warn_self(link_id, grant, tries=0, opened=0):
+    from . import service
+    service.warn_self(link_id, grant, tries, opened)
+
+
 @shared_task(name='whatsapp_link.sweep_vendor', ignore_result=True, soft_time_limit=80, time_limit=125)
 def sweep_vendor():
     from . import service

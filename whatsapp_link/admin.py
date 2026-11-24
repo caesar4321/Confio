@@ -19,3 +19,21 @@ class WhatsAppLinkAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False  # unlinking deletes the vendor profile too: the person does it from the app
+
+
+class WhatsAppLinkRecordAdmin(admin.ModelAdmin):
+    """Who linked which number, and when it ended."""
+    list_display = ('id', 'user', 'phone', 'linked_at', 'ended_at', 'ended_by', 'consent_version')
+    list_filter = ('ended_by',)
+    search_fields = ('user__id', 'phone')
+    fields = list_display[1:]
+    readonly_fields = fields
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

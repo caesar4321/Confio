@@ -1562,6 +1562,7 @@ confio_admin_site.register(AgentTask, AgentTaskAdmin)
 confio_admin_site.register(AgentProfile, AgentProfileAdmin)
 
 # The person's linked WhatsApp (whatsapp_link/): states and times only.
-from whatsapp_link.admin import WhatsAppLinkAdmin
-from whatsapp_link.models import WhatsAppLink
+from whatsapp_link.admin import WhatsAppLinkAdmin, WhatsAppLinkRecordAdmin
+from whatsapp_link.models import WhatsAppLink, WhatsAppLinkRecord
 confio_admin_site.register(WhatsAppLink, WhatsAppLinkAdmin)
+confio_admin_site.register(WhatsAppLinkRecord, WhatsAppLinkRecordAdmin)

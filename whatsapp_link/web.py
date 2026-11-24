@@ -107,6 +107,17 @@ def _pace(low=0.06, high=0.16):
     time.sleep(random.uniform(low, high))
 
 
+def press_key(page, key, code):
+    for kind in ('keyDown', 'keyUp'):
+        page.call('Input.dispatchKeyEvent', {'type': kind, 'key': key, 'code': key, 'windowsVirtualKeyCode': code})
+
+
+def type_key(page, char):
+    page.call('Input.dispatchKeyEvent', {'type': 'keyDown', 'key': char, 'text': char, 'unmodifiedText': char})
+    page.call('Input.dispatchKeyEvent', {'type': 'keyUp', 'key': char})
+    _pace(0.05, 0.12)
+
+
 def type_like_a_person(page, text):
     """A few characters at a time. A new line is Shift+Enter: Enter alone sends."""
     for number, line in enumerate(str(text).split('\n')):
@@ -133,8 +144,12 @@ def ask_for_code(page, phone_digits) -> str:
     if seen == 'phone':
         _press(page, "document.querySelector('input[aria-label*=\"phone number\" i], input[type=text]')",
                'no_phone_field')
-        page.evaluate("(() => { const i = document.activeElement; if (i && i.select) i.select(); })()")
-        page.insert('+' + phone_digits)
+        # Real keys, one at a time: the field formats as it is typed, and text pasted in one go is shown but
+        # never taken (seen 2026-11-24: "A valid phone number is required").
+        for _ in range(12):
+            press_key(page, 'Backspace', 8)
+        for char in '+' + phone_digits:
+            type_key(page, char)
         _pace(0.4, 0.9)
         typed = re.sub(r'\D', '', page.evaluate("(document.activeElement || {}).value || ''") or '')
         if typed != phone_digits:
@@ -142,7 +157,7 @@ def ask_for_code(page, phone_digits) -> str:
         _press(page, _button('^Next$'), 'no_next')
         seen = wait_for(page, ('code',), 25)
     if seen != 'code':
-        if re.search(r'invalid|not valid|isn.t valid', page.evaluate('document.body.innerText') or '', re.I):
+        if re.search(r'invalid|not valid|isn.t valid|valid phone number is required', page.evaluate('document.body.innerText') or '', re.I):
             raise WebError('phone_invalid')
         raise WebError(f'screen_{seen}')
     code = read_code(page)

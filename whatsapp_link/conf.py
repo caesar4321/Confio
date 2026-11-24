@@ -28,7 +28,9 @@ DEFAULTS = {
     # Only what the person approved, one at a time, at a person's pace.
     'WHATSAPP_LINK_SENDS_PER_DAY': 20,
     'WHATSAPP_LINK_NEW_NUMBERS_PER_DAY': 5,
-    'WHATSAPP_LINK_KEEP_DAYS': 7,
+    # None: kept while the WhatsApp stays linked (founder 2026-11-24); unlinking, from Confío or the phone,
+    # erases them, as does dismissing one. A number of days sets a limit again.
+    'WHATSAPP_LINK_KEEP_DAYS': None,
     'WHATSAPP_LINK_MODEL': 'gpt-6-luna',
 }
 

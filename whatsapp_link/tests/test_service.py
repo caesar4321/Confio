@@ -36,6 +36,9 @@ class FakePage:
     def goto(self, _url):
         pass
 
+    def evaluate(self, _expression):
+        return ''  # nothing in its local storage: the typed number stands
+
     def pump(self, _seconds):
         pass
 
@@ -78,7 +81,7 @@ class LinkTestBase(TestCase):
 
 class PairingTest(LinkTestBase):
     def test_start_seals_the_number_and_queues_a_pairing(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         link.refresh_from_db()
         self.assertEqual(link.state, 'pairing')
         self.assertEqual(link.phone_hint, '4567')
@@ -86,25 +89,42 @@ class PairingTest(LinkTestBase):
         self.assertEqual(service._unseal(link.sealed_phone), PHONE)
         self.tasks.pair.delay.assert_called_once_with(link.pk, str(link.grant))
 
-    def test_only_the_persons_own_number_after_consent(self):
+    def test_a_typed_number_with_its_country_code_after_consent(self):
+        for value in ('59171234567', '', '+12'):
+            with self.assertRaises(service.LinkRefused) as caught:
+                service.start_link(self.other, value, CONSENT)
+            self.assertEqual(caught.exception.code, 'phone')
         with self.assertRaises(service.LinkRefused) as caught:
-            service.start_link(self.other, CONSENT)  # no number in Confío
-        self.assertEqual(caught.exception.code, 'no_phone')
-        with self.assertRaises(service.LinkRefused) as caught:
-            service.start_link(self.user, 0)
+            service.start_link(self.user, '+' + PHONE, 1)  # the text of version 1 did not say what 2 says
         self.assertEqual(caught.exception.code, 'consent')
-        self.tasks.pair.delay.assert_not_called()
+        link = service.start_link(self.other, '+591 7123 4567', CONSENT)  # no number of its own in Confío: fine
+        self.assertEqual(service._unseal(WhatsAppLink.objects.get(pk=link.pk).sealed_phone), PHONE)
 
+    def test_one_confio_account_per_whatsapp_number(self):
+        service.start_link(self.user, '+' + PHONE, CONSENT)
+        with self.assertRaises(service.LinkRefused) as caught:
+            service.start_link(self.other, '+' + PHONE, CONSENT)
+        self.assertEqual(caught.exception.code, 'number_taken')
+
+    def test_a_number_gets_few_prompts_a_day_from_all_of_confio(self):
+        from users.models import User
+        for n in range(service.NUMBER_PER_DAY):
+            someone = User.objects.create(username=f'wa_try_{n}', firebase_uid=f'wa-try-{n}')
+            link = service.start_link(someone, '+' + PHONE, CONSENT)
+            WhatsAppLink.objects.filter(pk=link.pk).update(state=WhatsAppLink.State.FAILED)  # gave up each time
+        with self.assertRaises(service.LinkRefused) as caught:
+            service.start_link(self.user, '+' + PHONE, CONSENT)
+        self.assertEqual(caught.exception.code, 'number_limit')
     def test_a_new_pairing_keeps_nothing_of_the_last(self):
         link = self.linked(state=WhatsAppLink.State.GONE)
         WhatsAppNotice.objects.create(link=link, source_key='k', kind='order', sealed=service._seal({}))
         WhatsAppDraft.objects.create(link=link, sealed=service._seal({}), expires_at=timezone.now() + timedelta(hours=1))
-        service.start_link(self.user, CONSENT)
+        service.start_link(self.user, '+' + PHONE, CONSENT)
         self.assertFalse(WhatsAppNotice.objects.exists())
         self.assertFalse(WhatsAppDraft.objects.exists())
 
     def test_a_pairing_waits_for_the_one_holding_the_browser(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(lease_until=timezone.now() + timedelta(minutes=1))
         with mock.patch.object(web, 'ask_for_code') as ask:
             service.pair(link.pk, str(link.grant))
@@ -114,11 +134,11 @@ class PairingTest(LinkTestBase):
     def test_a_linked_whatsapp_is_not_paired_again(self):
         self.linked()
         with self.assertRaises(service.LinkRefused) as caught:
-            service.start_link(self.user, CONSENT)
+            service.start_link(self.user, '+' + PHONE, CONSENT)
         self.assertEqual(caught.exception.code, 'already_linked')
 
     def test_pair_reads_the_code_and_watches(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         with mock.patch.object(web, 'ask_for_code', return_value='ABCD1234') as ask:
             service.pair(link.pk, str(link.grant))
         ask.assert_called_once_with(self.page, PHONE)
@@ -135,7 +155,7 @@ class PairingTest(LinkTestBase):
         self.assertEqual(kwargs['viewport']['width'], 1280)
 
     def test_a_second_pair_never_replaces_a_code_given_out(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(code_at=timezone.now(), sealed_code=service._seal('ABCD1234'))
         with mock.patch.object(web, 'ask_for_code') as ask:
             service.pair(link.pk, str(link.grant))
@@ -147,25 +167,15 @@ class PairingTest(LinkTestBase):
         self.assertTrue(service.unlink(self.user))
         self.assertFalse(service.unlink(self.user))
 
-    def test_a_rotated_secret_key_is_not_a_new_number(self):
-        link = self.linked()
-        with override_settings(SECRET_KEY='rotated-' + 'x' * 50, SECRET_KEY_FALLBACKS=[self._old_secret()]):
-            self.assertFalse(service.number_changed(link))
-
-    @staticmethod
-    def _old_secret():
-        from django.conf import settings
-        return settings.SECRET_KEY
-
     def test_an_old_grant_does_nothing(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         with mock.patch.object(web, 'ask_for_code') as ask:
             service.pair(link.pk, '00000000-0000-0000-0000-000000000000')
         ask.assert_not_called()
         self.vendor.open.assert_not_called()
 
     def test_a_refused_number_fails_and_closes_the_browser(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         with mock.patch.object(web, 'ask_for_code', side_effect=web.WebError('phone_invalid')):
             service.pair(link.pk, str(link.grant))
         link.refresh_from_db()
@@ -177,21 +187,28 @@ class PairingTest(LinkTestBase):
         self.assertEqual((link.context_id, link.sealed_phone), ('', ''))
 
     def test_watch_sees_the_link_and_closes_the_browser(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(
             session_id='sess-1', sealed_connect_url=service._seal('wss://secret'),
             session_expires_at=timezone.now() + timedelta(minutes=5), sealed_code=service._seal('ABCD1234'))
         with mock.patch.object(web, 'screen', return_value='chats'):
             service.watch(link.pk, str(link.grant))
         link.refresh_from_db()
-        self.assertEqual(link.state, 'linked')
-        self.assertEqual((link.sealed_code, link.sealed_phone), ('', ''))
+        self.assertEqual((link.state, link.sealed_code), ('linked', ''))
+        # The number stays sealed for the note to the owner's own chat, then goes.
+        self.tasks.warn_self.apply_async.assert_called_once_with((link.pk, str(link.grant)), countdown=5)
+        with mock.patch.object(web, 'open_chat_by_number') as opened, \
+                mock.patch.object(web, 'send_text', return_value=True) as typed:
+            service.warn_self(link.pk, str(link.grant))
+        opened.assert_called_once_with(self.page, PHONE)
+        self.assertEqual(typed.call_args.args[1], service.SELF_NOTE)
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).sealed_phone, '')
         self.assertIsNotNone(link.next_sync_at)
         self.vendor.close.assert_called_with('sess-1')
         self.pushes.assert_called_once()
 
     def test_watch_keeps_the_code_fresh(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(
             session_id='sess-1', sealed_connect_url=service._seal('wss://secret'),
             session_expires_at=timezone.now() + timedelta(minutes=5), sealed_code=service._seal('ABCD1234'))
@@ -211,7 +228,7 @@ class PairingTest(LinkTestBase):
         self.vendor.delete_profile.assert_not_called()
 
     def test_typed_just_as_the_code_was_asked_again(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(
             session_id='sess-1', sealed_connect_url=service._seal('wss://secret'),
             session_expires_at=timezone.now() + timedelta(minutes=5), context_id='ctx-1')
@@ -224,7 +241,7 @@ class PairingTest(LinkTestBase):
         self.vendor.delete_profile.assert_not_called()
 
     def test_an_already_linked_profile_must_be_the_persons_number(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         with mock.patch.object(web, 'ask_for_code', side_effect=web.WebError('already_linked')), \
                 mock.patch.object(web, 'wait_for', return_value='chats'), \
                 mock.patch.object(web, 'signed_in_number', return_value='5491100000000'):
@@ -234,7 +251,7 @@ class PairingTest(LinkTestBase):
         self.vendor.delete_profile.assert_called_once_with('ctx-1')
 
     def test_an_already_linked_own_profile_is_linked(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         with mock.patch.object(web, 'ask_for_code', side_effect=web.WebError('already_linked')), \
                 mock.patch.object(web, 'wait_for', return_value='chats'), \
                 mock.patch.object(web, 'signed_in_number', return_value=PHONE):
@@ -246,8 +263,191 @@ class PairingTest(LinkTestBase):
         self.user.phone_country, self.user.phone_number = 'AR', '1123456789'
         self.assertEqual(service.own_phone(self.user), '5491123456789')
 
+    def test_a_link_is_recorded_and_outlives_the_unlink(self):
+        from whatsapp_link.models import WhatsAppLinkRecord
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
+        link.refresh_from_db()
+        service._linked(link)
+        record = WhatsAppLinkRecord.objects.get(user=self.user)
+        self.assertEqual((record.phone_hint, record.consent_version, record.ended_at), ('4567', CONSENT, None))
+        self.assertEqual(record.phone, '+' + PHONE)  # plain: support and fraud work read and search it
+        service.unlink(self.user)
+        with mock.patch.object(web, 'wait_for', return_value='login'):
+            service.forget(link.pk)
+        self.assertFalse(WhatsAppLink.objects.exists())
+        record.refresh_from_db()
+        self.assertEqual(record.ended_by, 'confio')
+        self.assertIsNotNone(record.ended_at)
+
+    def test_how_a_link_ended_is_recorded(self):
+        from security.models import UserBan
+        from whatsapp_link.models import WhatsAppLinkRecord
+        link = self.linked()
+        WhatsAppLinkRecord.objects.create(user=self.user, phone='+59171234567', phone_key='k', phone_hint='4567',
+                                          consent_version=CONSENT, linked_at=timezone.now())
+        service._gone(link)
+        self.assertEqual(WhatsAppLinkRecord.objects.get(user=self.user).ended_by, 'phone')
+        other = self.linked(user=self.other, context_id='ctx-2')
+        WhatsAppLinkRecord.objects.create(user=self.other, phone='+59170000000', phone_key='k2', phone_hint='0000',
+                                          consent_version=CONSENT, linked_at=timezone.now())
+        with mock.patch('security.tasks.sync_face_blocklist'):
+            UserBan.objects.create(user=self.other, ban_type='permanent', reason='fraud', reason_details='test')
+        with mock.patch.object(service, 'due_ids', return_value=[]):
+            service.sweep()
+        self.assertEqual(WhatsAppLinkRecord.objects.get(user=self.other).ended_by, 'account')
+        self.assertEqual(WhatsAppLink.objects.get(pk=other.pk).reason, 'unlinking')
+
+    def test_the_number_whatsapp_reports_decides(self):
+        # Typed without the Argentine 9; WhatsApp signed in as the full number: that one is recorded and held.
+        link = service.start_link(self.user, '+541123456789', CONSENT)
+        link.refresh_from_db()
+        page = FakePage()
+        page.evaluate = lambda _expression: '"5491123456789:3@c.us"'
+        service._linked(link, page)
+        link.refresh_from_db()
+        self.assertEqual(link.phone_key, service.phone_key('5491123456789'))
+        self.assertEqual(service._unseal(link.sealed_phone), '5491123456789')
+        with self.assertRaises(service.LinkRefused) as caught:
+            service.start_link(self.other, '+5491123456789', CONSENT)
+        self.assertEqual(caught.exception.code, 'number_taken')
+
+    def test_nothing_is_read_or_sent_before_the_note(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(service, '_read') as read:
+            service.sync(link.pk)
+        read.assert_not_called()
+        with self.assertRaises(service.LinkRefused) as caught:
+            service.create_draft(self.user, chat='Farmacia', body='hola')
+        self.assertEqual(caught.exception.code, 'finishing')
+
+    def test_the_note_is_tried_again_when_nothing_was_typed(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(web, 'open_chat_by_number', side_effect=web.WebError('no_chat_list')):
+            service.warn_self(link.pk, str(link.grant))
+        self.tasks.warn_self.apply_async.assert_called_once_with((link.pk, str(link.grant), 1, 1), countdown=60)
+        self.assertNotEqual(WhatsAppLink.objects.get(pk=link.pk).sealed_phone, '')
+
+    def test_a_note_that_cannot_be_written_undoes_the_link(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(service, '_room', return_value=False), self.assertLogs('whatsapp_link.service', 'ERROR'):
+            service.warn_self(link.pk, str(link.grant), service.WARN_TRIES)
+        # Fails closed: never linked without the note.
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, 'unlinking')
+        self.assertEqual(self.pushes.call_args.args[1], service.NOT_WRITTEN)
+
+    def test_few_paid_browsers_for_a_note(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(web, 'open_chat_by_number', side_effect=web.WebError('no_chat_list')), \
+                self.assertLogs('whatsapp_link.service', 'ERROR'):
+            service.warn_self(link.pk, str(link.grant), 7, service.OPENED_TRIES - 1)
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, 'unlinking')
+
+    def test_a_dropped_connection_before_enter_is_never_a_written_note(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(web, 'open_chat_by_number'), \
+                mock.patch.object(web, 'send_text', side_effect=web.WebError('partial_sent')):
+            service.warn_self(link.pk, str(link.grant))
+        self.assertNotEqual(WhatsAppLink.objects.get(pk=link.pk).sealed_phone, '')  # still pending, tried again
+        self.tasks.warn_self.apply_async.assert_called_once()
+
+    def test_an_unconfirmed_note_undoes_the_link(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(web, 'open_chat_by_number'), mock.patch.object(web, 'send_text', return_value=False), \
+                self.assertLogs('whatsapp_link.service', 'ERROR'):
+            service.warn_self(link.pk, str(link.grant))
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, 'unlinking')
+
+    def test_the_undo_never_touches_a_link_whose_note_was_written(self):
+        link = self.linked()  # note written: no sealed number
+        self.assertFalse(service.unlink(self.user, grant=str(link.grant), only_pending=True))
+        self.assertFalse(service.unlink(self.user, grant='00000000-0000-0000-0000-000000000000'))
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, '')
+
+    def test_two_hours_without_the_note_undoes_the_link(self):
+        link = self.linked(sealed_phone=service._seal(PHONE), linked_at=timezone.now() - timedelta(hours=3))
+        with mock.patch.object(service, 'due_ids', return_value=[]), self.assertLogs('whatsapp_link.service', 'ERROR'):
+            service.sweep()
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, 'unlinking')
+
+    def test_once_enter_may_have_gone_the_note_is_never_typed_again(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        cache.set(service._typing_key(str(link.grant)), 1)  # a worker died right after the marker
+        with mock.patch.object(web, 'send_text') as typed, self.assertLogs('whatsapp_link.service', 'ERROR'):
+            service.warn_self(link.pk, str(link.grant))
+        typed.assert_not_called()  # never typed again
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, 'unlinking')  # and never usable unconfirmed
+
+    def test_the_sweep_restarts_a_lost_note(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(service, 'due_ids', return_value=[]):
+            service.sweep()
+        self.tasks.warn_self.apply_async.assert_called_once_with((link.pk, str(link.grant)), countdown=1)
+        self.tasks.warn_self.apply_async.reset_mock()
+        cache.set(service._chain_key(str(link.grant)), 1)  # a chain is alive: left alone
+        with mock.patch.object(service, 'due_ids', return_value=[]):
+            service.sweep()
+        self.tasks.warn_self.apply_async.assert_not_called()
+
+    def test_numbers_are_counted_before_any_answer_about_them(self):
+        self.linked(user=self.other, phone_key=service.phone_key(PHONE))
+        for _ in range(service.LIMITS['link']):
+            with self.assertRaises(service.LinkRefused):
+                service.start_link(self.user, '+' + PHONE, CONSENT)
+        with self.assertRaises(service.LinkRefused) as caught:
+            service.start_link(self.user, '+59170000002', CONSENT)
+        self.assertEqual(caught.exception.code, 'rate_limited')  # asking about numbers is never free
+
+    def test_linking_again_suggests_the_whatsapp_linked_last(self):
+        from whatsapp_link.models import WhatsAppLinkRecord
+        self.assertEqual(service.status(self.user)['suggested_phone'], '+' + PHONE)  # the account's, to start
+        WhatsAppLinkRecord.objects.create(user=self.user, phone='+584141112233', phone_key='k', phone_hint='2233',
+                                          consent_version=CONSENT, linked_at=timezone.now(), ended_by='phone',
+                                          ended_at=timezone.now())
+        self.assertEqual(service.status(self.user)['suggested_phone'], '+584141112233')
+
+    def test_important_messages_stay_while_linked_and_go_with_the_link(self):
+        link = self.linked()
+        old = WhatsAppNotice.objects.create(link=link, source_key='old', kind='order', sealed=service._seal({}))
+        WhatsAppNotice.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=90))
+        with mock.patch.object(service, 'due_ids', return_value=[]):
+            service.sweep()
+        self.assertTrue(WhatsAppNotice.objects.filter(pk=old.pk).exists())  # no age limit
+        self.assertEqual(len(service.status(self.user)['notices']), 1)
+        service.unlink(self.user)
+        self.assertFalse(WhatsAppNotice.objects.exists())  # unlinking erases them
+
+    def test_the_note_to_self_is_never_written_twice(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        def entered_then_failed(page, body, still_wanted, progress):
+            still_wanted()
+            progress['enter'] = True
+            raise web.WebError('partial_sent')
+        with mock.patch.object(web, 'open_chat_by_number'), \
+                mock.patch.object(web, 'send_text', side_effect=entered_then_failed), \
+                self.assertLogs('whatsapp_link.service', 'ERROR'):
+            service.warn_self(link.pk, str(link.grant))
+        self.tasks.warn_self.apply_async.assert_not_called()  # it may have gone: no second try
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, 'unlinking')  # nor usable unconfirmed
+        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).sealed_phone, '')
+
+    def test_the_note_to_self_waits_for_a_free_browser(self):
+        link = self.linked(sealed_phone=service._seal(PHONE))
+        with mock.patch.object(service, '_room', return_value=False), mock.patch.object(web, 'send_text') as typed:
+            service.warn_self(link.pk, str(link.grant))
+        typed.assert_not_called()
+        self.tasks.warn_self.apply_async.assert_called_once_with((link.pk, str(link.grant), 1, 0), countdown=60)
+        self.assertNotEqual(WhatsAppLink.objects.get(pk=link.pk).sealed_phone, '')
+
+    def test_a_number_linked_elsewhere_meanwhile_is_never_held_twice(self):
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
+        self.linked(user=self.other, phone_key=service.phone_key(PHONE))  # another account got there first
+        link.refresh_from_db()
+        service._linked(link)
+        link.refresh_from_db()
+        self.assertEqual((link.state, link.reason), ('failed', 'number_taken'))
+
     def test_an_expired_pairing_fails(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(
             session_id='sess-1', sealed_connect_url=service._seal('wss://secret'),
             session_expires_at=timezone.now() + timedelta(seconds=5))
@@ -256,7 +456,7 @@ class PairingTest(LinkTestBase):
         self.assertEqual((link.state, link.reason), ('failed', 'timeout'))
 
     def test_status_shows_the_code_only_while_pairing(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(sealed_code=service._seal('ABCD1234'), code_at=timezone.now())
         self.assertEqual(service.status(self.user)['code'], 'ABCD1234')
         WhatsAppLink.objects.filter(pk=link.pk).update(state='linked')
@@ -339,15 +539,6 @@ class ReadingTest(LinkTestBase):
         self.assertEqual(link.failures, 1)
         self.assertEqual(link.state, 'linked')
 
-    def test_a_changed_confio_number_unlinks(self):
-        link = self.linked()
-        self.user.phone_number = '79994567'  # same last four digits
-        self.user.save()
-        with mock.patch.object(service, '_read') as read:
-            service.sync(link.pk)
-        read.assert_not_called()
-        self.assertEqual(WhatsAppLink.objects.get(pk=link.pk).reason, 'unlinking')
-
     def test_opening_confio_ia_never_hurries_the_second_look(self):
         link = self.linked(last_sync_at=timezone.now() - timedelta(hours=2))
         with mock.patch.object(service, '_read', side_effect=web.WebError('gone')):
@@ -423,7 +614,7 @@ class ReadingTest(LinkTestBase):
         self.tasks.sync.apply_async.assert_called_once_with((other.pk,), expires=240)
 
     def test_a_pairing_waits_for_a_free_browser(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         with mock.patch.object(service, '_room', return_value=False), mock.patch.object(web, 'ask_for_code') as ask:
             service.pair(link.pk, str(link.grant))
         ask.assert_not_called()
@@ -606,14 +797,6 @@ class SendingTest(LinkTestBase):
         self.assertEqual((draft.status, draft.reason), ('unknown', 'unknown'))
         self.assertEqual(service._unseal(draft.sealed), {})
 
-    def test_no_send_after_the_confio_number_changed(self):
-        made = self.draft()
-        self.user.phone_number = '79994567'  # same last four digits
-        self.user.save()
-        with self.assertRaises(service.LinkRefused) as caught:
-            service.send_draft(self.user, made['id'], made['display_hash'])
-        self.assertEqual(caught.exception.code, 'not_linked')
-
     def test_an_approved_send_waits_for_a_free_browser(self):
         made = self.draft()
         service.send_draft(self.user, made['id'], made['display_hash'])
@@ -639,7 +822,7 @@ class SendingTest(LinkTestBase):
             self.assertTrue(again)  # given back
 
     def test_a_waiting_pairing_is_never_left_unwatched(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(
             session_id='sess-1', session_expires_at=timezone.now() + timedelta(minutes=5), code_at=timezone.now())
         with service._slot(), service._slot():
@@ -652,7 +835,7 @@ class SendingTest(LinkTestBase):
         self.assertEqual(self.tasks.watch.apply_async.call_count, 2)
 
     def test_duplicate_watchers_merge_into_one(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(
             session_id='sess-1', session_expires_at=timezone.now() + timedelta(minutes=5), code_at=timezone.now(),
             lease_until=timezone.now() + timedelta(minutes=1))  # another watcher is looking right now
@@ -661,7 +844,7 @@ class SendingTest(LinkTestBase):
         self.tasks.watch.apply_async.assert_called_once_with((link.pk, str(link.grant)), countdown=3)
 
     def test_a_pairing_without_a_place_waits_then_ends(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(context_id='ctx-1', provider='fake')
         with service._slot(), service._slot():
             service.pair(link.pk, str(link.grant))
@@ -672,7 +855,7 @@ class SendingTest(LinkTestBase):
         self.vendor.delete_profile.assert_called_once_with('ctx-1')
 
     def test_a_pairing_with_a_code_out_is_never_failed_for_a_place(self):
-        link = service.start_link(self.user, CONSENT)
+        link = service.start_link(self.user, '+' + PHONE, CONSENT)
         WhatsAppLink.objects.filter(pk=link.pk).update(code_at=timezone.now())
         with service._slot(), service._slot():
             service.pair(link.pk, str(link.grant), service.PAIR_RETRIES)

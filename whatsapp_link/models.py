@@ -94,3 +94,31 @@ class WhatsAppDraft(models.Model):
     expires_at = models.DateTimeField(db_index=True)
     sending_at = models.DateTimeField(null=True, blank=True)  # the tap: a send silent past minutes is unknown
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class WhatsAppLinkRecord(models.Model):
+    """Each WhatsApp number that was linked, by whom and until when: the trail for support and fraud cases.
+
+    Kept after an unlink (that is its point), gone only with the person's account. The number is kept
+    plain (founder, 2026-11-24): support and fraud work need to read and search it."""
+
+    class EndedBy(models.TextChoices):
+        CONFIO = 'confio', 'Desvinculado en Confío'
+        PHONE = 'phone', 'Desvinculado desde el teléfono'
+        ACCOUNT = 'account', 'Cuenta bloqueada o eliminada'
+        NOTE = 'note', 'Desvinculado: no se pudo avisar al dueño del número'
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='whatsapp_link_records')
+    phone = models.CharField(max_length=16, db_index=True)  # +digits, as WhatsApp signed in
+    phone_key = models.CharField(max_length=64, db_index=True)
+    phone_hint = models.CharField(max_length=4)
+    consent_version = models.PositiveSmallIntegerField()
+    linked_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    ended_by = models.CharField(max_length=10, choices=EndedBy.choices, blank=True, default='')
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'linked_at'], name='whatsapp_record_user_idx')]
+
+    def __str__(self):
+        return f'WhatsAppLinkRecord {self.pk} ••{self.phone_hint}'
