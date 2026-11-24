@@ -123,6 +123,17 @@ class StartTests(ServiceBase):
         self.make_task(state='stopped')
         self.refused('daily_limit', self.start)
 
+    @override_settings(AGENT_TASKS_PER_DAY=1, AGENT_TASKS_PER_DAY_PLUS=3)
+    def test_a_cuenta_inteligente_subscriber_has_more(self):
+        self.make_task(state='stopped')
+        with mock.patch('assistant.billing.has_plus', return_value=True):
+            self.start(goal='otra')
+            AgentTask.objects.filter(user=self.user, state__in=AgentTask.ACTIVE).update(state='stopped', provider='fake')
+            self.make_task(state='stopped')
+            with self.assertRaises(service.TaskRefused) as refused:
+                self.start(goal='y otra')
+        self.assertIn('3 compras', str(refused.exception))
+
     @override_settings(AGENT_TASKS_MAX_CONCURRENT=1)
     def test_the_browsers_are_finite(self):
         user, account = self.person()

@@ -52,6 +52,8 @@ DEFAULTS = {
     'AGENT_TASKS_PERSON_WAIT_SECONDS': 300,
     'AGENT_TASKS_CHECKOUT_WAIT_SECONDS': 900,  # the person's checkout
     'AGENT_TASKS_PER_DAY': 5,
+    # Cuenta inteligente / IA+ (assistant.billing.has_plus): the shopping assistant is part of what they pay for.
+    'AGENT_TASKS_PER_DAY_PLUS': 20,
     'AGENT_TASKS_MAX_CONCURRENT': 3,
     'AGENT_TASKS_ALL_PER_DAY': 300,
     'AGENT_TASKS_KEEP_DAYS': 30,

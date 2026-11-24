@@ -30,7 +30,7 @@ MESSAGES = {
     'store_busy': 'Estoy usando esa tienda para una compra tuya. Cuando termine puedes cerrar la sesión.',
     'checkout_open': ('Tu pedido en {site} sigue en curso. Espera a que termine o cancélalo en su tarjeta, y '
                       'después te ayudo con lo nuevo.'),
-    'daily_limit': 'Llegaste al máximo de compras por hoy. Mañana seguimos.',
+    'daily_limit': ('Llegaste al máximo de {limit} compras en 24 horas. En unas horas puedes pedirme otra.'),
     'busy': 'Ahora hay muchas compras en curso. Inténtalo en unos minutos.',
     'not_found': 'No encontré esa compra.',
     'not_open': 'Esto ya no está esperando tu respuesta.',
@@ -57,6 +57,16 @@ def build_supported(meta):
     version = _version((meta or {}).get('HTTP_X_CONFIO_VERSION'))
     return (floor is not None and version is not None and version >= floor
             and str((meta or {}).get(conf.get('AGENT_TASKS_CAPABLE_HEADER')) or '') == '1')
+
+
+def _plus(user):
+    """A Cuenta inteligente / IA+ subscriber: more purchases a day."""
+    try:
+        from assistant.billing import has_plus
+        return bool(has_plus(user))
+    except Exception:  # noqa: BLE001 - unknown is the ordinary limit, never none
+        logger.warning('agent task plus check failed', exc_info=True)
+        return False
 
 
 def require_owner(account, user):
@@ -169,9 +179,9 @@ def start(account, user, *, goal, site, meta=None):
     # Cancelled before its browser ever opened (no provider yet) costs nothing.
     # A browser never opened (cancelled first, or the vendor refused it) costs nothing and is not counted.
     free = Q(provider='') & ~Q(state__in=AgentTask.ACTIVE)
-    if (mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(free).count()
-            >= conf.get('AGENT_TASKS_PER_DAY')):
-        raise TaskRefused('daily_limit')
+    per_day = conf.get('AGENT_TASKS_PER_DAY_PLUS' if _plus(user) else 'AGENT_TASKS_PER_DAY')
+    if mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(free).count() >= per_day:
+        raise TaskRefused('daily_limit', MESSAGES['daily_limit'].format(limit=per_day))
     require_payable(account, user, country, meta)
     now = timezone.now()
     try:
