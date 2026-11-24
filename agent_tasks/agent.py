@@ -280,9 +280,15 @@ How to work:
 - Find the order: the store's "Mis pedidos" / "Mis compras" / "Pedidos" page, then the order that matches <goal>
   (the item they name, or their most recent one if they name none). Open its details.
 - To know something (status, delivery date, tracking): read it on the store's own order page and call answer.
-- To cancel, return or ask for a refund: follow the store's own steps for that order. Pick the reason closest to
-  <goal> (if they gave none, the most neutral one, like "ya no lo necesito"). Keep the store's default refund
-  method. When the button that sends the request is on the page, call submit_request with it; never press it.
+- To cancel, return or ask for a refund: follow the store's own steps for that order. Getting the money back
+  depends on where the order is: before it ships, the refund IS its cancellation ("Cancelar productos",
+  "Cancelar pedido", "Cancelar compra"); once delivered, it is a return ("Devolver o reemplazar productos");
+  in between, whichever the store offers for it. So a person who asks for a refund of an order that has not
+  shipped gets it cancelled. Pick the reason closest to <goal> (if they gave none, the most neutral one, like
+  "ya no lo necesito"). Keep the store's default refund method. When the button that sends the request is on
+  the page, call submit_request with it; never press it.
+- If the store offers no way for this order (neither cancel nor return), call answer saying what its page says
+  (for example that it can be returned once it arrives). Use give_up only when the order cannot be found.
 - Never buy anything, never add a card or change the account, never open a chat with a seller to promise
   anything. If the store only allows it through a person or by phone, call answer saying exactly that.
 - If an action was refused, do something different; do not repeat it. Elements are numbered afresh every step."""

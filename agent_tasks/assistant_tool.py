@@ -118,6 +118,13 @@ def call(viewer, texts, *, saw_web, store=None, recent=None, what=None, kind='bu
     except Exception:  # noqa: BLE001 - an honest no
         logger.exception('agent task was not started')
         return {'ok': False, 'motivo': 'No pude empezar la compra ahora.'}, None
+    if kind == 'manage':
+        # About an order already made: never "nothing was bought" (the order exists; the agent looks it up).
+        return {'ok': True, 'tienda': site, 'estado': 'empezando',
+                'instruccion': ('Di en una frase que estás revisando su pedido en la tienda y que le dirás aquí lo '
+                                'que muestra; si hace falta enviar algo (cancelar, devolver), se lo pedirás antes. '
+                                'No digas si el pedido se compró, se pagó o no: eso lo dirá la tienda. No la mandes '
+                                'a la tienda.')}, task
     return {'ok': True, 'tienda': site, 'estado': 'empezando',
             'instruccion': ('Todavía no compró ni pagó nada y puede no lograrlo. Di en una frase que lo estás '
                             'buscando y que le mostrarás aquí las opciones para elegir. No le pidas confirmar nada '
