@@ -104,9 +104,12 @@ export const GET_WHATSAPP_DRAFT = gql`
   }
 `;
 
-// A reply chip in the Confío IA conversation: that reply, on a card the person sends with a tap.
+// A reply in the Confío IA conversation, on a card the person sends with a tap: a suggested reply as it is
+// (body), or what she wrote in "Otro" for the assistant to write in full (instructions).
 export const PREPARE_WHATSAPP_REPLY = gql`
-  mutation PrepareWhatsAppReply($noticeId: ID!, $body: String!) {
-    prepareWhatsAppReply(noticeId: $noticeId, body: $body) { success error errorCode draft { ${DRAFT} } }
+  mutation PrepareWhatsAppReply($noticeId: ID!, $body: String, $instructions: String) {
+    prepareWhatsAppReply(noticeId: $noticeId, body: $body, instructions: $instructions) {
+      success error errorCode draft { ${DRAFT} }
+    }
   }
 `;

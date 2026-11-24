@@ -28,7 +28,6 @@ KIND_WORDS = {
     'reply': 'Parece que espera tu respuesta.',
     'urgent': 'Parece urgente.',
 }
-OWN_REPLY = 'Escríbeme qué quieres responder y te lo preparo.'
 
 
 def _post(user, body, tag, actions=()):
@@ -75,23 +74,24 @@ def tell(link, notice, replies):
     lines = [f'«{_name(data.get("chat"))}» te escribió por WhatsApp:', f'«{_quote(data.get("preview"))}»']
     lines.append(KIND_WORDS.get(notice.kind, 'Parece importante.') + ' ¿Qué le respondo?')
     actions = [{'type': 'whatsapp_reply', 'target': str(notice.pk), 'label': reply} for reply in replies[:3]]
-    if not actions:
-        lines[-1] = KIND_WORDS.get(notice.kind, 'Parece importante.') + ' ' + OWN_REPLY
+    # Always a way to say it in her own words: the assistant writes the full reply, on a card she confirms.
+    actions.append({'type': 'whatsapp_other', 'target': str(notice.pk), 'label': 'Otro…'})
     try:
         _post(link.user, '\n'.join(lines), f'whatsapp-notice:{notice.pk}', actions)
     except Exception as exc:  # noqa: BLE001 - the notice is kept either way (the WhatsApp screen shows it)
         logger.warning('WhatsApp notice %s not posted to the chat: %s', notice.pk, type(exc).__name__)
 
 
-def prepare(user, text, *, notice_id=None, chat=None, phone=None):
-    """A reply on a card in the conversation: from a chip (notice_id + its text), or from the chat model's
-    tool (the chat's name as the assistant wrote it, or a number). Returns the draft as service.present."""
+def prepare(user, text=None, *, notice_id=None, chat=None, phone=None, instructions=None):
+    """A reply on a card in the conversation: from a chip (notice_id + its text), from "Otro" (notice_id + what she
+    wants to say: the assistant writes the full reply), or from the chat model's tool (the chat's name as the
+    assistant wrote it, or a number). Returns the draft as service.present."""
     if notice_id is None and chat and not phone:
         notice = _notice_by_chat(user, chat)
         if notice is None:
             raise service.LinkRefused('chat')
         notice_id = notice.pk
-    draft = service.create_draft(user, notice_id=notice_id, phone=phone, body=text)
+    draft = service.create_draft(user, notice_id=notice_id, phone=phone, body=text, instructions=instructions)
     to = _name(draft.get('chat')) if draft.get('chat') else (draft.get('phone') or 'ese chat')
     try:
         card = _post(user, f'Esta es tu respuesta para «{to}». Revísala y toca Enviar:', f'whatsapp-draft:{draft["id"]}',

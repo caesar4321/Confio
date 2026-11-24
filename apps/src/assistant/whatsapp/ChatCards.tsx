@@ -7,7 +7,7 @@ import { useApolloClient } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 
 import WhatsAppLogo from '../../assets/svg/WhatsApp.svg';
-import { Text } from '../../components/common/AppText';
+import { Text, TextInput } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
 import { GET_WHATSAPP_DRAFT, PREPARE_WHATSAPP_REPLY, SEND_WHATSAPP_DRAFT, type WhatsAppDraft } from './api';
 import { draftView, mergeDraft } from './rules';
@@ -17,29 +17,37 @@ export type ChatAction = { type: string; target?: string | null; label?: string 
 const THREAD = ['GetAssistantThread'];
 const FAILED = 'No pude preparar esa respuesta. Inténtalo de nuevo.';
 
-/** The replies offered under a WhatsApp message: one tap puts it on a card (nothing is sent yet). */
+const OTHER = '__other__';
+
+/** The replies offered under a WhatsApp message, and "Otro": one tap puts a reply on a card (nothing is sent yet);
+ * "Otro" takes what she wants to say, and the assistant writes the full reply on the card for her to confirm. */
 export function WhatsAppReplyChips({ actions }: { actions: ChatAction[] }) {
   const client = useApolloClient();
   const replies = actions.filter((a) => a.type === 'whatsapp_reply' && a.target && a.label);
+  const other = actions.find((a) => a.type === 'whatsapp_other' && a.target);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  if (!replies.length) {
+  const [writing, setWriting] = useState(false);
+  const [words, setWords] = useState('');
+  if (!replies.length && !other) {
     return null;
   }
-  const choose = async (noticeId: string, body: string) => {
-    setBusy(body);
+  const choose = async (noticeId: string, body: string | null, instructions?: string) => {
+    setBusy(instructions ? OTHER : body);
     setMessage(null);
     try {
       const { data } = await client.mutate<any>({
-        mutation: PREPARE_WHATSAPP_REPLY, variables: { noticeId, body }, fetchPolicy: 'no-cache',
-        refetchQueries: THREAD,
+        mutation: PREPARE_WHATSAPP_REPLY, fetchPolicy: 'no-cache', refetchQueries: THREAD,
+        variables: instructions ? { noticeId, instructions } : { noticeId, body },
       });
       const result = data?.prepareWhatsAppReply;
       if (!result?.success) {
         setMessage(result?.error || FAILED);
       }
+      return !!result?.success;
     } catch {
       setMessage(FAILED);
+      return false;
     } finally {
       setBusy(null);
     }
@@ -60,7 +68,55 @@ export function WhatsAppReplyChips({ actions }: { actions: ChatAction[] }) {
           <Text style={styles.replyText}>{a.label}</Text>
         </Pressable>
       ))}
-      <Text style={styles.hint}>O escríbeme qué quieres responder.</Text>
+      {other && !writing ? (
+        <Pressable
+          style={({ pressed }) => [styles.replyChip, styles.otherChip, pressed && styles.pressed, busy !== null && styles.disabled]}
+          disabled={busy !== null}
+          onPress={() => setWriting(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Otra respuesta"
+        >
+          <Icon name="edit-3" size={14} color={colors.successText} />
+          <Text style={styles.replyText}>Otro…</Text>
+        </Pressable>
+      ) : null}
+      {other && writing ? (
+        <View style={styles.compose}>
+          <TextInput
+            style={styles.input}
+            value={words}
+            onChangeText={setWords}
+            placeholder="¿Qué le quieres decir? Ej.: que paso mañana en la tarde"
+            placeholderTextColor={colors.muted}
+            multiline
+            maxLength={500}
+            autoFocus
+            accessibilityLabel="Qué quieres responder"
+          />
+          <View style={styles.composeRow}>
+            <Pressable onPress={() => { setWriting(false); setWords(''); }} style={styles.cancel} accessibilityRole="button">
+              <Text style={styles.cancelText}>Cancelar</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.write, pressed && styles.pressed, (!words.trim() || busy !== null) && styles.disabled]}
+              disabled={!words.trim() || busy !== null}
+              onPress={async () => {
+                // Kept on a failure: what she wrote is never lost.
+                if (await choose(String(other.target), null, words.trim())) {
+                  setWriting(false);
+                  setWords('');
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Preparar respuesta"
+            >
+              {busy === OTHER ? <ActivityIndicator size="small" color={colors.white} />
+                : <Icon name="feather" size={15} color={colors.white} />}
+              <Text style={styles.writeText}>Preparar respuesta</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {message ? <Text style={styles.error}>{message}</Text> : null}
     </View>
   );
@@ -218,6 +274,14 @@ const styles = StyleSheet.create({
   },
   replyText: { flexShrink: 1, fontSize: 14, fontWeight: '600', color: colors.primaryDeep },
   hint: { fontSize: 12, color: colors.textSecondary },
+  otherChip: { borderStyle: 'dashed' },
+  compose: { alignSelf: 'stretch', gap: 8, borderRadius: 16, borderWidth: 1, borderColor: colors.primaryMuted, padding: 10, backgroundColor: colors.background },
+  input: { minHeight: 64, fontSize: 15, color: colors.textFlat, textAlignVertical: 'top', paddingHorizontal: 4 },
+  composeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 12 },
+  cancel: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 6 },
+  cancelText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  write: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, borderRadius: 12, backgroundColor: colors.successText, paddingHorizontal: 14 },
+  writeText: { color: colors.white, fontSize: 14, fontWeight: '700' },
   error: { fontSize: 13, color: colors.error.text },
   pressed: { opacity: 0.8 },
   disabled: { opacity: 0.5 },

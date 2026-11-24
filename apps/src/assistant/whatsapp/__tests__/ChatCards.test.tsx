@@ -10,7 +10,7 @@ const mockClient = { mutate: (...a: unknown[]) => mockMutate(...a), query: (...a
   refetchQueries: (...a: unknown[]) => mockRefetch(...a) };
 jest.mock('@apollo/client', () => ({ gql: () => ({}), useApolloClient: () => mockClient }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
-jest.mock('../../../components/common/AppText', () => ({ Text: require('react-native').Text }));
+jest.mock('../../../components/common/AppText', () => ({ Text: require('react-native').Text, TextInput: require('react-native').TextInput }));
 
 const draft = { id: 'd1', chat: 'Farmacia Central', phone: null, body: 'Paso a las 5', status: 'draft', reason: null, displayHash: 'h1' };
 
@@ -82,4 +82,30 @@ it('a lost answer and the server never got it: Enviar comes back', async () => {
   await press(tree, 'Enviar por WhatsApp');
   expect(tree.root.findAll((n: any) => n.props.accessibilityLabel === 'Enviar por WhatsApp').length).toBeGreaterThan(0);
   act(() => tree.unmount());
+});
+
+it('"Otro": what she writes goes as instructions, and the assistant writes the full reply on a card', async () => {
+  mockMutate.mockResolvedValue({ data: { prepareWhatsAppReply: { success: true, draft } } });
+  let tree: any;
+  act(() => {
+    tree = create(<WhatsAppReplyChips actions={[{ type: 'whatsapp_other', target: '7', label: 'Otro…' }]} />);
+  });
+  await press(tree, 'Otra respuesta');
+  act(() => tree.root.findByProps({ accessibilityLabel: 'Qué quieres responder' }).props.onChangeText('que paso mañana'));
+  await press(tree, 'Preparar respuesta');
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { noticeId: '7', instructions: 'que paso mañana' } }));
+  expect(tree.root.findAll((n: any) => n.props.accessibilityLabel === 'Qué quieres responder')).toHaveLength(0);
+});
+
+it('"Otro" that fails keeps what she wrote', async () => {
+  mockMutate.mockResolvedValue({ data: { prepareWhatsAppReply: { success: false, error: 'Llegaste al límite de hoy.' } } });
+  let tree: any;
+  act(() => {
+    tree = create(<WhatsAppReplyChips actions={[{ type: 'whatsapp_other', target: '7', label: 'Otro…' }]} />);
+  });
+  await press(tree, 'Otra respuesta');
+  act(() => tree.root.findByProps({ accessibilityLabel: 'Qué quieres responder' }).props.onChangeText('que paso mañana'));
+  await press(tree, 'Preparar respuesta');
+  expect(tree.root.findByProps({ accessibilityLabel: 'Qué quieres responder' }).props.value).toBe('que paso mañana');
+  expect(JSON.stringify(tree.toJSON())).toContain('Llegaste al límite de hoy.');
 });

@@ -777,13 +777,13 @@ def create_draft(user, *, chat=None, phone=None, body=None, instructions=None, n
     """A draft for a chat a message came from (a notice) or one number. Written by the person, or by the model
     from their words. A chat named by hand (no notice) is not one WhatsApp can be asked for: the number is."""
     link = _linked_of(user)
-    jid = ''
+    jid = replying_to = ''
     if notice_id:
         notice = link.notices.filter(pk=notice_id).first() if str(notice_id).isdigit() else None
         if notice is None:
             raise LinkRefused('not_found')
         sealed = _unseal(notice.sealed, {})
-        chat, jid = sealed.get('chat'), sealed.get('jid') or ''
+        chat, jid, replying_to = sealed.get('chat'), sealed.get('jid') or '', sealed.get('preview') or ''
         if not jid:
             raise LinkRefused('not_found')
     elif chat and not phone:
@@ -799,7 +799,10 @@ def create_draft(user, *, chat=None, phone=None, body=None, instructions=None, n
         digits = ''
     if instructions:
         _claim(user, 'write', LIMITS['write'])
-        body = classify.write(str(instructions)[:1000], chat or 'un número nuevo')
+        from .assistant_tool import own_only
+        # The model's wording of what she asked: a number or a link only if it is in her own words.
+        body = own_only(classify.write(str(instructions)[:1000], chat or 'un número nuevo', replying_to),
+                        [str(instructions)])
     fields = {'chat': chat if jid else '', 'jid': jid, 'phone': digits, 'body': _body(body)}
     with transaction.atomic():
         # One message at a time. While one is on its way no new one is written: if the person could not see it

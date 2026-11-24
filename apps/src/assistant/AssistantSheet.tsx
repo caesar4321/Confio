@@ -1369,7 +1369,7 @@ export default function AssistantSheet({ home }: { home?: AssistantHomeProps } =
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
   // The newest message offers WhatsApp replies or holds a reply's card (whatsapp_link/chat.py): that is the one
   // thing to do now. The default chips and cards would push it up and compete with it.
-  const awaitingWhatsApp = !!reversed[0]?.actions?.some((a) => a.type === 'whatsapp_reply' || a.type === 'whatsapp_draft');
+  const awaitingWhatsApp = !!reversed[0]?.actions?.some((a) => a.type === 'whatsapp_reply' || a.type === 'whatsapp_other' || a.type === 'whatsapp_draft');
   // Chips and the one-time question, ranked on the server for this person;
   // the built-in STARTERS stay as the fallback (older server, offline).
   const { data: suggestionData, refetch: refetchSuggestions } = useQuery(GET_ASSISTANT_SUGGESTIONS, {

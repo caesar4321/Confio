@@ -223,17 +223,22 @@ class SendWhatsAppDraft(_DraftResult, graphene.Mutation):
 
 
 class PrepareWhatsAppReply(_DraftResult, graphene.Mutation):
-    """A reply chip in the Confío IA conversation: that reply to that message, on a card the person sends with a
-    tap (the card appears in the conversation; refetch the thread)."""
+    """A reply in the Confío IA conversation, on a card the person sends with a tap (the card appears in the
+    conversation; refetch the thread). `body`: a suggested reply as it is. `instructions`: what she wrote in "Otro",
+    from which the assistant writes the full reply. One of the two."""
 
     class Arguments:
         notice_id = graphene.ID(required=True)
-        body = graphene.String(required=True)
+        body = graphene.String()
+        instructions = graphene.String()
 
     @classmethod
     @login_required
-    def mutate(cls, root, info, notice_id, body):
+    def mutate(cls, root, info, notice_id, body=None, instructions=None):
         from . import chat
+        if instructions and instructions.strip():
+            return _run(cls, info, lambda user: _draft(chat.prepare(
+                user, notice_id=notice_id, instructions=instructions.strip()[:1000])))
         return _run(cls, info, lambda user: _draft(chat.prepare(user, body, notice_id=notice_id)))
 
 

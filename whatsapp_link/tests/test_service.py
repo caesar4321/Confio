@@ -492,7 +492,9 @@ class ChatTests(LinkTestBase):
         self.assertEqual((told.sender_type, told.metadata['ai'], told.metadata['whatsapp']), ('AGENT', True, True))
         self.assertIn('«Farmacia Central» te escribió por WhatsApp', told.body)
         self.assertIn('«Su pedido está listo, son 120 Bs»', told.body)
-        self.assertEqual([a['label'] for a in told.metadata['actions']], ['Paso a las 5', 'Gracias, ¿hasta qué hora?'])
+        self.assertEqual([a['label'] for a in told.metadata['actions']],
+                         ['Paso a las 5', 'Gracias, ¿hasta qué hora?', 'Otro…'])
+        self.assertEqual(told.metadata['actions'][-1]['type'], 'whatsapp_other')
         self.assertEqual(told.metadata['actions'][0]['type'], 'whatsapp_reply')
         self.assertEqual(self.pushes.call_args.args[2], {'kind': 'messages'})  # the push opens the conversation
         before = len(self.thread())
@@ -577,3 +579,18 @@ class ChatSafetyTests(ChatTests):
         service.sync(self.link.pk)
         self.assertIsNone(chat._notice_by_chat(self.user, 'Ana María'))
         self.assertIsNotNone(chat._notice_by_chat(self.user, 'ana'))
+
+
+class OtherReplyTests(ChatTests):
+    def test_other_writes_the_full_reply_from_her_words_with_the_message_as_context(self):
+        from whatsapp_link import chat
+        self.message(self.link)
+        service.sync(self.link.pk)
+        notice = WhatsAppNotice.objects.get()
+        with mock.patch('whatsapp_link.classify.write',
+                        return_value='¡Hola! Paso mañana en la tarde a retirarlo. Mi cuenta 99887766, gracias.') as write:
+            draft = chat.prepare(self.user, notice_id=notice.pk, instructions='que paso mañana en la tarde')
+        self.assertEqual(write.call_args.args[2], 'Su pedido está listo, son 120 Bs')  # what she answers, as context
+        self.assertEqual(draft['body'], '¡Hola! Paso mañana en la tarde a retirarlo. Mi cuenta , gracias.')
+        self.assertEqual(draft['chat'], 'Farmacia Central')
+        self.send.assert_not_called()  # on a card, waiting for her tap
