@@ -413,9 +413,16 @@ def final_looking(element):
         and not any(_NEVER.search(part) for part in _parts(element))
 
 
+# What the browser never loads, whatever was clicked: signing out, deleting, unsubscribing, closing the account.
+# Not "prime" or "subscription": Amazon declines its Prime offer through /checkout/p/.../prime/handler, and
+# joining is refused at the click (hard_refusal, the judge), never by an address guessed in advance.
+_NAV_NEVER = re.compile(r'/(logout|signout|sign-out|log-out|delete\w*|unsubscribe|close-?account|cancel-?account'
+                        r'|cancel-?order|cancelar-?pedido)(/|$)')
+
+
 def account_address(url):
-    """An address that acts on the person's account: never opened, in any phase."""
-    return bool(_ACCOUNT_PATH.search(urlsplit(url or '').path.lower()))
+    """An address the browser never loads, in any phase (runner's document guard)."""
+    return bool(_NAV_NEVER.search(urlsplit(url or '').path.lower()))
 
 
 def order_placed(page):

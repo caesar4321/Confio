@@ -1563,6 +1563,12 @@ class CheckoutTests(StepBase):
         self.assertNotEqual(guard.hard_refusal(element('No gracias', tag='a', href=f'{BASE}/logout'), on_checkout=True),
                             '')
 
+    def test_the_browser_loads_amazons_prime_decline_and_never_a_sign_out(self):
+        # The founder's 04:15 run: "No gracias" was clicked, and the browser's own filter stopped its page.
+        self.assertFalse(guard.account_address('https://www.amazon.com.mx/checkout/p/p-703-5961383-3177812/prime/handler'))
+        for url in (f'{BASE}/logout', f'{BASE}/account/delete', f'{BASE}/unsubscribe', f'{BASE}/gp/flex/sign-out'):
+            self.assertTrue(guard.account_address(url), url)
+
     def test_an_unsure_edit_by_its_whole_words_goes_ahead(self):
         self.judge.side_effect = None
         self.judge.return_value = ('unsure', 'which method is selected is not shown')
