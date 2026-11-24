@@ -1,1 +1,4 @@
 https://user:pw@loja.com.br',
+# whatsapp_bridge README placeholder DSN and a proxy-parser test value (no real credential)
+postgres://whatsapp_bridge:...@<rds>
+http://u:p@x:1"}`);

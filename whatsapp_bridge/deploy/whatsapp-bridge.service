@@ -1,0 +1,25 @@
+# /etc/systemd/system/whatsapp-bridge.service — whatsapp_bridge/README.md says how it is installed.
+[Unit]
+Description=whatsapp-bridge: each Confío user's own WhatsApp as a linked device (whatsmeow)
+After=network-online.target whatsapp-bridge.socket
+Wants=network-online.target
+Requires=whatsapp-bridge.socket
+
+[Service]
+Type=simple
+# Its own user and group: never the app's group, which can read the app's secrets file. The socket comes
+# from whatsapp-bridge.socket (group nginx, 0660).
+User=whatsapp-bridge
+Group=whatsapp-bridge
+Environment=BRIDGE_CALLBACK=http://127.0.0.1:8000/internal/whatsapp-bridge/events
+ExecStart=/opt/whatsapp-bridge/whatsapp-bridge
+Restart=always
+RestartSec=5
+MemoryMax=400M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

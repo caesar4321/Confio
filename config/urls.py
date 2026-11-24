@@ -221,6 +221,7 @@ from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
 from ramps.views import koywe_webhook, pagoasap_webhook, vexpay_webhook
 from payment_accounts.views import cobre_webhook, infinia_webhook
 from security.views import didit_webhook
+from whatsapp_link.views import bridge_events as whatsapp_bridge_events
 from assistant.gmail.views import gmail_connect_callback
 from security.app_version import app_version
 from users.funnel_ingest import funnel_ingest
@@ -235,6 +236,8 @@ urlpatterns += [
     path('api/pagoasap/webhook/', pagoasap_webhook, name='pagoasap_webhook'),
     path('api/payment-accounts/cobre/webhook/', cobre_webhook, name='cobre_payment_webhook'),
     path('api/payment-accounts/infinia/webhook/', infinia_webhook, name='infinia_payment_webhook'),
+    # whatsapp-bridge on this host delivers WhatsApp events here (whatsapp_link/views.py: token + no proxy).
+    path('internal/whatsapp-bridge/events', whatsapp_bridge_events, name='whatsapp_bridge_events'),
     path('gmail/connect/callback/', gmail_connect_callback, name='gmail_connect_callback'),
     path('api/funnel/ingest/', funnel_ingest, name='funnel_ingest'),
     path('api/content-ingestion/telegram-sync/', enqueue_telegram_sync, name='content_ingestion_telegram_sync'),

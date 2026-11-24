@@ -1,6 +1,6 @@
-"""The person's WhatsApp, linked as a device in a browser that is theirs alone.
+"""The person's WhatsApp, linked as one more device in whatsapp-bridge (whatsmeow), theirs alone.
 
-Hard-deleted on purpose: unlinking erases the browser profile at the vendor,
+Hard-deleted on purpose: unlinking logs the device out and deletes its keys in the bridge,
 the important messages kept and the drafts. Everything that came from
 WhatsApp is sealed (users.encryption); only fixed kinds and times are plain.
 """
@@ -23,7 +23,8 @@ class WhatsAppLink(models.Model):
     state = models.CharField(max_length=10, choices=State.choices, default=State.PAIRING, db_index=True)
     reason = models.CharField(max_length=24, blank=True, default='')
 
-    # The person's browser profile at the vendor: their WhatsApp session. Never shared.
+    # 'whatsmeow' (the bridge holds the device by this row's id). Rows from before kept a Browserbase profile
+    # (context_id) until the sweep deleted it; the session fields are unused since.
     provider = models.CharField(max_length=32)
     context_id = models.CharField(max_length=128, blank=True, default='')
     session_id = models.CharField(max_length=128, blank=True, default='')
@@ -122,3 +123,16 @@ class WhatsAppLinkRecord(models.Model):
 
     def __str__(self):
         return f'WhatsAppLinkRecord {self.pk} ••{self.phone_hint}'
+
+
+class WhatsAppInbox(models.Model):
+    """A message that arrived and waits for the next look (service.sync, a minute or two later), sealed.
+    Deleted once looked at, kept as a notice or not; never kept past a day."""
+
+    link = models.ForeignKey(WhatsAppLink, on_delete=models.CASCADE, related_name='inbox')
+    source_key = models.CharField(max_length=64)  # an HMAC of WhatsApp's message id: delivered twice, kept once
+    sealed = models.TextField()  # {chat, name, phone, text, at}
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['link', 'source_key'], name='whatsapp_inbox_once')]

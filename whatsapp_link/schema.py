@@ -114,18 +114,19 @@ def _run(cls, info, action):
 
 
 class StartWhatsAppLink(_Result, graphene.Mutation):
-    """Opens the person's own browser on WhatsApp Web and asks for a pairing code for the number they typed
-    (with its country code, starting with +). Poll whatsAppLink every 2-3 s while state is pairing: the code
-    appears, may change, and the state turns linked."""
+    """Asks WhatsApp for a pairing code for the number the person typed (with its country code, starting with +),
+    and answers once the code is there. Poll whatsAppLink every 2-3 s while state is pairing: the code may
+    change, and the state turns linked."""
 
     class Arguments:
         phone = graphene.String()  # optional in the schema: a missing one gets the person's message, not an error
         consent_version = graphene.Int(required=True)
+        country = graphene.String()  # the ISO country picked with the number (tells +1 countries apart)
 
     @classmethod
     @login_required
-    def mutate(cls, root, info, consent_version, phone=None):
-        return _run(cls, info, lambda user: service.start_link(user, phone, consent_version) and None)
+    def mutate(cls, root, info, consent_version, phone=None, country=None):
+        return _run(cls, info, lambda user: service.start_link(user, phone, consent_version, country or '') and None)
 
 
 class AcceptWhatsAppConsent(_Result, graphene.Mutation):

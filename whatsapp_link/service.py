@@ -1,53 +1,49 @@
-"""The person's WhatsApp link: pairing, reading the chat list, unlinking, sending.
+"""The person's WhatsApp link: pairing, what arrives, unlinking, sending.
 
-One browser profile per person, at the vendor, in its own region. Only
-this module opens it, and only for that person's link. One worker at a time
-holds it (lease_until). Only the person's own Confío number can be linked:
-a pairing code for someone else's number is how WhatsApp accounts get stolen.
+The person's own WhatsApp is linked as one more device in whatsapp-bridge (whatsapp_bridge/, Go, whatsmeow),
+on our own host: one device per person, never shared. Only the number the person types can be linked, and a
+pairing code for someone else's number is how WhatsApp accounts get stolen, so: one Confío account per number,
+a few prompts a day per number, the signed-in number must be the typed one, and a note in the owner's own chat
+once it is linked (warn_self), without which nothing is read or sent.
 
-Money never moves here. A payment someone asks for in WhatsApp goes through
-the app's own payment cards, which the person approves.
+What arrives comes as events (on_events): no polling, nothing marked read, never "online".
 
-Sending: createWhatsAppDraft returns the text and its hash; only the
-person's tap on that card may call sendWhatsAppDraft. No assistant tool may
-send a draft (founder rule: the assistant never acts on its own).
+Money never moves here. A payment someone asks for in WhatsApp goes through the app's own payment cards, which
+the person approves.
+
+Sending: createWhatsAppDraft returns the text and its hash; only the person's tap on that card may call
+sendWhatsAppDraft. No assistant tool may send a draft (founder rule: the assistant never acts on its own).
 """
-import contextlib
 import hashlib
 import json
 import logging
 import re
+import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
-from django.db import DatabaseError, transaction
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 
-from agent_tasks import browsers
-from agent_tasks.cdp import CdpError, Page
 from users.encryption import decrypt_data, encrypt_data
 
-from . import classify, conf, web
-from .models import WhatsAppDraft, WhatsAppLink, WhatsAppLinkRecord, WhatsAppNotice
+from . import bridge, classify, conf
+from .models import WhatsAppDraft, WhatsAppInbox, WhatsAppLink, WhatsAppLinkRecord, WhatsAppNotice
 
 logger = logging.getLogger(__name__)
 
-LEASE = timedelta(minutes=5)
-WATCH_SECONDS = 45  # one watch holds the browser this long, then hands over to the next
-REASK_BEFORE = 30  # past this in a watch, a lapsed code is asked again by the next watch
-SETTLE_AFTER_LINK = 30  # WhatsApp copies the chat list to a new device: let it start before closing
-SENDING_STUCK = timedelta(minutes=12)  # past the lease wait (about 200 s) and the task's limits
-MAX_BACKOFF = timedelta(hours=12)
-SEND_BUSY_TRIES = 40  # 20 s apart: longer than a pairing (10 min) holds its browser
-PAIR_RETRIES = 80  # 4 to 10 s apart: longer than a lease (5 min) a killed task may leave behind
+PROVIDER = 'whatsmeow'
+SENDING_STUCK = timedelta(minutes=12)  # past the send task's limits
 DRAFT_HOURS = 24
 MAX_BODY = 2000
+MAX_NAME = 120
 # 2: the person types the number; Confío writes one note to their own chat when it is linked.
-CONSENT_VERSION = 2
+# 3: linked from our own servers (whatsmeow), new messages arrive as they come, never "online".
+CONSENT_VERSION = 3
 NOTICE_TYPE = 'whatsapp_link'
 LIMITS = {'link': 10, 'refresh': 30, 'write': 40}
 TITLE = 'Confío IA'
@@ -83,22 +79,17 @@ MESSAGES = {
 REASONS = {
     'phone_invalid': 'WhatsApp no aceptó ese número. Revisa el número y su código de país.',
     'timeout': 'El código venció sin que se vinculara. Pide uno nuevo.',
-    'browser': 'No pude abrir WhatsApp ahora. Inténtalo en unos minutos.',
+    'browser': 'No pude conectar con WhatsApp ahora. Inténtalo en unos minutos.',
     'whatsapp': 'WhatsApp no respondió como esperaba. Inténtalo en unos minutos.',
     'chat_not_found': 'No encontré ese chat en tu WhatsApp. Escribe su nombre tal como aparece.',
     'chat_ambiguous': 'Hay más de un chat con ese nombre. Usa el número en su lugar.',
     'number_not_on_whatsapp': 'Ese número no tiene WhatsApp.',
-    'composer_not_empty': 'No pude preparar ese chat para escribir. Inténtalo de nuevo.',
-    'typed_mismatch': 'No pude escribir el mensaje tal como lo aprobaste. No se envió.',
     'unknown': 'No sé si el mensaje salió. Revisa el chat en tu teléfono antes de repetirlo.',
     'gone': GONE,
-    'not_own_phone': 'El WhatsApp de este navegador no es el número que escribiste. Lo desvinculé.',
+    'not_own_phone': 'El WhatsApp vinculado no es el número que escribiste. Lo desvinculé.',
     'number_taken': ('No pude vincular ese número. Si lo vinculaste en otra cuenta de Confío, desvincúlalo allí '
                      'primero.'),
-    'phone_mismatch': 'WhatsApp mostró otro número. Revisa el número que escribiste e inténtalo de nuevo.',
-    'pending': ('Tu mensaje quedó en espera en WhatsApp y puede salir más tarde. Revisa el chat en tu teléfono '
-                'antes de repetirlo.'),
-    'partial_sent': 'Salió solo una parte del mensaje. Revisa el chat en tu teléfono antes de repetirlo.',
+    'banned': 'WhatsApp restringió tu cuenta por un tiempo. Lo desvinculé para cuidarla.',
 }
 
 
@@ -147,6 +138,36 @@ def phone_digits(value) -> str:
     return digits
 
 
+# A number can't say which country of a shared code it is: the main one (the person's pick in the app decides).
+SHARED_CODE_DEFAULT = {'1': 'US', '7': 'RU', '44': 'GB', '47': 'NO', '61': 'AU', '212': 'MA', '262': 'RE',
+                       '590': 'GP', '599': 'CW'}
+
+
+def phone_country(digits, picked='', home='') -> str:
+    """The ISO country of an international number: the one the person picked when its calling code fits the
+    number, else their account's country when it fits, else the code's main country. '' when no code fits. It
+    only chooses the proxy route the person's WhatsApp connects through (whatsapp_bridge/proxy.go).
+
+    The app's chip starts on the code's main country (+1 is the US), so a pick of that is taken as no pick when
+    the account says otherwise (a Dominican with a prefilled +1 number)."""
+    from users.country_codes import COUNTRY_CODES
+    picked, home = str(picked or '').strip().upper(), str(home or '').strip().upper()
+    codes = {}
+    for _name, code, iso in (row for row in COUNTRY_CODES if len(row) >= 3):
+        codes.setdefault(code.replace('+', ''), []).append(iso.upper())
+    for length in (4, 3, 2, 1):
+        prefix = digits[:length]
+        if len(digits) > length and prefix in codes:
+            options = codes[prefix]
+            main = SHARED_CODE_DEFAULT.get(prefix) if SHARED_CODE_DEFAULT.get(prefix) in options else options[0]
+            if picked in options and picked != main:
+                return picked
+            if home in options:
+                return home
+            return main
+    return ''
+
+
 def own_phone(user) -> str:
     """The person's Confío number as international digits, or ''."""
     from users.phone_utils import _resolve_calling_code
@@ -177,163 +198,8 @@ def allowed(user, account, jwt_context):
         raise LinkRefused('unavailable')
 
 
-@contextlib.contextmanager
-def _taken(link_id, grant=None, seconds=LEASE):
-    """The link, leased to this worker for the block (None when another holds it or it changed).
-    The lease always ends with the block, whatever happens in it."""
-    now = timezone.now()
-    rows = WhatsAppLink.objects.filter(pk=link_id).exclude(lease_until__gt=now)
-    if grant:
-        rows = rows.filter(grant=grant)
-    if not rows.update(lease_until=now + seconds):
-        yield None
-        return
-    try:
-        yield WhatsAppLink.objects.select_related('user').filter(pk=link_id).first()
-    finally:
-        WhatsAppLink.objects.filter(pk=link_id).update(lease_until=None)
-
-
 def _mine(link):
     return WhatsAppLink.objects.filter(pk=link.pk, grant=link.grant)
-
-
-def _vendor(link=None):
-    return browsers.provider((link.provider if link is not None else '') or None)
-
-
-SLOTS = 2  # WhatsApp tasks at once on the shared browser worker (3 processes): a purchase always has one
-SLOT_SECONDS = 300  # past every browser task's hard time limit: a killed worker's slot frees itself
-
-
-@contextlib.contextmanager
-def _slot():
-    """One of WhatsApp's two places on the browser worker, held for the whole task, or False."""
-    token = uuid.uuid4().hex
-    for number in range(SLOTS):
-        key = f'whatsapp-link:slot:{number}'
-        try:
-            taken = cache.add(key, token, SLOT_SECONDS)
-        except Exception:  # noqa: BLE001 - no counter, no slot
-            taken = False
-        if taken:
-            try:
-                yield True
-            finally:
-                try:
-                    if cache.get(key) == token:
-                        cache.delete(key)
-                except Exception:  # noqa: BLE001 - it expires on its own
-                    pass
-            return
-    yield False
-
-
-OPEN_LOCK = 47113503  # pg advisory lock: one WhatsApp browser opens at a time, so the room check holds
-
-
-def _room(link, kind) -> bool:
-    """Whether WhatsApp may open one more browser now. The plan's browsers are shared with purchases.
-
-    background (reads): WhatsApp's share, and one browser always left free.
-    pair: WhatsApp's share.
-    send: any free browser, one past WhatsApp's share: an approved message never waits behind a pairing."""
-    from agent_tasks.models import AgentTask
-    now = timezone.now()
-    # Browsers only: worker places are bounded by _slot.
-    ours = WhatsAppLink.objects.exclude(pk=link.pk).exclude(session_id='').filter(session_expires_at__gt=now).count()
-    # Every purchase under way counts, also one whose browser is about to open: it was admitted first.
-    shopping = AgentTask.objects.filter(state__in=AgentTask.ACTIVE).count()
-    free = conf.get('WHATSAPP_LINK_PLAN_CONCURRENCY') - ours - shopping - (1 if kind == 'background' else 0)
-    share = conf.get('WHATSAPP_LINK_MAX_SESSIONS') + (1 if kind == 'send' else 0)
-    return ours < share and free > 0
-
-
-def _open(link, seconds, *, kind='pair'):
-    """A browser on the person's own profile. Creates the profile on first use.
-    Only when the plan has room (`_room`); busy otherwise.
-
-    The profile and session ids are bookkeeping, written by row whatever the
-    grant: a vendor profile nobody recorded could never be deleted."""
-    from django.db import connection
-    provider = _vendor()
-    if not link.context_id:
-        context = provider.create_profile()
-        if not WhatsAppLink.objects.filter(pk=link.pk).update(context_id=context, provider=provider.name):
-            from . import tasks
-            tasks.drop_profile.delay(provider.name, context)  # retried there until it is gone
-            raise browsers.BrowserUnavailable('link gone')
-        link.context_id, link.provider = context, provider.name
-    _close(link)
-    session = None
-    try:
-        # Checked, opened and recorded under one lock: two workers never both see the last free browser.
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                # Never waited for: another open in progress is a busy browser plan, retried like one.
-                cursor.execute('SELECT pg_try_advisory_xact_lock(%s)', [OPEN_LOCK])
-                got = cursor.fetchone()[0]
-            if not got or not _room(link, kind):
-                raise browsers.BrowserUnavailable('no browser free for WhatsApp now', 'busy')
-            session = provider.open(profile_id=link.context_id, country='', seconds=seconds, solve_captchas=False,
-                                    viewport=conf.get('WHATSAPP_LINK_VIEWPORT'),
-                                    region=conf.get('WHATSAPP_LINK_REGION'))
-            recorded = WhatsAppLink.objects.filter(pk=link.pk).update(
-                session_id=session.id, sealed_connect_url=_seal(session.connect_url),
-                session_expires_at=session.expires_at)
-            if not recorded:
-                raise browsers.BrowserUnavailable('link gone')
-    except BaseException:
-        # Opened and not recorded (an error, a time limit, a failed commit): nobody would count or close it.
-        if session is not None:
-            try:
-                provider.close(session.id)
-            except browsers.BrowserUnavailable:
-                pass
-        raise
-    link.session_id, link.session_expires_at = session.id, session.expires_at
-    return session.connect_url
-
-
-def _close(link):
-    """Closing is what saves the profile at the vendor: every opened browser is closed."""
-    if not link.session_id:
-        return
-    try:
-        _vendor(link).close(link.session_id)
-    except browsers.BrowserUnavailable:
-        logger.warning('WhatsApp link %s: closing the browser failed', link.pk)
-    WhatsAppLink.objects.filter(pk=link.pk, session_id=link.session_id).update(
-        session_id='', sealed_connect_url='', session_expires_at=None)
-    link.session_id = ''
-
-
-def _drop_profile(link):
-    """Deletes the vendor profile (the WhatsApp session in it) and forgets its id."""
-    _close(link)
-    if not link.context_id:
-        return True
-    try:
-        _vendor(link).delete_profile(link.context_id)
-    except browsers.BrowserUnavailable:
-        logger.warning('WhatsApp link %s: profile not deleted yet', link.pk)
-        return False
-    WhatsAppLink.objects.filter(pk=link.pk, context_id=link.context_id).update(context_id='')
-    link.context_id = ''
-    return True
-
-
-@contextlib.contextmanager
-def _guarded(connect_url):
-    """A connection that only lets WhatsApp Web's own pages load, closed the proper way."""
-    with Page(connect_url) as page:
-        page.guard_documents(web.allowed)
-        try:
-            # The screens are read in English: WhatsApp Web follows the browser's language.
-            page.call('Emulation.setLocaleOverride', {'locale': 'en-US'})
-        except CdpError:
-            pass  # already set on this tab
-        yield page
 
 
 def _notify(user, message, data=None):
@@ -425,8 +291,9 @@ def _claim_number(key):
         raise LinkRefused('number_limit')
 
 
-def start_link(user, phone, consent_version):
-    """Asks WhatsApp for a pairing code for the number the person typed (with its country code).
+def start_link(user, phone, consent_version, country=''):
+    """Asks WhatsApp for a pairing code for the number the person typed (with its country code), and waits
+    for it (a few seconds): the screen shows the code as soon as this returns.
 
     The number is theirs to type (sign-up no longer proves a phone). What keeps a stranger's WhatsApp out:
     WhatsApp asks its owner to type the code in their own phone; one Confío account per WhatsApp number;
@@ -451,34 +318,54 @@ def start_link(user, phone, consent_version):
         if link is not None and link.state == WhatsAppLink.State.LINKED:
             raise LinkRefused('already_linked')
         fields = dict(state=WhatsAppLink.State.PAIRING, reason='', sealed_phone=_seal(digits), phone_hint=digits[-4:],
-                      phone_key=phone_key(digits),
+                      phone_key=phone_key(digits), provider=PROVIDER,
                       sealed_code='', code_at=None, linked_at=None, next_sync_at=None, failures=0,
                       consent_version=consent_version, grant=uuid.uuid4(), session_expires_at=None)
         if link is None:
-            link = WhatsAppLink.objects.create(user=user, provider='', **fields)
+            link = WhatsAppLink.objects.create(user=user, **fields)
         else:
             # A new pairing may be another WhatsApp: nothing of the last one carries over.
             link.notices.all().delete()
             link.drafts.all().delete()
+            link.inbox.all().delete()
             for name, value in fields.items():
                 setattr(link, name, value)
             link.save()
-    from . import tasks
-    grant = str(link.grant)
-    transaction.on_commit(lambda: tasks.pair.delay(link.pk, grant))
+    _ask_code(link, phone_country(digits, country, getattr(user, 'phone_country', '')))
     return link
 
 
+def _ask_code(link, country):
+    grant = str(link.grant)
+    try:
+        code = bridge.pair(link.pk, grant, _unseal(link.sealed_phone, ''), conf.get('WHATSAPP_LINK_PAIRING_SECONDS'),
+                           country=country)
+    except bridge.BridgeRefused as exc:
+        logger.warning('WhatsApp pairing %s refused: %s', link.pk, exc.code)
+        _fail(link, exc.code if exc.code in REASONS else 'whatsapp')
+        return
+    except (bridge.BridgeUnavailable, TimeoutError, OSError, ValueError, KeyError) as exc:
+        logger.warning('WhatsApp pairing %s: bridge %s', link.pk, type(exc).__name__)
+        _fail(link, 'browser')
+        return
+    _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(sealed_code=_seal(code), code_at=timezone.now(),
+                                                                session_expires_at=_pairing_ends())
+
+
+def _pairing_ends():
+    return timezone.now() + timedelta(seconds=conf.get('WHATSAPP_LINK_PAIRING_SECONDS'))
+
+
 def accept_consent(user, consent_version):
-    """A linked person accepts today's text: reads start again."""
+    """A linked person accepts today's text: what arrives is kept again."""
     if consent_version != CONSENT_VERSION:
         raise LinkRefused('consent')
     WhatsAppLink.objects.filter(user=user, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').update(
-        consent_version=consent_version, next_sync_at=timezone.now())
+        consent_version=consent_version)
 
 
 def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pending=False):
-    """Erases what came from WhatsApp now; a worker logs the browser out and deletes its profile."""
+    """Erases what came from WhatsApp now; then the bridge logs the device out and deletes its keys."""
     with transaction.atomic():
         link = WhatsAppLink.objects.select_for_update().filter(user=user).first()
         if link is None or link.reason == 'unlinking' or (grant is not None and str(link.grant) != str(grant)):
@@ -487,6 +374,7 @@ def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pe
             return False  # the note was written meanwhile: nothing to undo
         link.notices.all().delete()
         link.drafts.all().delete()
+        link.inbox.all().delete()
         WhatsAppLink.objects.filter(pk=link.pk).update(
             reason='unlinking', grant=uuid.uuid4(), sealed_code='', code_at=None, sealed_phone='', next_sync_at=None,
             updated_at=timezone.now())
@@ -498,17 +386,12 @@ def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pe
 
 
 def refresh(user):
-    """Opening Confío IA asks for a fresh read, at most every REFRESH minutes, never past a backoff."""
+    """Opening Confío IA: what arrived and waits to be looked at is looked at now (messages come by themselves)."""
     link = WhatsAppLink.objects.filter(user=user, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
-    if link is None or link.failures or link.consent_version < CONSENT_VERSION or _gone_seen(link) is not None \
-            or note_pending(link):
-        return False
-    soon = timezone.now() - timedelta(minutes=conf.get('WHATSAPP_LINK_REFRESH_MINUTES'))
-    if link.last_sync_at and link.last_sync_at > soon:
+    if link is None or link.consent_version < CONSENT_VERSION or note_pending(link) or not link.inbox.exists():
         return False
     _claim(user, 'refresh', LIMITS['refresh'])
-    WhatsAppLink.objects.filter(pk=link.pk, failures=0).update(next_sync_at=timezone.now())
-    _queue_sync(link.pk)
+    _queue_sync(link.pk, countdown=0)
     return True
 
 
@@ -517,196 +400,107 @@ def dismiss(user, notice_id):
         WhatsAppNotice.objects.filter(pk=notice_id, link__user=user).delete()
 
 
-# ------------------------------------------------------------------ pairing (browser worker)
+# ------------------------------------------------------------------ events from the bridge
 
-def pair(link_id, grant, tries=0):
-    with _slot() as placed:
-        if placed:
-            return _pair(link_id, grant, tries)
-    # Both of WhatsApp's places on the browser worker are taken: this waits, nothing is spent.
-    waiting = WhatsAppLink.objects.filter(pk=link_id, grant=grant, state=WhatsAppLink.State.PAIRING,
-                                          code_at__isnull=True).exclude(reason='unlinking')
-    if tries < PAIR_RETRIES and enabled() and waiting.exists():
-        from . import tasks
-        tasks.pair.apply_async((link_id, grant, tries + 1), countdown=10)
-        return
-    with _taken(link_id, grant) as link:
-        if link is not None and link.state == WhatsAppLink.State.PAIRING and link.code_at is None:
-            # Nobody is asking WhatsApp for a code right now: ended, its browser and profile with it.
-            _fail(link, 'browser' if enabled() else 'whatsapp')
+EVENT_TRIES = 3  # deliveries of one event that failed here before it is given up (logged as an error): the
+# bridge delivers in order, so one bad event must not hold everyone's (a pairing code) for long
 
 
-def _pair(link_id, grant, tries):
-    from . import tasks
-    again, busy = None, False
-    with _taken(link_id, grant) as link:
-        if link is None:
-            # Another pairing or watch still holds the browser: come back until it lets go.
-            waiting = WhatsAppLink.objects.filter(pk=link_id, grant=grant, state=WhatsAppLink.State.PAIRING).exclude(
-                reason='unlinking')
-            if tries < PAIR_RETRIES and enabled() and waiting.exists():
-                tasks.pair.apply_async((link_id, grant, tries + 1), countdown=4)
-            elif not enabled():
-                waiting.filter(code_at__isnull=True).update(state=WhatsAppLink.State.FAILED, reason='whatsapp',
-                                                            sealed_phone='')
-            return
-        if link.state != WhatsAppLink.State.PAIRING or link.reason == 'unlinking' or link.code_at is not None:
-            return  # a code for this pairing is out: the person may be typing it, its browser stays
-        if not enabled():
-            _fail(link, 'whatsapp')
-            return
-        cache.set(f'whatsapp-link:pair-started:{grant}', 1, 900)
+def on_events(events) -> bool:
+    """What WhatsApp said, in order, as the bridge delivers it (views.bridge_events). Delivered again after a
+    lost answer or a failure here: each one is safe to see twice. False while one failed and must come again."""
+    ok = True
+    for event in events:
+        started = time.monotonic()
+        kind = str(event.get('kind') or '')
         try:
-            with _guarded(_open(link, conf.get('WHATSAPP_LINK_PAIRING_SECONDS'))) as page:
-                if not _mine(link).filter(state=WhatsAppLink.State.PAIRING).exists():
-                    _close(link)  # unlinked or asked again while the browser opened: no prompt on the phone
-                    return
-                page.goto(web.HOME)
-                try:
-                    code = web.ask_for_code(page, _unseal(link.sealed_phone, ''))
-                except web.WebError as exc:
-                    if exc.code != 'already_linked':
-                        raise
-                    # A profile signed in before this pairing: it must be the person's own number.
-                    page.pump(5.0)
-                    _linked(link, number=web.signed_in_number(page))
-                    return
-            if _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(sealed_code=_seal(code),
-                                                                           code_at=timezone.now()):
-                again = str(link.grant)
-            else:
-                _close(link)
-        except web.WebError as exc:
-            # The step's name only (no number, no code): what to look at when WhatsApp Web changes.
-            logger.warning('WhatsApp pairing %s stopped at %s', link.pk, exc.code)
-            _fail(link, exc.code if exc.code in REASONS else 'whatsapp')
-        except (browsers.BrowserUnavailable, CdpError) as exc:
-            if getattr(exc, 'code', '') == 'busy' and tries < PAIR_RETRIES:
-                busy = True  # every browser is in use: the pairing waits its turn, nothing is spent
-            else:
-                _fail(link, 'browser')
-        except BaseException:
-            _fail(link, 'whatsapp')  # a time limit or anything unforeseen: never a pairing left open
+            _on_event(event)
+        except SoftTimeLimitExceeded:
             raise
-    if busy:
-        tasks.pair.apply_async((link_id, grant, tries + 1), countdown=10)
-    if again:
-        tasks.watch.apply_async((link_id, again), countdown=2)
+        except Exception as exc:  # noqa: BLE001 - the bridge delivers it again
+            key = f"whatsapp-link:event-fails:{event.get('id')}"
+            try:
+                cache.add(key, 0, 86400)
+                tries = cache.incr(key)
+            except Exception:  # noqa: BLE001 - no counter: given up rather than holding the queue forever
+                tries = EVENT_TRIES
+            if tries >= EVENT_TRIES:
+                logger.error('WhatsApp event %s for link %s given up after %d tries: %s', kind, event.get('link'),
+                             tries, type(exc).__name__)
+            else:
+                logger.warning('WhatsApp event %s for link %s failed (%s), delivered again', kind, event.get('link'),
+                               type(exc).__name__)
+                ok = False
+        logger.info('WhatsApp event %s link=%s ms=%d', kind, event.get('link'), (time.monotonic() - started) * 1000)
+    return ok
 
 
-def watch(link_id, grant):
-    with _slot() as placed:
-        if placed:
-            return _watch(link_id, grant)
-    # No place now: the pairing's browser stays open and is looked at again in a moment, for as long as it
-    # lives. No de-duplication here: an extra chain is cheap and merges once a place frees (the leased path).
-    if enabled() and WhatsAppLink.objects.filter(
-            pk=link_id, grant=grant, state=WhatsAppLink.State.PAIRING, session_expires_at__gt=timezone.now()).exclude(
-            session_id='').exists():
-        from . import tasks
-        tasks.watch.apply_async((link_id, grant), countdown=3)
-
-
-def _watch(link_id, grant):
-    """Until the person types the code: keeps the code fresh and sees the link happen."""
-    from . import tasks
-    again = soon = False
-    with _taken(link_id, grant) as link:
-        if link is None:
-            # Held by a pair or another watch for a moment: look again so the pairing is never unwatched.
-            soon = WhatsAppLink.objects.filter(pk=link_id, grant=grant, state=WhatsAppLink.State.PAIRING).exclude(
-                session_id='').exists() and cache.add(f'whatsapp-link:watch-requeued:{grant}', 1, 20)
-        elif link.state != WhatsAppLink.State.PAIRING or not link.session_id:
-            return
-        elif not enabled():
-            _fail(link, 'whatsapp')
-            return
-        else:
-            again = _watch_once(link)
-    if soon:
-        tasks.watch.apply_async((link_id, grant), countdown=3)
-    if again:
-        tasks.watch.apply_async((link_id, grant), countdown=1)
-
-
-def _watch_once(link):
-    """One watch's budget on the pairing browser. True when the next watch should go on."""
-    started = timezone.now()
-    try:
-        if not link.session_expires_at or link.session_expires_at <= started + timedelta(seconds=20):
-            _fail(link, 'timeout')
-            return
-        shown = _unseal(link.sealed_code)
-        with _guarded(_unseal(link.sealed_connect_url, '')) as page:
-            while timezone.now() < started + timedelta(seconds=WATCH_SECONDS):
-                if not _mine(link).filter(state=WhatsAppLink.State.PAIRING).exists():
-                    _close(link)
-                    return  # unlinked or asked again meanwhile
-                seen = web.screen(page)
-                if seen in ('chats', 'loading'):
-                    _linked(link, page)
-                    return
-                if seen == 'code':
-                    code = web.read_code(page)
-                    if not code and web.refresh_code(page):
-                        code = web.read_code(page)
-                    if code and code != shown:
-                        _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(
-                            sealed_code=_seal(code), code_at=timezone.now())
-                        shown = code
-                elif seen in ('login', 'phone'):
-                    if timezone.now() > started + timedelta(seconds=REASK_BEFORE):
-                        break  # asking takes long: the next watch does it with a whole budget
-                    # The code lapsed and WhatsApp went back to its first screen: ask again.
-                    try:
-                        code = web.ask_for_code(page, _unseal(link.sealed_phone, ''))
-                    except web.WebError as exc:
-                        # The person may have typed the code just as it was asked again.
-                        if exc.code == 'already_linked' or web.screen(page) in ('chats', 'loading'):
-                            _linked(link, page)
-                            return
-                        raise
-                    _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(
-                        sealed_code=_seal(code), code_at=timezone.now())
-                    shown = code
-                page.pump(3.0)
-        return True
-    except web.WebError as exc:
-        logger.warning('WhatsApp pairing %s stopped at %s', link.pk, exc.code)
-        _fail(link, exc.code if exc.code in REASONS else 'whatsapp')
-    except (browsers.BrowserUnavailable, CdpError):
-        _fail(link, 'browser')
-    except BaseException:
-        _fail(link, 'whatsapp')
-        raise
-    return False
-
-
-def _linked(link, page=None, number=None):
-    """`number`: read from a profile that was signed in before this pairing. It must be the person's own;
-    unread ('') is no proof, and the pairing ends (the person can ask again)."""
-    typed = _unseal(link.sealed_phone, '')
-    if number is not None and number != typed:
-        _fail(link, 'not_own_phone' if number else 'whatsapp')
+def _on_event(event):
+    kind, data = event.get('kind'), event.get('data') or {}
+    link = WhatsAppLink.objects.select_related('user').filter(
+        pk=int(event.get('link') or 0), grant=str(event.get('grant') or '')).exclude(reason='unlinking').first() \
+        if str(event.get('link') or '').isdigit() else None
+    if link is None:
+        if kind in ('paired', 'message'):
+            # A device for a pairing that is over (unlinked or asked again meanwhile): it must not stay linked.
+            _queue_logout(event.get('link'), event.get('grant'))
         return
-    # The number WhatsApp itself says is signed in decides (a spelling of the same number, with or without a
-    # 0 or a 9, would otherwise get past one account per number). Unread: the typed one, which WhatsApp paired.
-    signed = number or (_signed_in(page) if page is not None else '')
-    # Only a spelling of the typed number (the same last 8 digits): a profile used before can still hold the
-    # last account's number for a moment, and that one is never recorded, held or written to.
-    digits = signed if signed and typed and signed[-8:] == typed[-8:] else typed
+    if kind in ('paired', 'message') and link.state not in (WhatsAppLink.State.PAIRING, WhatsAppLink.State.LINKED):
+        _queue_logout(link.pk, link.grant)  # this pairing ended here (failed, gone): its device goes too
+        return
+    if kind == 'code':
+        _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(sealed_code=_seal(str(data.get('code') or '')),
+                                                                    code_at=timezone.now())
+    elif kind == 'paired':
+        if link.state == WhatsAppLink.State.PAIRING:
+            _linked(link, re.sub(r'\D', '', str(data.get('phone') or '')))
+    elif kind == 'pair_timeout':
+        _fail(link, 'timeout', logout=False)
+    elif kind == 'pair_error':
+        _fail(link, 'whatsapp')
+    elif kind == 'logged_out':
+        if link.state == WhatsAppLink.State.LINKED:
+            _gone(link)
+        else:
+            _fail(link, 'whatsapp', logout=False)
+    elif kind == 'banned':
+        logger.error('WhatsApp link %s: WhatsApp restricted the account for a while', link.pk)
+        if link.state == WhatsAppLink.State.LINKED:
+            _gone(link, reason='banned', ended_by=WhatsAppLinkRecord.EndedBy.PHONE)
+            _queue_logout(link.pk, link.grant)
+    elif kind == 'outdated':
+        logger.error('WhatsApp bridge: WhatsApp says the client is outdated; update whatsmeow and redeploy')
+    elif kind == 'message':
+        _arrived(link, data)
+
+
+def _queue_logout(link_id, grant):
+    """That pairing's device only: a late logout never touches a newer pairing of the same row. Once an hour per
+    pairing (a stale device still getting messages would queue one per message)."""
+    if str(link_id or '').isdigit() and grant and cache.add(f'whatsapp-link:logout:{link_id}:{grant}', 1, 3600):
+        from . import tasks
+        transaction.on_commit(lambda: tasks.logout.delay(int(link_id), str(grant)))
+
+
+def _linked(link, signed):
+    """WhatsApp says the device is linked to `signed`. Only the number the person typed may be: a spelling of it
+    (the same last 8 digits) is recorded as WhatsApp writes it; any other number is unlinked at once."""
+    typed = _unseal(link.sealed_phone, '')
+    if not signed or not typed or signed[-8:] != typed[-8:]:
+        _fail(link, 'not_own_phone')
+        return
+    digits = signed
     now = timezone.now()
     with transaction.atomic():
         _number_lock(digits)
-        if _number_taken(link.user, digits, linked_only=True, exclude_pk=link.pk):
-            taken = True
-        else:
-            taken = False
+        taken = _number_taken(link.user, digits, linked_only=True, exclude_pk=link.pk)
+        linked = 0
+        if not taken:
             # The number stays sealed until the note to the person's own chat is written (warn_self), then goes.
             linked = _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(
                 state=WhatsAppLink.State.LINKED, reason='', sealed_code='', code_at=None, linked_at=now, failures=0,
                 sealed_phone=_seal(digits), phone_key=phone_key(digits), phone_hint=digits[-4:],
-                next_sync_at=now + timedelta(minutes=conf.get('WHATSAPP_LINK_SYNC_MINUTES')))
+                session_expires_at=None)
             if linked:
                 # With the link itself, so no crash in between loses them and an unlink always finds the record.
                 _end_record(link.user_id, WhatsAppLinkRecord.EndedBy.CONFIO, now)  # left open by a lost unlink
@@ -715,49 +509,52 @@ def _linked(link, page=None, number=None):
                     phone_hint=digits[-4:], consent_version=link.consent_version, linked_at=now)
                 from . import tasks
                 grant = str(link.grant)
-                transaction.on_commit(lambda: tasks.warn_self.apply_async((link.pk, grant), countdown=5))
+                transaction.on_commit(lambda: tasks.warn_self.apply_async((link.pk, grant), countdown=3))
     if taken:
         _fail(link, 'number_taken')  # another account linked it first: this one never holds it
         return
-    if not linked:
-        _close(link)
-        return  # unlinked or asked again meanwhile: nothing to say
-    link.refresh_from_db()
-    if page is not None:
-        try:
-            page.pump(SETTLE_AFTER_LINK)
-        except CdpError:
-            pass
-    _close(link)
-    _notify(link.user, 'Tu WhatsApp quedó vinculado. Te aviso cuando llegue algo importante.')
+    if linked:
+        _notify(link.user, 'Tu WhatsApp quedó vinculado. Te aviso cuando llegue algo importante.')
+
+
+def _arrived(link, data):
+    """A new message someone wrote the person. Kept sealed until the next look (sync), a minute or two later,
+    so a burst of messages is one look; never kept when it looks like a code or a password."""
+    if link.state != WhatsAppLink.State.LINKED or link.consent_version < CONSENT_VERSION or note_pending(link):
+        return  # nothing is read before the note is written, nor under an older consent
+    row = {'name': str(data.get('name') or '')[:MAX_NAME], 'preview': str(data.get('text') or '')[:1000]}
+    if not row['preview'] or private(row):
+        return
+    key = _key(str(link.user_id), str(link.grant), str(data.get('id') or ''), str(data.get('chat') or ''))
+    if cache.get(f'whatsapp-link:seen:{key}'):
+        return  # delivered again after it was looked at: never a second notice
+    WhatsAppInbox.objects.get_or_create(link=link, source_key=key, defaults={'sealed': _seal({
+        'chat': str(data.get('chat') or ''), 'name': row['name'], 'phone': str(data.get('phone') or ''),
+        'text': row['preview'], 'at': int(data.get('at') or 0)})})
+    cache.set(f'whatsapp-link:seen:{key}', 1, 86400)  # only once it is kept: a failure is delivered again
+    _queue_sync(link.pk)
+
+
+def _queue_sync(link_id, countdown=None):
+    """One look per link at a time: the first message starts the wait, the rest join it."""
+    wait = conf.get('WHATSAPP_LINK_BATCH_SECONDS') if countdown is None else countdown
+    if cache.add(f'whatsapp-link:queued:{link_id}', 1, max(wait, 1) + 60):
+        from . import tasks
+        transaction.on_commit(lambda: tasks.sync.apply_async((link_id,), countdown=wait))
 
 
 # What the owner of the WhatsApp reads in their own chat right after it is linked. Fixed words.
 SELF_NOTE = ('Confío: este WhatsApp se vinculó a una cuenta de Confío (aparece como «Chrome» en Dispositivos '
              'vinculados). Si no fuiste tú, desvincúlalo ahora y no compartas códigos con nadie.')
-WARN_TRIES = 60  # a minute apart: an hour of a busy plan never drops the note
+WARN_TRIES = 30  # a minute apart
+NOT_WRITTEN = ('No pude terminar de vincular tu WhatsApp, así que lo desvinculé. Vuelve a vincularlo en Confío IA '
+               'cuando quieras.')
+NOTE_DEADLINE = timedelta(hours=1)  # a note still not written by then undoes the link, whatever happened
 
 
 def note_pending(link) -> bool:
-    """Linked, and the note to the owner's own chat not written yet: nothing is read or sent until it is,
-    so keeping every browser busy (to keep the note away) gets nothing."""
+    """Linked, and the note to the owner's own chat not written yet: nothing is read or sent until it is."""
     return link.state == WhatsAppLink.State.LINKED and bool(link.sealed_phone)
-
-
-OPENED_TRIES = 5  # tries that opened a (paid) browser before giving up
-NOT_WRITTEN = ('No pude terminar de vincular tu WhatsApp, así que lo desvinculé. Vuelve a vincularlo en Confío IA '
-               'cuando quieras.')
-
-
-def _typing_key(grant):
-    return f'whatsapp-link:note-entered:{grant}'
-
-
-def _chain_key(grant):
-    return f'whatsapp-link:note-chain:{grant}'
-
-
-NOTE_DEADLINE = timedelta(hours=2)  # a note still not written by then undoes the link, whatever the chains did
 
 
 def _note_failed(link_id, grant):
@@ -769,93 +566,29 @@ def _note_failed(link_id, grant):
         _notify(row.user, NOT_WRITTEN)
 
 
-def warn_self(link_id, grant, tries=0, opened=0):
-    """The one message Confío writes by itself: a note in the owner's own chat that the link happened. A
-    person tricked into typing a code sees it in their own WhatsApp.
+def warn_self(link_id, grant, tries=0):
+    """The one message Confío writes by itself: a note in the owner's own chat that the link happened. A person
+    tricked into typing a code sees it in their own WhatsApp.
 
     Fails closed: nothing is read or sent until it is written (note_pending), and if it cannot be written the
-    link is undone. Tried again while nothing could have left; never once Enter may have been pressed (a
-    durable marker says so even if the worker died), so it never arrives twice."""
-    from . import tasks
+    link is undone. The bridge sends one id at most once, so trying again never writes it twice."""
+    link = WhatsAppLink.objects.filter(pk=link_id, grant=grant).exclude(reason='unlinking').first()
+    if link is None or not note_pending(link):
+        return
     try:
-        cache.set(_chain_key(grant), 1, 300)  # a live chain: the sweep leaves it alone
-    except Exception:  # noqa: BLE001
-        pass
-
-    def later(browser=False):
-        if tries < WARN_TRIES and opened + int(browser) < OPENED_TRIES:
-            try:
-                cache.set(_chain_key(grant), 1, 600)  # still alive while it waits: no second chain from the sweep
-            except Exception:  # noqa: BLE001
-                pass
-            tasks.warn_self.apply_async((link_id, grant, tries + 1, opened + int(browser)), countdown=60)
-            return
-        _note_failed(link_id, grant)
-
-    def written(link):
+        result = bridge.send(link.pk, grant, f'note-{grant}', SELF_NOTE, own_chat=True)
+    except (bridge.BridgeUnavailable, bridge.BridgeRefused):
+        result = {'status': 'not_sent'}
+    except (TimeoutError, OSError, ValueError):
+        result = {'status': 'unknown'}  # asked, no answer: tried again under the same id, answered from its row
+    if result.get('status') == 'sent':
         _mine(link).update(sealed_phone='')  # the number is not kept past this
-
-    with _slot() as placed:
-        if not placed:
-            later()
-            return
-        with _taken(link_id, grant) as link:
-            if link is None:
-                if WhatsAppLink.objects.filter(pk=link_id, grant=grant).exists():
-                    later()
-                return
-            digits = _unseal(link.sealed_phone, '')
-            if link.state != WhatsAppLink.State.LINKED or link.reason == 'unlinking' or not digits:
-                return
-            if cache.get(_typing_key(grant)):
-                # Enter may have been pressed by a worker that died, unconfirmed: never typed again, and never
-                # usable unconfirmed either. Undone; linking again writes a new note.
-                _note_failed(link_id, grant)
-                return
-
-            def about_to_enter():
-                # Durable before Enter: whatever happens next, it is never typed again.
-                cache.set(_typing_key(grant), 1, 30 * 86400)
-                return True
-
-            progress, browser = {}, False
-            try:
-                url = _open(link, 180, kind='send')
-            except browsers.BrowserUnavailable:
-                later()  # no browser free: nothing was opened or typed
-                return
-            browser = True
-            try:
-                with _guarded(url) as page:
-                    web.open_chat_by_number(page, digits)
-                    sent = web.send_text(page, SELF_NOTE, about_to_enter, progress)
-                if sent is True or sent == 'pending':
-                    written(link)  # WhatsApp shows it sent, or on its way
-                else:
-                    _note_failed(link_id, grant)  # Enter pressed, nothing confirmed: undone, never typed again
-            except web.WebError as exc:
-                logger.warning('WhatsApp link %s: note to self stopped at %s', link.pk, exc.code)
-                # One line, so nothing leaves before Enter: a "partial" without it (a dropped connection
-                # read as growth) is a refusal, never a written note.
-                if progress.get('enter') or cache.get(_typing_key(grant)):
-                    _note_failed(link_id, grant)  # after Enter, unconfirmed: undone, never typed again
-                else:
-                    later(browser)
-            except (browsers.BrowserUnavailable, CdpError) as exc:
-                logger.warning('WhatsApp link %s: note to self not written (%s)', link.pk, type(exc).__name__)
-                if progress.get('enter') or cache.get(_typing_key(grant)):
-                    _note_failed(link_id, grant)
-                else:
-                    later(browser)
-            except BaseException:
-                # A time limit or anything else: undone once Enter may have been pressed, else tried again.
-                if progress.get('enter') or cache.get(_typing_key(grant)):
-                    _note_failed(link_id, grant)
-                else:
-                    later(browser)
-                raise
-            finally:
-                _close(link)
+        return
+    if tries < WARN_TRIES:
+        from . import tasks
+        tasks.warn_self.apply_async((link_id, grant, tries + 1), countdown=60)
+        return
+    _note_failed(link_id, grant)
 
 
 def _end_record(user_id, ended_by, now=None):
@@ -863,233 +596,55 @@ def _end_record(user_id, ended_by, now=None):
         ended_at=now or timezone.now(), ended_by=ended_by)
 
 
-def _signed_in(page) -> str:
-    try:
-        return web.signed_in_number(page)
-    except CdpError:
-        return ''
-
-
-def _fail(link, reason):
-    """The pairing ended without a link. The profile goes too: a code typed just now could have linked it.
-    A link that is already made is never failed (a time limit can land just after it)."""
+def _fail(link, reason, logout=True):
+    """The pairing ended without a link (a link already made is never failed). The device goes with it."""
     if _mine(link).filter(state=WhatsAppLink.State.PAIRING).update(
-            state=WhatsAppLink.State.FAILED, reason=reason, sealed_code='', code_at=None, sealed_phone=''):
-        _drop_profile(link)
-    else:
-        _close(link)
+            state=WhatsAppLink.State.FAILED, reason=reason, sealed_code='', code_at=None, sealed_phone='',
+            session_expires_at=None) and logout:
+        _queue_logout(link.pk, link.grant)
+
+
+def _gone(link, reason='gone', ended_by=WhatsAppLinkRecord.EndedBy.PHONE):
+    """Unlinked from the phone (or WhatsApp ended the device): what came from it goes."""
+    if not _mine(link).filter(state=WhatsAppLink.State.LINKED).update(
+            state=WhatsAppLink.State.GONE, reason=reason, next_sync_at=None, sealed_phone=''):
+        return
+    link.notices.all().delete()
+    link.inbox.all().delete()
+    link.drafts.exclude(status=WhatsAppDraft.Status.SENDING).delete()
+    _end_record(link.user_id, ended_by)
+    _notify(link.user, REASONS.get(reason) or GONE)
 
 
 # ------------------------------------------------------------------ unlinking
 
 def forget(link_id, tries=0):
-    with _slot() as placed:
-        if placed:
-            return _forget(link_id, tries)
-    from . import tasks
-    if tries < 4:
-        # A place usually frees within a minute: try for the logout a few times first.
-        if WhatsAppLink.objects.filter(pk=link_id, reason='unlinking').exists():
-            tasks.forget.apply_async((link_id, tries + 1), countdown=15)
+    """Logs the device out of WhatsApp (it leaves the person's list) and deletes its keys, then the row."""
+    if not WhatsAppLink.objects.filter(pk=link_id, reason='unlinking').exists():
         return
-    # Still no place: no logout, and the vendor delete goes to the task that retries it (analytics
-    # worker). The phone drops the device later on its own.
-    with _taken(link_id, seconds=timedelta(minutes=1)) as row:
-        if row is None:
-            if WhatsAppLink.objects.filter(pk=link_id, reason='unlinking').exists():
-                tasks.forget.apply_async((link_id, tries + 1), countdown=15)
-            return
-        if row.reason != 'unlinking':
-            return
-        if row.context_id:
-            tasks.drop_profile.delay(row.provider, row.context_id, row.session_id)
-            WhatsAppLink.objects.filter(pk=row.pk, reason='unlinking').update(context_id='', session_id='')
-        WhatsAppLink.objects.filter(pk=row.pk, reason='unlinking').delete()
-
-
-def _forget(link_id, tries):
-    """Log the browser out of WhatsApp (the device leaves the person's list), then delete the profile and the row."""
-    with _taken(link_id, seconds=timedelta(minutes=3)) as link:
-        if link is None:
-            if tries < 25 and WhatsAppLink.objects.filter(pk=link_id, reason='unlinking').exists():
-                from . import tasks
-                tasks.forget.apply_async((link_id, tries + 1), countdown=15)  # a read or pairing lets go soon
-            return
-        if link.reason != 'unlinking':
-            return
-        if link.context_id and link.state == WhatsAppLink.State.LINKED:
-            # Tried once: a retry only deletes, it never opens another paid browser.
-            WhatsAppLink.objects.filter(pk=link.pk).update(state=WhatsAppLink.State.GONE)
-            try:
-                # Within the shared slots like everything else; with none free, the logout is skipped (below).
-                with _guarded(_open(link, 120, kind='send')) as page:
-                    page.goto(web.HOME)
-                    if web.wait_for(page, ('chats', 'login'), 45) == 'chats':
-                        web.log_out(page)
-            except (web.WebError, CdpError, browsers.BrowserUnavailable) as exc:
-                # Deleting the profile still ends it here; the phone drops the device later on its own.
-                logger.info('WhatsApp link %s: logout skipped (%s)', link.pk, type(exc).__name__)
-            finally:
-                _close(link)
-        if _drop_profile(link):
-            WhatsAppLink.objects.filter(pk=link.pk, reason='unlinking').delete()
-        else:
-            key = f'whatsapp-link:forget-fails:{link.pk}'
-            cache.add(key, 0, 7 * 86400)
-            if cache.incr(key) >= 20:
-                # The person must be able to link again: the profile goes to the task that retries it for a day.
-                logger.error('WhatsApp link %s: unlinked but its vendor profile still not deleted', link.pk)
-                from . import tasks
-                tasks.drop_profile.delay(link.provider, link.context_id, '')
-                WhatsAppLink.objects.filter(pk=link.pk, reason='unlinking').update(context_id='')
-                WhatsAppLink.objects.filter(pk=link.pk, reason='unlinking').delete()
-
-
-# ------------------------------------------------------------------ reading (browser worker)
-
-def due_ids():
-    now = timezone.now()
-    return list(WhatsAppLink.objects.filter(state=WhatsAppLink.State.LINKED, next_sync_at__lte=now,
-                                            consent_version__gte=CONSENT_VERSION)
-                .exclude(reason='unlinking').exclude(lease_until__gt=now)
-                .order_by('next_sync_at').values_list('pk', flat=True)[:conf.get('WHATSAPP_LINK_SYNCS_PER_SWEEP')])
-
-
-def _queue_sync(link_id):
-    """Once per link until it runs or expires: the sweep must not stack reads behind purchases."""
-    if cache.add(f'whatsapp-link:queued:{link_id}', 1, 240):
-        from . import tasks
-        tasks.sync.apply_async((link_id,), expires=240)
-
-
-def sync(link_id):
-    read = False
     try:
-        read = _sync(link_id)
-    finally:
-        if read and enabled():
-            # One read at a time fits the plan: when one ends, the next due one starts, not the next sweep.
-            for due in due_ids()[:1]:
-                if due != link_id:
-                    _queue_sync(due)
-
-
-def _sync(link_id):
-    cache.delete(f'whatsapp-link:queued:{link_id}')
-    if not enabled():
+        bridge.logout(link_id)
+    except (bridge.BridgeUnavailable, bridge.BridgeRefused, TimeoutError, OSError, ValueError) as exc:
+        logger.warning('WhatsApp link %s: logout not done yet (%s)', link_id, type(exc).__name__)
+        if tries < 20:
+            from . import tasks
+            tasks.forget.apply_async((link_id, tries + 1), countdown=min(30 * (tries + 1), 600))
+        else:
+            logger.error('WhatsApp link %s: unlinked here, but the bridge never logged it out', link_id)
         return
-    with _slot() as placed:
-        if placed:
-            return _sync_placed(link_id)
-    # No place now: later, with a little spread so waiting reads do not all come back together.
-    import random
-    WhatsAppLink.objects.filter(pk=link_id, state=WhatsAppLink.State.LINKED, next_sync_at__lte=timezone.now()).update(
-        next_sync_at=timezone.now() + timedelta(minutes=10, seconds=random.randint(0, 300)))
-    return False
+    WhatsAppLink.objects.filter(pk=link_id, reason='unlinking').delete()
 
 
-def _sync_placed(link_id):
-    now = timezone.now()
-    interval = timedelta(minutes=conf.get('WHATSAPP_LINK_SYNC_MINUTES'))
-    with _taken(link_id) as link:
-        if link is None:
-            return  # a send or another read holds it: it stays due for the next sweep
-        if link.state != WhatsAppLink.State.LINKED or link.reason == 'unlinking' or not link.next_sync_at \
-                or link.next_sync_at > now:
-            return
-        if link.consent_version < CONSENT_VERSION:
-            _mine(link).update(next_sync_at=None)  # until they accept today's text (accept_consent)
-            return
-        if note_pending(link):
-            _mine(link).update(next_sync_at=now + timedelta(minutes=5))  # nothing is read before the note is written
-            return
-        _mine(link).update(next_sync_at=now + interval)
-        try:
-            rows = _read(link)
-        except web.WebError as exc:
-            if exc.code != 'gone':
-                _backoff(link, now, interval)
-            else:
-                first = _gone_seen(link)
-                if first is None:
-                    # Once is not proof (a profile can open stale right after the last browser closed): look again.
-                    cache.set(_gone_key(link), now.timestamp(), 6 * 3600)
-                    _mine(link).update(next_sync_at=now + GONE_CONFIRM)
-                elif now.timestamp() - first >= GONE_CONFIRM.total_seconds():
-                    _gone(link)  # a second read, minutes apart, saw it logged out too
-                else:
-                    _mine(link).update(next_sync_at=now + GONE_CONFIRM)
-            return
-        except (browsers.BrowserUnavailable, CdpError) as exc:
-            if getattr(exc, 'code', '') == 'busy':
-                import random
-                # Others are reading: soon, no blame, spread so the waiting ones do not return together.
-                _mine(link).update(next_sync_at=now + timedelta(minutes=10, seconds=random.randint(0, 300)))
-                return False
-            logger.warning('WhatsApp sync %s failed: %s', link.pk, type(exc).__name__)
-            _backoff(link, now, interval)
-            return
-        finally:
-            _close(link)
-        try:
-            found = _store(link, rows)
-        except SoftTimeLimitExceeded:
-            raise
-        except Exception as exc:  # noqa: BLE001 - by type: a message can quote a chat
-            logger.warning('WhatsApp classify %s failed: %s', link.pk, type(exc).__name__)
-            _backoff(link, now, interval)
-            return
-        _mine(link).update(last_sync_at=now, failures=0)
-    if found and _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').exists():
-        noun = 'mensaje importante' if found == 1 else 'mensajes importantes'
-        _notify(link.user, f'Tienes {found if found < 10 else "más de 9"} {noun} en WhatsApp. Míralos en Confío IA.')
-    return True
+def logout(link_id, grant=''):
+    """A device that must not stay (a failed pairing, a stranger's number): off the phone, keys deleted."""
+    try:
+        bridge.logout(link_id, grant)
+    except (bridge.BridgeUnavailable, bridge.BridgeRefused, TimeoutError, OSError, ValueError) as exc:
+        logger.warning('WhatsApp link %s: logout failed (%s)', link_id, type(exc).__name__)
+        raise
 
 
-GONE_CONFIRM = timedelta(minutes=10)
-
-
-def _gone_key(link):
-    return f'whatsapp-link:gone-seen:{link.pk}:{link.grant}'
-
-
-def _gone_seen(link):
-    """When a read first saw this link logged out, as a timestamp, or None."""
-    value = cache.get(_gone_key(link))
-    return float(value) if isinstance(value, (int, float)) else None
-
-
-def _read(link):
-    with _guarded(_open(link, conf.get('WHATSAPP_LINK_SYNC_SECONDS'), kind='background')) as page:
-        for attempt in range(2):
-            page.goto(web.HOME)
-            seen = web.wait_for(page, ('chats', 'login', 'phone', 'code'), 60)
-            if seen == 'chats':
-                cache.delete(_gone_key(link))  # signed in: an earlier logged-out sighting was not real
-                page.pump(4.0)  # what arrived while it was closed lands in the list
-                return web.unread_chats(page)
-            if seen not in ('login', 'phone', 'code'):
-                raise web.WebError(f'screen_{seen}')
-        # Seen twice, a load apart: the device was logged out.
-        raise web.WebError('gone')
-
-
-def _backoff(link, now, interval):
-    wait = min(interval * 2 ** min(link.failures, 4), MAX_BACKOFF)
-    _mine(link).update(failures=min(link.failures + 1, 100), next_sync_at=now + wait)
-
-
-def _gone(link):
-    """Unlinked from the phone (or WhatsApp logged the device out): the profile is worth nothing now."""
-    if not _mine(link).filter(state=WhatsAppLink.State.LINKED).update(
-            state=WhatsAppLink.State.GONE, reason='gone', next_sync_at=None, sealed_phone=''):
-        return
-    link.notices.all().delete()
-    link.drafts.exclude(status=WhatsAppDraft.Status.SENDING).delete()
-    _end_record(link.user_id, WhatsAppLinkRecord.EndedBy.PHONE)
-    _drop_profile(link)
-    _notify(link.user, GONE)
-
+# ------------------------------------------------------------------ looking at what arrived
 
 def private(row) -> bool:
     """A login code, a password or a bank token: never stored, never shown to a model."""
@@ -1099,31 +654,77 @@ def private(row) -> bool:
     return bool(DIGITS.search(re.sub(r'[\s\-.]', '', text)))
 
 
-def _store(link, rows) -> int:
-    """Classifies what is new and keeps only the important. Returns how many are new."""
-    fresh = []
-    for row in rows:
-        if row['group'] or private(row) or not row['preview']:
+def sync(link_id):
+    """Classifies what arrived since the last look and keeps only the important. Messages are deleted once
+    looked at, kept or not."""
+    cache.delete(f'whatsapp-link:queued:{link_id}')
+    if not enabled():
+        return
+    link = WhatsAppLink.objects.select_related('user').filter(
+        pk=link_id, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
+    if link is None or link.consent_version < CONSENT_VERSION or note_pending(link):
+        return
+    # One look per link at a time; the messages are deleted only once looked at (a failed look keeps them for
+    # the next, and the sweep drops any older than a day).
+    lease = f'whatsapp-link:looking:{link_id}'
+    if not cache.add(lease, 1, 120):
+        _queue_sync(link_id)
+        return
+    try:
+        taken = list(WhatsAppInbox.objects.filter(link=link).order_by('pk')[:100])
+        if not taken:
+            return
+        started = time.monotonic()
+        try:
+            found = _store(link, [_unseal(row.sealed, {}) for row in taken])
+        except SoftTimeLimitExceeded:
+            raise
+        except Exception as exc:  # noqa: BLE001 - by type: a message can quote a chat
+            logger.warning('WhatsApp classify %s failed: %s', link.pk, type(exc).__name__)
+            return
+        WhatsAppInbox.objects.filter(pk__in=[row.pk for row in taken]).delete()
+    finally:
+        cache.delete(lease)
+    logger.info('WhatsApp classify link=%s messages=%d important=%d ms=%d', link.pk, len(taken), found,
+                (time.monotonic() - started) * 1000)
+    _mine(link).update(last_sync_at=timezone.now())
+    if found and _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').exists():
+        noun = 'mensaje importante' if found == 1 else 'mensajes importantes'
+        _notify(link.user, f'Tienes {found if found < 10 else "más de 9"} {noun} en WhatsApp. Míralos en Confío IA.')
+    if WhatsAppInbox.objects.filter(link=link).exists():
+        _queue_sync(link.pk)
+
+
+def _store(link, messages) -> int:
+    """One look per chat: its newest lines, oldest first. Returns how many notices are new."""
+    chats = {}
+    for message in messages:
+        if not message.get('chat') or not message.get('text'):
             continue
-        key = _key(str(link.user_id), str(link.grant), row['name'], row['preview'])
-        if WhatsAppNotice.objects.filter(link=link, source_key=key).exists() or cache.get(f'whatsapp-link:seen:{key}'):
-            continue
-        fresh.append((key, row))
-    if not fresh:
+        chats.setdefault(message['chat'], []).append(message)
+    if not chats:
         return 0
-    verdicts = classify.important([{'chat': row['name'], 'preview': row['preview']} for _key_, row in fresh])
+    looked = []
+    for chat, lines in chats.items():
+        lines.sort(key=lambda line: line.get('at') or 0)
+        preview = '\n'.join(line['text'] for line in lines[-3:])[-600:]
+        looked.append({'chat': chat, 'name': lines[-1].get('name') or '', 'phone': lines[-1].get('phone') or '',
+                       'preview': preview, 'at': lines[-1].get('at') or 0})
+    verdicts = classify.important([{'chat': row['name'], 'preview': row['preview']} for row in looked])
     found = 0
     with transaction.atomic():
         if _mine(link).select_for_update().filter(state=WhatsAppLink.State.LINKED).first() is None:
             return 0  # unlinked meanwhile: write nothing
-        for (key, row), verdict in zip(fresh, verdicts):
-            cache.set(f'whatsapp-link:seen:{key}', 1, 3 * 86400)
+        for row, verdict in zip(looked, verdicts):
             if not verdict:
                 continue
+            key = _key(str(link.user_id), str(link.grant), row['chat'], row['preview'])
+            when = timezone.localtime(datetime.fromtimestamp(row['at'], tz=dt_timezone.utc)) if row['at'] else None
             _notice, made = WhatsAppNotice.objects.get_or_create(link=link, source_key=key, defaults={
                 'kind': verdict['kind'], 'notified_at': timezone.now(),
-                'sealed': _seal({'chat': row['name'], 'preview': row['preview'], 'summary': verdict['summary'],
-                                 'time': row['time']})})
+                'sealed': _seal({'chat': row['name'], 'jid': row['chat'], 'phone': row['phone'],
+                                 'preview': row['preview'], 'summary': verdict['summary'],
+                                 'time': when.strftime('%H:%M') if when else ''})})
             found += int(made)
     return found
 
@@ -1162,24 +763,33 @@ def _body(value) -> str:
 
 
 def create_draft(user, *, chat=None, phone=None, body=None, instructions=None, notice_id=None):
-    """A draft for one chat (its exact name) or one number. Written by the person, or by the model from their words."""
+    """A draft for a chat a message came from (a notice) or one number. Written by the person, or by the model
+    from their words. A chat named by hand (no notice) is not one WhatsApp can be asked for: the number is."""
     link = _linked_of(user)
+    jid = ''
     if notice_id:
         notice = link.notices.filter(pk=notice_id).first() if str(notice_id).isdigit() else None
         if notice is None:
             raise LinkRefused('not_found')
-        chat = _unseal(notice.sealed, {}).get('chat')
-    chat = str(chat or '').strip()[:web.MAX_NAME]
+        sealed = _unseal(notice.sealed, {})
+        chat, jid = sealed.get('chat'), sealed.get('jid') or ''
+        if not jid:
+            raise LinkRefused('not_found')
+    elif chat and not phone:
+        raise LinkRefused('chat')  # a bare name is ambiguous: a number (or a reply to a message) is needed
+    chat = str(chat or '').strip()[:MAX_NAME]
     if phone and not str(phone).strip().startswith('+'):
         # 4141234567 is a Venezuelan number to the person and a Swiss one to WhatsApp: the + is required.
         raise LinkRefused('phone')
     digits = phone_digits(phone) if phone else ''
-    if bool(chat) == bool(digits):
+    if not jid and not digits:
         raise LinkRefused('chat')
+    if jid:
+        digits = ''
     if instructions:
         _claim(user, 'write', LIMITS['write'])
         body = classify.write(str(instructions)[:1000], chat or 'un número nuevo')
-    fields = {'chat': chat, 'phone': digits, 'body': _body(body)}
+    fields = {'chat': chat if jid else '', 'jid': jid, 'phone': digits, 'body': _body(body)}
     with transaction.atomic():
         # One message at a time. While one is on its way no new one is written: if the person could not see it
         # (a stalled request, an app closed mid-send), writing it again would send it twice.
@@ -1246,97 +856,41 @@ def send_draft(user, draft_id, shown_hash):
 
 
 def send(draft_id, tries=0):
-    with _slot() as placed:
-        if placed:
-            return _send(draft_id, tries)
-    # No place now: the approved message waits its turn; nothing was typed.
-    draft = WhatsAppDraft.objects.filter(pk=draft_id, status=WhatsAppDraft.Status.SENDING).first()
+    draft = WhatsAppDraft.objects.select_related('link').filter(pk=draft_id, status=WhatsAppDraft.Status.SENDING).first()
     if draft is None:
         return
-    WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(sending_at=timezone.now())
-    if tries < SEND_BUSY_TRIES:
-        from . import tasks
-        tasks.send.apply_async((draft_id, tries + 1), countdown=20)
+    link = draft.link
+    fields = _unseal(draft.sealed, {})
+    if not enabled() or not fields.get('body') or not (fields.get('jid') or fields.get('phone')):
+        _sent(draft, WhatsAppDraft.Status.DRAFT, 'whatsapp')  # nothing left: it can be tried again
+        return
+    if link.state != WhatsAppLink.State.LINKED or link.reason == 'unlinking':
+        _sent(draft, WhatsAppDraft.Status.DRAFT, 'gone')
+        return
+    try:
+        result = bridge.send(link.pk, str(link.grant), str(draft.pk), fields['body'],
+                             to=fields.get('jid') or fields.get('phone'))
+    except (bridge.BridgeUnavailable, bridge.BridgeRefused):
+        # Not asked: nothing left. Tried again a few times; then it is a draft again.
+        if tries < 5:
+            from . import tasks
+            WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(
+                sending_at=timezone.now())
+            tasks.send.apply_async((draft_id, tries + 1), countdown=20)
+        else:
+            _sent(draft, WhatsAppDraft.Status.DRAFT, 'browser')
+        return
+    except (TimeoutError, OSError, ValueError):
+        _sent(draft, WhatsAppDraft.Status.UNKNOWN, 'unknown')  # asked, no answer: it may have left
+        return
+    state = result.get('status')
+    if state == 'sent':
+        _sent(draft, WhatsAppDraft.Status.SENT, '')
+    elif state == 'not_sent':
+        error = str(result.get('error') or '')
+        _sent(draft, WhatsAppDraft.Status.DRAFT, error if error in REASONS else 'whatsapp')
     else:
-        _sent(draft, WhatsAppDraft.Status.DRAFT, 'browser')
-
-
-def _send(draft_id, tries):
-    from . import tasks
-    draft = WhatsAppDraft.objects.filter(pk=draft_id, status=WhatsAppDraft.Status.SENDING).first()
-    if draft is None:
-        return
-    with _taken(draft.link_id) as link:
-        if link is None:
-            if tries < SEND_BUSY_TRIES:
-                tasks.send.apply_async((draft_id, tries + 1), countdown=20)  # a read holds the browser: wait for it
-            else:
-                _sent(draft, WhatsAppDraft.Status.DRAFT, 'browser')
-            return
-        # The clock for "silent too long" starts now that a worker holds the browser.
-        WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(sending_at=timezone.now())
-        fields = _unseal(draft.sealed, {})
-        typed = busy = False
-        progress = {}
-
-        def still_wanted():
-            # Unlinked or deleted since the tap: Enter is not pressed.
-            current = _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
-            return (WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).exists()
-                    and current is not None)
-
-        try:
-            if not enabled() or not fields.get('body') or not (fields.get('chat') or fields.get('phone')):
-                _sent(draft, WhatsAppDraft.Status.DRAFT, 'whatsapp')  # nothing typed: it can be tried again
-                return
-            if link.state != WhatsAppLink.State.LINKED or link.reason == 'unlinking':
-                _sent(draft, WhatsAppDraft.Status.DRAFT, 'gone')
-                return
-            with _guarded(_open(link, 260, kind='send')) as page:  # a long text is typed at a person's pace
-                if fields.get('phone'):
-                    web.open_chat_by_number(page, fields['phone'])
-                else:
-                    page.goto(web.HOME)
-                    seen = web.wait_for(page, ('chats', 'login', 'phone', 'code'), 60)
-                    if seen != 'chats':
-                        raise web.WebError('whatsapp')
-                    web.open_chat_by_name(page, fields['chat'])
-                typed = True
-                delivered = web.send_text(page, fields['body'], still_wanted, progress)
-            if delivered == 'pending':
-                _sent(draft, WhatsAppDraft.Status.UNKNOWN, 'pending')
-            else:
-                _sent(draft, WhatsAppDraft.Status.SENT if delivered else WhatsAppDraft.Status.UNKNOWN,
-                      '' if delivered else 'unknown')
-        except web.WebError as exc:
-            # Refused before Enter: nothing left. After it: unknown, never sent again.
-            unsure = typed and exc.code not in web.BEFORE_ENTER
-            reason = (exc.code if exc.code == 'partial_sent' else 'unknown') if unsure else exc.code
-            _sent(draft, WhatsAppDraft.Status.UNKNOWN if unsure else WhatsAppDraft.Status.DRAFT,
-                  reason if reason in REASONS else 'whatsapp')
-        except DatabaseError:
-            # Before Enter nothing left; after it, unknown. Never left in "sending".
-            entered = progress.get('enter')
-            _sent(draft, WhatsAppDraft.Status.UNKNOWN if entered else WhatsAppDraft.Status.DRAFT,
-                  'unknown' if entered else 'browser')
-        except (browsers.BrowserUnavailable, CdpError) as exc:
-            if getattr(exc, 'code', '') == 'busy' and not typed and tries < SEND_BUSY_TRIES:
-                busy = True  # every browser is in use: the approved send waits its turn
-                return
-            # Before Enter nothing left (a line that did go out is partial_sent, a WebError).
-            entered = progress.get('enter')
-            _sent(draft, WhatsAppDraft.Status.UNKNOWN if entered else WhatsAppDraft.Status.DRAFT,
-                  'unknown' if entered else 'browser')
-        except SoftTimeLimitExceeded:
-            # Before Enter nothing left (the box was cleared on the way out): it can be sent again.
-            entered = progress.get('enter')
-            _sent(draft, WhatsAppDraft.Status.UNKNOWN if entered else WhatsAppDraft.Status.DRAFT,
-                  'unknown' if entered else 'whatsapp')
-            raise
-        finally:
-            _close(link)
-            if busy:
-                tasks.send.apply_async((draft_id, tries + 1), countdown=20)
+        _sent(draft, WhatsAppDraft.Status.UNKNOWN, 'unknown')
 
 
 def _sent(draft, status_, reason):
@@ -1360,8 +914,7 @@ def _leavers():
 
 
 def sweep():
-    """Erases what must not stay, then queues reads and the vendor cleanup. Only the database here:
-    every Browserbase call runs on the browser queue (sweep_vendor)."""
+    """Erases what must not stay and restarts what a restart lost."""
     from . import tasks
     now = timezone.now()
     # A send that never reported back: unknown, so it is never sent twice.
@@ -1370,6 +923,8 @@ def sweep():
     if conf.get('WHATSAPP_LINK_KEEP_DAYS'):
         WhatsAppNotice.objects.filter(created_at__lt=now - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))).delete()
     WhatsAppDraft.objects.filter(expires_at__lte=now).exclude(status=WhatsAppDraft.Status.SENDING).delete()
+    # Messages nobody looked at within a day (a look that kept failing): not kept.
+    WhatsAppInbox.objects.filter(created_at__lt=now - timedelta(days=1)).delete()
     for link in _leavers()[:20]:
         try:
             unlink(link.user, WhatsAppLinkRecord.EndedBy.ACCOUNT)
@@ -1377,89 +932,40 @@ def sweep():
             raise
         except Exception as exc:  # noqa: BLE001 - one row must not stop the others
             logger.warning('WhatsApp link %s: unlink of a leaver failed: %s', link.pk, type(exc).__name__)
-    for link_id in WhatsAppLink.objects.filter(reason='unlinking', updated_at__lt=now - timedelta(minutes=5)).exclude(
-            lease_until__gt=now).values_list('pk', flat=True)[:20]:
+    for link_id in WhatsAppLink.objects.filter(reason='unlinking', updated_at__lt=now - timedelta(minutes=5)).values_list(
+            'pk', flat=True)[:20]:
         tasks.forget.delay(link_id)
-    # A note to the owner whose chain was lost (a worker restart): started again, or done if Enter may have gone.
-    # Past the deadline, whatever happened, the link is undone: never usable without the note.
+    # A pairing whose end never came (the bridge restarted): over.
+    for link in WhatsAppLink.objects.filter(
+            Q(session_expires_at__lt=now - timedelta(minutes=2)) | Q(session_expires_at__isnull=True,
+                                                                     updated_at__lt=now - timedelta(minutes=15)),
+            state=WhatsAppLink.State.PAIRING).exclude(reason='unlinking')[:20]:
+        _fail(link, 'timeout')
+    # A note to the owner past its deadline undoes the link; one whose chain was lost starts again.
     for link_id, grant, linked_at in WhatsAppLink.objects.filter(state=WhatsAppLink.State.LINKED).exclude(
-            sealed_phone='').exclude(reason='unlinking').exclude(lease_until__gt=now).values_list(
-            'pk', 'grant', 'linked_at')[:20]:
+            sealed_phone='').exclude(reason='unlinking').values_list('pk', 'grant', 'linked_at')[:20]:
         if linked_at and linked_at < now - NOTE_DEADLINE:
             _note_failed(link_id, grant)
-        elif not cache.get(_chain_key(grant)):
+        elif cache.add(f'whatsapp-link:note-restart:{grant}', 1, 600):
             tasks.warn_self.apply_async((link_id, str(grant)), countdown=1)
-    if enabled():
-        for link_id in due_ids():
-            _queue_sync(link_id)
-    if cache.add('whatsapp-link:sweep-vendor', 1, 240):
-        tasks.sweep_vendor.apply_async(expires=240)
-
-
-VENDOR_SECONDS = 50  # on the shared analytics worker: short
-
-
-def sweep_vendor():
-    """Browserbase work of the sweep, on the browser queue, within a time budget. Each row under its lease."""
-    from . import tasks
-    started, now = timezone.now(), timezone.now()
-    budget = lambda: timezone.now() < started + timedelta(seconds=VENDOR_SECONDS)  # noqa: E731
-    late = now - timedelta(seconds=conf.get('WHATSAPP_LINK_PAIRING_SECONDS') + 300)
-    # Over when its browser is (the code dies with it), or long after a start that never opened one.
-    over = Q(session_expires_at__lt=now) | Q(session_expires_at__isnull=True, updated_at__lt=late)
-    for link_id in WhatsAppLink.objects.filter(over, state=WhatsAppLink.State.PAIRING).exclude(
-            reason='unlinking').values_list('pk', flat=True)[:10]:
-        if not budget():
-            break
-        with _taken(link_id) as link:
-            if link is not None and link.state == WhatsAppLink.State.PAIRING and link.reason != 'unlinking':
-                _fail(link, 'timeout')
-    # A pairing whose watch was lost (a worker restart): its browser is open, nobody looks at it.
-    for link_id, grant in WhatsAppLink.objects.filter(
-            state=WhatsAppLink.State.PAIRING, session_expires_at__gt=now, code_at__isnull=False).exclude(
-            session_id='').exclude(lease_until__gt=now).exclude(reason='unlinking').values_list('pk', 'grant')[:10]:
-        if enabled() and cache.add(f'whatsapp-link:watch-requeued:{grant}', 1, 120):
-            tasks.watch.apply_async((link_id, str(grant)), countdown=1)
-    # A pairing whose first task was lost: no browser and no code a minute after the tap.
-    for link_id, grant in WhatsAppLink.objects.filter(
-            state=WhatsAppLink.State.PAIRING, session_expires_at__isnull=True, code_at__isnull=True,
-            updated_at__lt=now - timedelta(minutes=1)).exclude(lease_until__gt=now).exclude(
-            reason='unlinking').values_list('pk', 'grant')[:10]:
-        if enabled() and not cache.get(f'whatsapp-link:pair-started:{grant}') \
-                and cache.add(f'whatsapp-link:pair-requeued:{grant}', 1, 600):
-            tasks.pair.apply_async((link_id, str(grant)), countdown=1)
-    # A profile whose delete failed after a failed pairing or a phone-side unlink: a session may live in it.
-    for link_id in WhatsAppLink.objects.filter(state__in=(WhatsAppLink.State.FAILED, WhatsAppLink.State.GONE)).exclude(
-            context_id='').exclude(reason='unlinking').order_by('?').values_list('pk', flat=True)[:50]:
-        if not budget():
-            return
-        context = WhatsAppLink.objects.filter(pk=link_id).values_list('context_id', flat=True).first() or ''
-        tried = f'whatsapp-link:profile-tries:{context}'
-        if (cache.get(tried) or 0) >= 20:
-            continue  # reported once below; never blocks the rows behind it
-        cache.set(tried, (cache.get(tried) or 0) + 1, 7 * 86400)
-        if cache.get(tried) == 20:
-            logger.error('WhatsApp link %s: vendor profile could not be deleted after 20 tries', link_id)
-        with _taken(link_id) as link:
-            # Re-read under the lease: a new pairing may be using this profile now.
-            if link is None or link.state not in (WhatsAppLink.State.FAILED, WhatsAppLink.State.GONE) \
-                    or link.reason == 'unlinking' or not link.context_id:
-                continue
-            try:
-                _drop_profile(link)
-            except SoftTimeLimitExceeded:
-                raise
-            except Exception as exc:  # noqa: BLE001 - one row must not stop the others
-                logger.warning('WhatsApp link %s: profile retry failed: %s', link.pk, type(exc).__name__)
+    # Messages waiting whose look was lost.
+    for link_id in WhatsAppInbox.objects.filter(created_at__lt=now - timedelta(minutes=10)).values_list(
+            'link_id', flat=True).distinct()[:50]:
+        _queue_sync(link_id, countdown=0)
+    # Browser profiles from before whatsmeow (Browserbase): deleted.
+    for link_id, provider, context_id in WhatsAppLink.objects.exclude(context_id='').exclude(
+            provider=PROVIDER).values_list('pk', 'provider', 'context_id')[:20]:
+        tasks.drop_profile.delay(provider, context_id, '')
+        WhatsAppLink.objects.filter(pk=link_id, context_id=context_id).update(context_id='', session_id='')
 
 
 def profile_orphaned(provider_name, context_id, session_id=''):
-    """A link row deleted another way (the person's account erased): its browser closes and its profile goes.
-    Raises BrowserUnavailable so the task retries."""
+    """A Browserbase profile from before whatsmeow: deleted. Raises BrowserUnavailable so the task retries."""
+    from agent_tasks import browsers
     provider = browsers.provider(provider_name or None)
     if session_id:
         try:
             provider.close(session_id)
         except browsers.BrowserUnavailable:
-            pass  # its own timeout ends it; the delete below is what matters
+            pass
     provider.delete_profile(context_id)
