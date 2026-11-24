@@ -17,7 +17,10 @@ import { closeWhatsAppSession, whatsAppSession } from '../whatsapp/session';
 import { useWhatsApp } from '../whatsapp/useWhatsApp';
 import { ANSWER_CONNECTION, type Connections } from './api';
 import { gmailView, type Build } from './rules';
-import { closeConnections, keepTypedEmail, typedEmail, useConnectionsOpen, type Where } from './store';
+import {
+  closeConnections, keepTypedEmail, openConnections, takeWhatsAppRequest, typedEmail, useConnectionsOpen,
+  useWhatsAppRequested, type Where,
+} from './store';
 import { useConnections, useViewer } from './useConnections';
 
 type SheetProps = { userId: string; data: Connections; build: Build; refresh: () => void };
@@ -270,6 +273,14 @@ function OpenHost({ userId }: { userId: string }) {
 export default function ConnectionsHost({ where }: { where: Where }) {
   const userId = useViewer();
   const open = useConnectionsOpen(userId, where);
+  // A WhatsApp notice opened (linked, unlinked, important messages): its screen, on Inicio.
+  const requested = useWhatsAppRequested();
+  useEffect(() => {
+    if (requested && userId && where === 'home' && takeWhatsAppRequest()) {
+      whatsAppSession(userId).open = true;
+      openConnections(userId, 'home');
+    }
+  }, [requested, userId, where]);
   return userId && open ? <OpenHost key={userId} userId={userId} /> : null;
 }
 

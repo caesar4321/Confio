@@ -28,6 +28,22 @@ export function closeConnections() {
   listeners.forEach((listener) => listener());
 }
 
+// A WhatsApp notice was opened: the WhatsApp screen opens on Inicio as soon as its assistant is there.
+let whatsAppRequested = false;
+
+export function openWhatsAppFromNotification() {
+  whatsAppRequested = true;
+  listeners.forEach((listener) => listener());
+}
+
+export const useWhatsAppRequested = () => useSyncExternalStore(subscribe, () => whatsAppRequested);
+
+export function takeWhatsAppRequest(): boolean {
+  const was = whatsAppRequested;
+  whatsAppRequested = false;
+  return was;
+}
+
 export const useConnectionsOpen = (userId: string | null, where: Where) =>
   useSyncExternalStore(subscribe, () => !!userId && openFor === `${where}:${userId}`);
 

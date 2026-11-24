@@ -78,14 +78,38 @@ it('the opening offers WhatsApp to whoever can link it', async () => {
   expect(await words(<ConnectionsPrompt where="box" starters />)).not.toContain('Vincula tu WhatsApp');
 });
 
-it('no WhatsApp card once linked, or without a number of their own', async () => {
+it('a WhatsApp that WhatsApp unlinked is offered again, and the card opens its screen', async () => {
+  const { whatsAppSession } = require('../../whatsapp/session');
+  const { openConnections } = require('../store');
+  mockLink = link({ state: 'gone' });
+  mockUntil = 0;
+  mockUntilWhatsApp = 0;
+  (useConnections as jest.Mock).mockReturnValue({
+    connections: { gmail: 'soon', gmailAnswered: true, googleEmail: null, suggestedEmail: null, calendar: 'soon', calendarAnswered: true },
+    build: { mail: false, calendar: false }, refetch: jest.fn(),
+  });
+  let tree: any;
+  await act(async () => {
+    tree = create(<ConnectionsPrompt where="home" starters />);
+  });
+  const shown = JSON.stringify(tree.toJSON());
+  expect(shown).toContain('Tu WhatsApp se desvinculó');
+  expect(shown).toContain('Vincular otra vez');
+  const button = tree.root.findAll((node: any) => typeof node.props.onPress === 'function'
+    && node.findAll((child: any) => child.props.children === 'Vincular otra vez').length > 0)[0];
+  act(() => button.props.onPress());
+  expect(whatsAppSession('1').open).toBe(true);  // straight to the WhatsApp screen
+  expect(openConnections).toHaveBeenCalledWith('1', 'home');
+});
+
+it('no WhatsApp card once linked', async () => {
   (useConnections as jest.Mock).mockReturnValue({
     connections: { gmail: 'soon', gmailAnswered: true, googleEmail: null, suggestedEmail: null, calendar: 'soon', calendarAnswered: true },
     build: { mail: false, calendar: false }, refetch: jest.fn(),
   });
   mockUntil = 0;
   mockUntilWhatsApp = 0;
-  for (const state of [link({ state: 'linked' }), link({ ownPhoneHint: null })]) {
+  for (const state of [link({ state: 'linked' }), link({ state: 'pairing' })]) {
     mockLink = state;
     const shown = await words(<ConnectionsPrompt where="box" starters />);
     expect(shown).not.toContain('Vincula tu WhatsApp');

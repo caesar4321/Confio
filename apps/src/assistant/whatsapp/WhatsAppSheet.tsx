@@ -1,7 +1,7 @@
 // The person's own WhatsApp: consent, the pairing code, what matters, and replies they approve one by one.
 // Every message leaves only from "Enviar" on a card that shows the exact text and where it goes.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useApolloClient, type DocumentNode } from '@apollo/client';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -22,7 +22,10 @@ import {
   type WhatsAppDraft,
   type WhatsAppNotice,
 } from './api';
-import { NOTICE_LABELS, PAIRING_STEPS, codeForCopy, consentText, draftView, mergeDraft } from './rules';
+import {
+  CONSENT_DATA, CONSENT_POINTS, CONSENT_RISK, NOTICE_LABELS, PAIRING_STEPS, codeForCopy, consentText, draftView, mergeDraft,
+  validPhone,
+} from './rules';
 import { SEND_TIMEOUT_MS, SENT_GRACE_MS, forgetWhatsAppSession, whatsAppSession } from './session';
 import { useWhatsApp } from './useWhatsApp';
 
@@ -36,6 +39,10 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [details, setDetails] = useState(false);
+  // Typed by the person (sign-up proves no phone); the account's number only fills it in to start with.
+  const [phone, setPhone] = useState<string | null>(null);
+  const shownPhone = phone ?? link?.suggestedPhone ?? '+';
   // These survive the app lock (session.ts). The last known draft shows at once, then is read back.
   const saved = whatsAppSession(userId);
   const [replyingId, setReplyingIdState] = useState<string | null>(saved.replyingId);
@@ -166,7 +173,9 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
       }
     }
   };
-  const startLink = () => void run(START_WHATSAPP_LINK, 'startWhatsAppLink', { consentVersion: WHATSAPP_CONSENT_VERSION });
+  const startLink = () => void run(START_WHATSAPP_LINK, 'startWhatsAppLink', {
+    phone: shownPhone.replace(/[\s\-().]/g, ''), consentVersion: WHATSAPP_CONSENT_VERSION,
+  });
   const unlink = () => {
     Alert.alert(
       '¿Desvincular tu WhatsApp?',
@@ -235,9 +244,58 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
   const consent = (label: string, onPress: () => void) => (link && link.consentVersion > WHATSAPP_CONSENT_VERSION ? (
     <Text style={styles.text}>Actualiza la app para ver lo que cambió y seguir usando WhatsApp en Confío.</Text>
   ) : (
-    <View style={styles.block}>
-      {consentText().map((line) => <Text key={line} style={styles.text}>{line}</Text>)}
-      <Action label={label} onPress={onPress} disabled={busy} />
+    <View style={styles.intro}>
+      <View style={styles.hero}>
+        <View style={styles.heroIcon}>
+          <Icon name="message-circle" size={34} color={colors.successText} />
+        </View>
+        <Text style={styles.heroTitle} accessibilityRole="header">Tu WhatsApp, en Confío</Text>
+      </View>
+      <View style={styles.points}>
+        {CONSENT_POINTS.map((point) => (
+          <View key={point.text} style={styles.point}>
+            <View style={styles.pointIcon}>
+              <Icon name={point.icon} size={18} color={colors.successText} />
+            </View>
+            <Text style={styles.pointText}>{point.text}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.risk}>
+        <Icon name="info" size={16} color={colors.gray600} />
+        <Text style={styles.riskText}>{CONSENT_DATA}</Text>
+      </View>
+      <View style={styles.risk}>
+        <Icon name="alert-triangle" size={16} color={colors.gray600} />
+        <Text style={styles.riskText}>{CONSENT_RISK}</Text>
+      </View>
+      <Pressable
+        style={styles.more}
+        onPress={() => setDetails(!details)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: details }}
+      >
+        <Text style={styles.moreText}>{details ? 'Ocultar detalles' : 'Cómo funciona'}</Text>
+        <Icon name={details ? 'chevron-up' : 'chevron-down'} size={16} color={colors.successText} />
+      </Pressable>
+      {details ? consentText().map((line) => <Text key={line} style={styles.detail}>{line}</Text>) : null}
+      {onPress === startLink ? (
+        <View style={styles.block}>
+          <Text style={styles.label}>Tu número de WhatsApp, con el código de país</Text>
+          <TextInput
+            style={styles.phone}
+            value={shownPhone}
+            onChangeText={(value) => setPhone(value.startsWith('+') ? value : `+${value.replace(/^\+*/, '')}`)}
+            keyboardType="phone-pad"
+            autoComplete="tel"
+            textContentType="telephoneNumber"
+            maxLength={22}
+            accessibilityLabel="Tu número de WhatsApp, con el código de país"
+          />
+        </View>
+      ) : null}
+      <Text style={styles.fine}>Al vincular aceptas cómo funciona. Lo desvinculas cuando quieras.</Text>
+      <Action label={label} onPress={onPress} disabled={busy || (onPress === startLink && !validPhone(shownPhone))} />
     </View>
   ));
 
@@ -246,29 +304,51 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
     if (link.state === 'pairing') {
       const code = link.code;
       content = (
-        <View style={styles.block}>
+        <View style={styles.intro}>
           {code ? (
             <>
-              <Text style={styles.label}>Tu código</Text>
-              <Text style={styles.code} selectable accessibilityLabel={`Código ${codeForCopy(code).split('').join(' ')}`}>
-                {code}
-              </Text>
-              <Action
-                label={copied === code ? 'Copiado' : 'Copiar código'}
-                onPress={() => {
-                  Clipboard.setString(codeForCopy(code));
-                  setCopied(code);  // a new code shows "Copiar código" again
-                }}
-              />
-              {PAIRING_STEPS.map((step, index) => (
-                <Text key={step} style={styles.text}>{`${index + 1}. ${step}`}</Text>
-              ))}
-              <Text style={styles.detail}>El código cambia cada pocos minutos: usa el que ves aquí.</Text>
+              <Text style={styles.heroTitle} accessibilityRole="header">Escribe este código en WhatsApp</Text>
+              <View
+                style={styles.cells}
+                accessible
+                accessibilityLabel={`Código ${codeForCopy(code).split('').join(' ')}`}
+              >
+                {codeForCopy(code).split('').map((char, index) => (
+                  <React.Fragment key={`${index}-${char}`}>
+                    {index === 4 ? <Text style={styles.dash}>-</Text> : null}
+                    <View style={styles.cell}><Text style={styles.cellText} maxFontSizeMultiplier={1.3}>{char}</Text></View>
+                  </React.Fragment>
+                ))}
+              </View>
+              <View style={styles.row}>
+                <Outline
+                  label={copied === code ? 'Copiado' : 'Copiar código'}
+                  icon={copied === code ? 'check' : 'copy'}
+                  onPress={() => {
+                    Clipboard.setString(codeForCopy(code));
+                    setCopied(code);  // a new code shows "Copiar código" again
+                  }}
+                />
+                <Outline label="Abrir WhatsApp" icon="external-link" onPress={() => void Linking.openURL('whatsapp://').catch(() => undefined)} />
+              </View>
+              <View style={styles.steps}>
+                {PAIRING_STEPS.map((step, index) => (
+                  <View key={step} style={styles.step}>
+                    <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{index + 1}</Text></View>
+                    <Text style={styles.pointText}>{step}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.waiting}>
+                <ActivityIndicator color={colors.successText} />
+                <Text style={styles.detail}>Esperando que lo escribas. El código se renueva solo.</Text>
+              </View>
             </>
           ) : (
-            <View style={styles.waiting}>
-              <ActivityIndicator color={colors.successText} />
-              <Text style={styles.text}>Pidiendo tu código a WhatsApp…</Text>
+            <View style={styles.hero}>
+              <ActivityIndicator size="large" color={colors.successText} />
+              <Text style={styles.heroTitle}>Pidiendo tu código</Text>
+              <Text style={styles.detail}>Tarda unos 30 segundos.</Text>
             </View>
           )}
           <Secondary label="Cancelar" onPress={() => void unlinkNow()} disabled={busy} />
@@ -281,9 +361,12 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
     } else if (link.state === 'linked') {
       content = (
         <View style={styles.block}>
-          <Text style={styles.detail}>
-            {link.phoneHint ? `Vinculado al número terminado en ${link.phoneHint}.` : 'Vinculado.'}
-          </Text>
+          <View style={styles.status}>
+            <View style={styles.dot} />
+            <Text style={styles.statusText}>
+              {link.phoneHint ? `Vinculado · terminado en ${link.phoneHint}` : 'Vinculado'}
+            </Text>
+          </View>
           {draft && !replying ? (
             // Its notice is gone (dismissed, expired) while this reply is on its way: still shown.
             <Reply
@@ -339,7 +422,10 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
               )}
             </View>
           )) : (
-            <Text style={styles.text}>Nada importante por ahora. Te avisamos cuando llegue algo.</Text>
+            <View style={styles.hero}>
+              <Icon name="inbox" size={30} color={colors.textSecondary} />
+              <Text style={styles.text}>Todo tranquilo. Te avisamos cuando llegue algo importante.</Text>
+            </View>
           )}
           <Secondary label="Desvincular WhatsApp" onPress={unlink} disabled={busy} />
         </View>
@@ -347,10 +433,13 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
     } else {
       content = (
         <>
-          {link.reasonMessage ? <Text style={styles.message}>{link.reasonMessage}</Text> : null}
-          {link.ownPhoneHint
-            ? consent(link.state === 'none' ? 'Vincular WhatsApp' : 'Vincular otra vez', startLink)
-            : <Text style={styles.text}>Primero agrega tu número de teléfono en Confío: solo podemos vincular el WhatsApp de ese número.</Text>}
+          {link.reasonMessage ? (
+            <View style={styles.alert}>
+              <Icon name="alert-circle" size={16} color={colors.textFlat} />
+              <Text style={styles.alertText}>{link.reasonMessage}</Text>
+            </View>
+          ) : null}
+          {consent(link.state === 'none' ? 'Vincular WhatsApp' : 'Vincular otra vez', startLink)}
         </>
       );
     }
@@ -361,7 +450,7 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
       <SafeAreaProvider>
         <SafeAreaView style={styles.screen}>
           <View style={styles.header}>
-            <Text style={styles.title}>WhatsApp</Text>
+            <Text style={styles.title}>{link?.state === 'linked' ? 'WhatsApp' : ''}</Text>
             <Pressable style={styles.close} onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={24} color={colors.textFlat} />
             </Pressable>
@@ -445,6 +534,15 @@ function Action({ label, onPress, disabled = false }: { label: string; onPress: 
   );
 }
 
+function Outline({ label, icon, onPress }: { label: string; icon: string; onPress: () => void }) {
+  return (
+    <Pressable style={styles.outline} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+      <Icon name={icon} size={16} color={colors.successText} />
+      <Text style={styles.outlineText}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function Secondary({ label, onPress, disabled = false, a11y }: {
   label: string; onPress: () => void; disabled?: boolean; a11y?: string;
 }) {
@@ -492,4 +590,43 @@ const styles = StyleSheet.create({
   buttonText: { color: colors.white, fontSize: 15, fontWeight: '700' },
   secondary: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { color: colors.successText, fontSize: 14, fontWeight: '600' },
+  intro: { gap: 16, paddingTop: 8 },
+  hero: { alignItems: 'center', gap: 10, paddingVertical: 8 },
+  heroIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
+  heroTitle: { fontSize: 22, fontWeight: '700', color: colors.textFlat, textAlign: 'center' },
+  points: { gap: 12 },
+  point: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pointIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
+  pointText: { flex: 1, fontSize: 15, color: colors.textFlat },
+  risk: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', backgroundColor: colors.neutralDark, borderRadius: 12, padding: 12 },
+  riskText: { flex: 1, fontSize: 13, color: colors.gray600 },
+  more: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', minHeight: 44 },
+  moreText: { color: colors.successText, fontSize: 14, fontWeight: '600' },
+  fine: { fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
+  cells: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 4 },
+  // Shrinks on small screens (8 cells + a dash must fit 280 dp), never past 30.
+  cell: {
+    flexShrink: 1, flexBasis: 34, minWidth: 28, maxWidth: 34, height: 46, borderRadius: 10, borderWidth: 1.5, borderColor: colors.primaryMuted, backgroundColor: colors.mint,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  cellText: { fontSize: 22, fontWeight: '700', color: colors.primaryDeep },
+  dash: { fontSize: 22, fontWeight: '700', color: colors.textSecondary },
+  outline: {
+    flex: 1, flexDirection: 'row', gap: 6, minHeight: 46, borderRadius: 14, borderWidth: 1.5, borderColor: colors.successText,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10,
+  },
+  outlineText: { color: colors.successText, fontSize: 14, fontWeight: '700' },
+  steps: { gap: 10, backgroundColor: colors.surface, borderRadius: 14, padding: 14 },
+  step: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stepNumber: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.successText, alignItems: 'center', justifyContent: 'center' },
+  stepNumberText: { color: colors.white, fontSize: 13, fontWeight: '700' },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', backgroundColor: colors.mint, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.successText },
+  statusText: { fontSize: 13, fontWeight: '600', color: colors.primaryDeep },
+  alert: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', backgroundColor: '#FEE2E2', borderRadius: 12, padding: 12 },
+  alertText: { flex: 1, fontSize: 14, color: colors.textFlat },
+  phone: {
+    minHeight: 52, borderRadius: 14, backgroundColor: colors.neutralDark, paddingHorizontal: 16, fontSize: 20,
+    fontWeight: '600', color: colors.textFlat, letterSpacing: 1,
+  },
 });

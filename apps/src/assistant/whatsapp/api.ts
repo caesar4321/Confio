@@ -2,9 +2,10 @@ import { gql } from '@apollo/client';
 
 // Own documents, all named *WhatsApp*: an older server rejects only these (the row just doesn't
 // show), and the request logs redact on the name.
-// 1: links as a device, reads the chat list (not the chats), keeps important ones 7 days, sends only
-// what the person approves. The text is consentText() in rules.ts: change both together.
-export const WHATSAPP_CONSENT_VERSION = 1;
+// 1: links as a device, reads the chat list (not the chats), keeps important ones (7 days in v1), sends only
+// what the person approves. 2: the person types the number, and one note goes to their own chat once linked.
+// The text is consentText() and CONSENT_DATA in rules.ts: change them together.
+export const WHATSAPP_CONSENT_VERSION = 2;
 
 export type WhatsAppState = 'none' | 'pairing' | 'linked' | 'gone' | 'failed';
 
@@ -28,6 +29,7 @@ export type WhatsAppLink = {
   linkedAt: string | null;
   lastSyncAt: string | null;
   ownPhoneHint: string | null;
+  suggestedPhone: string | null;
   consentVersion: number;
   consentOutdated: boolean;
   notices: WhatsAppNotice[];
@@ -43,7 +45,7 @@ export type WhatsAppDraft = {
   displayHash: string;
 };
 
-const LINK = `state code codeAt phoneHint reason reasonMessage linkedAt lastSyncAt ownPhoneHint consentVersion
+const LINK = `state code codeAt phoneHint reason reasonMessage linkedAt lastSyncAt ownPhoneHint suggestedPhone consentVersion
   consentOutdated notices { id kind chat preview summary time createdAt }`;
 const DRAFT = 'id chat phone body status reason displayHash';
 
@@ -54,8 +56,8 @@ export const GET_WHATSAPP = gql`
 `;
 
 export const START_WHATSAPP_LINK = gql`
-  mutation StartWhatsAppLink($consentVersion: Int!) {
-    startWhatsAppLink(consentVersion: $consentVersion) { success error errorCode }
+  mutation StartWhatsAppLink($phone: String!, $consentVersion: Int!) {
+    startWhatsAppLink(phone: $phone, consentVersion: $consentVersion) { success error errorCode }
   }
 `;
 

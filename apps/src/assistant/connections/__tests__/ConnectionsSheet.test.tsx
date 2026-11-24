@@ -56,13 +56,13 @@ it('an older server without WhatsApp shows no WhatsApp row', () => {
   expect(show('soon').words()).not.toContain('Vincular WhatsApp');
 });
 
-it('WhatsApp: links the number of their own Confío account', async () => {
+it('WhatsApp: anyone can open the way to link it', async () => {
   mockLink = {
     state: 'none', code: null, codeAt: null, phoneHint: null, reason: null, reasonMessage: null, linkedAt: null,
-    lastSyncAt: null, ownPhoneHint: '4567', consentVersion: 1, consentOutdated: false, notices: [],
+    lastSyncAt: null, ownPhoneHint: null, suggestedPhone: null, consentVersion: 2, consentOutdated: false, notices: [],
   };
   const { words, press } = show('soon');
-  expect(words()).toContain('terminado en 4567');
+  expect(words()).toContain('respondes desde aquí');
   await press('Vincular WhatsApp');
   expect(words()).toContain('WhatsAppSheet');
 });

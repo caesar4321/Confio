@@ -2,13 +2,19 @@
 import type { Connections } from './api';
 import type { WhatsAppLink } from '../whatsapp/api';
 
-/** WhatsApp is offered to whoever can link it now (their own number in Confío) and has not. */
-export const offersWhatsApp = (link: WhatsAppLink | null) => link?.state === 'none' && !!link.ownPhoneHint;
+/** WhatsApp is offered to whoever has not linked it (they type their number), and again to whoever WhatsApp
+ * unlinked (a phone unused for a while, "Chrome" removed). */
+export const offersWhatsApp = (link: WhatsAppLink | null) => link?.state === 'none' || link?.state === 'gone';
+
+export const WHATSAPP_RELINK_CARD = {
+  title: 'Tu WhatsApp se desvinculó',
+  body: 'WhatsApp lo desvincula si tu teléfono pasa un tiempo sin usarse. Vincúlalo otra vez para seguir recibiendo avisos.',
+  cta: 'Vincular otra vez',
+};
 
 export const WHATSAPP_CARD = {
   title: 'Vincula tu WhatsApp',
-  body: 'Tu asistente te avisa de cobros, pedidos y citas que llegan por WhatsApp, y respondes desde aquí, '
-    + 'enviando solo lo que tú apruebas.',
+  body: 'Te avisamos de cobros, pedidos y citas, y respondes desde aquí.',
   cta: 'Ver cómo funciona',
 };
 

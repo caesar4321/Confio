@@ -21,7 +21,8 @@ jest.mock('../useWhatsApp', () => ({ useWhatsApp: () => ({ link: mockLink, refet
 
 const link = (over: Record<string, unknown> = {}) => ({
   state: 'none', code: null, codeAt: null, phoneHint: '4567', reason: null, reasonMessage: null, linkedAt: null,
-  lastSyncAt: null, ownPhoneHint: '4567', consentVersion: 1, consentOutdated: false, notices: [], ...over,
+  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: '+59171234567', consentVersion: 2, consentOutdated: false,
+  notices: [], ...over,
 });
 const notice = { id: '7', kind: 'order', chat: 'Farmacia Central', preview: 'Su pedido está listo', summary: 'Pedido listo', time: '10:01', createdAt: '' };
 const draft = { id: 'd1', chat: 'Farmacia Central', phone: null, body: '¿A qué hora cierran?', status: 'draft', reason: null, displayHash: 'hash-1' };
@@ -63,15 +64,20 @@ it('consent first, then the pairing asks for the code of the accepted text', asy
   mockLink = link();
   mockMutate.mockResolvedValue({ data: { startWhatsAppLink: { success: true } } });
   const { words, press } = open();
-  expect(words()).toContain('restringir');
+  expect(words()).toContain('restringir');  // the risk is always in sight, not behind "Cómo funciona"
+  // What is read, by an AI, for how long: in sight before the button, not behind a toggle.
+  expect(words()).toContain('Una IA marca lo importante y lo guardamos cifrado mientras siga vinculado');
+  expect(words()).not.toContain('«Chrome»');  // the long text waits behind "Cómo funciona"
+  await press('Cómo funciona');
+  expect(words()).toContain('«Chrome»');
   await press('Vincular WhatsApp');
-  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { consentVersion: 1 } }));
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 2 } }));
 });
 
 it('pairing: the code, copied as WhatsApp takes it, and the steps', async () => {
   mockLink = link({ state: 'pairing', code: 'ABCD-EFGH' });
   const { words, press } = open();
-  expect(words()).toContain('ABCD-EFGH');
+  expect(words()).toContain('Código A B C D E F G H');  // one cell per character, read out one by one
   expect(words()).toContain('Vincular con el número de teléfono');
   await press('Copiar código');
   expect(mockSetString).toHaveBeenCalledWith('ABCDEFGH');
@@ -140,7 +146,7 @@ it('a send whose answer was lost shows what the server has, not a retry', async 
 });
 
 it('a newer consent than this build knows: update, never the old text', () => {
-  mockLink = link({ consentVersion: 2 });
+  mockLink = link({ consentVersion: 3 });
   expect(open().words()).toContain('Actualiza la app');
 });
 
@@ -279,4 +285,26 @@ it('unlinking forgets what was kept, a message on its way included', async () =>
     await (alert.mock.calls[0][2] as any)[1].onPress();
   });
   expect(whatsAppSession('1').draft).toBeNull();
+});
+
+it('the number is typed: the account number only fills it in, and no country code means no link', async () => {
+  mockLink = link({ suggestedPhone: null });
+  mockMutate.mockResolvedValue({ data: { startWhatsAppLink: { success: true } } });
+  let tree: any;
+  act(() => {
+    tree = create(<WhatsAppSheet userId="1" onClose={jest.fn()} />);
+  });
+  mounted.push(tree);
+  const field = () => tree.root.findByProps({ accessibilityLabel: 'Tu número de WhatsApp, con el código de país' });
+  const button = () => tree.root.findAll((node: any) => node.props.accessibilityRole === 'button'
+    && node.findAll((child: any) => child.props.children === 'Vincular WhatsApp').length > 0)[0];
+  expect(button().props.disabled).toBe(true);
+  act(() => field().props.onChangeText('71234567'));
+  expect(field().props.value).toBe('+71234567');  // the + stays: the country code is asked for
+  act(() => field().props.onChangeText('+58 414 765 4321'));
+  expect(button().props.disabled).toBe(false);
+  await act(async () => {
+    await button().props.onPress();
+  });
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+584147654321', consentVersion: 2 } }));
 });

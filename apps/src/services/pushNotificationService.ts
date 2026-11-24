@@ -13,6 +13,7 @@ import { confirmedReceiptContext, extractFcmTransactionData } from '../utils/fcm
 import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
 import { isCalendarNudge } from '../assistant/calendar/nudge';
 import { agentTaskNotificationRoute } from '../agentTasks/helpers';
+import { routeWhatsAppNotification } from '../assistant/whatsapp/route';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -267,6 +268,13 @@ export class PushNotificationService {
         extra_transactionType,
         notification_type
       });
+
+      // The person's WhatsApp: its screen, on Inicio.
+      if (routeWhatsAppNotification(remoteMessage.data, () => {
+        (RootNavigation.navigationRef as any).navigate('Main', { screen: 'BottomTabs', params: { screen: 'Home' } });
+      })) {
+        return;
+      }
 
       // A purchase the assistant is making: its card is in the conversation, on Inicio.
       if (agentTaskNotificationRoute(remoteMessage.data)) {

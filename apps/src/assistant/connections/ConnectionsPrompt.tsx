@@ -7,7 +7,8 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
-import { cardText, mentionsConnections, offersWhatsApp, promptKind, unanswered, WHATSAPP_CARD } from './rules';
+import { cardText, mentionsConnections, offersWhatsApp, promptKind, unanswered, WHATSAPP_CARD, WHATSAPP_RELINK_CARD } from './rules';
+import { whatsAppSession } from '../whatsapp/session';
 import { openConnections, readSnooze, snooze, useKnownSnooze, type Where } from './store';
 import { useConnections, useViewer } from './useConnections';
 import { REFRESH_WHATSAPP } from '../whatsapp/api';
@@ -92,7 +93,8 @@ function Prompt({ userId, where, starters }: { userId: string; where: Where; sta
   const ready = build.mail && (connections.gmail === 'invited' || connections.gmail === 'reconnect');
   // Something waits on them in Gmail first; otherwise WhatsApp, which anyone can link today.
   const showsWhatsApp = offerWhatsApp && !ready;
-  const { title, body, cta } = showsWhatsApp ? WHATSAPP_CARD : cardText(connections);
+  const whatsAppCard = link?.state === 'gone' ? WHATSAPP_RELINK_CARD : WHATSAPP_CARD;
+  const { title, body, cta } = showsWhatsApp ? whatsAppCard : cardText(connections);
   const source = showsWhatsApp ? 'whatsapp' : 'mail';
   return (
     <View style={styles.card}>
@@ -102,7 +104,11 @@ function Prompt({ userId, where, starters }: { userId: string; where: Where; sta
       </View>
       <Text style={styles.body}>{body}</Text>
       <View style={styles.actions}>
-        <Pressable style={styles.primary} onPress={open} accessibilityRole="button">
+        <Pressable
+          style={styles.primary}
+          onPress={showsWhatsApp ? () => { whatsAppSession(userId).open = true; open(); } : open}
+          accessibilityRole="button"
+        >
           <Text style={styles.primaryText}>{cta}</Text>
         </Pressable>
         {ready ? null : (

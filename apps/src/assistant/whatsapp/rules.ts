@@ -2,16 +2,38 @@
 // never by the model: a model's summary is shown as a claim ("Parece…"), never as fact.
 import type { WhatsAppDraft, WhatsAppLink } from './api';
 
-/** The text the person accepts. Version WHATSAPP_CONSENT_VERSION in api.ts: change both together. */
+/** What anyone reads before linking: three lines and the one risk, in plain words. */
+export const CONSENT_POINTS: { icon: string; text: string }[] = [
+  { icon: 'bell', text: 'Te avisamos de cobros, pedidos y citas.' },
+  { icon: 'check-circle', text: 'Respondes desde aquí. Nada sale sin tu OK.' },
+  { icon: 'eye-off', text: 'No marcamos tus chats como leídos (solo el que respondes).' },
+];
+/** Always in sight before linking: what is read, by whom, for how long, and what contacts may see. */
+export const CONSENT_DATA = 'Cada ~2 horas y al abrir Confío IA leemos el nombre y la última línea de tus chats sin '
+  + 'leer. Una IA marca lo importante y lo guardamos cifrado mientras siga vinculado. Tus contactos pueden verte «en '
+  + 'línea» un momento. '
+  + 'Al vincularlo te dejamos una nota en tu propio chat, para que sepas que se vinculó.';
+
+/** A number with its country code, as WhatsApp takes it: + and 8 to 15 digits. */
+export const validPhone = (value: string) => /^\+\d{8,15}$/.test(value.replace(/[\s\-().]/g, ''));
+export const CONSENT_RISK = 'WhatsApp no permite oficialmente apps como esta y podría restringir tu cuenta.';
+
+/** The whole text the person accepts, behind "Cómo funciona". Version WHATSAPP_CONSENT_VERSION in api.ts:
+ * change both together. */
 export function consentText(): string[] {
   return [
-    'Confío vincula tu WhatsApp como un dispositivo más, en un navegador en la nube que es solo tuyo. Lo '
-      + 'verás en WhatsApp como «Chrome» en Dispositivos vinculados.',
+    'Escribes tu número de WhatsApp y WhatsApp te pide confirmarlo con un código en tu teléfono. Confío lo '
+      + 'vincula como un dispositivo más, en un navegador en la nube que es solo tuyo. Lo verás en WhatsApp como '
+      + '«Chrome» en Dispositivos vinculados.',
+    'Al vincularlo, Confío escribe una sola nota en tu chat contigo mismo («Mensaje para ti») diciendo que se '
+      + 'vinculó: si alguien te pidió el código con engaños, lo ves ahí. Es el único mensaje que Confío escribe sin '
+      + 'que lo apruebes.',
     'Cada unas dos horas, y cuando abres Confío IA, miramos tu lista de chats: el nombre y la última línea de '
       + 'los chats sin leer. No abrimos tus chats para eso, así que no marcamos nada como leído (al enviar una '
       + 'respuesta, ese chat sí queda leído). No guardamos grupos ni mensajes que parezcan códigos o contraseñas.',
     'Un modelo de IA marca lo importante (cobros, pedidos, entregas, citas, alguien esperando tu respuesta) y '
-      + 'te avisamos. Guardamos eso cifrado 7 días y nada más.',
+      + 'te avisamos. Guardamos eso cifrado mientras tu WhatsApp siga vinculado; al desvincularlo, desde Confío o desde '
+      + 'tu teléfono, lo borramos.',
     'Solo enviamos un mensaje cuando tú lo apruebas aquí, uno por uno y escrito a ritmo de persona. Nunca '
       + 'pagamos nada desde WhatsApp.',
     'Cuando miramos tu lista, tus contactos pueden verte «en línea» un momento. WhatsApp no permite oficialmente '
@@ -32,14 +54,7 @@ export type WhatsAppView = {
 export function whatsAppView(link: WhatsAppLink): WhatsAppView {
   switch (link.state) {
     case 'none':
-      return link.ownPhoneHint
-        ? {
-            body: `Vincula el WhatsApp de tu número terminado en ${link.ownPhoneHint}. Te avisamos de lo importante y `
-              + 'respondes desde aquí, siempre con tu aprobación.',
-            action: 'link',
-            actionLabel: 'Vincular WhatsApp',
-          }
-        : { body: 'Primero agrega tu número de teléfono en Confío: solo podemos vincular el WhatsApp de ese número.' };
+      return { body: 'Te avisamos de lo importante y respondes desde aquí.', action: 'link', actionLabel: 'Vincular WhatsApp' };
     case 'pairing':
       return { badge: 'Vinculando', body: 'Escribe el código en tu WhatsApp para terminar.', action: 'open', actionLabel: 'Ver el código' };
     case 'linked':
@@ -63,13 +78,13 @@ export function whatsAppView(link: WhatsAppLink): WhatsAppView {
       return {
         badge: 'Desvinculado',
         body: link.reasonMessage || 'Tu WhatsApp se desvinculó. Puedes vincularlo otra vez.',
-        action: link.ownPhoneHint ? 'link' : undefined,
+        action: 'link',
         actionLabel: 'Vincular otra vez',
       };
     case 'failed':
       return {
         body: link.reasonMessage || 'No se pudo vincular. Inténtalo de nuevo.',
-        action: link.ownPhoneHint ? 'link' : undefined,
+        action: 'link',
         actionLabel: 'Intentar de nuevo',
       };
     default:
@@ -92,9 +107,9 @@ export const NOTICE_LABELS: Record<string, string> = {
 export const codeForCopy = (code: string) => code.replace(/[^A-Z0-9]/gi, '').toUpperCase();
 
 export const PAIRING_STEPS = [
-  'Copia el código y abre WhatsApp en tu teléfono.',
-  'Ve a Ajustes (o los tres puntos) → Dispositivos vinculados → Vincular un dispositivo.',
-  'Toca «Vincular con el número de teléfono» y escribe el código.',
+  'Abre WhatsApp → Dispositivos vinculados',
+  'Vincular un dispositivo → «Vincular con el número de teléfono»',
+  'Escribe el código',
 ];
 
 /** What a draft card says about where it goes and how it went. */

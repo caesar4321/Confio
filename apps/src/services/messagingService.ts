@@ -18,6 +18,7 @@ import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 import { extractFcmTransactionData } from '../utils/fcmData';
 import { smartNotificationRoute, smartNotificationSwitchTarget } from '../utils/smartAccountNotificationRoute';
 import { agentTaskNotificationRoute } from '../agentTasks/helpers';
+import { routeWhatsAppNotification } from '../assistant/whatsapp/route';
 import { androidChannelFor, createCommunityChannel } from './notificationChannels';
 import { isCalendarNudge } from '../assistant/calendar/nudge';
 
@@ -800,6 +801,15 @@ class MessagingService {
         console.error('[MessagingService] Error checking account context:', error);
         // Continue with navigation even if account check fails
       }
+    }
+
+    // The person's WhatsApp (linked, unlinked, important messages, link again): its screen, on Inicio.
+    if (routeWhatsAppNotification(data, () => {
+      if (navigationRef.current && navigationRef.current.isReady()) {
+        (navigationRef.current as any).navigate('Main', { screen: 'BottomTabs', params: { screen: 'Home' } });
+      }
+    })) {
+      return;
     }
 
     // A purchase the assistant is making: its card is in the conversation, on Inicio (the

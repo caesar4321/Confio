@@ -258,8 +258,8 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     'UpdateAssistantProfile', 'UseAssistantPet', 'DeleteAssistantPet',
     // Calendar titles the person ticked.
     'AnalyzeAssistantCalendar',
-    // WhatsApp replies the person writes (assistant/whatsapp/api.ts).
-    'CreateWhatsAppDraft', 'SendWhatsAppDraft',
+    // WhatsApp replies the person writes, and the number they type to link (assistant/whatsapp/api.ts).
+    'CreateWhatsAppDraft', 'SendWhatsAppDraft', 'StartWhatsAppLink',
     // Wallet recovery diagnostics describe a user's backup files. Shapes
     // only by construction, but never echo them into error logs.
     'ReportWalletRecoveryDiagnostic',

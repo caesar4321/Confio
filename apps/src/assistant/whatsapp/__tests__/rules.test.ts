@@ -3,16 +3,19 @@ import { codeForCopy, consentText, draftView, pollFor, whatsAppView } from '../r
 
 const link = (over: Partial<WhatsAppLink> = {}): WhatsAppLink => ({
   state: 'none', code: null, codeAt: null, phoneHint: null, reason: null, reasonMessage: null, linkedAt: null,
-  lastSyncAt: null, ownPhoneHint: '4567', consentVersion: 1, consentOutdated: false, notices: [], ...over,
+  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: null, consentVersion: 2, consentOutdated: false, notices: [], ...over,
 });
 const draft = (over: Partial<WhatsAppDraft> = {}): WhatsAppDraft => ({
   id: 'd1', chat: 'Farmacia Central', phone: null, body: 'Hola', status: 'draft', reason: null, displayHash: 'h', ...over,
 });
 
-it('only their own number can be linked', () => {
+it('anyone can link, by typing a number with its country code', () => {
   expect(whatsAppView(link()).action).toBe('link');
-  expect(whatsAppView(link()).body).toContain('4567');
-  expect(whatsAppView(link({ ownPhoneHint: null })).action).toBeUndefined();
+  expect(whatsAppView(link({ ownPhoneHint: null })).action).toBe('link');
+  const { validPhone } = require('../rules');
+  expect(validPhone('+591 7123 4567')).toBe(true);
+  expect(validPhone('71234567')).toBe(false);  // no country code: another country's number to WhatsApp
+  expect(validPhone('+12')).toBe(false);
 });
 
 it('every state says what to do next', () => {
@@ -25,7 +28,8 @@ it('every state says what to do next', () => {
 
 it('the consent says the risks plainly', () => {
   const text = consentText().join(' ');
-  for (const words of ['no marcamos nada como leído', '7 días', 'tú lo apruebas', 'en línea', 'restringir', 'desvincularlo']) {
+  for (const words of ['no marcamos nada como leído', 'mientras tu WhatsApp siga vinculado', 'tú lo apruebas', 'en línea', 'restringir', 'desvincularlo',
+    'Mensaje para ti', 'único mensaje que Confío escribe sin']) {
     expect(text).toContain(words);
   }
 });
