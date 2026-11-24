@@ -37,7 +37,7 @@ func named(types.MessageInfo) string { return "Farmacia Central" }
 
 func TestIncomingPassesOnlyOneToOneTextFromOthers(t *testing.T) {
 	ctx := context.Background()
-	data, ok := incoming(ctx, named, message(person("59171234567"), "Su pedido está listo"))
+	data, ok := incoming(ctx, named, message(person("59171234567"), "Su pedido está listo"), "")
 	if !ok || data["name"] != "Farmacia Central" || data["phone"] != "59171234567" || data["text"] != "Su pedido está listo" ||
 		data["chat"] != "59171234567@s.whatsapp.net" {
 		t.Fatalf("one-to-one text: %v %v", ok, data)
@@ -45,6 +45,7 @@ func TestIncomingPassesOnlyOneToOneTextFromOthers(t *testing.T) {
 
 	mine := person("59171234567")
 	mine.IsFromMe = true
+	mine.Sender = types.NewJID("59170000009", types.DefaultUserServer) // her: the chat is the other person
 	group := person("59171234567")
 	group.IsGroup = true
 	group.Chat = types.NewJID("1203630", types.GroupServer)
@@ -52,17 +53,36 @@ func TestIncomingPassesOnlyOneToOneTextFromOthers(t *testing.T) {
 	status.Chat = types.StatusBroadcastJID
 	channel := person("59171234567")
 	channel.Chat = types.NewJID("1203", types.NewsletterServer)
-	for name, info := range map[string]types.MessageInfo{"own": mine, "group": group, "status": status, "channel": channel} {
-		if _, ok := incoming(ctx, named, message(info, "hola")); ok {
+	// Her own message (written on her phone) is passed on, marked: it tells Django she already answered.
+	if data, ok := incoming(ctx, named, message(mine, "ya voy"), ""); !ok || data["from_me"] != true {
+		t.Fatalf("her own message: %v %v", ok, data)
+	}
+	// Her chat with herself (Confío's note lives there) never is, by her number or by her LID.
+	if _, ok := incoming(ctx, named, message(mine, "nota"), "59171234567"); ok {
+		t.Error("her chat with herself passed on")
+	}
+	self := mine
+	self.Chat = types.NewJID("88888", types.HiddenUserServer)
+	self.Sender = types.NewJID("88888", types.HiddenUserServer)
+	if _, ok := incoming(ctx, named, message(self, "clave del banco"), "59171234567"); ok {
+		t.Error("her chat with herself by LID passed on")
+	}
+	viewOnce := message(person("59171234567"), "solo una vez")
+	viewOnce.IsViewOnce = true
+	if _, ok := incoming(ctx, named, viewOnce, ""); ok {
+		t.Error("a view-once message passed on")
+	}
+	for name, info := range map[string]types.MessageInfo{"group": group, "status": status, "channel": channel} {
+		if _, ok := incoming(ctx, named, message(info, "hola"), ""); ok {
 			t.Errorf("%s message passed on", name)
 		}
 	}
-	if _, ok := incoming(ctx, named, &events.Message{Info: person("591"), Message: &waE2E.Message{}}); ok {
+	if _, ok := incoming(ctx, named, &events.Message{Info: person("591"), Message: &waE2E.Message{}}, ""); ok {
 		t.Error("a message without text passed on")
 	}
 	edit := message(person("59171234567"), "editado")
 	edit.IsEdit = true
-	if _, ok := incoming(ctx, named, edit); ok {
+	if _, ok := incoming(ctx, named, edit, ""); ok {
 		t.Error("an edit passed on as a new message")
 	}
 }
@@ -71,14 +91,15 @@ func TestIncomingLidChatKeepsThePhoneWhenKnown(t *testing.T) {
 	info := person("59171234567")
 	info.Chat = types.NewJID("123456789", types.HiddenUserServer)
 	info.SenderAlt = types.NewJID("59171234567", types.DefaultUserServer)
-	data, ok := incoming(context.Background(), named, message(info, "hola"))
-	if !ok || data["chat"] != "123456789@lid" || data["phone"] != "59171234567" {
+	data, ok := incoming(context.Background(), named, message(info, "hola"), "")
+	// One chat, one id: the phone-number form, so her messages and the contact's are the same conversation.
+	if !ok || data["chat"] != "59171234567@s.whatsapp.net" || data["phone"] != "59171234567" {
 		t.Fatalf("lid chat: %v", data)
 	}
 }
 
 func TestIncomingCutsLongTextOnRunes(t *testing.T) {
-	data, _ := incoming(context.Background(), named, message(person("591"), strings.Repeat("ñ", 1500)))
+	data, _ := incoming(context.Background(), named, message(person("591"), strings.Repeat("ñ", 1500)), "")
 	if got := []rune(data["text"].(string)); len(got) != 1000 || string(got[999]) != "ñ" {
 		t.Fatalf("cut to %d runes", len(got))
 	}

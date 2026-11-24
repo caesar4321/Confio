@@ -43,7 +43,8 @@ MAX_BODY = 2000
 MAX_NAME = 120
 # 2: the person types the number; Confío writes one note to their own chat when it is linked.
 # 3: linked from our own servers (whatsmeow), new messages arrive as they come, never "online".
-CONSENT_VERSION = 3
+# 4: each chat's last 48 hours (both sides, hers from her phone too) kept sealed as context.
+CONSENT_VERSION = 4
 NOTICE_TYPE = 'whatsapp_link'
 LIMITS = {'link': 10, 'refresh': 30, 'write': 40}
 TITLE = 'Confío IA'
@@ -390,7 +391,8 @@ def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pe
 def refresh(user):
     """Opening Confío IA: what arrived and waits to be looked at is looked at now (messages come by themselves)."""
     link = WhatsAppLink.objects.filter(user=user, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
-    if link is None or link.consent_version < CONSENT_VERSION or note_pending(link) or not link.inbox.exists():
+    if link is None or link.consent_version < CONSENT_VERSION or note_pending(link) \
+            or not link.inbox.filter(from_me=False, looked_at__isnull=True).exists():
         return False
     _claim(user, 'refresh', LIMITS['refresh'])
     _queue_sync(link.pk, countdown=0)
@@ -520,21 +522,56 @@ def _linked(link, signed):
 
 
 def _arrived(link, data):
-    """A new message someone wrote the person. Kept sealed until the next look (sync), a minute or two later,
-    so a burst of messages is one look; never kept when it looks like a code or a password."""
+    """A new message of a one-to-one chat: from someone (waits for the next look, 30 seconds later, so a burst
+    is one look) or hers, written on her phone (context only: it tells the look she already answered). Kept
+    sealed for the chat's context; never when it looks like a code or a password."""
     if link.state != WhatsAppLink.State.LINKED or link.consent_version < CONSENT_VERSION or note_pending(link):
         return  # nothing is read before the note is written, nor under an older consent
     row = {'name': str(data.get('name') or '')[:MAX_NAME], 'preview': str(data.get('text') or '')[:1000]}
     if not row['preview'] or private(row):
         return
-    key = _key(str(link.user_id), str(link.grant), str(data.get('id') or ''), str(data.get('chat') or ''))
-    if cache.get(f'whatsapp-link:seen:{key}'):
-        return  # delivered again after it was looked at: never a second notice
-    WhatsAppInbox.objects.get_or_create(link=link, source_key=key, defaults={'sealed': _seal({
-        'chat': str(data.get('chat') or ''), 'name': row['name'], 'phone': str(data.get('phone') or ''),
-        'text': row['preview'], 'at': int(data.get('at') or 0)})})
-    cache.set(f'whatsapp-link:seen:{key}', 1, 86400)  # only once it is kept: a failure is delivered again
-    _queue_sync(link.pk)
+    chat_id = str(data.get('chat') or '')
+    if not chat_id:
+        return
+    from_me = data.get('from_me') is True
+    key = _key(str(link.user_id), str(link.grant), str(data.get('id') or ''), chat_id)
+    _row, made = WhatsAppInbox.objects.get_or_create(link=link, source_key=key, defaults={
+        'chat_key': _chat_key(link, chat_id), 'from_me': from_me, 'looked_at': timezone.now() if from_me else None,
+        'sealed': _seal({'chat': chat_id, 'name': row['name'], 'phone': str(data.get('phone') or ''),
+                         'text': row['preview'], 'at': int(data.get('at') or 0)})})
+    if made and not from_me:
+        _queue_sync(link.pk)
+
+
+def _chat_key(link, chat_id):
+    return _key(str(link.user_id), str(link.grant), 'chat', chat_id)
+
+
+def _context_since():
+    return timezone.now() - timedelta(hours=conf.get('WHATSAPP_LINK_CONTEXT_HOURS'))
+
+
+CONTEXT_LINES = 15
+
+
+def conversation(link, chat_id, *, new_ids=()):
+    """The chat's last hours as the model reads them, oldest first: [{de, texto, nuevo}] ("ella" is the person)."""
+    rows = list(WhatsAppInbox.objects.filter(link=link, chat_key=_chat_key(link, chat_id),
+                                             created_at__gte=_context_since()).order_by('pk'))
+    lines = []
+    for row in rows:
+        data = _unseal(row.sealed, {})
+        if data.get('text'):
+            lines.append({'de': 'ella' if row.from_me else 'contacto', 'texto': data['text'][:500],
+                          'nuevo': row.pk in new_ids, 'at': int(data.get('at') or 0)})
+    lines.sort(key=lambda line: line['at'])
+    return [{k: v for k, v in line.items() if k != 'at'} for line in lines[-CONTEXT_LINES:]]
+
+
+def transcript(lines):
+    # One line per message: a contact's text can never start a line that reads as hers.
+    return '\n'.join(f"{'Ella' if line['de'] == 'ella' else 'Contacto'}: {' '.join(line['texto'].split())}"
+                     for line in lines)
 
 
 def _queue_sync(link_id, countdown=None):
@@ -659,8 +696,8 @@ def private(row) -> bool:
 
 
 def sync(link_id):
-    """Classifies what arrived since the last look and keeps only the important. Messages are deleted once
-    looked at, kept or not."""
+    """Looks at what arrived since the last look, each chat in its whole recent conversation, and keeps only the
+    important. Messages stay only as the chat's context (CONTEXT_HOURS), sealed."""
     cache.delete(f'whatsapp-link:queued:{link_id}')
     if not enabled():
         return
@@ -668,25 +705,25 @@ def sync(link_id):
         pk=link_id, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').first()
     if link is None or link.consent_version < CONSENT_VERSION or note_pending(link):
         return
-    # One look per link at a time; the messages are deleted only once looked at (a failed look keeps them for
-    # the next, and the sweep drops any older than a day).
+    # One look per link at a time; a failed look leaves them unlooked for the next.
     lease = f'whatsapp-link:looking:{link_id}'
     if not cache.add(lease, 1, 120):
         _queue_sync(link_id)
         return
     try:
-        taken = list(WhatsAppInbox.objects.filter(link=link).order_by('pk')[:100])
+        taken = list(WhatsAppInbox.objects.filter(link=link, from_me=False, looked_at__isnull=True).order_by('pk')[:100])
         if not taken:
             return
         started = time.monotonic()
         try:
-            found = _store(link, [_unseal(row.sealed, {}) for row in taken])
+            found = _store(link, taken)
         except SoftTimeLimitExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 - by type: a message can quote a chat
             logger.warning('WhatsApp classify %s failed: %s', link.pk, type(exc).__name__)
             return
-        WhatsAppInbox.objects.filter(pk__in=[row.pk for row in taken]).delete()
+        # Looked at: kept only as the chat's context, until it is CONTEXT_HOURS old (sweep).
+        WhatsAppInbox.objects.filter(pk__in=[row.pk for row in taken]).update(looked_at=timezone.now())
     finally:
         cache.delete(lease)
     logger.info('WhatsApp classify link=%s messages=%d important=%d ms=%d', link.pk, len(taken), len(found),
@@ -701,26 +738,33 @@ def sync(link_id):
         # Fixed words: a lock screen never shows what someone wrote. It opens the conversation.
         _notify(link.user, f'Tienes {count if count < 10 else "más de 9"} {noun} en WhatsApp. Te lo cuento en '
                            'Confío IA.', {'kind': 'messages'})
-    if WhatsAppInbox.objects.filter(link=link).exists():
+    if WhatsAppInbox.objects.filter(link=link, from_me=False, looked_at__isnull=True).exists():
         _queue_sync(link.pk)
 
 
-def _store(link, messages) -> list:
-    """One look per chat: its newest lines, oldest first. Returns the new notices, each with its suggested replies."""
-    chats = {}
-    for message in messages:
-        if not message.get('chat') or not message.get('text'):
-            continue
-        chats.setdefault(message['chat'], []).append(message)
-    if not chats:
+def _store(link, taken) -> list:
+    """One look per chat with new messages, in its whole recent conversation (both sides): is what is new
+    something she should hear about now, and what could she answer? Returns the new notices with their replies."""
+    new = {}
+    for row in taken:
+        data = _unseal(row.sealed, {})
+        if data.get('chat') and data.get('text'):
+            new.setdefault(data['chat'], []).append((row.pk, data))
+    if not new:
         return []
     looked = []
-    for chat, lines in chats.items():
-        lines.sort(key=lambda line: line.get('at') or 0)
-        preview = '\n'.join(line['text'] for line in lines[-3:])[-600:]
-        looked.append({'chat': chat, 'name': lines[-1].get('name') or '', 'phone': lines[-1].get('phone') or '',
-                       'preview': preview, 'at': lines[-1].get('at') or 0})
-    verdicts = classify.important([{'chat': row['name'], 'preview': row['preview']} for row in looked])
+    for chat_id, rows in new.items():
+        rows.sort(key=lambda item: item[1].get('at') or 0)
+        last = rows[-1][1]
+        lines = conversation(link, chat_id, new_ids={pk for pk, _data in rows})
+        preview = '\n'.join(data['text'] for _pk, data in rows[-3:])[-600:]
+        if not any(line['nuevo'] for line in lines):
+            # Rows from before chat keys (or the window cut them): the new lines themselves are the conversation.
+            lines = [{'de': 'contacto', 'texto': data['text'][:500], 'nuevo': True} for _pk, data in rows][-CONTEXT_LINES:]
+        looked.append({'chat': chat_id, 'name': last.get('name') or '', 'phone': last.get('phone') or '',
+                       'preview': preview, 'at': last.get('at') or 0, 'conversation': lines,
+                       'rows': ','.join(str(pk) for pk, _data in rows)})
+    verdicts = classify.important([{'chat': row['name'], 'conversation': row['conversation']} for row in looked])
     found = []
     with transaction.atomic():
         if _mine(link).select_for_update().filter(state=WhatsAppLink.State.LINKED).first() is None:
@@ -728,7 +772,8 @@ def _store(link, messages) -> list:
         for row, verdict in zip(looked, verdicts):
             if not verdict:
                 continue
-            key = _key(str(link.user_id), str(link.grant), row['chat'], row['preview'])
+            # The messages of this look, not their words: the same words in a later message are told again.
+            key = _key(str(link.user_id), str(link.grant), row['chat'], 'rows', row['rows'])
             when = timezone.localtime(datetime.fromtimestamp(row['at'], tz=dt_timezone.utc)) if row['at'] else None
             _notice, made = WhatsAppNotice.objects.get_or_create(link=link, source_key=key, defaults={
                 'kind': verdict['kind'], 'notified_at': timezone.now(),
@@ -801,7 +846,8 @@ def create_draft(user, *, chat=None, phone=None, body=None, instructions=None, n
         _claim(user, 'write', LIMITS['write'])
         from .assistant_tool import own_only
         # The model's wording of what she asked: a number or a link only if it is in her own words.
-        body = own_only(classify.write(str(instructions)[:1000], chat or 'un número nuevo', replying_to),
+        context = transcript(conversation(link, jid)) if jid else ''
+        body = own_only(classify.write(str(instructions)[:1000], chat or 'un número nuevo', context or replying_to),
                         [str(instructions)])
     fields = {'chat': chat if jid else '', 'jid': jid, 'phone': digits, 'body': _body(body)}
     with transaction.atomic():
@@ -913,8 +959,28 @@ def _sent(draft, status_, reason):
         fields = {'sealed': _seal({}), 'expires_at': timezone.now() + timedelta(hours=1)}  # the text goes now
     if WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(
             status=status_, reason=reason, **fields):
+        if status_ == WhatsAppDraft.Status.SENT:
+            _context_of_sent(draft)
         from . import chat
         chat.outcome(draft.pk)  # Confío IA says how it went
+
+
+def _context_of_sent(draft):
+    """A reply sent from Confío is part of the chat's conversation (WhatsApp never echoes it back to this device):
+    the next look knows she answered."""
+    try:
+        sent = _unseal(draft.sealed, {})
+        link = WhatsAppLink.objects.filter(pk=draft.link_id, state=WhatsAppLink.State.LINKED).first()
+        if link is None or not sent.get('jid') or not sent.get('body'):
+            return
+        WhatsAppInbox.objects.get_or_create(link=link, source_key=_key(str(link.user_id), str(link.grant), 'sent', str(draft.pk)),
+                                            defaults={'chat_key': _chat_key(link, sent['jid']), 'from_me': True,
+                                                      'looked_at': timezone.now(),
+                                                      'sealed': _seal({'chat': sent['jid'], 'name': sent.get('chat') or '',
+                                                                       'text': sent['body'][:1000],
+                                                                       'at': int(time.time())})})
+    except Exception as exc:  # noqa: BLE001 - the send is done either way
+        logger.warning('WhatsApp sent reply not kept as context: %s', type(exc).__name__)
 
 
 # ------------------------------------------------------------------ sweep
@@ -940,8 +1006,10 @@ def sweep():
     if conf.get('WHATSAPP_LINK_KEEP_DAYS'):
         WhatsAppNotice.objects.filter(created_at__lt=now - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))).delete()
     WhatsAppDraft.objects.filter(expires_at__lte=now).exclude(status=WhatsAppDraft.Status.SENDING).delete()
-    # Messages nobody looked at within a day (a look that kept failing): not kept.
-    WhatsAppInbox.objects.filter(created_at__lt=now - timedelta(days=1)).delete()
+    # Each chat's context is its last CONTEXT_HOURS: older messages go (looked at or not). And none stays on a link
+    # that is no longer linked (a message that landed just as the phone unlinked it).
+    WhatsAppInbox.objects.filter(Q(created_at__lt=_context_since()) | ~Q(link__state=WhatsAppLink.State.LINKED)
+                                 | Q(link__reason='unlinking')).delete()
     for link in _leavers()[:20]:
         try:
             unlink(link.user, WhatsAppLinkRecord.EndedBy.ACCOUNT)
@@ -966,7 +1034,10 @@ def sweep():
         elif cache.add(f'whatsapp-link:note-restart:{grant}', 1, 600):
             tasks.warn_self.apply_async((link_id, str(grant)), countdown=1)
     # Messages waiting whose look was lost.
-    for link_id in WhatsAppInbox.objects.filter(created_at__lt=now - timedelta(minutes=10)).values_list(
+    for link_id in WhatsAppInbox.objects.filter(from_me=False, looked_at__isnull=True,
+                                                created_at__lt=now - timedelta(minutes=10),
+                                                link__state=WhatsAppLink.State.LINKED,
+                                                link__consent_version__gte=CONSENT_VERSION).values_list(
             'link_id', flat=True).distinct()[:50]:
         _queue_sync(link_id, countdown=0)
     # Browser profiles from before whatsmeow (Browserbase): deleted.

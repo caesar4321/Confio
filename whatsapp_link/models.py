@@ -126,11 +126,15 @@ class WhatsAppLinkRecord(models.Model):
 
 
 class WhatsAppInbox(models.Model):
-    """A message that arrived and waits for the next look (service.sync, a minute or two later), sealed.
-    Deleted once looked at, kept as a notice or not; never kept past a day."""
+    """A message of a one-to-one chat, sealed: from someone to the person, or hers (from_me, written on her phone).
+    The chat's last hours are the context every look reads (service.sync): kept CONTEXT_HOURS (48), never past
+    that, and erased with the link. A message from someone waits for its look (looked_at null)."""
 
     link = models.ForeignKey(WhatsAppLink, on_delete=models.CASCADE, related_name='inbox')
     source_key = models.CharField(max_length=64)  # an HMAC of WhatsApp's message id: delivered twice, kept once
+    chat_key = models.CharField(max_length=64, blank=True, default='', db_index=True)  # an HMAC of the chat
+    from_me = models.BooleanField(default=False)
+    looked_at = models.DateTimeField(null=True, blank=True)
     sealed = models.TextField()  # {chat, name, phone, text, at}
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

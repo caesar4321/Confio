@@ -21,7 +21,7 @@ jest.mock('../useWhatsApp', () => ({ useWhatsApp: () => ({ link: mockLink, refet
 
 const link = (over: Record<string, unknown> = {}) => ({
   state: 'none', code: null, codeAt: null, phoneHint: '4567', reason: null, reasonMessage: null, linkedAt: null,
-  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: '+59171234567', consentVersion: 3, consentOutdated: false,
+  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: '+59171234567', consentVersion: 4, consentOutdated: false,
   notices: [], ...over,
 });
 const notice = { id: '7', kind: 'order', chat: 'Farmacia Central', preview: 'Su pedido está listo', summary: 'Pedido listo', time: '10:01', createdAt: '' };
@@ -65,12 +65,12 @@ it('consent first, then the pairing asks for the code of the accepted text', asy
   const { words, press } = open();
   expect(words()).toContain('restringir');  // the risk is always in sight, not behind "Cómo funciona"
   // What is read, by an AI, for how long: in sight before the button, not behind a toggle.
-  expect(words()).toContain('Una IA marca lo importante y lo guardamos cifrado mientras siga vinculado');
+  expect(words()).toContain('Guardamos cifradas las últimas 48 horas de cada chat');
   expect(words()).not.toContain('«Chrome»');  // the long text waits behind "Cómo funciona"
   await press('Cómo funciona');
   expect(words()).toContain('«Chrome»');
   await press('Vincular WhatsApp');
-  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 3, country: 'BO' } }));
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 4, country: 'BO' } }));
 });
 
 it('pairing: the code, copied as WhatsApp takes it, and the steps', async () => {
@@ -92,7 +92,7 @@ it('unlinking asks first', async () => {
 });
 
 it('a newer consent than this build knows: update, never the old text', () => {
-  mockLink = link({ consentVersion: 4 });
+  mockLink = link({ consentVersion: 5 });
   expect(open().words()).toContain('Actualiza la app');
 });
 
@@ -116,7 +116,7 @@ it('the number is typed with its country: the account number only fills it in, a
   await act(async () => {
     await button().props.onPress();
   });
-  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+584147654321', consentVersion: 3, country: 'VE' } }));
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+584147654321', consentVersion: 4, country: 'VE' } }));
 });
 it('linked: the screen only manages the link; messages are told in the conversation', async () => {
   mockLink = link({ state: 'linked', notices: [notice], lastSyncAt: new Date().toISOString() });

@@ -9,8 +9,9 @@ export const CONSENT_POINTS: { icon: string; text: string }[] = [
   { icon: 'eye-off', text: 'No marcamos nada como leído ni apareces «en línea».' },
 ];
 /** Always in sight before linking: what is read, by whom, for how long. */
-export const CONSENT_DATA = 'Recibimos los mensajes nuevos de tus chats personales (no grupos) mientras siga vinculado. '
-  + 'Una IA marca lo importante y lo guardamos cifrado mientras siga vinculado; lo demás no se guarda. '
+export const CONSENT_DATA = 'Recibimos los mensajes de tus chats personales (no grupos) mientras siga vinculado. '
+  + 'Guardamos cifradas las últimas 48 horas de cada chat para entender la conversación; una IA marca lo '
+  + 'importante y lo guardamos cifrado mientras siga vinculado. '
   + 'Al vincularlo te dejamos una nota en tu propio chat, para que sepas que se vinculó.';
 
 /** A number with its country code, as WhatsApp takes it: + and 8 to 15 digits. */
@@ -27,12 +28,16 @@ export function consentText(): string[] {
     'Al vincularlo, Confío escribe una sola nota en tu chat contigo mismo («Mensaje para ti») diciendo que se '
       + 'vinculó: si alguien te pidió el código con engaños, lo ves ahí. Es el único mensaje que Confío escribe sin '
       + 'que lo apruebes.',
-    'Mientras siga vinculado, recibimos los mensajes nuevos que te escriben en chats personales, como cualquier '
-      + 'dispositivo vinculado. No recibimos grupos ni estados, no marcamos nada como leído y no apareces «en '
-      + 'línea». Los mensajes que parecen códigos o contraseñas se descartan sin guardarse.',
-    'Un modelo de IA revisa los mensajes nuevos y marca lo importante (cobros, pedidos, entregas, citas, alguien '
-      + 'esperando tu respuesta) y te avisamos. Guardamos solo eso, cifrado, mientras tu WhatsApp siga vinculado; '
-      + 'lo demás se descarta al revisarlo. Al desvincularlo, desde Confío o desde tu teléfono, lo borramos.',
+    'Mientras siga vinculado, recibimos los mensajes de tus chats personales, como cualquier dispositivo '
+      + 'vinculado: los que te escriben y los que tú envías desde tu teléfono. No recibimos grupos ni estados, no '
+      + 'marcamos nada como leído y no apareces «en línea». Los mensajes que parecen códigos o contraseñas se '
+      + 'descartan sin guardarse.',
+    'Guardamos cifradas las últimas 48 horas de cada chat, para entender la conversación completa (los mensajes '
+      + 'partidos, lo que ya respondiste) y no sugerirte algo fuera de contexto; lo más antiguo se borra solo.',
+    'Un modelo de IA lee esa conversación, marca lo importante (cobros, pedidos, entregas, citas, alguien '
+      + 'esperando tu respuesta) y te lo cuento en nuestra conversación, con respuestas sugeridas. Guardamos lo '
+      + 'importante, cifrado, mientras tu WhatsApp siga vinculado. Al desvincularlo, desde Confío o desde tu '
+      + 'teléfono, lo borramos todo.',
     'Solo enviamos un mensaje cuando tú lo apruebas aquí, uno por uno y a ritmo de persona. Nunca pagamos nada '
       + 'desde WhatsApp.',
     'WhatsApp no permite oficialmente clientes como este y podría restringir una cuenta; cuidamos tu número '

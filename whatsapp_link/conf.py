@@ -16,6 +16,9 @@ DEFAULTS = {
     'WHATSAPP_LINK_PAIRING_SECONDS': 600,
     # Messages that arrive close together are looked at together, this long after the first.
     'WHATSAPP_LINK_BATCH_SECONDS': 30,
+    # Founder 2026-11-24: each chat's last 48 hours (both sides) are kept, sealed, as the context every look
+    # reads; older ones are deleted, and all of it with the link.
+    'WHATSAPP_LINK_CONTEXT_HOURS': 48,
     # Only what the person approved, one at a time, at a person's pace.
     'WHATSAPP_LINK_SENDS_PER_DAY': 20,
     'WHATSAPP_LINK_NEW_NUMBERS_PER_DAY': 5,

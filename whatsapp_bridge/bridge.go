@@ -221,7 +221,11 @@ func (b *bridge) handle(d *device, raw any) {
 		if quiet {
 			return // a device on its way out (maybe a stranger's WhatsApp): nothing of it is kept
 		}
-		if data, ok := incoming(ctx, func(info types.MessageInfo) string { return nameOf(ctx, d.client, info) }, evt); ok {
+		own := []string{d.client.Store.GetLID().User}
+		if d.client.Store.ID != nil {
+			own = append(own, d.client.Store.ID.User)
+		}
+		if data, ok := incoming(ctx, func(info types.MessageInfo) string { return nameOf(ctx, d.client, info) }, evt, own...); ok {
 			b.enqueue(ctx, d.link, d.grant, "message", data)
 		}
 	case *events.LoggedOut:

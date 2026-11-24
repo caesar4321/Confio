@@ -138,13 +138,23 @@ func (b *bridge) post(ctx context.Context, batch []event) error {
 	return nil
 }
 
-// incoming: a new one-to-one message someone sent the person, as Django gets it, or false. Groups, status
-// updates, channels, the person's own messages, and anything without text are never passed on.
-func incoming(ctx context.Context, nameFn func(types.MessageInfo) string, evt *events.Message) (map[string]any, bool) {
+// incoming: a new one-to-one message, as Django gets it, or false: from someone to the person, or from the person
+// to someone (written on her phone: it tells Django she already answered). Groups, status updates, channels, her
+// chat with herself (Confío's note) and anything without text are never passed on.
+func incoming(ctx context.Context, nameFn func(types.MessageInfo) string, evt *events.Message, own ...string) (map[string]any, bool) {
 	info := evt.Info
-	if info.IsFromMe || info.IsGroup || evt.IsEdit || info.Chat.Server == types.BroadcastServer ||
+	if info.IsGroup || evt.IsEdit || evt.IsViewOnce || info.Chat.Server == types.BroadcastServer ||
 		(info.Chat.Server != types.DefaultUserServer && info.Chat.Server != types.HiddenUserServer) {
 		return nil, false
+	}
+	// Her chat with herself (her notes, Confío's note): never, whether WhatsApp names it by her number or her LID.
+	if info.IsFromMe && info.Chat.User == info.Sender.User {
+		return nil, false
+	}
+	for _, user := range own {
+		if user != "" && info.Chat.User == user {
+			return nil, false
+		}
 	}
 	text := textOf(evt.Message)
 	if strings.TrimSpace(text) == "" {
@@ -163,9 +173,20 @@ func incoming(ctx context.Context, nameFn func(types.MessageInfo) string, evt *e
 	} else if info.SenderAlt.Server == types.DefaultUserServer {
 		phone = info.SenderAlt.User
 	}
+	// One chat, one id: the phone-number form when WhatsApp gives it, so her messages and the contact's (which may
+	// be addressed by LID on one side) are the same conversation.
+	chat := info.Chat.ToNonAD()
+	if chat.Server == types.HiddenUserServer {
+		for _, alt := range []types.JID{info.SenderAlt, info.RecipientAlt} {
+			if alt.Server == types.DefaultUserServer && (!info.IsFromMe || alt.User != info.Sender.User) {
+				chat = alt.ToNonAD()
+				break
+			}
+		}
+	}
 	return map[string]any{
-		"chat": info.Chat.ToNonAD().String(), "name": name, "phone": phone, "text": text,
-		"id": string(info.ID), "at": info.Timestamp.Unix(),
+		"chat": chat.String(), "name": name, "phone": phone, "text": text,
+		"id": string(info.ID), "at": info.Timestamp.Unix(), "from_me": info.IsFromMe,
 	}, true
 }
 
@@ -202,7 +223,7 @@ func nameOf(ctx context.Context, client *whatsmeow.Client, info types.MessageInf
 			}
 		}
 	}
-	if info.PushName != "" {
+	if info.PushName != "" && !info.IsFromMe { // on her own message the push name is hers, not the chat's
 		return info.PushName
 	}
 	if info.Chat.Server == types.DefaultUserServer {

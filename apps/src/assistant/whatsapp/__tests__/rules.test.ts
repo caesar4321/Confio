@@ -4,7 +4,7 @@ import { checkedAgo, initialOf } from '../rules';
 
 const link = (over: Partial<WhatsAppLink> = {}): WhatsAppLink => ({
   state: 'none', code: null, codeAt: null, phoneHint: null, reason: null, reasonMessage: null, linkedAt: null,
-  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: null, consentVersion: 3, consentOutdated: false, notices: [], ...over,
+  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: null, consentVersion: 4, consentOutdated: false, notices: [], ...over,
 });
 const draft = (over: Partial<WhatsAppDraft> = {}): WhatsAppDraft => ({
   id: 'd1', chat: 'Farmacia Central', phone: null, body: 'Hola', status: 'draft', reason: null, displayHash: 'h', ...over,

@@ -71,7 +71,11 @@ def _name(value):
 def tell(link, notice, replies):
     """The assistant tells the person about one important message, with replies to choose from."""
     data = service._unseal(notice.sealed, {})
-    lines = [f'«{_name(data.get("chat"))}» te escribió por WhatsApp:', f'«{_quote(data.get("preview"))}»']
+    # A chat that keeps writing is one thread: "siguió escribiendo", answered with what it says now.
+    earlier = any(service._unseal(other.sealed, {}).get('jid') == data.get('jid') for other in WhatsAppNotice.objects.filter(
+        link=link, created_at__gte=service._context_since()).exclude(pk=notice.pk).order_by('-created_at')[:20])
+    verb = 'siguió escribiendo' if earlier else 'te escribió'
+    lines = [f'«{_name(data.get("chat"))}» {verb} por WhatsApp:', f'«{_quote(data.get("preview"))}»']
     lines.append(KIND_WORDS.get(notice.kind, 'Parece importante.') + ' ¿Qué le respondo?')
     actions = [{'type': 'whatsapp_reply', 'target': str(notice.pk), 'label': reply} for reply in replies[:3]]
     # Always a way to say it in her own words: the assistant writes the full reply, on a card she confirms.
