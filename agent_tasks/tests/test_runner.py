@@ -1437,7 +1437,7 @@ class CheckoutTests(StepBase):
         self.assertEqual(service.approve(self.account, self.user, task.internal_id, total='R$ 189,00').state, 'working')
 
     def test_amazons_verification_steps_are_its_sign_in(self):
-        for path in ('/ap/signin', '/ap/cvf/request', '/ap/mfa'):
+        for path in ('/ap/signin', '/ap/cvf/request', '/ap/mfa', '/ax/claim/signin', '/ap/challenge'):
             self.assertTrue(guard.login_address(f'https://www.amazon.com.mx{path}'), path)
 
 

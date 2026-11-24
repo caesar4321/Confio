@@ -222,6 +222,11 @@ class Step:
         self.save(history=history, steps=self.task.steps + 1, failures=0, **fields)
 
     def stop(self, reason, **fields):
+        # Where it stopped, without any query (a store's sign-in carries tokens there): the next
+        # failure is read off the log, not guessed.
+        where = urlsplit(getattr(self, 'seen_url', '') or '')
+        logger.info('agent task %s stopped: %s at %s%s', self.task.internal_id, reason, where.hostname or '',
+                    where.path[:120])
         if not end(self.task, 'stopped', reason, lease=self.lease, **fields):
             raise Lost()
 

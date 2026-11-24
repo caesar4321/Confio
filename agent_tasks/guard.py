@@ -125,8 +125,8 @@ _FINAL_WORDS = re.compile(r'\b(realiza(r)? (tu |el |seu |o )?pedido|comprar ahor
                           r'confirmar (compra|pedido|pago)|place (your )?order)\b')
 _LOGIN_URL = re.compile(
     r'(/login\b|/signin\b|/sign-in\b|/registration\b|/identification\b|/lgz/|/authentication\b|/account-verification\b'
-    # Amazon's sign-in and its verification steps.
-    r'|/ap/(signin|cvf|mfa)\b)',
+    # Amazon's sign-in and its verification steps, old (/ap/) and new (/ax/claim, email first).
+    r'|/ap/(signin|cvf|mfa|challenge)\b|/ax/claim\b)',
     re.I)
 _BLOCKED_PAGE = re.compile(
     r'\b(acesso negado|access denied|acceso denegado|unusual traffic|trafego incomum|you have been blocked'
