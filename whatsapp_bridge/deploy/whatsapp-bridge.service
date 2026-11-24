@@ -11,6 +11,8 @@ Type=simple
 # from whatsapp-bridge.socket (group nginx, 0660).
 User=whatsapp-bridge
 Group=whatsapp-bridge
+# lib/pq looks for client certificates under $HOME/.postgresql: a home it may read (/home is protected).
+Environment=HOME=/opt/whatsapp-bridge
 Environment=BRIDGE_CALLBACK=http://127.0.0.1:8000/internal/whatsapp-bridge/events
 ExecStart=/opt/whatsapp-bridge/whatsapp-bridge
 Restart=always
