@@ -14,8 +14,7 @@ import java.security.MessageDigest
 import java.util.Calendar
 import java.util.TimeZone
 
-// Read-only Calendar Provider for Confío IA. This file and its permission
-// exist in debug builds only (docs/designs/assistant-mail-calendar.md).
+// Read-only Calendar Provider for Confío IA (docs/designs/assistant-mail-calendar.md).
 class ConfioCalendarPackage : ReactPackage {
     override fun createNativeModules(context: ReactApplicationContext): List<NativeModule> = listOf(ConfioCalendarModule(context))
     override fun createViewManagers(context: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()

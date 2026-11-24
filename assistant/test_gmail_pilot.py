@@ -35,7 +35,8 @@ def gmail_message(body='Tu factura vence mañana.', subject='Factura de luz', se
         parts.append({'mimeType': 'text/html', 'body': {'data': b64(html)}})
     headers = [('From', sender), ('To', 'owner@gmail.example'), ('Subject', subject),
                ('Message-ID', '<m1@luz.example>'), *extra]
-    return {'id': message_id, 'threadId': 'thread1', 'internalDate': '1795300000000',
+    # Recent: an undated need from mail older than three days is dropped, so a fixed date expires.
+    return {'id': message_id, 'threadId': 'thread1', 'internalDate': str(int(datetime.now(tz.utc).timestamp() * 1000)),
             'payload': {'mimeType': 'multipart/alternative', 'parts': parts,
                         'headers': [{'name': n, 'value': v} for n, v in headers]}}
 

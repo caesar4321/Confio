@@ -67,8 +67,8 @@ DEFAULTS = {
     'CONFIO_ASSISTANT_TRANSCRIBE_PRICE_PER_MINUTE': '0.0045',
 
     # ---- Phone calendar (assistant/calendar_context.py) ----
-    # '' = nobody, '*' = everyone, or '12,34'. OpenAI only: the consent copy names it.
-    'ASSISTANT_CALENDAR_ALLOWED_USER_IDS': '',
+    # '*' = everyone (2026-11-24), '' = nobody, or '12,34'. OpenAI only: the consent copy names it.
+    'ASSISTANT_CALENDAR_ALLOWED_USER_IDS': '*',
     'ASSISTANT_CALENDAR_MODEL': 'gpt-6-luna',
 
     # ---- Gmail pilot (assistant/gmail/) ----

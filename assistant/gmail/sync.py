@@ -347,7 +347,8 @@ def cleanup(now=None):
     MailNeed.objects.filter(
         Q(due_date__lt=cutoff.date()) | Q(due_date__isnull=True, created_at__lt=cutoff)).delete()
     MailDraft.objects.filter(expires_at__lte=now).delete()
-    GmailOAuthState.objects.filter(expires_at__lte=now).delete()
+    # Kept a while after expiring: someone who comes back from Google late is still counted (oauth.complete).
+    GmailOAuthState.objects.filter(expires_at__lte=now - timedelta(hours=oauth.LATE_HOURS)).delete()
     from assistant import connections
     try:
         for connection in connections.removed_connections()[:10]:

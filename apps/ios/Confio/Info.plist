@@ -65,6 +65,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Confío lee los calendarios que tú elijas para mostrarte lo que viene y avisarte. No los modifica, y solo salen del teléfono los títulos que marques para que Confío IA los clasifique.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Confío lee los calendarios que tú elijas para mostrarte lo que viene y avisarte. No los modifica, y solo salen del teléfono los títulos que marques para que Confío IA los clasifique.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Confío usa la cámara para escanear códigos QR y para confirmar con tu rostro que eres tú antes de mover tu dinero.</string>
 	<key>NSContactsUsageDescription</key>

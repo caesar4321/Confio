@@ -1,6 +1,4 @@
-// Read-only EventKit for Confío IA. Debug-only: a Release binary has no calendar
-// code until the release gates in docs/designs/assistant-mail-calendar.md are met.
-#if DEBUG
+// Read-only EventKit for Confío IA (docs/designs/assistant-mail-calendar.md).
 import CryptoKit
 import EventKit
 import Foundation
@@ -132,4 +130,3 @@ final class ConfioCalendar: NSObject {
     return organizer.isCurrentUser
   }
 }
-#endif

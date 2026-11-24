@@ -37,7 +37,7 @@ class MainApplication : Application(), ReactApplication {
             add(ConfioLocationPackage())
             add(FaceLivenessPackage())
             add(ConfioAudioRoutePackage())
-            addAll(variantPackages())
+            add(ConfioCalendarPackage())
             // Manual: Didit SDK (custom maven repo; excluded from autolinking)
             add(SdkReactNativePackage())
           }

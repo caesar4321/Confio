@@ -661,3 +661,138 @@ class AdminFlowTests(TestCase):
             self.assertIsNotNone(Request.objects.get().invited_at)
             self.assertEqual(LogEntry.objects.get().user_id, staff.pk)
             self.assertEqual(post({'action': 'reserve_place'}).status_code, 302)  # nothing left to confirm
+
+
+@override_settings(**ON, GMAIL_PILOT_SELF_SERVE=True)
+class SelfServeTests(TestCase):
+    """Unverified production: anyone takes one of the places left by connecting."""
+    setUp = ConnectionsTests.setUp
+    person = ConnectionsTests.person
+    see = ConnectionsTests.see
+
+    def start(self, user=None):
+        from assistant.gmail import oauth
+        return oauth.start(user or self.user, config.CONSENT_VERSION)
+
+    def take(self, user):
+        from django.db import transaction
+        from assistant.gmail import oauth
+        with transaction.atomic():
+            oauth._take_place(user)
+
+    def test_anyone_may_connect_and_connecting_spends_a_place(self):
+        self.assertEqual(self.see()['gmail'], 'invited')
+        before = connections.seats_used()
+        self.take(self.user)
+        row = Request.objects.get(user=self.user, feature='gmail')
+        self.assertTrue(row.invited_at and row.ready_at and not row.removed_at and not row.google_email)
+        self.assertEqual(connections.seats_used(), before + 1)
+        self.assertTrue(config.user_allowed(self.user))
+
+    def test_google_screen_holds_a_place_and_full_stops_before_it(self):
+        left = connections.seats_left()
+        self.start()
+        self.assertEqual(connections.seats_left(), left - 1)
+        self.start()  # a new attempt replaces the old one
+        self.assertEqual(connections.seats_left(), left - 1)
+        from assistant.gmail.errors import MailRefused
+        late = self.person('late')
+        with mock.patch.object(connections, 'seats_left', return_value=0):
+            self.assertFalse(config.user_allowed(late))
+            self.assertEqual(self.see(late)['gmail'], 'full')
+            with self.assertRaises(MailRefused) as caught:
+                self.start(late)
+        self.assertEqual(caught.exception.code, 'full')
+
+    def test_every_account_that_consented_counts_once(self):
+        from assistant.gmail import oauth
+        from assistant.gmail.models import GmailGrant
+        left = connections.seats_left()
+        oauth._granted('a@gmail.com')
+        oauth._granted('A@gmail.com')
+        oauth._granted('')
+        self.assertEqual(GmailGrant.objects.count(), 2)
+        self.assertEqual(connections.seats_left(), left - 2)  # two Google accounts, neither the configured owner's
+
+    def test_their_own_hold_never_counts_against_them(self):
+        self.start()
+        with mock.patch.object(connections, 'seats_left', return_value=0):
+            self.assertTrue(config.user_allowed(self.user))  # the last place is the one they hold
+
+    def test_coming_back_from_google_counts_once_whatever_happens(self):
+        from assistant.gmail import client, oauth
+        from assistant.gmail.errors import GmailError, MailRefused
+        from assistant.gmail.models import GmailGrant, GmailOAuthState
+        url, verifier = self.start()
+        from urllib.parse import parse_qs, urlparse
+        state = parse_qs(urlparse(url).query)['state'][0]
+        with mock.patch.object(client, 'exchange_code', side_effect=GmailError(400)):
+            with self.assertRaises(MailRefused):
+                oauth.complete(self.user, 'code', state, verifier)
+        self.assertEqual(GmailGrant.objects.count(), 1)
+        self.assertFalse(GmailOAuthState.objects.exists())
+        with self.assertRaises(MailRefused):  # used once
+            oauth.complete(self.user, 'code', state, verifier)
+        self.assertEqual(GmailGrant.objects.count(), 1)
+
+    def test_a_late_return_from_google_is_still_counted(self):
+        from urllib.parse import parse_qs, urlparse
+        from assistant.gmail import oauth
+        from assistant.gmail.errors import MailRefused
+        from assistant.gmail.models import GmailGrant, GmailOAuthState
+        url, verifier = self.start()
+        GmailOAuthState.objects.update(expires_at=timezone.now() - timedelta(minutes=30))
+        sync.cleanup(timezone.now())  # the sweep keeps it for a while
+        with mock.patch.object(connections, 'seats_left', return_value=0):
+            self.assertTrue(config.user_allowed(self.user))
+        state = parse_qs(urlparse(url).query)['state'][0]
+        with self.assertRaises(MailRefused) as caught:
+            oauth.complete(self.user, 'code', state, verifier)
+        self.assertEqual((caught.exception.code, GmailGrant.objects.count()), ('expired', 1))
+
+    def test_places_and_google_accounts_are_counted_once_each(self):
+        from assistant.gmail import crypto, oauth
+        left = connections.seats_left()
+        configured = get_user_model().objects.create_user(
+            username='cx_owner', email='o@example.com', password='x', firebase_uid='cx-owner', pk=999999901)
+        oauth._granted('owner@gmail.com')  # the configured owner's mailbox, connected
+        now = timezone.now()
+        GmailConnection.objects.create(user=configured, consent_version=2, connected_at=now, next_sync_at=now,
+                                       email_key=crypto.opaque('owner@gmail.com'))
+        self.assertEqual(connections.seats_left(), left)  # one person, one account: still one place
+        oauth._granted('')  # someone who consented and was never connected
+        self.assertEqual(connections.seats_left(), left - 1)
+
+    def test_a_reserved_place_is_not_held_twice(self):
+        Request.objects.create(user=self.user, feature='gmail', answer='yes', invited_at=timezone.now())
+        with mock.patch.object(connections, 'seats_left', return_value=0):
+            self.start()
+            self.assertTrue(config.user_allowed(self.user))
+
+    def test_a_member_reconnects_even_when_full(self):
+        self.take(self.user)
+        with mock.patch.object(connections, 'seats_left', return_value=0):
+            self.start()  # no refusal
+            self.assertTrue(config.user_allowed(self.user))
+
+    def test_a_place_taken_away_is_not_taken_again(self):
+        self.take(self.user)
+        connections.remove([Request.objects.get(user=self.user).pk])
+        self.assertFalse(config.user_allowed(self.user))
+        from assistant.gmail.errors import MailRefused
+        with self.assertRaises(MailRefused):
+            self.take(self.user)
+
+    def test_waiting_people_hear_the_news(self):
+        Request.objects.create(user=self.user, feature='gmail', answer='yes')
+        self.assertEqual(connections.tell_waiting(Request.objects.values_list('pk', flat=True)), 1)
+
+    def test_off_without_the_switch_or_the_list(self):
+        with override_settings(GMAIL_PILOT_SELF_SERVE=False):
+            self.assertFalse(config.user_allowed(self.user))
+        with override_settings(GMAIL_PILOT_USER_IDS=''):
+            self.assertFalse(config.user_allowed(self.user))
+
+    def test_banned_never(self):
+        self.banned.return_value = (True, None)
+        self.assertFalse(config.user_allowed(self.user))

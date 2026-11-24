@@ -5,8 +5,8 @@ beforeEach(() => {
   takeMailConnectResult();
 });
 
-it('ships off', () => {
-  expect(ASSISTANT_MAIL_ENABLED).toBe(false);
+it('ships on', () => {
+  expect(ASSISTANT_MAIL_ENABLED).toBe(true);
 });
 
 it('takes the code and state once', () => {

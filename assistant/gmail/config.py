@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import models
 from django.utils import timezone
 
 from assistant import conf
@@ -45,11 +46,54 @@ def tester_ids() -> set:
     return set(listed) | {str(pk) for pk in given}
 
 
-def user_allowed(user) -> bool:
+def eligible(user) -> bool:
+    """Could use the pilot at all, place or not."""
     if user is None or not getattr(user, 'is_active', False) or getattr(user, 'deleted_at', None):
         return False
-    return (bool(conf.get('CONFIO_ASSISTANT_ENABLED')) and configured() and str(user.pk) in tester_ids()
-            and not banned(user))
+    return bool(conf.get('CONFIO_ASSISTANT_ENABLED')) and configured() and not banned(user)
+
+
+def user_allowed(user) -> bool:
+    return eligible(user) and (str(user.pk) in tester_ids() or may_take_place(user))
+
+
+def self_serve() -> bool:
+    """The Google project is in (unverified) production: no address has to be typed into its console."""
+    return bool(getattr(settings, 'GMAIL_PILOT_SELF_SERVE', False)) and bool(configured_tester_ids())
+
+
+def had_place(user) -> bool:
+    """Given a place once (by hand or self-serve). One taken away is not taken again by connecting."""
+    from assistant.connections_models import AssistantConnectionRequest as Request
+    return Request.objects.filter(user=user, feature=Request.Feature.GMAIL).filter(
+        models.Q(ready_at__isnull=False) | models.Q(removed_at__isnull=False)).exists()
+
+
+def reserved_place(user) -> bool:
+    """Reserved from the admin and not given yet: the place is already counted as theirs."""
+    from assistant.connections_models import AssistantConnectionRequest as Request
+    return Request.objects.filter(user=user, feature=Request.Feature.GMAIL, invited_at__isnull=False,
+                                  ready_at__isnull=True, removed_at__isnull=True).exists()
+
+
+def holds_place(user) -> bool:
+    """Never held back by the count: a member, or a place reserved for them."""
+    return str(user.pk) in tester_ids() or reserved_place(user)
+
+
+def may_take_place(user) -> bool:
+    """Self-serve: never had a place, and one is reserved for them, held by their open attempt, or left."""
+    if not self_serve() or had_place(user):
+        return False
+    if reserved_place(user):
+        return True
+    from assistant import connections
+    from .models import GmailOAuthState
+    if GmailOAuthState.objects.filter(user=user).exclude(challenge='').exists():
+        # Their own attempt holds the place and must not count against them. An expired one still lets
+        # them come back, so the account Google counted is recorded (oauth.complete) before the refusal.
+        return True
+    return connections.seats_left() > 0
 
 
 def consented(connection) -> bool:

@@ -1,6 +1,7 @@
 """Gmail pilot rows. Hard-deleted on purpose: disconnecting has to erase the token and what came from mail.
 
-Everything that came from Google is sealed (crypto.seal): no mail is stored.
+Everything that came from Google is sealed (crypto.seal): no mail is stored. The one row that outlives
+a disconnect is GmailGrant, a keyed hash per Google account kept to mirror Google's lifetime count of 100.
 """
 import uuid
 
@@ -38,6 +39,20 @@ class GmailConnection(models.Model):
 
     def __str__(self):
         return f'{self.user_id}: {self.status}'
+
+
+class GmailGrant(models.Model):
+    """A Google account that consented on Google's screen: Google counts it toward the 100 for life.
+
+    Only a keyed hash (crypto.opaque) or a random key when the address was never learned. Kept on purpose
+    after disconnecting or deleting the account: the count it mirrors is never reset.
+    """
+
+    key = models.CharField(max_length=64, unique=True)
+    granted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'assistant'
 
 
 class GmailOAuthState(models.Model):

@@ -24,8 +24,8 @@ import { ASSISTANT_CALENDAR_ENABLED } from '../flag';
 
 beforeEach(() => mockStore.clear());
 
-it('ships off', () => {
-  expect(ASSISTANT_CALENDAR_ENABLED).toBe(false);
+it('ships on', () => {
+  expect(ASSISTANT_CALENDAR_ENABLED).toBe(true);
 });
 
 it('never asks the phone for events without a chosen calendar', async () => {

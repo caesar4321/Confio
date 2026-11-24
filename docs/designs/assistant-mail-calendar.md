@@ -304,13 +304,16 @@ Why this slice: it needs no Google approval and no credential, covers Apple and 
 | Piece | Where |
 |---|---|
 | App | `apps/src/assistant/calendar/`, entry in `MascotPicker.tsx` |
-| iOS | `apps/ios/Confio/ConfioCalendar.swift`, `.m`, compiled in Debug only. No purpose string in `Info.plist` yet |
-| Android | `ConfioCalendarPackage.kt` in the debug source set, with its permission |
+| iOS | `apps/ios/Confio/ConfioCalendar.swift`, `.m`, in every build since 2026-11-24, with both purpose strings in `Info.plist` |
+| Android | `ConfioCalendarPackage.kt` in the main source set, `READ_CALENDAR` in the main manifest |
 | Server | `assistant/calendar_context.py`, `assistant/calendar_schema.py`, no model or migration |
 
-Three switches keep it off: `ASSISTANT_CALENDAR_ENABLED = false` in the app, Debug-only native access, and `ASSISTANT_CALENDAR_ALLOWED_USER_IDS` empty on the server.
+**On for everyone since 2026-11-24 (founder's decision, ahead of counsel's answer).** `ASSISTANT_CALENDAR_ENABLED = true` in the app and `ASSISTANT_CALENDAR_ALLOWED_USER_IDS` defaults to `'*'`. The switch that remains is the server's: set that name to an empty value in `config/settings.py` (it is still not read from the environment) and the send to OpenAI stops; reading on the phone and the local reminders need a new build to stop.
 
 ### Release gates
+
+State on 2026-11-24: 4 is done in code and the Android release variant compiles; 5 was replaced by the `'*'` default. Still open: 1 (counsel has not answered; clause drafted in `docs/drafts/privacy-phone-calendar.md`, not published), 2 (store declarations), 3 (no real-device test of a release build yet) and 7.
+
 
 1. The founder approves the copy and the send to OpenAI. Counsel updates the Privacy Policy.
 2. Update App Privacy, Data safety and the privacy manifest.
@@ -476,3 +479,15 @@ What this changes in the rules above, and what holds them:
 - **Apple Calendar is not covered** by this route. The phone-calendar slice (section 10) stays as built and off.
 
 Before the first tester, additionally: enable the Calendar API and add the third scope in the Google project (step 1 above), and ship a build whose consent screen is version 2.
+
+
+## 10e. Self-serve places (2026-11-24)
+
+The founder chose unverified production: the Google project `confio-gmail-pilot` is "In production" without verification, so no address is typed into Google's console. People see Google's "unverified app" screen, and Google itself refuses a 101st account for the project's lifetime.
+
+- `GMAIL_PILOT_SELF_SERVE=True` (with a non-empty `GMAIL_PILOT_USER_IDS`) lets anyone eligible without a place connect while places are left. The admin waitlist steps keep working.
+- Opening Google's screen holds a place for 15 minutes (`GmailOAuthState`), under the seats lock, so places are never handed out past what is left. A member (has a place) is never held back: a reconnect always works.
+- Google counts every account that consents, even one we then refuse. `GmailGrant` mirrors that count: a keyed hash per Google account, or a random key when the address is unknown, kept forever and not linked to the Confío account. Places left = 100 − max(our places, Google accounts) − open attempts.
+- Someone who consented is never refused for capacity: the hold was taken before Google's screen. A place taken away is not taken again by connecting.
+- `GMAIL_PILOT_FULL=True` stays the backstop when Google's console shows a higher count than ours.
+- The refresh token no longer expires every 7 days (that was Testing mode only).

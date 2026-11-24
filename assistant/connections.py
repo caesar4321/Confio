@@ -52,7 +52,27 @@ def seats_left() -> int:
     # Google's count can be ahead of ours (added by hand, corrected addresses): the owner says when it is full.
     if getattr(settings, 'GMAIL_PILOT_FULL', False):
         return 0
-    return max(gmail.MAX_TESTERS - seats_used(), 0)
+    used = seats_used()
+    if gmail.self_serve():
+        from .gmail.models import GmailGrant, GmailOAuthState
+        # Google counts every account that consented, and anyone on its screen now may become one.
+        holders = set(gmail.tester_ids()) | {str(pk) for pk in Request.objects.filter(
+            feature=Request.Feature.GMAIL, invited_at__isnull=False, ready_at__isnull=True,
+            removed_at__isnull=True).values_list('user_id', flat=True)}
+        open_attempts = GmailOAuthState.objects.filter(expires_at__gt=timezone.now()).exclude(
+            user_id__in=list(holders)).count()
+        used = GmailGrant.objects.count() + used - _counted_by_grant(GmailGrant) + open_attempts
+    return max(gmail.MAX_TESTERS - used, 0)
+
+
+def _counted_by_grant(grant_model) -> int:
+    """People with a place whose current mailbox is already a recorded grant: counted once, not twice."""
+    given = Request.objects.filter(feature=Request.Feature.GMAIL, invited_at__isnull=False,
+                                   user__isnull=False).values_list('user_id', flat=True)
+    people = {str(pk) for pk in given} | set(gmail.configured_tester_ids())
+    keys = dict(GmailConnection.objects.filter(user_id__in=list(people)).values_list('user_id', 'email_key'))
+    recorded = set(grant_model.objects.filter(key__in=list(keys.values())).values_list('key', flat=True))
+    return sum(1 for key in keys.values() if key in recorded)
 
 
 def pilot_open() -> bool:
@@ -298,8 +318,9 @@ def tell_waiting(request_ids) -> int:
     rows = Request.objects.filter(
         pk__in=list(request_ids), answer=Request.Answer.YES,
         user__is_active=True, user__deleted_at__isnull=True).select_related('user')
-    # Everyone who reads "En la lista", a spent place included. Not who already has Gmail.
-    waiting = [row for row in rows if row.feature != Request.Feature.GMAIL or not gmail.user_allowed(row.user)]
+    # Everyone who reads "En la lista", a spent place included. Not who already has Gmail (self-serve can still come in).
+    members = gmail.tester_ids()
+    waiting = [row for row in rows if row.feature != Request.Feature.GMAIL or str(row.user_id) not in members]
     people = {row.user.pk: row.user for row in waiting}
     Request.objects.filter(pk__in=[row.pk for row in waiting]).update(notified_at=timezone.now())
     for user in people.values():

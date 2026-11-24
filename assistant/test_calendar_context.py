@@ -36,8 +36,8 @@ class CalendarContextTests(SimpleTestCase):
             self.classify(**kwargs)
         self.assertEqual(caught.exception.code, code)
 
-    def test_off_by_default(self):
-        self.assertEqual(cal.conf.DEFAULTS['ASSISTANT_CALENDAR_ALLOWED_USER_IDS'], '')
+    def test_on_for_everyone_and_the_setting_can_switch_it_off(self):
+        self.assertEqual(cal.conf.DEFAULTS['ASSISTANT_CALENDAR_ALLOWED_USER_IDS'], '*')
         for value in ('', None, '9011', '90'):
             with override_settings(ASSISTANT_CALENDAR_ALLOWED_USER_IDS=value):
                 self.refused('unavailable')
