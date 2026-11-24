@@ -93,6 +93,52 @@ class ReadTests(SimpleTestCase):
         self.assertEqual(spei.read(('CLABE', CLABE, 'Total', '$1,249.00', 'Referencia', '4021775')), (None, 'code'))
 
 
+class ByFactsTests(SimpleTestCase):
+    """With the amount the person approved, nothing is read by its label: one valid CLABE, and that amount."""
+
+    AMAZON = ('Gracias, tu pedido fue recibido', 'Pedido 701-1234567-7654321', 'Para completar tu compra transfiere',
+              '$99.48', 'a la cuenta', '646180157000000004', 'antes de 72 horas', 'Llega el jueves 26 de nov')
+
+    def test_a_page_with_no_label_of_ours_is_read(self):
+        self.assertEqual(spei.read(self.AMAZON, expected='99.48'),
+                         ({'clabe': CLABE, 'amount': Decimal('99.48'), 'reference': ''}, ''))
+        self.assertEqual(spei.read(self.AMAZON)[0], None)   # by labels alone it never was
+
+    def test_another_amount_is_not_this_orders_page(self):
+        for approved in ('99.49', '9.48', '199.48', '99'):
+            with self.subTest(approved=approved):
+                self.assertEqual(spei.read(self.AMAZON, expected=approved), (None, 'code'))
+
+    def test_whole_pesos_only_with_their_sign(self):
+        page = ('Transfiere $1,249 a la CLABE', CLABE, '1249 opiniones')
+        self.assertEqual(spei.read(page, expected='1249.00')[0]['amount'], Decimal('1249.00'))
+        self.assertEqual(spei.read(('1249 opiniones', CLABE), expected='1249.00'), (None, 'code'))
+
+    def test_two_accounts_or_none_or_dollars_are_never_chosen_between(self):
+        self.assertEqual(spei.read((*self.AMAZON, OTHER), expected='99.48'), (None, 'several'))
+        self.assertEqual(spei.read(tuple(n for n in self.AMAZON if n != CLABE), expected='99.48'), (None, 'code'))
+        self.assertEqual(spei.read((*self.AMAZON, 'US$ 5.10'), expected='99.48'), (None, 'several'))
+        bad = tuple('646180157000000005' if n == CLABE else n for n in self.AMAZON)   # wrong check digit
+        self.assertEqual(spei.read(bad, expected='99.48'), (None, 'code'))
+
+
+    def test_an_account_a_seller_could_have_written_is_never_the_stores(self):
+        # Recorded as the audit's P1: a CLABE in a listing's title, on the store's own thank-you page.
+        thanks = ('Gracias, tu pedido fue recibido', 'Chocolate 646180157000000004 oferta', 'Total', '$99.48',
+                  'Te compartiremos la cuenta CLABE para pagar')
+        self.assertEqual(spei.read(thanks, expected='99.48', item='Chocolate 646180157000000004 oferta'),
+                         (None, 'several'))
+        self.assertEqual(spei.read(thanks, expected='99.48', item='Chocolate 6461 8015 7000 0000 04 oferta'),
+                         (None, 'several'))
+        # One that was already on a page before the order existed (the product page, the checkout).
+        self.assertEqual(spei.read(self.AMAZON, expected='99.48', before=[CLABE]), (None, 'several'))
+        self.assertEqual(spei.read(self.AMAZON, expected='99.48', before=[OTHER])[0]['clabe'], CLABE)
+
+    def test_the_amount_stands_beside_the_account(self):
+        far = ('Total', '$99.48', *(f'Recomendado {n}' for n in range(30)), 'Vendedor: paga a', CLABE)
+        self.assertEqual(spei.read(far, expected='99.48'), (None, 'code'))
+
+
 class MexicoTests(StepBase):
     def setUp(self):
         super().setUp()
@@ -114,6 +160,19 @@ class MexicoTests(StepBase):
                 mock.patch('payment_accounts.payment_intents.cancel'), mock.patch('agent_tasks.runner.post_payment'):
             self.step(self.task)
         return came_of(self.task)
+
+    def test_the_page_the_order_was_pressed_on_is_never_its_payment_page(self):
+        AgentTask.objects.filter(pk=self.task.pk).update(order={
+            **self.task.order, 'pressed_at': [runner.same_page('https://www.mercadolibre.com.mx/compra/123/pago')]})
+        self.task.refresh_from_db()
+        self.assertEqual(self.outcome(MERCADO_PAGO), 'code')
+        self.prepare.assert_not_called()
+
+    def test_an_account_seen_before_the_order_is_never_paid(self):
+        AgentTask.objects.filter(pk=self.task.pk).update(order={**self.task.order, 'seen_clabes': [CLABE]})
+        self.task.refresh_from_db()
+        self.assertEqual(self.outcome(MERCADO_PAGO), 'several')
+        self.prepare.assert_not_called()
 
     def test_the_orders_spei_details_become_the_card(self):
         self.assertEqual(self.outcome(MERCADO_PAGO), 'prepared')
@@ -140,7 +199,7 @@ class MexicoTests(StepBase):
         self.mode.side_effect = None
         self.mode.return_value = ('manual', 'mx_clabe')
         changed = tuple('$1,250.00' if node == '$1,249.00' else node for node in MERCADO_PAGO)
-        self.assertEqual(self.outcome(changed), 'unpaid')
+        self.assertEqual(self.outcome(changed), 'code')   # the approved amount is not on it: not read at all
 
     def test_mercado_pagos_own_ticket_is_read_and_its_payment_number_is_the_reference(self):
         # Mercado Libre México pays SPEI through Mercado Pago: the CLABE is on its ticket, with no reference.

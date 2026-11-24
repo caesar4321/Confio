@@ -326,7 +326,9 @@ def approve(account, user, task_id, total=None):
     # Bound to that item, that total, that button, on that page; used once (operate._order).
     order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item', 'address')}
     order['approved']['manual'] = bool(order.get('manual'))   # who pays it, as their card said
-    return _answered(account, user, task_id, 'approve', order=order)
+    entry = {'did': 'the person approved the order', 'result': 'call ready_to_order again: it is pressed for you'}
+    return _answered(account, user, task_id, 'approve', order=order,
+                     history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
 
 
 def answer_request(account, user, task_id, yes, what=None):

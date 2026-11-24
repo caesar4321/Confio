@@ -1,14 +1,16 @@
-"""Code's own checks against pages recorded from real stores (AgentTask.trace, anonymised).
+"""Pages recorded from real stores (AgentTask.trace, anonymised).
 
-Every rule here was once written from an imagined page and failed on the real one. A rule that
-changes is run against these before a person meets it."""
+What a page means is read by models (agent.judge, agent.review): their real judgment on these pages is
+run against the live models by scripts/ops/eval_agent_readers.py, never here. Here: the facts code checks
+on those same pages, and that the tests' stand-in readers (tests/readers.py) read them as a person would."""
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
 
-from agent_tasks import guard, operate
+from agent_tasks import operate
+from agent_tasks.tests import readers
 
 PAGES = Path(__file__).parent / 'pages'
 
@@ -29,46 +31,23 @@ class AmazonMexicoReviewTests(SimpleTestCase):
 
     def setUp(self):
         self.page = recorded('amazon_mx_review')
-        self.on_checkout = guard.is_checkout(self.page)
+        self.final = next(e for e in self.page.elements if e['label'] == 'Realiza tu pedido y paga')
 
-    def floor(self, label):
-        element = next(e for e in self.page.elements if e['label'].startswith(label))
-        return guard.hard_refusal(element, on_checkout=self.on_checkout, page=self.page)
-
-    def test_it_is_a_checkout_and_its_last_page(self):
-        self.assertTrue(self.on_checkout)
-        self.assertTrue(guard.final_step(self.page.text, self.page.elements))
-
-    def test_what_the_agent_must_press_is_left_to_the_judge(self):
-        # 2026-11-24: "Cambiar el método de pago" was refused for its address (/checkout/.../pay).
-        for label in ('Cambiar | Cambiar el método de pago', 'Cambiar | Cambiar dirección de entrega',
-                      'jueves 26 de nov | $44.00 Envío estándar', 'Cambiar fecha y hora de entrega',
-                      'Carrito | Volver al carrito', 'Recolección cerca disponible'):
-            with self.subTest(label=label):
-                self.assertEqual(self.floor(label), '')
-
-    def test_what_code_never_lets_through(self):
-        for label, kind in (('Realiza tu pedido y paga', 'places_order'), ('Prueba Prime gratis', 'account'),
-                            ('Empieza tu prueba gratis', 'account'), ('Pagar con Mastercard', 'card'),
-                            ('Agregar tarjeta de regalo', 'account'),
-                            ('Revisa tu opción de envío. Marca esta casilla para establecer', 'account'),
-                            ('miércoles 25 de nov Envíos rápidos y GRATIS', 'account')):   # delivery with a Prime trial
-            with self.subTest(label=label):
-                self.assertEqual(self.floor(label), kind)
-
-    def test_the_total_is_amazons_total_with_its_long_bracket(self):
+    def test_the_figures_code_checks_are_on_the_page(self):
         # "Total (IVA incluido, en caso de ser aplicable) $129.00"
-        self.assertTrue(operate.total_on(self.page.text, '$129.00'))
-        for other in ('$85.00', '$44.00', '$59.00'):   # the products, the shipping, another delivery
-            self.assertFalse(operate.total_on(self.page.text, other), other)
+        self.assertTrue(operate.figure_on(self.page.text, operate.amount_of('$129.00')))
+        self.assertFalse(operate.figure_on(self.page.text, operate.amount_of('$130.00')))
 
-    def test_a_saved_card_is_never_ordered_with(self):
-        refusal = operate._method_refusal(SimpleNamespace(country='MX'), self.page)
-        self.assertIn('local payment method', refusal)
+    def test_an_address_counts_only_as_the_page_writes_it(self):
+        self.assertTrue(operate.written_on(self.page.text, 'Calle Falsa 123, CENTRO, GUADALAJARA, JALISCO, 44100, México'))
+        self.assertTrue(operate.written_on(self.page.text, 'calle falsa 123,  centro'))   # case and spacing aside
+        self.assertFalse(operate.written_on(self.page.text, 'Calle Verdadera 9, Monterrey'))
+        self.assertFalse(operate.written_on(self.page.text, ''))
 
-    def test_the_address_is_the_orders(self):
-        self.assertEqual(guard.ship_to(self.page.text),
-                         'ana perez calle falsa 123, centro, guadalajara, jalisco, 44100, mexico')
+    def test_a_saved_card_is_never_what_a_reader_calls_the_asked_way(self):
+        read = readers.review_by_words(SimpleNamespace(country='MX'), self.page, self.final, 'Chocolate', None)
+        self.assertEqual((read['places_order'], read['total']), (True, '129.00'))
+        self.assertNotEqual(read['pays_with'], 'asked')
 
 
 class AmazonMexicoPayTests(SimpleTestCase):
@@ -76,16 +55,6 @@ class AmazonMexicoPayTests(SimpleTestCase):
 
     def setUp(self):
         self.page = recorded('amazon_mx_pay')
-
-    def floor(self, label):
-        element = next(e for e in self.page.elements if e['label'].startswith(label))
-        return guard.hard_refusal(element, on_checkout=True, page=self.page)
-
-    def test_spei_and_the_way_on_are_the_models(self):
-        for label in ('Transferencia electrónica (Finaliza tu pago con SPEI', 'Usar este método de pago',
-                      'Revisar el pedido'):
-            with self.subTest(label=label):
-                self.assertEqual(self.floor(label), '')
 
     def test_amazon_says_it_will_share_a_clabe_after_the_order(self):
         self.assertIn('cuenta CLABE de 18 dígitos', self.page.text)
@@ -98,18 +67,10 @@ class AmazonMexicoSpeiReviewTests(SimpleTestCase):
         self.page = recorded('amazon_mx_review_spei')
         self.final = next(e for e in self.page.elements if e['label'] == 'Realiza tu pedido y paga')
 
-    def test_a_checkout_address_is_never_a_products_page(self):
-        # /checkout/p/p-000…/spc: that "p" refused the final button as "on a product page".
-        self.assertFalse(guard.product_address(self.page.url))
-        self.assertTrue(guard.product_address('https://www.amazon.com.mx/De-la-Rosa/dp/B0X'))
-        self.assertTrue(guard.product_address('https://tienda.mx/p/123'))
+    def test_the_total_the_person_approves_is_written_on_it(self):
+        self.assertTrue(operate.figure_on(self.page.text, operate.amount_of('$99.48')))
 
-    def test_spei_is_read_as_the_method_after_the_address_s_own_cambiar(self):
-        # "… Cambiar  Pagando con SPEI  Agregar tarjeta de regalo …"
-        self.assertEqual(operate._method_refusal(SimpleNamespace(country='MX'), self.page), '')
-
-    def test_the_final_button_is_named_never_pressed_and_the_total_is_the_pages(self):
-        self.assertTrue(guard.final_looking(self.final))
-        self.assertEqual(guard.hard_refusal(self.final, on_checkout=True, page=self.page), 'places_order')
-        self.assertTrue(operate.total_on(self.page.text, '$99.48'))
-        self.assertFalse(operate.total_on(self.page.text, '$55.48'))
+    def test_a_reader_calls_it_the_order_paid_by_spei(self):
+        read = readers.review_by_words(SimpleNamespace(country='MX'), self.page, self.final, 'Chocolate', None)
+        self.assertEqual((read['places_order'], read['pays_with'], read['total']), (True, 'asked', '99.48'))
+        self.assertTrue(operate.written_on(self.page.text, read['ship_to']))

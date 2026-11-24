@@ -13,6 +13,8 @@ from agent_tasks.models import AgentProfile, AgentTask
 
 
 REAL_KICK = runner.kick   # before RowsBase patches it
+from agent_tasks.tests.readers import (judge_by_words, payment_page_by_words, review_by_words, ship_to,
+                                       total_on)
 from agent_tasks.tests.base import (BASE, CODE, CODE_TEXT, RowsBase, SITE, cart_button, element, link, picture,
                                     search_box, snap)
 
@@ -26,21 +28,6 @@ def came_of(task):
     if task.state == 'working' and task.history and task.history[-1]['did'] == runner.UNREAD:
         return task.history[-1]['result']
     return task.state
-
-
-def judge_by_words(task, page, element, meter):
-    parts = guard._parts(element)
-    if guard.final_looking(element) or guard.final_button(element):
-        return 'places_order', 'final words'
-    if any(guard.card_words(part) for part in parts):
-        return 'card', 'a card'
-    if any(guard._NEVER.search(part) for part in parts) or guard.account_address(element.get('href') or ''):
-        return 'account', 'the account'
-    on_checkout = guard.is_checkout(page)
-    stage = guard.stage_of(page, on_checkout=on_checkout)
-    if stage in ('final', 'money') and not guard.may_press(element, on_checkout=on_checkout, stage=stage, page=page):
-        return 'places_order', 'the last step'   # as the real judge reads "Continuar" on the final review
-    return 'safe', ''
 
 
 def field(label, ref, kind='text', **over):
@@ -74,6 +61,9 @@ class StepBase(RowsBase):
         # The click judge (a model) stands in with the guard's own reading of the words: tests of the
         # judge's real judgment run against recorded pages (scripts/ops, scratch eval), not here.
         self.judge = self.patch('agent_tasks.agent.judge', side_effect=judge_by_words)
+        # The order's reader (a model) likewise: what a careful reader would say of the page's words.
+        self.review = self.patch('agent_tasks.agent.review', side_effect=review_by_words)
+        self.payment_page = self.patch('agent_tasks.agent.payment_page', side_effect=payment_page_by_words)
         # Confío pays it, unless the rail is switched off for everyone (Bolivia): the person's own
         # account state is what the manual tests set.
         self.mode = self.patch('agent_tasks.service.pay_mode', side_effect=lambda task, meta: (
@@ -449,7 +439,7 @@ class AfterCheckoutTests(StepBase):
     def test_never_on_a_page_the_agent_read(self):
         self.read.return_value = [(CODE, 200)]
         # A shopping page is not an order's own page; and an order page the agent read while shopping is not trusted.
-        for url, why in ((f'{BASE}/p/1', 'offsite'), (f'{BASE}/p/1?variation=2', 'offsite'), (f'{BASE}/s', 'offsite'),
+        for url, why in ((f'{BASE}/p/1', 'code'), (f'{BASE}/p/1?variation=2', 'code'),
                          (f'{BASE}/compras/7', 'code'), (f'{BASE}/compras/7#x', 'code')):
             with self.subTest(url=url):
                 self.browser.capture.return_value = (picture(url), picture(url))
@@ -930,33 +920,30 @@ class ManageTests(StepBase):
                     self.assertNotEqual(task.reason, 'act')
                     AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
 
-    def test_on_a_request_form_a_plain_way_on_is_the_persons_even_when_the_judge_says_safe(self):
-        # A return form whose last button only says "Continuar" or "Enviar".
-        self.judge.side_effect = None
-        self.judge.return_value = ('safe', 'continues a step')
+    def test_what_the_judge_reads_as_sending_a_request_is_the_persons(self):
+        # A return form whose last button only says "Continuar": the judge reads the page, no word list does.
         page = snap('Devolución Motivo de la devolución: Ya no lo necesito', self.ORDERS, elements=[
-            element('Continuar', ref=0), element('Enviar', ref=1), element('Ver detalles', ref=2),
-            element('Devolver o reemplazar artículos', ref=3, tag='a', href=f'{BASE}/returns/start')])
-        for ref in (0, 1):
-            self.manage.return_value = ('press', {'ref': ref})
-            task = self.step(self.task(), page)
-            self.assertIn('submit_request', task.history[-1]['result'])
-            AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+            element('Continuar', ref=0), element('Ver detalles', ref=1)])
+        self.judge.side_effect = lambda task, seen, pressed, meter: (
+            ('request', 'it sends the return') if pressed['label'] == 'Continuar' else ('safe', ''))
+        self.manage.return_value = ('press', {'ref': 0})
+        task = self.step(self.task(), page)
+        self.assertIn('submit_request', task.history[-1]['result'])
         self.reader.click.assert_not_called()
-        for ref in (2, 3):   # an edit, a link that opens the store's form: the model's
-            self.manage.return_value = ('press', {'ref': ref})
-            task = self.step(self.task(), page)
-            AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
-        self.assertEqual(self.reader.click.call_count, 2)
+        self.manage.return_value = ('press', {'ref': 1})
+        self.step(task, page)
+        self.reader.click.assert_called_once()
 
-    def test_helping_with_an_order_never_goes_near_a_cart_or_a_checkout(self):
+    def test_helping_with_an_order_never_buys_whatever_page_it_is_on(self):
         for url in (f'{BASE}/gp/cart/view.html', f'{BASE}/checkout/p/1/spc'):
             with self.subTest(url=url):
-                task = self.step(self.task(), snap('Total $129.00', url, elements=[element('Finalizar compra', ref=0)]))
-                self.assertEqual((task.state, task.reason), ('stopped', 'cannot_do'))
-                self.manage.assert_not_called()
-        self.assertNotIn('compra tú', self.post.call_args.args[1])
-        self.assertIn('no envié ninguna solicitud', self.post.call_args.args[1])
+                page = snap('Total $129.00', url, elements=[element('Finalizar compra', ref=0)])
+                for name in ('press', 'submit_request'):
+                    self.manage.return_value = (name, {'ref': 0, 'what': 'x'})
+                    task = self.step(self.task(), page)
+                    self.assertNotEqual(task.reason, 'act')
+                    AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        self.reader.click.assert_not_called()
 
     def test_an_answer_carries_no_link_phone_or_number_the_page_does_not_show(self):
         page = snap('Tu reembolso de $120 fue aprobado', self.ORDERS, elements=[])
@@ -1404,7 +1391,7 @@ class CheckoutTests(StepBase):
     def test_the_address_is_read_beside_the_payment_not_from_the_header(self):
         text = ('Enviar a Julian - Ciudad 01000 Buscar ... Enviando a Ana Perez, Calle 1 #23, CDMX Cambiar '
                 'Llega mañana Metodo de pago SPEI Total del pedido $189.00')
-        self.assertEqual(guard.ship_to(text), 'ana perez, calle 1 #23, cdmx')
+        self.assertEqual(ship_to(text), 'ana perez, calle 1 #23, cdmx')
         self.assertTrue(guard.may_press(element('Envío estándar (Predeterminada)', role='radio'), on_checkout=True,
                                         stage='final'))
         self.assertTrue(guard.may_press(element('Sin garantía'), on_checkout=True))
@@ -1489,12 +1476,12 @@ class CheckoutTests(StepBase):
     def test_only_a_final_looking_button_of_a_checkout_page_is_named(self):
         self.operate.return_value = ('ready_to_order', {'ref': 3, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
         task = self.step(self.make_task(phase='ordering'), checkout_page())      # "Continuar"
-        self.assertIn('not the button that places', task.history[-1]['result'])
+        self.assertIn('the button that places', task.history[-1]['result'])
         AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
         product = snap('Chocolate Ibarra Total R$ 189,00', f'{BASE}/p/1', elements=[
             element('Pix', ref=0, role='radio', tag='div', checked=True), element('Comprar agora', ref=1)])
         task = self.named(product)                                                # a product page's "buy now"
-        self.assertIn('not the button that places', task.history[-1]['result'])
+        self.assertIn('the button that places', task.history[-1]['result'])
 
     def test_approved_it_is_pressed_once_and_the_approval_is_used_up(self):
         task = self.approved()
@@ -1572,8 +1559,8 @@ class CheckoutTests(StepBase):
         task = self.step(task, checkout_page(url=f'{BASE}/checkout/other'))
         self.reader.click.assert_called_once()
 
-    def test_an_approved_way_on_keeps_the_approval_for_the_stores_final_button(self):
-        # Amazon's payment step: "Continuar" on the page with the total and the method, approved; then the review.
+    def test_an_approved_button_that_was_only_a_way_on_leads_to_the_stores_final_one_once(self):
+        # A payment step's "Continuar" on the page with the total and the method, approved; then the review.
         page = snap('Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
             element('Pix', ref=0, role='radio', tag='input', type='radio', checked=True), element('Continuar', ref=1)])
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
@@ -1582,23 +1569,45 @@ class CheckoutTests(StepBase):
         task = service.approve(self.account, self.user, task.internal_id)
         task = self.step(task, page)
         self.reader.click.assert_called_once()
-        self.assertEqual((task.phase, task.order['stepped']), ('ordering', 1))   # not called an order
-        self.reader.click.reset_mock()
-        self.operate.return_value = self.ORDER
-        task = self.step(task, checkout_page())   # the review's own final button: same purchase, no new ask
-        self.reader.click.assert_called_once()
         self.assertEqual(task.phase, 'ordered')
+        self.reader.click.reset_mock()
+        # The store shows its review, with its own final button: the same purchase, no new ask, pressed once.
+        self.operate.return_value = ('not_placed', {'ref': 1})
+        task = self.step(task, page)   # the page it was pressed on, whatever its button says now: never twice
+        self.reader.click.assert_not_called()
+        self.assertIn('never twice', task.history[-1]['result'])
+        review = f'{BASE}/checkout/final'
+        task = self.step(task, checkout_page(url=review))
+        self.reader.click.assert_called_once()
+        self.assertEqual(len(task.order['pressed_at']), 2)
+        for again in (review, f'{review}?step=2', f'{review}#x'):   # a slow store, a reload: never twice
+            task = self.step(task, checkout_page(url=again))
+            self.assertIn('never twice', task.history[-1]['result'])
+        self.reader.click.assert_called_once()
 
-    def test_an_approved_way_on_that_leaves_the_checkout_is_taken_as_the_order(self):
-        # It may have placed the order: never a second one under the same approval.
+    def test_after_the_order_another_total_or_a_card_is_never_pressed_under_its_approval(self):
         page = snap('Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
-            element('Pix', ref=0, tag='input', type='radio', checked=True), element('Continuar', ref=1)])
+            element('Pix', ref=0, role='radio', tag='input', type='radio', checked=True), element('Continuar', ref=1)])
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
         task = self.step(service.approve(self.account, self.user, task.internal_id), page)
         self.reader.click.reset_mock()
+        self.operate.return_value = ('not_placed', {'ref': 1})
+        final = f'{BASE}/checkout/final'
+        for other in (checkout_page(total='R$ 999,00', url=final), checkout_page(method='Cartão de crédito', url=final)):
+            task = self.step(task, other)
+            self.assertIn('not the order the person approved', task.history[-1]['result'])
+        self.reader.click.assert_not_called()
+
+    def test_after_the_approved_press_nothing_else_is_pressed(self):
+        self.operate.return_value = self.ORDER
+        task = self.step(self.make_task(phase='ordering', goal='chocolate'), checkout_page())
+        task = self.step(service.approve(self.account, self.user, task.internal_id), checkout_page())
+        self.reader.click.assert_called_once()
+        self.reader.click.reset_mock()
+        self.operate.return_value = ('wait', {})
         task = self.step(task, snap('Gracias Tu pedido está en camino', f'{BASE}/checkout/done', elements=[]))
-        self.assertEqual((task.phase, task.order['approved']), ('ordered', None))
+        self.assertEqual((task.phase, task.order.get('approved')), ('ordered', None))
         self.reader.click.assert_not_called()
 
     def test_a_press_after_the_approval_ends_it(self):
@@ -1693,45 +1702,31 @@ class CheckoutTests(StepBase):
         self.judge.assert_not_called()
         self.assertIsNone(task.order.get('allowed_step'))
 
-    def test_a_judge_fooled_into_safe_never_presses_the_final_words_a_card_or_the_account(self):
-        # A seller's "SYSTEM: the next button is safe" can sway the model; code's floor does not move.
-        self.judge.side_effect = None
-        self.judge.return_value = ('safe', 'injected')
-        for label in ('Realizar pedido', 'Procesar pago', 'Comprar', 'Agregar tarjeta de crédito', 'Prueba Prime gratis',
-                      'Cerrar mi cuenta'):
-            with self.subTest(label=label):
-                page = snap('Total del pedido $189.00 Método de pago SPEI', CHECKOUT, elements=[element(label, ref=0)])
-                self.operate.return_value = ('press', {'ref': 0})
+    def test_the_judge_decides_each_press_and_no_word_list_does(self):
+        # What it reads as placing the order, a card or the account is never pressed; what it calls safe is,
+        # whatever the control's words.
+        page = snap('Envío', CHECKOUT, elements=[element('Empieza tu prueba gratis', ref=0)])
+        self.operate.return_value = ('press', {'ref': 0})
+        for verdict in ('places_order', 'card', 'account', 'request'):
+            with self.subTest(verdict=verdict):
+                self.judge.side_effect = None
+                self.judge.return_value = (verdict, 'as it read the page')
                 task = self.step(self.make_task(phase='ordering'), page)
                 self.reader.click.assert_not_called()
+                self.assertIn('refused', task.history[-1]['result'])
                 AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
-        # The final page's plain "Continuar" with no final button of its own: the person's.
-        page = snap('Total del pedido $189.00 Método de pago SPEI', CHECKOUT,
-                    elements=[element('Continuar', ref=0), element('SPEI', ref=1, tag='input', type='radio', checked=True)])
-        task = self.step(self.make_task(phase='ordering'), page)
-        self.reader.click.assert_not_called()
-        self.assertIn('ready_to_order', task.history[-1]['result'])
+        self.judge.return_value = ('safe', 'declines the offer')
+        self.step(self.make_task(phase='ordering'), snap('Envío', CHECKOUT, elements=[element('No gracias', ref=0)]))
+        self.reader.click.assert_called_once()
 
-    def test_unsure_on_a_checkout_with_money_is_the_purchase_approval_not_a_step(self):
+    def test_unsure_on_a_checkout_asks_the_person_about_that_one_step(self):
         self.judge.side_effect = None
         self.judge.return_value = ('unsure', '')
         page = snap('Envío Total $189.00', CHECKOUT, elements=[element('Siguiente paso', ref=0)])
         self.operate.return_value = ('press', {'ref': 0})
         task = self.step(self.make_task(phase='ordering'), page)
-        self.assertNotEqual(task.reason, 'step')
-        self.assertIn('ready_to_order', task.history[-1]['result'])
-
-    def test_amazons_real_prime_page_is_declined(self):
-        # Recorded on the founder's 04:08 run: the decline is a link to .../prime/handler.
-        url = 'https://www.amazon.com.mx/checkout/p/p-703-7200281-8445016/pip'
-        decline = element('No gracias', tag='a', href='https://www.amazon.com.mx/checkout/p/p-703-7200281-8445016/prime/handler')
-        join = element('Continúa con Amazon Prime', tag='input', type='submit')
-        page = snap('Prueba Amazon Prime GRATIS por 30 días ... MXN $129 al mes Sin Prime Desde $79 No gracias', url,
-                    elements=[decline, join])
-        self.assertEqual(guard.hard_refusal(decline, on_checkout=True, page=page), '')
-        self.assertEqual(guard.hard_refusal(join, on_checkout=True, page=page), 'account')
-        self.assertNotEqual(guard.hard_refusal(element('No gracias', tag='a', href=f'{BASE}/logout'), on_checkout=True),
-                            '')
+        self.assertEqual(task.reason, 'step')
+        self.reader.click.assert_not_called()
 
     def test_the_browser_loads_amazons_prime_decline_and_never_a_sign_out(self):
         # The founder's 04:15 run: "No gracias" was clicked, and the browser's own filter stopped its page.
@@ -1741,12 +1736,8 @@ class CheckoutTests(StepBase):
 
     def test_a_pages_own_toggle_links_are_not_refused_by_their_address(self):
         # Recorded on Amazon México: "Ver más", "Ver más opciones" are javascript:void(0) links.
-        for label in ('Ver más', 'Ver más opciones', 'Mostrar más métodos de pago'):
-            self.assertEqual(guard.hard_refusal(element(label, tag='a', href='javascript:void(0)'), on_checkout=True), '')
-        self.assertNotEqual(guard.hard_refusal(element('Realizar pedido', tag='a', href='javascript:void(0)'),
-                                               on_checkout=True), '')
-        self.assertNotEqual(guard.hard_refusal(element('Ver', tag='a', href='javascript:fetch("/x")'),
-                                               on_checkout=True), '')
+        self.assertTrue(guard.toggle_link('javascript:void(0)'))
+        self.assertFalse(guard.toggle_link('javascript:fetch("/x")'))
         # And the checkout presses it: it stays on the page.
         page = snap('Selecciona un método de pago', CHECKOUT, elements=[
             element('Mostrar más métodos de pago', ref=0, tag='a', href='javascript:void(0)')])
@@ -1754,14 +1745,15 @@ class CheckoutTests(StepBase):
         self.step(self.make_task(phase='ordering'), page)
         self.reader.click.assert_called_once()
 
-    def test_an_unsure_edit_by_its_whole_words_goes_ahead(self):
+    def test_unsure_is_never_a_dead_end_the_person_is_asked_about_that_step(self):
         self.judge.side_effect = None
         self.judge.return_value = ('unsure', 'which method is selected is not shown')
         page = snap('Selecciona un método de pago Total del pedido $89.00', CHECKOUT,
                     elements=[element('Usar este método de pago', ref=0)])
         self.operate.return_value = ('press', {'ref': 0})
-        self.step(self.make_task(phase='ordering'), page)
-        self.reader.click.assert_called_once()
+        task = self.step(self.make_task(phase='ordering'), page)
+        self.reader.click.assert_not_called()
+        self.assertEqual((task.state, task.reason), ('needs_person', 'step'))
 
     def test_a_yes_is_for_that_control_only_and_the_next_step_only(self):
         page = snap('Carrito', f'{BASE}/gp/cart', elements=[element('Mover', ref=0),
@@ -1888,9 +1880,9 @@ class CheckoutTests(StepBase):
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate', 'total': '$9.00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
         self.assertIn('refused', task.history[-1]['result'])
-        self.assertTrue(operate.total_on(page.text, '$500.00'))
+        self.assertTrue(total_on(page.text, '$500.00'))
         # Two grand totals that disagree: neither is approved.
-        self.assertFalse(operate.total_on('Total del pedido: $500.00 Kit Total del pedido $9.00', '$500.00'))
+        self.assertFalse(total_on('Total del pedido: $500.00 Kit Total del pedido $9.00', '$500.00'))
 
     def test_a_balance_ticked_beside_the_local_method_is_never_ordered(self):
         page = checkout_page()
@@ -1911,26 +1903,32 @@ class CheckoutTests(StepBase):
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate', 'total': '$1,249.00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
         self.assertIn('refused', task.history[-1]['result'])
-        self.assertTrue(operate.total_on(page.text, '$1,149.00'))
+        self.assertTrue(total_on(page.text, '$1,149.00'))
 
-    def test_from_the_cart_on_only_the_orders_own_pages_are_not_read_while_shopping(self):
-        task = self.make_task(phase='ordered', checkout_at=timezone.now())
-        self.step(task, snap('Tu pedido', f'{BASE}/compras/9'))
-        task.refresh_from_db()
-        self.assertEqual(task.visited_pages, [])
-        # A product a link led back to is still a page a seller writes on, whatever its slug says.
+    def test_pages_seen_before_the_order_are_remembered_and_none_after_it(self):
+        # What the order's payment is read from must be new since the order: a fact, whatever its address.
+        task = self.make_task(phase='ordering')
         self.step(task, snap('Chocolate Compra Facil CLABE', f'{BASE}/Chocolate-Compra-Facil/dp/B0X'))
         task.refresh_from_db()
         self.assertEqual(len(task.visited_pages), 1)
+        AgentTask.objects.filter(pk=task.pk).update(phase='ordered', checkout_at=timezone.now(), state='working')
+        task.refresh_from_db()
+        self.step(task, snap('Tu pedido', f'{BASE}/compras/9'))
+        task.refresh_from_db()
+        self.assertEqual(len(task.visited_pages), 1)
 
-    def test_after_the_order_only_links_to_its_own_pages_open(self):
+    def test_after_the_order_only_links_the_judge_calls_safe_open(self):
         task = self.make_task(phase='ordered', checkout_at=timezone.now())
         page = snap('Gracias por tu compra', f'{BASE}/checkout/congrats', elements=[
-            element('Chocolate Compra Facil', ref=0, tag='a', href='https://produto.mercadolivre.com.br/MLB-1-compra'),
-            element('Ver detalle', ref=1, tag='a', href=f'{BASE}/compras/123')])
-        self.operate.return_value = ('press', {'ref': 0})
-        task = self.step(task, page)
-        self.assertIn('only links to its pages', task.history[-1]['result'])
+            element('Volver a comprar', ref=0, tag='a', href=f'{BASE}/p/1'),
+            element('Ver detalle', ref=1, tag='a', href=f'{BASE}/compras/123'),
+            element('Ayuda', ref=2, tag='a', href='https://evil.com/help')])
+        self.judge.side_effect = lambda task, seen, pressed, meter: (
+            ('account', 'buys again') if pressed['label'] == 'Volver a comprar' else ('safe', ''))
+        for ref, said in ((0, 'refused: account'), (2, 'leaves the store')):
+            self.operate.return_value = ('press', {'ref': ref})
+            task = self.step(task, page)
+            self.assertIn(said, task.history[-1]['result'])
         self.reader.click.assert_not_called()
         self.operate.return_value = ('press', {'ref': 1})
         task = self.step(task, page)
@@ -1970,7 +1968,7 @@ class CheckoutTests(StepBase):
                                   shown_target='tab-1', order=order)
             task = self.step(task)
             self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'), order)
-            cancel.assert_called_with(self.account, 'intent-1')
+        prepare.assert_not_called()   # nothing is even prepared for an order nobody approved
 
     def test_the_approval_is_for_the_total_on_the_card_they_saw(self):
         task = self.named()
@@ -1991,6 +1989,7 @@ class CheckoutTests(StepBase):
         self.operate.assert_not_called()
 
     def test_an_order_the_store_shows_placed_is_said_never_denied(self):
+        self.operate.return_value = ('order_placed', {})
         task = self.step(self.make_task(phase='ordering'), DONE)
         self.assertEqual((task.phase, task.order['unapproved']), ('ordered', True))
         self.assertIsNotNone(task.checkout_at)
@@ -2001,6 +2000,9 @@ class CheckoutTests(StepBase):
             element('Cancelar pedido', ref=0), element('Volver a comprar', ref=1, tag='a', href=f'{BASE}/p/1'),
             element('Confirmar pedido', ref=2), element('Ver instrucciones de pago', ref=3, tag='a',
                                                         href=f'{BASE}/compras/9/pago')])
+        self.judge.side_effect = lambda task, seen, pressed, meter: {
+            'Volver a comprar': ('account', 'buys again'), 'Cancelar pedido': ('request', 'cancels it'),
+            'Confirmar pedido': ('places_order', 'another order')}.get(pressed['label'], ('safe', ''))
         for ref, pressed in ((0, False), (1, False), (2, False), (3, True)):
             self.reader.click.reset_mock()
             self.operate.return_value = ('press', {'ref': ref})
@@ -2047,10 +2049,11 @@ class CheckoutTests(StepBase):
         task = self.step(self.task)
         self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'))
         cancel.assert_called_with(self.account, 'intent-1')
-        # A page that is not an order's own (a seller's product page): not read at all.
+        # A page the agent read while shopping (a seller's product page): not read at all.
         prepare.reset_mock()
         self.browser.capture.return_value = (picture(url=f'{BASE}/p/1'), picture(url=f'{BASE}/p/1'))
         self.reading()
+        self.task.visited_pages = [runner.same_page(f'{BASE}/p/1')]
         self.task.save()
         task = self.step(self.task)
         prepare.assert_not_called()

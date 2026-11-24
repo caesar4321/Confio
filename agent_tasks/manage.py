@@ -1,11 +1,12 @@
 """An order already placed: its state, or a request about it (cancel, return, refund, claim).
 
 The model finds the order on the store's own pages and does what the store asks
-of a shopper there. The click judge reviews each press, and code's floor holds
-as on a purchase: never buying, never a card, never the account. What sends a
-request is never pressed by the model: it names it (submit_request), the person
-approves exactly that in the chat, and it is pressed once. What the person only
-wanted to know is answered in the chat with what the store's page says.
+of a shopper there. A second model reads each press (agent.judge) and decides:
+buying, a card and the account are refused; what sends a request is never
+pressed by the model. It names it (submit_request), the judge confirms it is
+one, the person approves exactly that in the chat, and it is pressed once.
+What the person only wanted to know is answered in the chat with what the
+store's page says. No word of the store's is matched in code.
 """
 import logging
 import re
@@ -13,7 +14,7 @@ import re
 from django.utils import timezone
 
 from . import agent, guard, notes
-from .operate import REFUSED, MAX_SAME_PRESS, _identity, _judged, _label, _trace
+from .operate import NOT_A_FORM, REFUSED, MAX_SAME_PRESS, _identity, _label, _trace, sign_in
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,6 @@ def step(st, browser, reader, seen):
     task = st.task
     st.operating = True
     _trace(st, seen)
-    if guard.is_checkout(seen) or _cart(seen.url):
-        # Helping with an order never goes near buying: a cart or a checkout ends it, whatever led there.
-        return st.stop('request_unclear' if (task.order or {}).get('submitted') else 'cannot_do')
     name, args = agent.manage(task, seen, st.meter)
     if name == 'wait':
         st.delay = 2
@@ -42,6 +40,9 @@ def step(st, browser, reader, seen):
         submitted = (task.order or {}).get('submitted')
         # After a request was sent the person is told it may be on its way, never that nothing happened.
         return st.stop('request_unclear' if submitted else ('not_found' if reason == 'not_found' else 'cannot_do'))
+    if name == 'sign_in':
+        done = sign_in(st, browser, reader, seen, asked=True)
+        return st.remember('sign_in', 'refused: no sign-in form on this page') if done is NOT_A_FORM else done
     if name == 'answer':
         return answer(st, args.get('text'), seen)
     element = seen.element(args.get('ref'))
@@ -57,11 +58,7 @@ def step(st, browser, reader, seen):
     if (task.order or {}).get('request_approved'):
         # Anything pressed after the person approved may change what is sent: asked again.
         st.save(order={**(task.order or {}), 'request_approved': None})
-    # (A link only opens the store's request page: "Devolver o reemplazar artículos" is pressed.)
-    if (_sends_request(element) and element.get('tag') != 'a') or (_request_form(seen) and _a_sender(element)):
-        # A request form: only what edits or chooses is pressed; any button that may send it is the person's.
-        return st.remember(did, 'refused: it may send the request. Call submit_request with it.')
-    if _judged_for_manage(st, seen, element, label, did, where) is REFUSED:
+    if _judged_for_manage(st, seen, element, label, did) is REFUSED:
         return None
     if sum(entry.get('at') == where and entry.get('did') == did[:120] for entry in (task.history or [])[-8:]) \
             >= MAX_SAME_PRESS:
@@ -70,84 +67,44 @@ def step(st, browser, reader, seen):
             steps=task.steps + 1, failures=0)
     refused = reader.click(element)
     if refused:
+        st.save(history=(task.history or [])[:-1])   # it never happened: not counted as a press
         return st.remember(did, f'refused: {refused}')
     browser.pump(2)
     return None
 
 
-# A cancellation, a return, a refund, a claim: the words that send one (beside the judge's own reading).
-_REQUEST_WORDS = re.compile(r'\b(cancelar (el |la |mi |este |los |las )?(pedido|compra|orden|producto|articulos?)'
-                            r'|cancel (the |this )?(order|items?)|cancelar (articulos )?seleccionados'
-                            r'|solicitar (la |una )?(devolucion|devolucao|cancelacion|cancelamento|reembolso)'
-                            r'|devolver (el |este |los )?(producto|articulo)s?|return items?|devolver|devolucao'
-                            r'|enviar (la )?solicitud|confirmar (la )?(cancelacion|devolucion|devolucao|cancelamento)'
-                            r'|request (a )?(refund|return)|reembolsar|abrir (un )?reclamo|iniciar (una )?devolucion'
-                            r'|si,? cancelar)\b')
-# A page that writes a request: its reason, its refund, a return or a cancellation.
-_FORM_WORDS = re.compile(r'\b(motivo|razon|reason|devolucion|devolucao|cancelacion|cancelamento|reembolso|refund'
-                         r'|reclamo|return)\b')
-
-
-def _sends_request(element):
-    return any(_REQUEST_WORDS.search(part) for part in guard._parts(element))
-
-
-def _request_form(seen):
-    return bool(_FORM_WORDS.search(guard.fold(seen.text[:100000])))
-
-
-def _a_sender(element):
-    """A button that may send the form it sits in: anything but a link, a choice, or an edit or choice by
-    its whole words (guard._FINAL_SAFE)."""
-    if element.get('tag') == 'a' or element.get('tag') == 'select' or element.get('type') in ('radio', 'checkbox') \
-            or element.get('role') in ('radio', 'checkbox', 'option', 'tab'):
-        return False
-    parts = guard._parts(element)
-    return not (parts and all(guard._FINAL_SAFE.fullmatch(part) for part in parts))
-
-
-def _cart(url):
-    return bool(re.search(r'/(cart|carrito|carrinho|cesta|basket|checkout)\b', guard.urlsplit(url or '').path.lower()))
-
-
-def _judged_for_manage(st, seen, element, label, did, where):
-    """The purchase's floor and judge, read for an order already placed: a request goes to submit_request,
-    never pressed; buying, a card and the account are refused as on a purchase."""
-    hard = guard.hard_refusal(element, on_checkout=True, page=seen)   # no way into a checkout is exempt here
-    if hard:
-        st.remember(did, f'refused: {hard}. Never buy, never a card nor the account: find another way.')
-        return REFUSED
+def _judged_for_manage(st, seen, element, label, did):
+    """The judge decides. Safe is pressed; what sends a request goes to submit_request, where the person
+    approves it; buying, a card and the account are refused."""
     try:
         verdict, why = agent.judge(st.task, seen, element, st.meter)
     except agent.AgentUnavailable:
         verdict, why = 'unsure', 'the check could not run'
-    if verdict == 'safe' and not (_request_form(seen) and _a_sender(element)):
+    if verdict == 'safe':
         return None
-    if verdict in ('safe', 'request'):
+    if verdict == 'request':
         st.remember(did, f'refused: it sends the request ({why}). Call submit_request with it.')
         return REFUSED
-    if verdict == 'unsure' and all(guard._FINAL_SAFE.fullmatch(part) for part in guard._parts(element) or ['x']):
-        return None
-    st.remember(did, f'refused: {verdict} ({why}). Find another way.')
+    if verdict == 'unsure':
+        st.remember(did, f'refused: it is not clear what it does ({why}). If it sends the request the person '
+                         'asked for, call submit_request with it; else find another way.')
+        return REFUSED
+    st.remember(did, f'refused: {verdict} ({why}). Never buy, never a card nor the account: find another way.')
     return REFUSED
 
 
 def submit(st, reader, browser, seen, element, label, where, args):
     """The button that sends the request: named, approved by the person, pressed once."""
     task = st.task
-    hard = guard.hard_refusal(element, on_checkout=True, page=seen)
-    # "Confirmar cancelación" reads as a final word: it is a request where nothing on the page is bought.
-    if hard == 'places_order' and _sends_request(element) and not guard.final_step(seen.text, seen.elements):
-        hard = ''
-    if hard in ('card', 'places_order') or (hard and not _sends_request(element)):
-        return st.remember('submit_request', f'refused: that is {hard}, never a request to send')
-    if not _sends_request(element):
-        try:
-            verdict, _ = agent.judge(task, seen, element, st.meter)
-        except agent.AgentUnavailable:
-            verdict = 'unsure'
-        if verdict != 'request':
-            return st.remember('submit_request', 'refused: that is not the button that sends the request')
+    # The judge reads this button on this page: only one that sends a request about an order is ever named
+    # to the person. Never one that buys, uses a card or changes the account.
+    try:
+        verdict, why = agent.judge(task, seen, element, st.meter)
+    except agent.AgentUnavailable:
+        verdict, why = 'unsure', 'the check could not run'
+    if verdict != 'request':
+        return st.remember('submit_request', f'refused: the second reader does not see it as the button that '
+                                             f'sends the request ({verdict}: {why})')
     what = guard.clean(agent.redact(str(args.get('what') or '')), 120) or 'la solicitud'
     same = [other for other in seen.elements if _label(other) == label]
     request = {**_identity(element, label, where), 'what': what, 'button': label[:80],
@@ -158,6 +115,8 @@ def submit(st, reader, browser, seen, element, label, where, args):
     if (order.get('submitted') or 0) >= MAX_SUBMITS:
         return st.remember('submit_request', 'refused: the request was already sent; read its result and answer')
     approved = order.get('request_approved') or {}
+    if approved and {**approved, 'what': ''} == {**request, 'what': ''}:
+        request['what'] = approved.get('what')   # the same request: a model never words it twice the same
     if approved != request:
         # Named: the person approves exactly this (its words, this button, this page) in the chat.
         return st.hand_over('act', order={**order, 'request': request, 'request_approved': None},

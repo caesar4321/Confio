@@ -379,8 +379,7 @@ class Step:
         # data is read off such a page later, so they are not "pages the agent read".
         # From the cart on, the order's own pages are not "read while shopping"; any other page
         # (a product a link led back to) still is: a seller writes there.
-        store_only = guard.is_checkout(seen) or guard.login_address(seen.url) \
-            or (operate.ordering(task) and guard.order_address(seen.url))
+        store_only = guard.is_checkout(seen) or guard.login_address(seen.url) or operate.ordered(task)
         if inside and not store_only and page not in (task.visited_pages or []) \
                 and len(task.visited_pages or []) < MAX_VISITED:
             self.save(visited_pages=[*(task.visited_pages or []), page])
@@ -548,13 +547,14 @@ class Step:
         shots = browser.capture(task.shown_target) if task.shown_target else None
         if not shots:
             return self.unread('screen')
-        # The store's own pages: anyone can create a page at a payment house. And the order's
-        # own page (a checkout or an order address): never a shopping page a seller writes on.
-        if not sites.house_ticket(shots[0].url, task.site) and (
-                not sites.within(shots[0].url, task.site) or not guard.order_address(shots[0].url)):
+        # The store's own site (or its payment house's ticket for it). Which of its pages shows this order's
+        # payment is the model's reading (payment_shown); what follows are facts no page can talk its way past.
+        if not sites.house_ticket(shots[0].url, task.site) and not sites.within(shots[0].url, task.site):
             return self.unread('offsite')
         if same_page(shots[0].url) in (task.visited_pages or []):
             return self.unread('code')  # a shopping page: a QR there is a seller's picture
+        if same_page(shots[0].url) in ((task.order or {}).get('pressed_at') or []):
+            return self.unread('code')  # the checkout the order was pressed on: its payment page is new since
         rail = countries.rail(task.country)
         if rail is None:
             return self.stop('unpaid')
@@ -566,12 +566,17 @@ class Step:
             ticket = sites.house_ticket(shots[0].url, task.site)
             # A CLABE made for this one order (Mercado Pago's ticket; a known store's own order page: Amazon
             # México "compartirá la cuenta CLABE de 18 dígitos") may come with no reference printed.
-            code, extra, why = rail.read(shots, reference_optional=ticket or task.site in sites.KNOWN)
+            # Read by facts once the person approved an amount: one valid CLABE on the page, and that amount.
+            placed = task.order or {}
+            expected = placed.get('amount') if placed.get('pressed') and not placed.get('unapproved') else None
+            code, extra, why = rail.read(shots, reference_optional=True, expected=expected,
+                                         item=placed.get('item') or '', before=placed.get('seen_clabes') or ())
             if code and not extra.get('reference'):
                 from . import spei
                 if ticket:
                     # Mercado Pago's own payment number, from its ticket's address: the transfer's concept.
-                    concept = re.search(r'/payments/(\d+)/ticket', urlsplit(shots[0].url).path).group(1)
+                    found = re.search(r'/payments/(\d+)/ticket', urlsplit(shots[0].url).path, re.I)
+                    concept = found.group(1) if found else 'Pedido ' + re.sub(r'[^A-Za-z0-9]+', ' ', task.site)
                 else:
                     # The order's own number as the page prints it, else the store's name.
                     concept = spei.order_number(shots[0].text) or ('Pedido ' + re.sub(r'[^A-Za-z0-9]+', ' ', task.site))
@@ -583,6 +588,10 @@ class Step:
         mode, offer = service.pay_mode(task, app_meta(task))
         if mode == 'manual':
             return self.hand_manual(rail, code=code, extra=extra, offer=offer)
+        placed = task.order or {}
+        if not placed.get('amount') or not placed.get('pressed') or placed.get('unapproved'):
+            # No order the person approved (the store shows one nobody named): nothing is prepared.
+            return self.stop('unpaid')
         self.save()
         try:
             intent = payment_intents.prepare(task.account, task.user, code, created_by='assistant',

@@ -318,60 +318,14 @@ def toggle_link(href):
     return bool(re.fullmatch(r'\s*(javascript:\s*(void\(0\)|void 0|;)?\s*;?|#)\s*', str(href or '').strip().lower()))
 
 
-def hard_refusal(element, *, on_checkout, page=None):
-    """What code reads for sure, before any model: '' or the kind of act ('places_order', 'card', 'account',
-    'acts'). A deny-list only: what it does not name, the click judge decides (and may refuse more)."""
-    parts = _parts(element)
-    href = element.get('href') or ''
-    path = urlsplit(href).path.lower()
-    # "No gracias" to an offer, by its own words: Amazon's is a link to /checkout/p/.../prime/handler. Never
-    # one that signs out, deletes or unsubscribes, whatever it says.
-    if parts and _DECLINE.fullmatch(parts[0]) and not any(_JOIN.search(part) for part in parts) \
-            and not any(_FINAL_LOOK.search(part) or _FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part)
-                        for part in parts) and not any(card_words(part) for part in parts) and not element.get('cut') \
-            and not (element.get('tag') == 'a' and urlsplit(href).scheme not in ('http', 'https')
-                     and not re.fullmatch(r'\s*javascript:\s*void\(0\)\s*;?\s*', href.strip().lower())) \
-            and not re.search(r'/(logout|signout|sign-out|delete\w*|unsubscribe|close\w*)(/|$)', path):
-        return ''
-    # A page's own toggles ("Ver más", "Ver más opciones de pago") are javascript:void(0) links: what they do
-    # is read by their words (below) and the judge. Any other script or scheme in a link: never.
-    # A link that is a script of its own (not the page's plain toggle): never. What a real address does is
-    # not guessed from its words: on Amazon's review page every link lives under /checkout/.../pay|address,
-    # and "Cambiar el método de pago" is exactly what the agent must press. The browser's never-load filter
-    # (account_address) and the judge cover where a link goes.
-    if element.get('tag') == 'a' and not toggle_link(href) and urlsplit(href).scheme not in ('http', 'https'):
-        return 'acts'
-    if _ACCOUNT_PATH.search(path):
-        return 'account'
-    if any(_NEVER.search(part) for part in parts):
-        return 'account'
-    if any(card_words(part) for part in parts):
-        return 'card'
-    tick = (element.get('tag') == 'input' and element.get('type') in ('radio', 'checkbox')) \
-        or element.get('role') in ('radio', 'checkbox')
-    # A label of a radio or checkbox on this page is that choice: Amazon México's SPEI option reads
-    # "Transferencia electrónica (Finaliza tu pago con SPEI antes de 30 minutos)".
-    if not tick and element.get('tag') == 'label' and page is not None:
-        tick = any(other.get('tag') == 'input' and other.get('type') in ('radio', 'checkbox')
-                   and other.get('label') == element.get('label') for other in page.elements)
-    if any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in parts):
-        return 'places_order'
-    if not tick and any(_FINAL_LOOK.search(part) for part in parts) and not (
-            not on_checkout and element.get('tag') != 'a' and all(_ENTER_CHECKOUT.fullmatch(part) for part in parts)):
-        return 'places_order'
-    # The page that shows the order's total and how it is paid: a plain way on with no final button of its own
-    # beside it may be the one that places it.
-    if page is not None and not tick and final_step(page.text, page.elements) \
-            and parts and all(_WAY_ON.fullmatch(part) for part in parts) and not any(
-                final_button(other) for other in page.elements if other is not element
-                and other.get('on_screen', True) and not other.get('disabled') and other.get('tag') != 'a'):
-        return 'places_order'
-    return ''
+# For the journey the app draws (stage_of) only: where a purchase is, never what may be pressed.
+_METHOD_LABEL = re.compile(r'(metodo|forma|medio|meio) de (pago|pagamento)|payment method|pagar con|pagando con')
+_GRAND_TOTAL =re.compile(r'\b(total (del pedido|de la orden|da compra|do pedido|a pagar|da sua compra|de tu compra)'
+                          r'|order total|valor total|importe total|voce pagara|pagaras|vas a pagar|vai pagar)\b')
 
 
 def final_step(text, elements=()):
     """A page that shows the order's total and how it is paid: where the order is placed."""
-    from .operate import _GRAND_TOTAL, _METHOD_LABEL
     folded = fold(text[:100000])
     # "Total (IVA incluido, en caso de ser aplicable) $129.00": what is in brackets is not in the way.
     total = _GRAND_TOTAL.search(folded) or re.search(r'\btotal\b[^\d]{0,30}\d', re.sub(r'\([^)]{0,80}\)', ' ', folded))
@@ -404,26 +358,6 @@ def stage_of(page, *, on_checkout):
     return 'shopping'
 
 
-def ship_to(text):
-    """The delivery address as the checkout writes it (folded), or '': part of what the person approves."""
-    from .operate import _METHOD_LABEL
-    folded = fold(text[:100000])
-    found = list(re.finditer(
-        r'\b(enviar a|enviando a|enviaremos a|direccion de envio|direccion de entrega|entregar a|entregando a'
-        r'|entrega en|envio a|se enviara a|endereco de entrega|entregar em|enviar para|shipping address'
-        r'|deliver(ing)? to|ship(ping)? to|domicilio( de entrega)?|recibir en|recibe en)\b\s*'
-        r'((cambiar|editar|alterar|change)\s*)?', folded))
-    if not found:
-        return ''
-    # The checkout's own address block: the label nearest its payment method (not a header's location bar).
-    method = _METHOD_LABEL.search(folded)
-    best = min(found, key=lambda m: abs(m.start() - method.start())) if method else found[-1]
-    block = re.split(r'\b(cambiar|editar|alterar|change|modificar|trocar|metodo de pago|forma de pago|total'
-                     r'|llega|llegada|entrega estimada|pide en|arrives?|chega|receba|enviar a|enviando a'
-                     r'|agregar|anadir|adicionar|recoleccion|instrucciones)\b'
-                     r'|\ben \d+ ?h(rs?|oras?)?\b', folded[best.end():best.end() + 140])[0]
-    return ' '.join(block.split())[:120]
-
 def final_looking(element):
     """A control that could be the one that places the order (named, never pressed, by a model)."""
     return (element.get('tag') in ('button', 'a') or element.get('role') == 'button'
@@ -434,7 +368,7 @@ def final_looking(element):
 
 # What the browser never loads, whatever was clicked: signing out, deleting, unsubscribing, closing the account.
 # Not "prime" or "subscription": Amazon declines its Prime offer through /checkout/p/.../prime/handler, and
-# joining is refused at the click (hard_refusal, the judge), never by an address guessed in advance.
+# joining is refused at the click by the judge model, never by an address guessed in advance.
 _NAV_NEVER = re.compile(r'/(logout|signout|sign-out|log-out|delete\w*|unsubscribe|close-?account|cancel-?account'
                         r'|cancel-?order|cancelar-?pedido)(/|$)')
 

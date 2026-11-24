@@ -116,15 +116,58 @@ def _reference(text, after=()):
     return value if _REFERENCE.fullmatch(value) and any(c.isdigit() for c in value) else None
 
 
-def read(text, *, reference_optional=False):
+_FIGURE = re.compile(r'(?<![\d.,])((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?![\d,]|\.\d)')
+# Whole pesos ("$99"): only with their sign, so a quantity or a date is never an amount.
+_WHOLE = re.compile(r'\$\s*((?:\d{1,3}(?:,\d{3})+|\d+))(?!\d)(?![.,]\d)')
+
+
+def clabes_in(nodes):
+    """Every valid CLABE written in those texts."""
+    return {digits for node in nodes for digits in (_clabe(match.group(1)) for match in _CLABE.finditer(str(node)))
+            if digits}
+
+
+def _by_facts(nodes, expected, item='', before=()):
+    """The order's payment page, by what is true of it and no label: one valid CLABE on the whole page (its
+    check digit proves it is one), written beside the amount the person approved. Never an account a seller
+    could have written: one inside the item's own name, or one already on a page before the order existed
+    (the store makes this order's account after it). Which page this is was a model's reading
+    (agent.payment_page) and the runner's facts (the store's own site, a page new since the order)."""
+    anywhere = clabes_in(nodes)
+    if len(anywhere) != 1:
+        return None, 'several' if anywhere else 'code'
+    clabe = next(iter(anywhere))
+    if clabe in set(before or ()) or clabe in re.sub(r'\D', '', str(item or '')):
+        return None, 'several'
+    wanted = Decimal(expected)
+    at_amount = [index for index, node in enumerate(nodes)
+                 if any(Decimal(match.group(1).replace(',', '')) == wanted
+                        for match in (*_FIGURE.finditer(node), *_WHOLE.finditer(node)))]
+    at_clabe = [index for index, node in enumerate(nodes) if clabes_in([node])]
+    if not at_amount or min(abs(a - c) for a in at_amount for c in at_clabe) > _TOGETHER:
+        return None, 'code'   # the amount is not on it, or nowhere near the account
+    try:
+        references = {value for _, value in _labelled(nodes, _REFERENCE_LABEL, _reference)}
+    except _Unreadable:
+        references = set()
+    return {'clabe': anywhere.pop(), 'amount': Decimal(expected),
+            'reference': references.pop() if len(references) == 1 else ''}, ''
+
+
+def read(text, *, reference_optional=False, expected=None, item='', before=()):
     """({'clabe', 'amount', 'reference'}, '') or (None, why): 'code' when
     something is missing, 'several' when anything is doubtful: two
     candidates, a labelled value that does not read, a numeric reference,
-    dollars on the page, or values far apart."""
+    dollars on the page, or values far apart. With `expected` (the amount the
+    person approved) nothing is read by its label: see _by_facts."""
     if text is None:
         return None, 'several'   # too long to read whole
     nodes = [str(node) for node in text]
     folded = [fold(node) for node in nodes]
+    if expected is not None:
+        if any(_DOLLARS.search(node) for node in folded):
+            return None, 'several'
+        return _by_facts(nodes, expected, item, before)
     if not any('clabe' in node for node in folded):
         return None, 'code'
     if any(_DOLLARS.search(node) for node in folded) or any(node.startswith('referencia numerica') for node in folded):
