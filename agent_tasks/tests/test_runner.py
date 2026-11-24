@@ -891,6 +891,29 @@ class ManageTests(StepBase):
         self.reader.click.assert_called_once()
         self.assertIn('already sent', task.history[-1]['result'])
 
+    def test_an_approved_link_only_opens_the_form_and_its_button_is_asked_next(self):
+        # 2026-11-24: the judge read Amazon's "Cancelar productos" link as the request; approving it used up the
+        # one request, and the form's real "Solicitar cancelación" was refused as a second.
+        self.judge.side_effect = None
+        self.judge.return_value = ('request', 'cancels it')
+        details = snap('Detalles del pedido', self.ORDERS, elements=[
+            element('Cancelar productos', ref=0, tag='a', href=f'{BASE}/preship/cancel-items')])
+        self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'cancelar el pedido'})
+        task = self.step(self.task(), details)
+        task = self.step(service.answer_request(self.account, self.user, task.internal_id, True), details)
+        self.reader.click.assert_called_once()
+        self.assertFalse(task.order.get('submitted'))
+        self.assertIn('nothing was sent', task.history[-1]['result'])
+        form = snap('Motivo de cancelación', f'{BASE}/preship/cancel-items', elements=[
+            element('Solicitar cancelación', ref=0)])
+        task = self.step(task, form)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'act'))   # its own approval
+        task = self.step(service.answer_request(self.account, self.user, task.internal_id, True), form)
+        self.assertEqual(self.reader.click.call_count, 2)
+        self.assertEqual(task.order['submitted'], 1)
+        task = self.step(task, form)   # never twice
+        self.assertEqual(self.reader.click.call_count, 2)
+
     def test_no_sends_nothing_and_ends_it(self):
         page = snap('Devolver', self.ORDERS, elements=[element('Solicitar devolución', ref=0)])
         self.manage.return_value = ('submit_request', {'ref': 0, 'what': 'devolver el chocolate'})

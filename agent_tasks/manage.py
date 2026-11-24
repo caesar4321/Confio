@@ -122,6 +122,20 @@ def submit(st, reader, browser, seen, element, label, where, args):
         # Named: the person approves exactly this (its words, this button, this page) in the chat.
         return st.hand_over('act', order={**order, 'request': request, 'request_approved': None},
                             body=notes.say(notes.NEEDS_PERSON['act'], task).replace('{what}', what))
+    if element.get('tag') == 'a':
+        # A link opens the store's form ("Cancelar productos"); it sends nothing. Pressed under this approval,
+        # it never uses up the request: the form's own button is named and approved next (2026-11-24: the
+        # approved link counted as sent, and the real "Solicitar cancelación" was then refused as a second one).
+        st.save(order={**order, 'request_approved': None},
+                history=[*(task.history or []), {'did': f'opened "{label}" (approved)',
+                                                 'result': 'only the store\'s form opened, nothing was sent: name '
+                                                           'its button with submit_request'}][-st.HISTORY_KEPT:],
+                steps=task.steps + 1, failures=0)
+        refused = reader.click(element)
+        if refused:
+            return st.save(order={**(st.task.order or {}), 'request_approved': approved})
+        browser.pump(3)
+        return None
     # Used once, and written down first: an answer lost on the way is never a second request.
     st.save(order={**order, 'request_approved': None, 'submitted': (order.get('submitted') or 0) + 1,
                    'submitted_at': timezone.now().isoformat()},
