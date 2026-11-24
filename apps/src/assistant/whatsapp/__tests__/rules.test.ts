@@ -1,9 +1,10 @@
 import type { WhatsAppDraft, WhatsAppLink } from '../api';
 import { codeForCopy, consentText, draftView, pollFor, whatsAppView } from '../rules';
+import { checkedAgo, initialOf } from '../rules';
 
 const link = (over: Partial<WhatsAppLink> = {}): WhatsAppLink => ({
   state: 'none', code: null, codeAt: null, phoneHint: null, reason: null, reasonMessage: null, linkedAt: null,
-  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: null, consentVersion: 2, consentOutdated: false, notices: [], ...over,
+  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: null, consentVersion: 3, consentOutdated: false, notices: [], ...over,
 });
 const draft = (over: Partial<WhatsAppDraft> = {}): WhatsAppDraft => ({
   id: 'd1', chat: 'Farmacia Central', phone: null, body: 'Hola', status: 'draft', reason: null, displayHash: 'h', ...over,
@@ -51,4 +52,21 @@ it('the code is copied as WhatsApp takes it, and polled only while it is up', ()
   expect(pollFor(link({ state: 'pairing' }))).toBeGreaterThan(0);
   expect(pollFor(link({ state: 'linked' }))).toBe(0);
   expect(pollFor(null)).toBe(0);
+});
+
+it('checkedAgo: minutes, hours, days, and nothing for a missing or future time', () => {
+  const now = Date.parse('2026-11-24T12:00:00Z');
+  expect(checkedAgo(null, now)).toBeNull();
+  expect(checkedAgo('2026-11-24T13:00:00Z', now)).toBeNull();
+  expect(checkedAgo('2026-11-24T11:59:40Z', now)).toBe('Revisado ahora');
+  expect(checkedAgo('2026-11-24T11:48:00Z', now)).toBe('Revisado hace 12 min');
+  expect(checkedAgo('2026-11-24T09:00:00Z', now)).toBe('Revisado hace 3 h');
+  expect(checkedAgo('2026-11-22T12:00:00Z', now)).toBe('Revisado hace 2 d');
+});
+
+it('initialOf: first letter or digit, "#" for emoji-only names', () => {
+  expect(initialOf('farmacia Central')).toBe('F');
+  expect(initialOf('🍕 Pizzería')).toBe('P');
+  expect(initialOf('🎉')).toBe('#');
+  expect(initialOf('+591 7123')).toBe('5');
 });

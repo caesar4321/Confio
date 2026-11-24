@@ -11,6 +11,9 @@ import { colors } from '../../config/theme';
 import CalendarConnectSheet from '../calendar/CalendarConnectSheet';
 import MailSheet from '../mail/MailSheet';
 import { closeMailSession, mailSession } from '../mail/session';
+import WhatsAppLogo from '../../assets/svg/WhatsApp.svg';
+import CalendarMark from '../../components/svg/CalendarMark';
+import GmailLogo from '../../components/svg/GmailLogo';
 import WhatsAppSheet from '../whatsapp/WhatsAppSheet';
 import { whatsAppView } from '../whatsapp/rules';
 import { closeWhatsAppSession, whatsAppSession } from '../whatsapp/session';
@@ -111,11 +114,18 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
             </Pressable>
           </View>
           <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            {/* flex: 1 so it is bounded by the screen and scrolls (the same fix the WhatsApp screen needed on
+                device): without it, it grew to its content and the bottom was cut off, unscrollable. */}
+            <ScrollView
+              style={styles.flex}
+              contentContainerStyle={styles.content}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
               <WhatsAppRow userId={userId} />
               <View style={styles.source}>
                 <View style={styles.sourceTitle}>
-                  <Icon name="mail" size={18} color={colors.successText} />
+                  <View style={styles.logoSmall}><GmailLogo size={24} /></View>
                   <Text style={styles.name}>Gmail</Text>
                   {badge(view.badge)}
                 </View>
@@ -164,7 +174,7 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
 
               <View style={styles.source}>
                 <View style={styles.sourceTitle}>
-                  <Icon name="calendar" size={18} color={colors.successText} />
+                  <View style={styles.logoSmall}><CalendarMark size={28} /></View>
                   <Text style={styles.name}>Calendario</Text>
                   {badge(build.calendar ? undefined : data.calendar === 'waiting' ? 'En la lista' : 'Próximamente')}
                 </View>
@@ -200,6 +210,20 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
 }
 
 /** Its own query: an older server without WhatsApp just shows no row. */
+const WHATSAPP_PERKS = [
+  { icon: 'bell', label: 'Avisos de lo importante' },
+  { icon: 'corner-up-left', label: 'Respondes desde aquí' },
+  { icon: 'eye-off', label: 'Sin marcar leídos' },
+];
+
+const WHATSAPP_TONES: Record<string, { background: string; dot: string; text: string }> = {
+  none: { background: colors.mint, dot: colors.successText, text: colors.primaryDeep },
+  pairing: { background: colors.warning.background, dot: colors.warning.icon, text: colors.warning.text },
+  linked: { background: colors.mint, dot: colors.successText, text: colors.primaryDeep },
+  gone: { background: colors.warning.background, dot: colors.warning.icon, text: colors.warning.text },
+  failed: { background: colors.error.background, dot: colors.error.icon, text: colors.error.text },
+};
+
 function WhatsAppRow({ userId }: { userId: string }) {
   const { link: fresh, refetch } = useWhatsApp(userId, 'cache-and-network');
   // A failed read must not pull the sheet from under them; the open state survives the lock (session.ts).
@@ -223,22 +247,47 @@ function WhatsAppRow({ userId }: { userId: string }) {
     return null;
   }
   const view = whatsAppView(link);
+  const tone = WHATSAPP_TONES[link.state] ?? WHATSAPP_TONES.none;
+  // Not linked yet (or not any more): what linking gives, at a glance.
+  const pitch = link.state === 'none' || link.state === 'failed' || link.state === 'gone';
   return (
-    <View style={styles.source}>
-      <View style={styles.sourceTitle}>
-        <Icon name="message-circle" size={18} color={colors.successText} />
-        <Text style={styles.name}>WhatsApp</Text>
-        {view.badge ? <Text style={styles.badge}>{view.badge}</Text> : null}
+    <View style={styles.whatsApp}>
+      <View style={styles.whatsAppHead}>
+        <View style={styles.logoTile}>
+          <WhatsAppLogo width={30} height={30} />
+        </View>
+        <View style={styles.flex}>
+          <Text style={styles.whatsAppName}>WhatsApp</Text>
+          {view.badge ? (
+            <View style={[styles.state, { backgroundColor: tone.background }]}>
+              <View style={[styles.stateDot, { backgroundColor: tone.dot }]} />
+              <Text style={[styles.stateText, { color: tone.text }]}>{view.badge}</Text>
+            </View>
+          ) : (
+            <Text style={styles.detail}>Tu propio número, vinculado como un dispositivo</Text>
+          )}
+        </View>
       </View>
-      <Text style={styles.text}>{view.body}</Text>
+      <Text style={styles.whatsAppBody}>{view.body}</Text>
+      {pitch ? (
+        <View style={styles.perks}>
+          {WHATSAPP_PERKS.map((perk) => (
+            <View key={perk.label} style={styles.perk}>
+              <View style={styles.perkIcon}><Icon name={perk.icon} size={16} color={colors.successText} /></View>
+              <Text style={styles.perkText}>{perk.label}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {view.action ? (
         <Pressable
-          style={styles.button}
+          style={({ pressed }) => [styles.button, styles.whatsAppButton, pressed && styles.pressed]}
           onPress={() => setOpen(true)}
           accessibilityRole="button"
           accessibilityLabel={`${view.actionLabel}: WhatsApp`}
         >
           <Text style={styles.buttonText}>{view.actionLabel}</Text>
+          <Icon name="arrow-right" size={18} color={colors.white} />
         </Pressable>
       ) : null}
       {open ? (
@@ -311,4 +360,31 @@ const styles = StyleSheet.create({
   buttonText: { color: colors.white, fontSize: 15, fontWeight: '700' },
   secondary: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { color: colors.successText, fontSize: 14, fontWeight: '600' },
+  pressed: { opacity: 0.85 },
+  logoSmall: {
+    width: 40, height: 40, borderRadius: 12, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.border,
+  },
+  // WhatsApp leads the sheet: a card of its own, not one more row.
+  whatsApp: {
+    borderRadius: 20, padding: 16, gap: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.primaryMuted,
+  },
+  whatsAppHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  logoTile: {
+    width: 48, height: 48, borderRadius: 14, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#064E3B', shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  },
+  whatsAppName: { fontSize: 18, fontWeight: '800', color: colors.textFlat },
+  state: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderRadius: 999,
+    paddingHorizontal: 9, paddingVertical: 3, marginTop: 3,
+  },
+  stateDot: { width: 7, height: 7, borderRadius: 4 },
+  stateText: { fontSize: 12, fontWeight: '700' },
+  whatsAppBody: { fontSize: 15, color: colors.textFlat, lineHeight: 21 },
+  perks: { flexDirection: 'row', gap: 8 },
+  perk: { flex: 1, alignItems: 'center', gap: 6, borderRadius: 14, backgroundColor: colors.background, paddingVertical: 10, paddingHorizontal: 4 },
+  perkIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
+  perkText: { fontSize: 12, fontWeight: '600', color: colors.gray600, textAlign: 'center' },
+  whatsAppButton: { flexDirection: 'row', gap: 8, minHeight: 52, borderRadius: 16 },
 });

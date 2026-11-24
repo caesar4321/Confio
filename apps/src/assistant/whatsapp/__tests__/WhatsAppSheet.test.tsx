@@ -21,7 +21,7 @@ jest.mock('../useWhatsApp', () => ({ useWhatsApp: () => ({ link: mockLink, refet
 
 const link = (over: Record<string, unknown> = {}) => ({
   state: 'none', code: null, codeAt: null, phoneHint: '4567', reason: null, reasonMessage: null, linkedAt: null,
-  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: '+59171234567', consentVersion: 2, consentOutdated: false,
+  lastSyncAt: null, ownPhoneHint: '4567', suggestedPhone: '+59171234567', consentVersion: 3, consentOutdated: false,
   notices: [], ...over,
 });
 const notice = { id: '7', kind: 'order', chat: 'Farmacia Central', preview: 'Su pedido está listo', summary: 'Pedido listo', time: '10:01', createdAt: '' };
@@ -71,7 +71,7 @@ it('consent first, then the pairing asks for the code of the accepted text', asy
   await press('Cómo funciona');
   expect(words()).toContain('«Chrome»');
   await press('Vincular WhatsApp');
-  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 2 } }));
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 3, country: 'BO' } }));
 });
 
 it('pairing: the code, copied as WhatsApp takes it, and the steps', async () => {
@@ -146,7 +146,7 @@ it('a send whose answer was lost shows what the server has, not a retry', async 
 });
 
 it('a newer consent than this build knows: update, never the old text', () => {
-  mockLink = link({ consentVersion: 3 });
+  mockLink = link({ consentVersion: 4 });
   expect(open().words()).toContain('Actualiza la app');
 });
 
@@ -287,7 +287,7 @@ it('unlinking forgets what was kept, a message on its way included', async () =>
   expect(whatsAppSession('1').draft).toBeNull();
 });
 
-it('the number is typed: the account number only fills it in, and no country code means no link', async () => {
+it('the number is typed with its country: the account number only fills it in, a pasted +code picks the country', async () => {
   mockLink = link({ suggestedPhone: null });
   mockMutate.mockResolvedValue({ data: { startWhatsAppLink: { success: true } } });
   let tree: any;
@@ -300,11 +300,12 @@ it('the number is typed: the account number only fills it in, and no country cod
     && node.findAll((child: any) => child.props.children === 'Vincular WhatsApp').length > 0)[0];
   expect(button().props.disabled).toBe(true);
   act(() => field().props.onChangeText('71234567'));
-  expect(field().props.value).toBe('+71234567');  // the + stays: the country code is asked for
+  expect(button().props.disabled).toBe(true);  // no country picked: no number to link
+  expect(JSON.stringify(tree.toJSON())).toContain('Elige el país');
   act(() => field().props.onChangeText('+58 414 765 4321'));
   expect(button().props.disabled).toBe(false);
   await act(async () => {
     await button().props.onPress();
   });
-  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+584147654321', consentVersion: 2 } }));
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+584147654321', consentVersion: 3, country: 'VE' } }));
 });

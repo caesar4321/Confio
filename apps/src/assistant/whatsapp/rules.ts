@@ -6,12 +6,11 @@ import type { WhatsAppDraft, WhatsAppLink } from './api';
 export const CONSENT_POINTS: { icon: string; text: string }[] = [
   { icon: 'bell', text: 'Te avisamos de cobros, pedidos y citas.' },
   { icon: 'check-circle', text: 'Respondes desde aquí. Nada sale sin tu OK.' },
-  { icon: 'eye-off', text: 'No marcamos tus chats como leídos (solo el que respondes).' },
+  { icon: 'eye-off', text: 'No marcamos nada como leído ni apareces «en línea».' },
 ];
-/** Always in sight before linking: what is read, by whom, for how long, and what contacts may see. */
-export const CONSENT_DATA = 'Cada ~2 horas y al abrir Confío IA leemos el nombre y la última línea de tus chats sin '
-  + 'leer. Una IA marca lo importante y lo guardamos cifrado mientras siga vinculado. Tus contactos pueden verte «en '
-  + 'línea» un momento. '
+/** Always in sight before linking: what is read, by whom, for how long. */
+export const CONSENT_DATA = 'Recibimos los mensajes nuevos de tus chats personales (no grupos) mientras siga vinculado. '
+  + 'Una IA marca lo importante y lo guardamos cifrado mientras siga vinculado; lo demás no se guarda. '
   + 'Al vincularlo te dejamos una nota en tu propio chat, para que sepas que se vinculó.';
 
 /** A number with its country code, as WhatsApp takes it: + and 8 to 15 digits. */
@@ -23,22 +22,21 @@ export const CONSENT_RISK = 'WhatsApp no permite oficialmente apps como esta y p
 export function consentText(): string[] {
   return [
     'Escribes tu número de WhatsApp y WhatsApp te pide confirmarlo con un código en tu teléfono. Confío lo '
-      + 'vincula como un dispositivo más, en un navegador en la nube que es solo tuyo. Lo verás en WhatsApp como '
+      + 'vincula como un dispositivo más, desde servidores de Confío, solo para ti. Lo verás en WhatsApp como '
       + '«Chrome» en Dispositivos vinculados.',
     'Al vincularlo, Confío escribe una sola nota en tu chat contigo mismo («Mensaje para ti») diciendo que se '
       + 'vinculó: si alguien te pidió el código con engaños, lo ves ahí. Es el único mensaje que Confío escribe sin '
       + 'que lo apruebes.',
-    'Cada unas dos horas, y cuando abres Confío IA, miramos tu lista de chats: el nombre y la última línea de '
-      + 'los chats sin leer. No abrimos tus chats para eso, así que no marcamos nada como leído (al enviar una '
-      + 'respuesta, ese chat sí queda leído). No guardamos grupos ni mensajes que parezcan códigos o contraseñas.',
-    'Un modelo de IA marca lo importante (cobros, pedidos, entregas, citas, alguien esperando tu respuesta) y '
-      + 'te avisamos. Guardamos eso cifrado mientras tu WhatsApp siga vinculado; al desvincularlo, desde Confío o desde '
-      + 'tu teléfono, lo borramos.',
-    'Solo enviamos un mensaje cuando tú lo apruebas aquí, uno por uno y escrito a ritmo de persona. Nunca '
-      + 'pagamos nada desde WhatsApp.',
-    'Cuando miramos tu lista, tus contactos pueden verte «en línea» un momento. WhatsApp no permite oficialmente '
-      + 'clientes como este y podría restringir una cuenta; cuidamos tu número enviando poco y solo lo que '
-      + 'apruebas, pero el riesgo no es cero.',
+    'Mientras siga vinculado, recibimos los mensajes nuevos que te escriben en chats personales, como cualquier '
+      + 'dispositivo vinculado. No recibimos grupos ni estados, no marcamos nada como leído y no apareces «en '
+      + 'línea». Los mensajes que parecen códigos o contraseñas se descartan sin guardarse.',
+    'Un modelo de IA revisa los mensajes nuevos y marca lo importante (cobros, pedidos, entregas, citas, alguien '
+      + 'esperando tu respuesta) y te avisamos. Guardamos solo eso, cifrado, mientras tu WhatsApp siga vinculado; '
+      + 'lo demás se descarta al revisarlo. Al desvincularlo, desde Confío o desde tu teléfono, lo borramos.',
+    'Solo enviamos un mensaje cuando tú lo apruebas aquí, uno por uno y a ritmo de persona. Nunca pagamos nada '
+      + 'desde WhatsApp.',
+    'WhatsApp no permite oficialmente clientes como este y podría restringir una cuenta; cuidamos tu número '
+      + 'enviando poco y solo lo que apruebas, pero el riesgo no es cero.',
     'Puedes desvincularlo cuando quieras, aquí o desde tu teléfono.',
   ];
 }
@@ -83,6 +81,7 @@ export function whatsAppView(link: WhatsAppLink): WhatsAppView {
       };
     case 'failed':
       return {
+        badge: 'No se vinculó',
         body: link.reasonMessage || 'No se pudo vincular. Inténtalo de nuevo.',
         action: 'link',
         actionLabel: 'Intentar de nuevo',
@@ -102,6 +101,26 @@ export const NOTICE_LABELS: Record<string, string> = {
   reply: 'Parece que esperan tu respuesta',
   urgent: 'Parece urgente',
 };
+
+/** "Revisado hace 12 min": when the chat list was last read, or nothing when it never was (or the clock is off). */
+export function checkedAgo(iso: string | null, now: number): string | null {
+  const at = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(at) || at > now + 60_000) {
+    return null;
+  }
+  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
+  if (minutes < 1) {
+    return 'Revisado ahora';
+  }
+  if (minutes < 60) {
+    return `Revisado hace ${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `Revisado hace ${hours} h` : `Revisado hace ${Math.floor(hours / 24)} d`;
+}
+
+/** The first letter or digit of a chat's name, for its avatar; "#" when it has none (emoji only). */
+export const initialOf = (name: string) => (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '#').toUpperCase();
 
 /** The 8 characters as WhatsApp takes them: "ABCD-EFGH" is copied as "ABCDEFGH". */
 export const codeForCopy = (code: string) => code.replace(/[^A-Z0-9]/gi, '').toUpperCase();
