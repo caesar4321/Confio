@@ -1,4 +1,5 @@
-"""Celery tasks. Browser work runs on the `browser` queue, beside the shopping agent."""
+"""Celery tasks. Browser work runs on the `browser` queue beside the shopping agent: WhatsApp runs at most two
+of its three processes at once (service._slot), so a purchase always has one."""
 from celery import shared_task
 
 
@@ -43,11 +44,13 @@ def drop_profile(self, provider_name, context_id, session_id=''):
     except BrowserUnavailable as exc:
         if self.request.retries >= self.max_retries:
             import logging
-            logging.getLogger(__name__).error('WhatsApp profile of a deleted link still not deleted after a day')
+            # The context id is useless without the vendor key: it is what lets ops delete it by hand.
+            logging.getLogger(__name__).error('WhatsApp profile %s (%s) still not deleted after a day',
+                                              context_id, provider_name)
         raise self.retry(exc=exc)
 
 
-@shared_task(name='whatsapp_link.sweep_vendor', ignore_result=True, soft_time_limit=120, time_limit=165)
+@shared_task(name='whatsapp_link.sweep_vendor', ignore_result=True, soft_time_limit=80, time_limit=125)
 def sweep_vendor():
     from . import service
     service.sweep_vendor()
