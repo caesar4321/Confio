@@ -57,7 +57,7 @@ import {
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
 import { TAP_ONLY_KEYS, cardFor, openDestination, resolveNavigate } from './destinations';
-import { WhatsAppDraftCard, WhatsAppReplyChips } from './whatsapp/ChatCards';
+import { WhatsAppConsentChip, WhatsAppDraftCard, WhatsAppReplyChips } from './whatsapp/ChatCards';
 import { requestGuideWalk } from './guidePointer';
 import ConnectionsHost from './connections/ConnectionsHost';
 import ConnectionsPrompt from './connections/ConnectionsPrompt';
@@ -387,6 +387,7 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
       {/* WhatsApp (whatsapp_link/chat.py): replies to choose under a message that arrived, and the card a
           reply waits on until the person taps Enviar. */}
       {message.pending ? null : <WhatsAppReplyChips actions={message.actions} />}
+      {message.pending ? null : <WhatsAppConsentChip actions={message.actions} />}
       {message.pending ? null : message.actions.filter((a) => a.type === 'whatsapp_draft' && a.target).slice(0, 1)
         .map((a) => <WhatsAppDraftCard key={`${message.id}:wa`} draftId={String(a.target)} />)}
       {/* A stock bought or sold here: one card per answer, approved on the card. */}

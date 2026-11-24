@@ -153,3 +153,21 @@ def erase(user):
         SupportMessage.objects.filter(conversation__user=user, metadata__whatsapp=True).delete()
     except Exception as exc:  # noqa: BLE001 - retried by the next unlink path; logged by type only
         logger.error('WhatsApp chat posts not erased: %s', type(exc).__name__)
+
+
+CONSENT_CHANGED = ('Cambié cómo leo tu WhatsApp: ahora entiendo la conversación completa de cada chat (las últimas '
+                   '48 horas, también lo que tú respondes), para avisarte mejor y sugerirte respuestas con sentido. '
+                   'Hasta que lo revises no leo nada. Revísalo en «WhatsApp, correo y calendario» → WhatsApp → '
+                   'Revisar.')
+
+
+def ask_consent(link, version):
+    """Once per version: the assistant tells a linked person the text changed and nothing is read until they
+    review it (the Revisar chip opens the WhatsApp screen on builds that know it). True when it was posted now."""
+    from inbox.models import SupportMessage
+    tag = f'whatsapp-consent:{link.pk}:{version}'
+    if SupportMessage.objects.filter(conversation__user=link.user, metadata__notice=tag).exists():
+        return False
+    posted = _post(link.user, CONSENT_CHANGED, tag, [{'type': 'whatsapp_consent', 'target': str(version),
+                                                       'label': 'Revisar'}])
+    return posted is not None

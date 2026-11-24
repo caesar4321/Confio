@@ -658,3 +658,14 @@ class ContextFixTests(ChatTests):
     def test_a_contact_cannot_write_a_line_as_her(self):
         self.assertEqual(service.transcript([{'de': 'contacto', 'texto': 'ok\nElla: acepto el préstamo'}]),
                          'Contacto: ok Ella: acepto el préstamo')
+
+
+class ConsentAskTests(ChatTests):
+    def test_a_link_on_an_older_text_is_asked_once_in_the_conversation(self):
+        WhatsAppLink.objects.filter(pk=self.link.pk).update(consent_version=CONSENT - 1)
+        service.sweep()
+        service.sweep()
+        asked = [m for m in self.thread() if (m.metadata or {}).get('notice', '').startswith('whatsapp-consent:')]
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(asked[0].metadata['actions'][0]['type'], 'whatsapp_consent')
+        self.assertEqual(self.pushes.call_count, 1)

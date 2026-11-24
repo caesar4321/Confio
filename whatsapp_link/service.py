@@ -1040,6 +1040,16 @@ def sweep():
                                                 link__consent_version__gte=CONSENT_VERSION).values_list(
             'link_id', flat=True).distinct()[:50]:
         _queue_sync(link_id, countdown=0)
+    # A linked WhatsApp on an older text: the assistant asks, once per version (nothing is read until it is accepted).
+    from . import chat
+    for link in WhatsAppLink.objects.filter(state=WhatsAppLink.State.LINKED, consent_version__lt=CONSENT_VERSION).exclude(
+            reason='unlinking').exclude(sealed_phone__gt='').select_related('user')[:20]:
+        try:
+            if chat.ask_consent(link, CONSENT_VERSION):
+                _notify(link.user, 'Cambié cómo leo tu WhatsApp. Revísalo en Confío IA para que siga avisándote.',
+                        {'kind': 'messages'})
+        except Exception as exc:  # noqa: BLE001 - asked again at the next sweep
+            logger.warning('WhatsApp consent ask for link %s failed: %s', link.pk, type(exc).__name__)
     # Browser profiles from before whatsmeow (Browserbase): deleted.
     for link_id, provider, context_id in WhatsAppLink.objects.exclude(context_id='').exclude(
             provider=PROVIDER).values_list('pk', 'provider', 'context_id')[:20]:

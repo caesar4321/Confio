@@ -4,7 +4,14 @@ import type { WhatsAppLink } from '../whatsapp/api';
 
 /** WhatsApp is offered to whoever has not linked it (they type their number), and again to whoever WhatsApp
  * unlinked (a phone unused for a while, "Chrome" removed). */
-export const offersWhatsApp = (link: WhatsAppLink | null) => link?.state === 'none' || link?.state === 'gone';
+export const offersWhatsApp = (link: WhatsAppLink | null) => link?.state === 'none' || link?.state === 'gone'
+  || (link?.state === 'linked' && link.consentOutdated);  // paused until the new text is accepted: ask
+
+export const WHATSAPP_CONSENT_CARD = {
+  title: 'Revisa lo nuevo de WhatsApp',
+  body: 'Cambié cómo leo tu WhatsApp. Hasta que lo revises no te aviso de nada.',
+  cta: 'Revisar',
+};
 
 export const WHATSAPP_RELINK_CARD = {
   title: 'Tu WhatsApp se desvinculó',

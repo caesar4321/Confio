@@ -11,6 +11,7 @@ import { Text, TextInput } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
 import { GET_WHATSAPP_DRAFT, PREPARE_WHATSAPP_REPLY, SEND_WHATSAPP_DRAFT, type WhatsAppDraft } from './api';
 import { draftView, mergeDraft } from './rules';
+import { openWhatsAppFromNotification } from '../connections/store';
 
 export type ChatAction = { type: string; target?: string | null; label?: string | null };
 
@@ -119,6 +120,24 @@ export function WhatsAppReplyChips({ actions }: { actions: ChatAction[] }) {
       ) : null}
       {message ? <Text style={styles.error}>{message}</Text> : null}
     </View>
+  );
+}
+
+/** The assistant asked to review a changed WhatsApp text (whatsapp_link/chat.ask_consent): opens that screen. */
+export function WhatsAppConsentChip({ actions }: { actions: ChatAction[] }) {
+  if (!actions.some((a) => a.type === 'whatsapp_consent')) {
+    return null;
+  }
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.send, styles.consent, pressed && styles.pressed]}
+      onPress={() => openWhatsAppFromNotification()}
+      accessibilityRole="button"
+      accessibilityLabel="Revisar lo nuevo de WhatsApp"
+    >
+      <Icon name="file-text" size={16} color={colors.white} />
+      <Text style={styles.sendText}>Revisar</Text>
+    </Pressable>
   );
 }
 
@@ -303,4 +322,5 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   sendText: { color: colors.white, fontSize: 15, fontWeight: '800' },
+  consent: { marginTop: 8, alignSelf: 'flex-start', paddingHorizontal: 18 },
 });

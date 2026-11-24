@@ -7,7 +7,9 @@ import Icon from 'react-native-vector-icons/Feather';
 
 import { Text } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
-import { cardText, mentionsConnections, offersWhatsApp, promptKind, unanswered, WHATSAPP_CARD, WHATSAPP_RELINK_CARD } from './rules';
+import {
+  cardText, mentionsConnections, offersWhatsApp, promptKind, unanswered, WHATSAPP_CARD, WHATSAPP_CONSENT_CARD, WHATSAPP_RELINK_CARD,
+} from './rules';
 import { whatsAppSession } from '../whatsapp/session';
 import { openConnections, readSnooze, snooze, useKnownSnooze, type Where } from './store';
 import { useConnections, useViewer } from './useConnections';
@@ -93,7 +95,8 @@ function Prompt({ userId, where, starters }: { userId: string; where: Where; sta
   const ready = build.mail && (connections.gmail === 'invited' || connections.gmail === 'reconnect');
   // Something waits on them in Gmail first; otherwise WhatsApp, which anyone can link today.
   const showsWhatsApp = offerWhatsApp && !ready;
-  const whatsAppCard = link?.state === 'gone' ? WHATSAPP_RELINK_CARD : WHATSAPP_CARD;
+  const whatsAppCard = link?.state === 'gone' ? WHATSAPP_RELINK_CARD
+    : link?.state === 'linked' ? WHATSAPP_CONSENT_CARD : WHATSAPP_CARD;
   const { title, body, cta } = showsWhatsApp ? whatsAppCard : cardText(connections);
   const source = showsWhatsApp ? 'whatsapp' : 'mail';
   return (
