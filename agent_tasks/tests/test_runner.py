@@ -228,7 +228,8 @@ class HandOverTests(StepBase):
                 task.save()
 
     def results(self):
-        return snap(url=f'{BASE}/busca?q=chocolate', elements=[
+        return snap('Chocolate Abuelita 6 tabletas R$ 89,00 Chocolate Ibarra 540 g R$ 112,50 Ibarra R$ 112',
+                    url=f'{BASE}/busca?q=chocolate', elements=[
             link('', '/p/A', ref=0, image='https://img.example/a.jpg'),
             link('Chocolate Abuelita 6 tabletas', '/p/A', ref=1),
             link('Chocolate Ibarra 540 g', '/p/B', ref=2, image='https://img.example/b.jpg'),
@@ -237,8 +238,8 @@ class HandOverTests(StepBase):
 
     def offered(self):
         self.decide.return_value = ('offer_products', {'items': [
-            {'ref': 1, 'title': 'Chocolate Abuelita 6 tabletas', 'price': '$89.00'},
-            {'ref': 2, 'title': 'Chocolate Ibarra 540 g', 'price': '$112.50'},
+            {'ref': 1, 'title': 'Chocolate Abuelita 6 tabletas', 'price': 'R$ 89,00'},
+            {'ref': 2, 'title': 'Chocolate Ibarra 540 g', 'price': 'R$ 112,50'},
             {'ref': 3, 'title': 'Oferta', 'price': '$1'}, {'ref': 99, 'title': 'x', 'price': ''}]})
         return self.step(self.make_task(), self.results())
 
@@ -246,18 +247,24 @@ class HandOverTests(StepBase):
         task = self.offered()
         self.assertEqual((task.state, task.reason), ('needs_person', 'choose'))
         # Only this store's product links; the picture of the same product's other link is used.
+        def top(price):
+            amount, text = operate.top_total(price, task.country)
+            return {'cap': text, 'cap_amount': format(amount, 'f')}
         self.assertEqual(task.options, [
-            {'title': 'Chocolate Abuelita 6 tabletas', 'price': '$89.00', 'image': 'https://img.example/a.jpg',
-             'href': f'{BASE}/p/A'},
-            {'title': 'Chocolate Ibarra 540 g', 'price': '$112.50', 'image': 'https://img.example/b.jpg',
-             'href': f'{BASE}/p/B'}])
+            {'title': 'Chocolate Abuelita 6 tabletas', 'price': 'R$ 89,00', **top('R$ 89,00'),
+             'image': 'https://img.example/a.jpg', 'href': f'{BASE}/p/A'},
+            {'title': 'Chocolate Ibarra 540 g', 'price': 'R$ 112,50', **top('R$ 112,50'),
+             'image': 'https://img.example/b.jpg', 'href': f'{BASE}/p/B'}])
         self.assertIsNone(task.checkout_at)
         self.assertIn('Elige una', self.post.call_args.args[1])
 
     def test_the_one_they_pick_is_opened_and_never_offered_again(self):
         task = self.offered()
-        picked = service.choose(self.account, self.user, task.internal_id, 1)
+        picked = service.choose(self.account, self.user, task.internal_id, 1, cap=task.options[1]['cap'])
         self.assertEqual((picked.state, picked.pending_url), ('working', f'{BASE}/p/B'))
+        # What "Elegir" approved: this item, up to the top total its card showed (spec decision 42).
+        self.assertEqual(picked.order['cap']['item'], 'Chocolate Ibarra 540 g')
+        self.assertEqual((picked.order['cap']['text'], picked.order['cap']['subscribed']), (task.options[1]['cap'], True))
         self.decide.reset_mock()
         task = self.step(picked, snap())
         self.browser.goto.assert_called_with(f'{BASE}/p/B')
@@ -265,6 +272,17 @@ class HandOverTests(StepBase):
         self.decide.assert_not_called()
         # Picked: the agent buys it from its page (its add to cart included) under the checkout's lines.
         self.assertEqual((task.state, task.phase), ('working', 'ordering'))
+
+    def test_a_build_that_never_showed_the_top_total_approves_none(self):
+        task = self.offered()
+        self.assertTrue(task.options[1]['cap'])
+        picked = service.choose(self.account, self.user, task.internal_id, 1)   # an older app: no cap sent
+        self.assertNotIn('cap', picked.order or {})
+
+    def test_a_price_the_results_page_does_not_write_sets_no_top_total(self):
+        self.decide.return_value = ('offer_products', {'items': [{'ref': 2, 'title': 'Ibarra', 'price': '$999.00'}]})
+        task = self.step(self.make_task(), self.results())
+        self.assertEqual((task.options[0]['cap'], task.options[0]['cap_amount']), ('', ''))
 
     def test_a_pick_that_is_not_there_or_not_asked_is_refused(self):
         task = self.offered()
@@ -275,10 +293,12 @@ class HandOverTests(StepBase):
         with self.assertRaises(service.TaskRefused):
             service.choose(self.account, self.user, task.internal_id, 0)
 
-    def test_a_single_match_needs_no_pick(self):
+    def test_a_single_match_is_still_the_persons_to_choose(self):
+        # "Elegir" approves the purchase up to its top total (spec decision 42): never chosen for them.
         self.decide.return_value = ('offer_products', {'items': [{'ref': 2, 'title': 'Ibarra', 'price': '$112'}]})
         task = self.step(self.make_task(), self.results())
-        self.assertEqual((task.state, task.pending_url), ('working', f'{BASE}/p/B'))
+        self.assertEqual((task.state, task.reason), ('needs_person', 'choose'))
+        self.assertEqual(task.pending_url, '')
 
     def test_a_captcha_is_waited_out_never_handed_to_the_person(self):
         task = self.step(self.make_task(), snap(captcha=True))
@@ -2024,6 +2044,77 @@ class CheckoutTests(StepBase):
         self.plus.return_value = False
         task = self.step(task, checkout_page())
         self.assertEqual(task.reason, 'subscribe')
+        self.reader.click.assert_not_called()
+
+    def cap_task(self, top, subscribed=True, price='150.00'):
+        return self.make_task(phase='ordering', options=[
+            {'title': 'Chocolate Ibarra', 'price': 'R$ 150,00', 'href': f'{BASE}/p/1', 'image': ''}],
+            order={'cap': {'item': 'Chocolate Ibarra', 'amount': top, 'text': f'R$ {top},00',
+                           'subscribed': subscribed, 'price': price}})
+
+    def priced(self, products='R$ 150,00', shipping='R$ 39,00'):
+        """The second reader lists products and shipping, as Amazon's review page does."""
+        self.review.side_effect = lambda task, page, element, item, meter: {
+            **review_by_words(task, page, element, item, meter),
+            'lines': [{'kind': 'products', 'amount': products}, {'kind': 'shipping', 'amount': shipping}]}
+        return checkout_page(extra=f'Produtos {products} Frete {shipping}')
+
+    def test_within_the_top_total_chosen_with_elegir_the_order_is_placed_with_no_second_tap(self):
+        self.operate.return_value = self.ORDER   # R$ 189,00
+        task = self.step(self.cap_task('200'), self.priced())
+        self.reader.click.assert_called_once()
+        self.assertEqual((task.phase, task.order['pressed']), ('ordered', True))
+        said = self.post.call_args.args[1]
+        self.assertIn('Estoy haciendo tu pedido', said)   # never "done" before the store confirms it
+        self.assertIn('dentro del máximo que aprobaste al elegir (R$ 200,00)', said)
+
+    def test_anything_elegir_did_not_prove_brings_the_order_card(self):
+        # Chosen before subscribing; more than the chosen price in products (two units, an add-on); no
+        # breakdown at all; a total in dollars.
+        cases = (
+            (lambda: self.cap_task('200', subscribed=False), self.ORDER, lambda: self.priced()),
+            (lambda: self.cap_task('400'), ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 339,00'}),
+             lambda: (self.priced(products='R$ 300,00', shipping='R$ 39,00'),
+                      checkout_page(total='R$ 339,00', extra='Produtos R$ 300,00 Frete R$ 39,00'))[1]),
+            (lambda: self.cap_task('200'), self.ORDER, lambda: checkout_page()),
+        )
+        for make, named, page in cases:
+            self.review.side_effect = review_by_words
+            self.operate.return_value = named
+            page = page()
+            task = self.step(make(), page)
+            with self.subTest(page=page.text[-40:]):
+                self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+            AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        self.reader.click.assert_not_called()
+        allowed = {'subscribed': True, 'price': '150', 'amount': '200'}
+        self.assertTrue(operate.cap_allows(allowed, {}, 'R$ 189,00', Decimal('189'),
+                                           [{'kind': 'products', 'amount': 'R$ 150,00'}, {'kind': 'shipping', 'amount': 'R$ 39,00'}]))
+        for total, lines in (('US$ 189.00', [{'kind': 'products', 'amount': '150'}]),               # dollars
+                             ('R$ 189,00', [{'kind': 'products', 'amount': 'R$ 149,00'},          # not the chosen price
+                                            {'kind': 'shipping', 'amount': 'R$ 40,00'}]),
+                             ('R$ 189,00', [{'kind': 'products', 'amount': 'R$ 150,00'},          # an add-on
+                                            {'kind': 'other', 'amount': 'R$ 39,00'}])):
+            with self.subTest(total=total, lines=lines):
+                self.assertFalse(operate.cap_allows(allowed, {}, total, Decimal('189'), lines))
+
+    def test_above_the_top_total_the_order_card_asks_once(self):
+        self.operate.return_value = self.ORDER
+        task = self.step(self.cap_task('180'), self.priced())
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.reader.click.assert_not_called()
+
+    def test_the_top_total_never_skips_the_cuenta_inteligente_wall_nor_a_person_paid_order(self):
+        self.operate.return_value = self.ORDER
+        self.plus.return_value = False
+        task = self.step(self.cap_task('200'), self.priced())
+        self.assertEqual(task.reason, 'subscribe')
+        AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        self.plus.return_value = True
+        self.mode.side_effect = None
+        self.mode.return_value = ('manual', '')
+        task = self.step(self.cap_task('200'), self.priced())
+        self.assertEqual(task.reason, 'approve')   # who pays is said on the card before anything is placed
         self.reader.click.assert_not_called()
 
     def test_the_card_says_what_the_total_is_made_of(self):

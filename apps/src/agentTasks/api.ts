@@ -18,7 +18,7 @@ const TASK_FIELDS = `
   payQr
   payDetails { label value }
   openAccountMethod
-  options { title price image }
+  options { title price image cap }
   order { item total image address breakdown { label value } }
 `;
 
@@ -49,8 +49,8 @@ export const ANSWER_AGENT_STEP = gql`
 `;
 
 export const CHOOSE_AGENT_OPTION = gql`
-  mutation ChooseAgentOption($id: UUID!, $index: Int!) {
-    chooseAgentOption(id: $id, index: $index) { ${RESULT} }
+  mutation ChooseAgentOption($id: UUID!, $index: Int!, $cap: String) {
+    chooseAgentOption(id: $id, index: $index, cap: $cap) { ${RESULT} }
   }
 `;
 
@@ -85,7 +85,8 @@ export const FORGET_AGENT_STORE = gql`
   }
 `;
 
-export type AgentOption = { title: string; price: string; image: string };
+// `cap`: the most it may cost with shipping and taxes; choosing it approves up to that (spec decision 42).
+export type AgentOption = { title: string; price: string; image: string; cap?: string | null };
 export type AgentOrder = {
   item: string; total: string; image: string; address?: string | null;
   // What the total is made of (Productos, Envío…): the server checked it adds up to the total.

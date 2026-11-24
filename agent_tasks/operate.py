@@ -91,6 +91,68 @@ def amount_of(text):
         return None
 
 
+# A price in dollars on a local store (US$, $us, USD): no top total is set from it, nor used against it.
+FOREIGN_MONEY = re.compile(r'(us\s?\$|\$\s?us|\busd\b|u\$s|\bdolar)')
+_NOT_ONE_PRICE = re.compile(r'\b(antes|ahora|desde|de|hasta|x|c/u|cada|por|unidades|und)\b|/|-|%')
+COMMA_DECIMALS = frozenset({'BR', 'BO'})
+
+
+def unit_price(price_text, country):
+    """The one price a product card writes, read in the country's own number style, or None when the text
+    is anything else (a range, "antes/ahora", "2 x", a percentage, dollars, two numbers, one decimal digit).
+    Refusing only ever means the ordinary order card asks."""
+    text = str(price_text or '')
+    folded = guard.fold(text)
+    if FOREIGN_MONEY.search(folded) or _NOT_ONE_PRICE.search(folded):
+        return None
+    numbers = re.findall(r'\d[\d.,]*\d|\d', text)
+    if len(numbers) != 1:
+        return None
+    raw = numbers[0]
+    if country in COMMA_DECIMALS:
+        if not re.fullmatch(r'\d{1,3}(\.\d{3})+(,\d{2})?|\d+(,\d{2})?', raw):
+            return None
+        value = Decimal(raw.replace('.', '').replace(',', '.'))
+    else:
+        if not re.fullmatch(r'\d{1,3}(,\d{3})+(\.\d{2})?|\d+(\.\d{2})?', raw):
+            return None
+        value = Decimal(raw.replace(',', ''))
+    return value if value > 0 else None
+
+
+def top_total(price_text, country):
+    """(amount, text) of the most a chosen item may cost with shipping and taxes (spec decision 42), or
+    (None, ''). The text keeps the price's currency mark, in the country's number style."""
+    from . import conf
+    price = unit_price(price_text, country)
+    if price is None:
+        return None, ''
+    margin = Decimal(str(conf.get('AGENT_TASKS_CAP_MARGIN')))
+    floor = Decimal(str((conf.get('AGENT_TASKS_CAP_MIN_EXTRA') or {}).get(country, '0')))
+    cap = (price + max(price * margin, floor)).quantize(Decimal('1'), rounding='ROUND_CEILING')
+    whole = f'{cap:,.2f}'
+    if country in COMMA_DECIMALS:
+        whole = whole.replace(',', '_').replace('.', ',').replace('_', '.')
+    text = str(price_text)
+    found = re.search(r'\d[\d.,]*\d|\d', text)
+    return cap, (text[:found.start()] + whole + text[found.end():]).strip()
+
+
+def cap_allows(cap, read, total, amount, breakdown_lines):
+    """Whether "Elegir" already approved this order (spec decision 42): chosen while subscribed, on a card
+    that showed this top total; the total at or under it, in the same money; the products line exactly the
+    chosen price (one unit of that item: a misread or "antes" price, or two units, never matches); and no line
+    but products, shipping, tax or a discount (nothing added). Anything unproven: the order card asks."""
+    if not cap or not cap.get('subscribed') or not cap.get('price') or amount is None:
+        return False
+    if FOREIGN_MONEY.search(guard.fold(total)) or amount > Decimal(cap['amount']):
+        return False
+    if any(line.get('kind') not in ('products', 'shipping', 'tax', 'discount') for line in breakdown_lines):
+        return False
+    products = [amount_of(line['amount']) for line in breakdown_lines if line.get('kind') == 'products']
+    return len(products) == 1 and products[0] is not None and products[0] == Decimal(cap['price'])
+
+
 def figure_on(page_text, amount):
     """A fact, not a reading: that amount is written on the page."""
     return amount is not None and any(amount_of(found.group(0)) == amount
@@ -417,12 +479,19 @@ def _order(step, browser, reader, seen, element, label, args):
     # Who pays it is part of what they approve: said before they confirm, and asked again if it changed.
     mode, offer = service.pay_mode(task, step.app_meta())
     order = {**order, 'manual': mode == 'manual', 'offer': offer}
+    cap = (task.order or {}).get('cap') or {}
+    if cap:
+        order['cap'] = cap   # what "Elegir" approved stays with the order until it is placed
     if not service.subscribed(task.user):
         # Buying and paying for the person is Cuenta inteligente's (spec decision 37). The priced order is
         # shown with the offer instead of a confirm; asked again right here on every press, so a
         # subscription that ended in between never buys. Subscribed by then, the same card confirms.
         return step.hand_over('subscribe', order={**order, 'approved': None}, body=notes.say(
             notes.NEEDS_PERSON['subscribe'], task) + notes.breakdown_text(order))
+    if not approved and mode != 'manual' and cap.get('item') == item \
+            and cap_allows(cap, read, total, amount, order.get('breakdown') or []):
+        # "Elegir" approved this item up to its top total (spec decision 42): at or under it, no second tap.
+        approved = {'total': total, 'item': item, 'manual': False, 'address': address, 'by_cap': True}
     # What the person approves is the purchase: this item, this total, this address, who pays.
     if not approved or amount_of(approved.get('total')) != amount or {
             key: approved.get(key) for key in ('item', 'manual', 'address')} != {
@@ -442,6 +511,9 @@ def _order(step, browser, reader, seen, element, label, args):
         return step.save(order={**order, 'approved': approved}, phase='ordering', checkout_at=None,
                          history=[*(task.history or []), {'did': 'the final button', 'result': f'not pressed: {refused}'}
                                   ][-step.HISTORY_KEPT:])
+    if approved.get('by_cap'):
+        notes.post(task, notes.say(notes.PLACED_BY_CAP, task).replace('{total}', total).replace(
+            '{cap}', cap.get('text') or '') + notes.breakdown_text(order), f'placed:{task.steps}')
     # Clicked: this page is never pressed on again (a slow store still places it). The order's pages are
     # looked for; if the store shows one more step for the same order instead, see _again.
     browser.pump(4)

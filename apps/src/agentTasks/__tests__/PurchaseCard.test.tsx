@@ -77,7 +77,7 @@ it('shows the products with their photos and prices, and a tap picks one', async
   // Only https pictures are loaded.
   expect(photos.map((p) => p.props.source.uri)).toEqual(['https://img.example/a.jpg']);
   await act(async () => { labelled(tree, 'Elegir Chocolate Ibarra 540 g, $112.50').props.onPress(); });
-  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, index: 1 });
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, index: 1, cap: null });   // no top total shown, none sent
 });
 
 it('the sign-in is typed in the card, sent once, and the password is not kept', async () => {
@@ -127,6 +127,17 @@ it('without Cuenta inteligente the priced order comes with the offer, never a co
   expect(opened).toEqual([['SmartAccountOffer', { door: 'chip', trigger: 'agent_purchase' }]]);
   await act(async () => { labelled(tree, 'Ya la activé: seguir').props.onPress(); });
   expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$129.00' });
+});
+
+it('each product says the most it may cost: choosing it approves up to that', async () => {
+  mockTask = task({ reason: 'choose', message: 'Elige una…',
+    options: [{ title: 'Turin Magno Chocolates', price: '$85.00', image: '', cap: '$165.00' }] });
+  const tree = await mount();
+  expect(texts(tree)).toContain('Hasta $165.00 con envío');
+  mockMutate.mockResolvedValue(answered('chooseAgentOption'));
+  await act(async () => { labelled(tree, 'Elegir Turin Magno Chocolates, $85.00, hasta $165.00 con envío').props.onPress(); });
+  // The top total the card showed goes back with the tap.
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, index: 0, cap: '$165.00' });
 });
 
 it('the card says what the total is made of: the shipping is never a surprise', async () => {

@@ -139,6 +139,10 @@ def manual_text(task):
     return text + (OPEN_ACCOUNT if order.get('offer') else '')
 
 
+# An order placed on "Elegir" alone, within its top total (spec decision 42): said as it happens.
+PLACED_BY_CAP = ('Estoy haciendo tu pedido en {site}: {{total}}, dentro del máximo que aprobaste al elegir '
+                 '({{cap}}). Te aviso cuando la tienda lo confirme.')
+
 BREAKDOWN_LABELS = {'products': 'productos', 'shipping': 'envío', 'tax': 'impuestos', 'discount': 'descuento',
                     'fee': 'cargos', 'other': 'otros cargos'}
 

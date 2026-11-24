@@ -183,7 +183,9 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
       <Text style={styles.message}>{task.message}</Text>
       {waiting && task.reason === 'choose' ? (
         <Products options={task.options} picking={tapping}
-          onPick={(index) => act(`pick:${index}`, CHOOSE_AGENT_OPTION, { index }, 'chooseAgentOption')} />
+          onPick={(index) => act(`pick:${index}`, CHOOSE_AGENT_OPTION,
+            // The top total this card showed goes back with the tap: only then does "Elegir" approve up to it.
+            { index, cap: task.options[index]?.cap ?? null }, 'chooseAgentOption')} />
       ) : null}
       {waiting && task.reason === 'login' ? (
         <SignIn site={task.site} sending={tapping === 'signin'}
@@ -365,10 +367,13 @@ function Products({ options, picking, onPick }: {
       contentContainerStyle={styles.products}
       renderItem={({ item, index }) => (
         <Pressable style={styles.product} disabled={picking !== null} onPress={() => onPick(index)}
-          accessibilityRole="button" accessibilityLabel={`Elegir ${item.title}${item.price ? `, ${item.price}` : ''}`}>
+          accessibilityRole="button"
+          accessibilityLabel={`Elegir ${item.title}${item.price ? `, ${item.price}` : ''}${item.cap ? `, hasta ${item.cap} con envío` : ''}`}>
           <Photo uri={item.image} size={132} />
           <Text style={styles.title} numberOfLines={3}>{item.title}</Text>
           {item.price ? <Text style={styles.price}>{item.price}</Text> : null}
+          {/* Choosing approves the purchase up to this (spec decision 42): said before the tap. */}
+          {item.cap ? <Text style={styles.cap}>Hasta {item.cap} con envío</Text> : null}
           <View style={styles.pick}>
             {picking === `pick:${index}` ? <ActivityIndicator size="small" color="#FFFFFF" />
               : <Text style={styles.pickText}>Elegir</Text>}
@@ -463,6 +468,7 @@ const styles = StyleSheet.create({
   photoEmpty: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.neutralDark },
   title: { fontSize: 14, lineHeight: 19, color: colors.text.primary },
   price: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  cap: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   pick: {
     minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.primaryDark, marginTop: 2,

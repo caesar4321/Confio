@@ -62,6 +62,10 @@ DEFAULTS = {
     'AGENT_TASKS_PERSON_WAIT_SECONDS': 300,
     'AGENT_TASKS_CHECKOUT_WAIT_SECONDS': 900,  # the person's checkout
     'AGENT_TASKS_PER_DAY': 5,
+    # "Elegir" approves a purchase up to a top total (spec decision 42): the price plus this share for shipping
+    # and taxes, and at least the country's floor in its own currency (Amazon México: $44 shipping on $85).
+    'AGENT_TASKS_CAP_MARGIN': '0.6',
+    'AGENT_TASKS_CAP_MIN_EXTRA': {'MX': '80', 'BR': '30', 'BO': '50'},
     # Cuenta inteligente / IA+ (assistant.billing.has_plus): the shopping assistant is part of what they pay for.
     'AGENT_TASKS_PER_DAY_PLUS': 20,
     'AGENT_TASKS_MAX_CONCURRENT': 3,

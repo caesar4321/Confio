@@ -48,6 +48,8 @@ class AgentOptionType(graphene.ObjectType):
     title = graphene.String(required=True)
     price = graphene.String(required=True)
     image = graphene.String(required=True)
+    cap = graphene.String(description='The most it may cost with shipping and taxes: choosing it approves up to this '
+                                      '(spec decision 42). Empty when its price could not be read.')
 
 
 class AgentOrderType(graphene.ObjectType):
@@ -177,7 +179,8 @@ def task_type(task):
                                          if line.get('kind') in notes.BREAKDOWN_LABELS])
                if task.order else None),
         options=[AgentOptionType(title=str(o.get('title') or ''), price=str(o.get('price') or ''),
-                                 image=str(o.get('image') or '')) for o in (task.options or [])])
+                                 image=str(o.get('image') or ''), cap=str(o.get('cap') or '') or None)
+                 for o in (task.options or [])])
 
 
 class Query(graphene.ObjectType):
@@ -249,11 +252,13 @@ class ChooseAgentOption(_Result):
     class Arguments:
         id = graphene.UUID(required=True)
         index = graphene.Int(required=True)
+        cap = graphene.String(description='The top total the tapped card showed (spec decision 42), as sent in '
+                                          'options.cap: choosing approves up to it only when it is sent back')
 
     @classmethod
-    def mutate(cls, root, info, id, index):
+    def mutate(cls, root, info, id, index, cap=None):
         try:
-            return cls(success=True, errors=[], task=task_type(service.choose(*_owner(info), id, index)))
+            return cls(success=True, errors=[], task=task_type(service.choose(*_owner(info), id, index, cap=cap)))
         except Exception as exc:  # noqa: BLE001
             return _failure(cls, exc)
 

@@ -428,16 +428,18 @@ class Step:
             title = guard.clean(agent.redact(item.get('title') or element.get('label')), 120)
             if not title:
                 continue
-            options.append({'title': title, 'price': guard.clean(agent.redact(item.get('price')), 30),
+            from . import operate
+            price = guard.clean(agent.redact(item.get('price')), 30)
+            cap, cap_text = operate.top_total(price, task.country)
+            if cap is not None and not operate.figure_on(seen.text, operate.unit_price(price, task.country)):
+                cap, cap_text = None, ''   # a price the page does not write sets no top total
+            options.append({'title': title, 'price': price, 'cap': cap_text, 'cap_amount': format(cap, 'f') if cap else '',
                             'image': element.get('image') or pictures.get(href.split('#')[0], ''), 'href': href})
             if len(options) >= MAX_OPTIONS:
                 break
         if not options:
             return self.remember('offer_products', 'refused: none of those is a product link of this store')
-        if len(options) == 1:
-            # Nothing to pick between: go on with it.
-            self.save()
-            return self.remember(CHOSEN, options[0]['title'], pending_url=options[0]['href'], options=options)
+        # Even one: "Elegir" is the person's approval of the purchase up to its top total (spec decision 42).
         return self.hand_over('choose', options=options)
 
     def await_captcha(self):

@@ -385,8 +385,9 @@ def answer_step(account, user, task_id, yes):
                      history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
 
 
-def choose(account, user, task_id, index):
+def choose(account, user, task_id, index, cap=None):
     """The person picked one of the products offered in the chat: the agent goes on with it."""
+    from . import operate
     if not conf.get('AGENT_TASKS_ENABLED'):
         raise TaskRefused('unavailable')
     task = get(account, user, task_id)
@@ -406,7 +407,16 @@ def choose(account, user, task_id, index):
     with transaction.atomic():
         if not AgentTask.objects.filter(pk=task.pk, state='needs_person', reason='choose', steps=task.steps).update(
                 state='working', reason='', wait_until=None, pending_url=str(picked.get('href') or ''),
-                options=[picked], history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now()):
+                options=[picked], history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now(),
+                # "Elegir" approves this item up to the top total its card showed (spec decision 42): only
+                # when the app sent back that very top total (a build that never showed one sets none), and
+                # only for a subscriber then (a choice made before subscribing is never a purchase).
+                order={**(task.order or {}), 'cap': {
+                    'item': str(picked.get('title') or ''), 'amount': picked['cap_amount'],
+                    'text': picked.get('cap') or '', 'subscribed': subscribed(user),
+                    'price': format(operate.unit_price(picked.get('price'), task.country), 'f')}}
+                if picked.get('cap_amount') and cap is not None and str(cap) == picked.get('cap')
+                else (task.order or {})):
             raise TaskRefused('not_open')
         runner.kick(task.pk)
     task.refresh_from_db()

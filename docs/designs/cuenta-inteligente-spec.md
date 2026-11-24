@@ -1,7 +1,7 @@
 # Cuenta inteligente: final specification
 
 Date: 2026-11-20
-Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 32 from the founder's answers to the drafts, same day; rows 33 to 35 from 2026-11-21; rows 37 to 41, purchases by the assistant, from 2026-11-24). What is still open is listed in section 9.3.
+Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 32 from the founder's answers to the drafts, same day; rows 33 to 35 from 2026-11-21; rows 37 to 42, purchases by the assistant, from 2026-11-24). What is still open is listed in section 9.3.
 Supersedes: the section "For Build B (launch only; nothing below is built for the probe)" and every other launch-only note in [`cuenta-inteligente-fake-door.md`](cuenta-inteligente-fake-door.md). That document remains the record of the waitlist probe (2026-10-11 to 2026-11-20). Where the two disagree, this document wins. In particular the probe's merchant subscriptions and debit control, its price (US$9.99), its "cUSD+ is unwrapped to cUSD to pay the charge" rule and its `ConfioPayrollVault`-style shared escrow are all replaced.
 
 The repository is public. This document contains no user identifiers, names, interview material, revenue or user counts, and none may be added.
@@ -86,6 +86,7 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | 39 | When the account is short and the personal wallet has the money, the purchase first moves it: "Mueve US$X de tu cuenta personal a tu Cuenta inteligente", signed with Face like any move out of the personal wallet, with an offer to move more than this purchase. Then the account pays it. When neither has it, the existing top-up suggestion, into the account. A purchase is never paid directly from the personal wallet | Face then means money entering the account, never the assistant paying. Paying from the personal wallet would make the account a detour | FINAL |
 | 40 | At the cap, the order card says the period's limit is reached and offers to change it (a new owner signature with Face). Nothing is pulled above the signed cap | The cap is the owner's; the way past it is the owner's signature | FINAL |
 | 41 | The 0.9% exit fee on a purchase pull stays (decision 35's normal exit), as revenue. It is the same 0.9% a payment from the personal wallet to a local rail pays. The order card's total in dollars includes it | One price whichever wallet the money came from | FINAL |
+| 42 | "Elegir" is the purchase's confirmation (founder, 2026-11-24). Each product offered shows a top total ("hasta $X con envío": its price plus a margin for shipping and taxes); choosing it approves that item, its quantity and that top total. A subscriber's order whose real total at the store's last page is at or under it is placed with no second tap and no Face, and paid from the account (decision 38). A higher total, a payer other than the account, or a price that could not be read brings the ordinary order card once, with the real breakdown. Several items and quantities may be chosen into one cart; the store's cart must then hold exactly those | One clear intention with the money's limit is enough for an autonomous account; the top total keeps "full information" true when the store adds shipping only at checkout | FINAL |
 
 ---
 
@@ -195,7 +196,7 @@ How requests map to what the contract has (no new contract capability):
 |---|---|
 | Not a subscriber | Search, choice, cart and the priced review as for anyone; the order card offers Cuenta inteligente instead of confirming. Nothing is bought |
 | Subscriber, purchases not switched on | The order card asks to switch them on: the "Compras con Confío IA" Card rule, cap US$200 per 28 days by default, signed once with Face |
-| Account has the amount, within the cap | "Confirmar pedido": the store's button is pressed once, the payment data is read off the store's order page (`agent_tasks.runner.after_checkout`), and the spender pulls exactly the approved amount. No Face |
+| Account has the amount, within the cap | Chosen with "Elegir" within its top total (decision 42), or confirmed on the order card: the store's button is pressed once, the payment data is read off the store's order page (`agent_tasks.runner.after_checkout`), and the spender pulls exactly the approved amount. No Face |
 | Account short, personal wallet has it | "Mueve US$X a tu Cuenta inteligente" first (Face), then as above |
 | Neither has it | The existing top-up suggestion, into the account |
 | Cap reached | The card says so and offers to change the cap (Face). Nothing above it |
