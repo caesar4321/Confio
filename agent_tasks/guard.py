@@ -194,9 +194,22 @@ _CARD = re.compile(r'\b(tarjeta|cartao|card|credito|debito|credit|debit|visa|mas
                    r'|terminada en|final \d{4}|meses sin intereses|parcel\w*|cuotas)\b|\*{2,} ?\d{4}')
 
 
+# Declining an offer (Prime, a warranty, insurance), as the button itself reads: always the safe answer.
+_DECLINE = re.compile(r'(no,? gracias|nao,? obrigado|no,? thanks|ahora no|agora nao|not now|omitir|pular|skip'
+                      r'|continuar sin \w+( \w+)?|seguir sin \w+( \w+)?|continuar sem \w+( \w+)?|continue without \w+)')
+# Joining it, whatever else the button says.
+_JOIN = re.compile(r'\b(probar|prueba|experimentar|suscrib\w*|unete|unirme|join|start|try|activar|assinar|comecar'
+                   r'|empezar|gratis|free trial)\b')
+
+
 def may_press(element, *, on_checkout):
     """A control a checkout model may click: a choice, a link, or a button whose words are on the list."""
     parts = _parts(element)
+    # "No gracias" on Amazon's Prime offer: its aria label names Prime, its own text declines it.
+    if parts and _DECLINE.fullmatch(parts[0]) and not any(_JOIN.search(part) for part in parts) \
+            and not any(_FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part) for part in parts) \
+            and not _ACCOUNT_PATH.search(urlsplit(element.get('href') or '').path.lower()):
+        return True
     if any(_NEVER.search(part) for part in parts):
         return False
     # A label for the final button, or a tab or option that holds it, presses that button.

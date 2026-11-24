@@ -1277,6 +1277,16 @@ class CheckoutTests(StepBase):
             self.assertIn('not a control I may press', task.history[-1]['result'])
         self.reader.click.assert_not_called()
 
+    def test_amazons_prime_offer_is_declined_never_joined(self):
+        # The founder's order, 2026-11-24: Amazon's /checkout/p/.../pip page between the sign-in and the review.
+        self.assertTrue(guard.may_press(element('No gracias | No gracias, continuar sin Amazon Prime'),
+                                        on_checkout=True))
+        self.assertTrue(guard.may_press(element('Continuar sin Prime'), on_checkout=True))
+        for label in ('Prueba Prime gratis', 'Únete a Prime', 'No gracias | Probar Prime gratis 30 días',
+                      'Suscribirme a Prime'):
+            with self.subTest(label=label):
+                self.assertFalse(guard.may_press(element(label), on_checkout=True))
+
     def test_a_method_radio_that_says_pay_with_it_may_be_chosen(self):
         self.assertTrue(guard.may_press(element('Pagar con SPEI', tag='input', type='radio'), on_checkout=True))
         self.assertFalse(guard.may_press(element('Pagar con SPEI', tag='label'), on_checkout=True))
