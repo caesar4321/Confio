@@ -1551,6 +1551,18 @@ class CheckoutTests(StepBase):
         self.assertNotEqual(task.reason, 'step')
         self.assertIn('ready_to_order', task.history[-1]['result'])
 
+    def test_amazons_real_prime_page_is_declined(self):
+        # Recorded on the founder's 04:08 run: the decline is a link to .../prime/handler.
+        url = 'https://www.amazon.com.mx/checkout/p/p-703-7200281-8445016/pip'
+        decline = element('No gracias', tag='a', href='https://www.amazon.com.mx/checkout/p/p-703-7200281-8445016/prime/handler')
+        join = element('Continúa con Amazon Prime', tag='input', type='submit')
+        page = snap('Prueba Amazon Prime GRATIS por 30 días ... MXN $129 al mes Sin Prime Desde $79 No gracias', url,
+                    elements=[decline, join])
+        self.assertEqual(guard.hard_refusal(decline, on_checkout=True, page=page), '')
+        self.assertEqual(guard.hard_refusal(join, on_checkout=True, page=page), 'account')
+        self.assertNotEqual(guard.hard_refusal(element('No gracias', tag='a', href=f'{BASE}/logout'), on_checkout=True),
+                            '')
+
     def test_an_unsure_edit_by_its_whole_words_goes_ahead(self):
         self.judge.side_effect = None
         self.judge.return_value = ('unsure', 'which method is selected is not shown')

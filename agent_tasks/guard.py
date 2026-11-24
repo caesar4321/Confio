@@ -318,14 +318,19 @@ def hard_refusal(element, *, on_checkout, page=None):
     'acts'). A deny-list only: what it does not name, the click judge decides (and may refuse more)."""
     parts = _parts(element)
     href = element.get('href') or ''
-    if element.get('tag') == 'a' and (urlsplit(href).scheme not in ('http', 'https') or acts(href)):
-        return 'acts'
-    if _ACCOUNT_PATH.search(urlsplit(href).path.lower()):
-        return 'account'
+    path = urlsplit(href).path.lower()
+    # "No gracias" to an offer, by its own words: Amazon's is a link to /checkout/p/.../prime/handler. Never
+    # one that signs out, deletes or unsubscribes, whatever it says.
     if parts and _DECLINE.fullmatch(parts[0]) and not any(_JOIN.search(part) for part in parts) \
             and not any(_FINAL_LOOK.search(part) or _FINAL_BUTTON.fullmatch(part) or _FINAL_WORDS.search(part)
-                        for part in parts) and not any(card_words(part) for part in parts) and not element.get('cut'):
-        return ''   # "No gracias" to an offer: its other wordings may name Prime
+                        for part in parts) and not any(card_words(part) for part in parts) and not element.get('cut') \
+            and not (element.get('tag') == 'a' and urlsplit(href).scheme not in ('http', 'https')) \
+            and not re.search(r'/(logout|signout|sign-out|delete\w*|unsubscribe|close\w*)(/|$)', path):
+        return ''
+    if element.get('tag') == 'a' and (urlsplit(href).scheme not in ('http', 'https') or acts(href)):
+        return 'acts'
+    if _ACCOUNT_PATH.search(path):
+        return 'account'
     if any(_NEVER.search(part) for part in parts):
         return 'account'
     if any(card_words(part) for part in parts):
