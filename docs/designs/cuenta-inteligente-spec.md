@@ -1,7 +1,7 @@
 # Cuenta inteligente: final specification
 
 Date: 2026-11-20
-Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 32 from the founder's answers to the drafts, same day; rows 33 to 35 from 2026-11-21). What is still open is listed in section 9.3.
+Status: FINAL for the decisions in section 2 (rows 1 to 15 from the decision session, rows 16 to 32 from the founder's answers to the drafts, same day; rows 33 to 35 from 2026-11-21; rows 37 to 41, purchases by the assistant, from 2026-11-24). What is still open is listed in section 9.3.
 Supersedes: the section "For Build B (launch only; nothing below is built for the probe)" and every other launch-only note in [`cuenta-inteligente-fake-door.md`](cuenta-inteligente-fake-door.md). That document remains the record of the waitlist probe (2026-10-11 to 2026-11-20). Where the two disagree, this document wins. In particular the probe's merchant subscriptions and debit control, its price (US$9.99), its "cUSD+ is unwrapped to cUSD to pay the charge" rule and its `ConfioPayrollVault`-style shared escrow are all replaced.
 
 The repository is public. This document contains no user identifiers, names, interview material, revenue or user counts, and none may be added.
@@ -81,6 +81,11 @@ Reading guide: sections 1 to 3 say what the product is; 4 to 6 are the contract;
 | 34 | Confío IA+ means "the assistant executes", not "more AI". Free Confío IA answers and advises. For a subscriber, the assistant proposes rule changes the owner asks for (create, change, stop; send, bank payment, buy), keeps an owner-set target split of investments by new buys only (never by selling), produces the monthly review (in the thread every month and on request), and keeps owner-set alerts on prices and exchange rates. Every rule change takes effect only after the owner reviews it on the rule screen and signs it through the existing prepare and sign flow; an alert only tells the owner. The assistant never moves money on its own judgement and never chooses what to buy, how much, a split or an alert level. No contract change (section 3.5) | The paid benefit is the account operated for the owner, with the owner's signature on every change; usage-based benefits read as an AI unlock | FINAL |
 | 35 | A Card rule (`RuleKind.Card`, appended) lets a future Confío Card issuer pull approved amounts from the account (founder, 2026-11-21: "Add the card allowance rule before deploy"). The owner creates and stops it like any rule: `payee` is the issuer's spender, `amountUsd` the most it may take per period, `frequency` the period, `tokenIn` the dollar spent. The spender must be allowlisted by the Safe in the factory at creation and on every pull; the Safe can also stop all cards at once (`cardPaused`). The spender calls `cardPull(ruleId, usdtOut)` and receives exactly `usdtOut` USDT, pushed in the same call through the normal 0.9% exit; the gross (USDT plus the exit fee) counts against the cap. Periods are fixed, one minimum gap of the frequency long (1, 7, 14, 28 days), from the rule's first run; many pulls per period up to the cap; no carry-over. Gates as a rule run: Active and Current; a pending claim does not block (decision 25); an executed claim ends every card for good. The relayer pause does not apply. No standing allowance is ever given. Card pulls pay no subscription fee | An issuer settles card spending by pulling; the owner's signed cap per period, not the issuer, bounds the exposure, and the Safe can cut a compromised issuer instantly | FINAL |
 | 36 | The processor's fixed Pix and CLABE fee is outside a rule's 1.5% cost limit (founder, 2026-11-22: "Outside"). The limit still measures Relay's whole cost, fixed part included; its value and the FX tolerance are unchanged. The owner sees the fee before signing (US dollars, per payment, how it is collected) and it is stored with the Face-bound standing authorization as a ceiling. A run never charges above it: a higher tariff skips the run, tells the owner and asks for a new signature; a lower one charges the lower. Maintenance and earlier debt are never part of a rule's per-payment fee. A payment must still cover its costs and the rail's minimum | A fixed fee inside a percentage limit refused ordinary amounts (CLABE under about US$42, Pix under about US$12); shown and capped by the owner's consent, it needs no percentage bound | FINAL |
+| 37 | Purchases by the assistant are a Cuenta inteligente benefit (founder, 2026-11-24). A purchase is the shopping agent buying at an online store and paying the store's order with a local rail (CLABE, Pix, QR). Everyone gets the search, the choice, the cart and the review (item, total with shipping, address). For a non-subscriber the order card shows "Para que lo compre y lo pague yo, activa Cuenta inteligente" with the offer instead of "Confirmar pedido". Asking about an order already made, cancelling, returning or asking for a refund stay free, and so do the assistant's actions that move no money (Calendar, Gmail, WhatsApp). There is no free first purchase | Buying and paying for the person is the paid "lo hago yo" job. Seeing it work up to the priced order sells it better than a refusal before anything happens. Physical goods are outside in-app purchase; the subscription remains the account service | FINAL |
+| 38 | The account always pays a purchase. One Card rule (decision 35), "Compras con Confío IA", whose spender is Confío's purchase spender (allowlisted by the Safe), is signed once by the owner with Face when purchases are switched on. Default cap US$200 per period of 28 days, editable. Each purchase still needs the owner's tap on its order card, and the pull is the amount approved there. No Face per purchase | The point of the account: money for purchases lives in it, and the assistant spends it only inside a cap the owner signed. Exposure is bounded by that cap, with no contract change | FINAL |
+| 39 | When the account is short and the personal wallet has the money, the purchase first moves it: "Mueve US$X de tu cuenta personal a tu Cuenta inteligente", signed with Face like any move out of the personal wallet, with an offer to move more than this purchase. Then the account pays it. When neither has it, the existing top-up suggestion, into the account. A purchase is never paid directly from the personal wallet | Face then means money entering the account, never the assistant paying. Paying from the personal wallet would make the account a detour | FINAL |
+| 40 | At the cap, the order card says the period's limit is reached and offers to change it (a new owner signature with Face). Nothing is pulled above the signed cap | The cap is the owner's; the way past it is the owner's signature | FINAL |
+| 41 | The 0.9% exit fee on a purchase pull stays (decision 35's normal exit), as revenue. It is the same 0.9% a payment from the personal wallet to a local rail pays. The order card's total in dollars includes it | One price whichever wallet the money came from | FINAL |
 
 ---
 
@@ -183,6 +188,19 @@ How requests map to what the contract has (no new contract capability):
 | "guarda / ahorra US$X al mes" | Not possible: there is no saving rule (decision 17). The owner's dollar already is the balance; the assistant offers what exists |
 | "mantén 70/30" | Target split kept by new buys only, as above |
 | "vende cuando…" | Not possible: the account does not automate sales |
+
+### 3.6 Purchases by the assistant (decisions 37 to 41)
+
+| Situation | What the person sees and signs |
+|---|---|
+| Not a subscriber | Search, choice, cart and the priced review as for anyone; the order card offers Cuenta inteligente instead of confirming. Nothing is bought |
+| Subscriber, purchases not switched on | The order card asks to switch them on: the "Compras con Confío IA" Card rule, cap US$200 per 28 days by default, signed once with Face |
+| Account has the amount, within the cap | "Confirmar pedido": the store's button is pressed once, the payment data is read off the store's order page (`agent_tasks.runner.after_checkout`), and the spender pulls exactly the approved amount. No Face |
+| Account short, personal wallet has it | "Mueve US$X a tu Cuenta inteligente" first (Face), then as above |
+| Neither has it | The existing top-up suggestion, into the account |
+| Cap reached | The card says so and offers to change the cap (Face). Nothing above it |
+
+Everything the agent already enforces stays: one approval for one item, total and address; the store's own pages; the payment for exactly the approved amount (`agent_tasks` README and `operate.py`).
 
 `firstRunAt` is an existing field of the rule tuple. The prepare mutations take an optional `firstRunAt`; it must be between now and 62 days ahead, is refused for daily rules, and on an edit is moved on by whole periods so it is never earlier than the rule's current next run (an edit never runs a rule twice in one period).
 
@@ -1010,13 +1028,14 @@ Still open:
 |---|---|---|---|
 | C2 | Match the two feed addresses against Chainlink's published list before they are hard-coded | Design resolved (9.2); tolerance and feed age are in the numbers table | Engineering, in the contract audit |
 | C6 | A claim pending when a signed cancellation expires | Default kept: the return wins (9.2). Not answered by the founder | Founder, if he wants it otherwise |
+| P2 | The purchase spender (decision 38). Proposed: a small contract allowlisted by the Safe that calls `cardPull` and, in the same transaction, sends the USDT on to the payment provider's deposit for that one purchase, so Confío never holds it; audited; its relayer bound to purchases the owner approved. Alternatives and the bridge route to the provider are not designed yet | Proposal, not decided | Founder, after the design |
 | P1 | Which rails are live for payment rules at launch. CLABE and Pix keys have an adapter (7.5, as built); Bre-B has none and stays off. Open: the provider's terms and limits (X9) and one founder-run live payment per rail | Built, not run with real money | Founder |
 
 Positioning for store review (decision 34), stated as facts about the product:
 
 - The free assistant answers questions and gives general guidance. It moves nothing.
 - Cuenta inteligente is a paid financial account. Its subscription is charged on-chain from inside the account (section 5), not through the stores. Nothing is sold in the app as a digital unlock and there is no in-app purchase.
-- What the subscription adds to the assistant is the execution of automated transactions on the subscriber's own account: rules the owner signs, a target split kept by new purchases, alerts the owner sets, and a monthly review. Every transaction is authorised by the owner's signature.
+- What the subscription adds to the assistant is the execution of automated transactions on the subscriber's own account: rules the owner signs, a target split kept by new purchases, alerts the owner sets, a monthly review, and purchases of physical goods at online stores paid from the account within a cap the owner signed (decisions 37 to 41). Every transaction is authorised by the owner's signature or, for a purchase, by the owner's signed cap and their confirmation of that order.
 
 Numbers (O6), all confirmed by the founder on 2026-11-20:
 
