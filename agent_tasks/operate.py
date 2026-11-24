@@ -269,8 +269,9 @@ def checkout(step, browser, reader, seen):
         return step.save(state='awaiting_code', reason='', shown_target=browser.target,
                          order={**(task.order or {}), 'shown': shown})
     element = seen.element(args.get('ref'))
-    if element is None or element.get('disabled') or not element.get('on_screen', True):
-        return step.remember(f'{name}'[:30], 'refused: no such control on screen')
+    # Off screen is fine: the real click scrolls it into view and refuses it if anything covers it.
+    if element is None or element.get('disabled'):
+        return step.remember(f'{name}'[:30], 'refused: no such control on this page')
     label = _label(element)
     if name == 'ready_to_order' and not after:
         return _order(step, browser, reader, seen, element, label, args, on_checkout)

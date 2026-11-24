@@ -1281,6 +1281,16 @@ class CheckoutTests(StepBase):
         self.assertTrue(guard.may_press(element('Pagar con SPEI', tag='input', type='radio'), on_checkout=True))
         self.assertFalse(guard.may_press(element('Pagar con SPEI', tag='label'), on_checkout=True))
 
+    def test_an_add_to_cart_below_the_fold_is_pressed_for_real(self):
+        # The founder's Amazon México order, 2026-11-24: the buy box was outside the first screen.
+        task = self.make_task(phase='ordering')
+        page = snap('Turin Magno Chocolates 73.6 g', f'{BASE}/p/MLB1', elements=[
+            element('Agregar al carrito', ref=0, tag='input', type='submit', on_screen=False)])
+        self.operate.return_value = ('press', {'ref': 0})
+        task = self.step(task, page)
+        self.reader.click.assert_called_once()
+        self.assertEqual(task.history[-1]['result'], 'pressed')
+
     def test_a_label_or_tab_for_the_final_button_is_never_pressed(self):
         task = self.make_task(phase='ordering')
         page = checkout_page()

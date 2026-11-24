@@ -201,7 +201,9 @@ How to work:
   subscriptions or memberships, and decline them when offered.
 - Payment method: choose {pay}. Never a card, never credit, never another method. If the store does not offer
   {pay} for this order, give_up(no_payment).
-- Only the item of the goal, in the quantity asked (one, if not said). If the cart holds anything else, remove it.
+- Only the item of the goal, in the quantity asked (one, if not said). If you are still on its product page or the
+  cart does not hold it yet, press its "add to cart" ("Agregar al carrito", "Adicionar ao carrinho") first. If the
+  cart holds anything else, remove it.
 - When the page shows the final button that places the order, call ready_to_order with its number, the item's
   name and the order total exactly as the page writes it. You can never press that button: the person approves
   the total first. If <done> says they approved, call ready_to_order again and it is pressed for you.
