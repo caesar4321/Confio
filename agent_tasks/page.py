@@ -65,11 +65,35 @@ _READ = r'''(() => {
       autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
       label: label.slice(0, __MAX_LABEL__), cut: label.length > __MAX_LABEL__,
       href: tag === 'a' ? el.href : '',
-      // A product's picture, for the card the person picks from: an address, never loaded here.
+      // A product's picture, for the card the person picks from: an address, never loaded here. Inside the
+      // link, or in the product's own card around it (Mercado Livre puts it beside the title link), never
+      // past a container that holds another product's link. A lazy one's address waits in data-src/srcset.
       image: (() => {
-        const img = tag === 'a' ? el.querySelector('img') : null;
-        const src = img ? String(img.currentSrc || img.src || '') : '';
-        return /^https:\/\//.test(src) ? src.slice(0, 600) : '';
+        if (tag !== 'a') return '';
+        const real = img => {
+          const options = [img.currentSrc, img.getAttribute('src'), img.getAttribute('data-src'),
+            img.getAttribute('data-lazy'), ((img.getAttribute('srcset') || img.getAttribute('data-srcset') || '')
+              .split(',')[0] || '').trim().split(' ')[0]];
+          const found = options.map(v => String(v || '')).find(v => /^https:\/\//.test(v));
+          return found ? found.slice(0, 600) : '';
+        };
+        const inside = [...el.querySelectorAll('img')].map(real).find(Boolean);
+        if (inside) return inside;
+        const bare = href => String(href || '').split('#')[0].split('?')[0];
+        const own = bare(el.href);
+        // A picture is this product's only when no other link holds it.
+        const mine = img => { const a = img.closest('a[href]'); return !a || bare(a.href) === own; };
+        let box = el.parentElement;
+        for (let depth = 0; box && box !== document.body && depth < 5; depth += 1, box = box.parentElement) {
+          const others = new Set([...box.querySelectorAll('a[href]')].map(a => bare(a.href))
+            .filter(href => href !== own && /^https?:/.test(href)));
+          // Alone in its box, any picture there; beside another product's link, only one linked to this one.
+          const pictures = [...box.querySelectorAll('img')].filter(img => !others.size || (img.closest('a[href]')
+            && bare(img.closest('a[href]').href) === own)).filter(mine).map(real).filter(Boolean);
+          if (pictures.length) return pictures[0];
+          if (others.size) return '';
+        }
+        return '';
       })(),
       // getAttribute, not form.action: a field named "action" would shadow the property.
       action: sends ? address(attr(el, 'formaction') || attr(form, 'action') || document.baseURI) : '',
