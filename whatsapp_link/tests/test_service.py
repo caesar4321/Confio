@@ -354,7 +354,10 @@ class DraftTests(LinkTestBase):
         self.send.assert_called_once_with(self.link.pk, str(self.link.grant), draft['id'], 'Paso a las 5',
                                           to='59170000001@s.whatsapp.net')
         self.assertEqual(service.get_draft(self.user, draft['id'])['status'], 'sent')
-        self.assertEqual(service.get_draft(self.user, draft['id'])['body'], '')  # the text goes once sent
+        shown = service.get_draft(self.user, draft['id'])
+        # The card still shows what went and where (a refetched thread draws it from the server), for 48 hours.
+        self.assertEqual((shown['body'], shown['chat']), ('Paso a las 5', 'Farmacia Central'))
+        self.assertGreater(WhatsAppDraft.objects.get().expires_at, timezone.now() + timedelta(hours=47))
 
     def test_a_bare_chat_name_needs_a_number(self):
         with self.assertRaises(service.LinkRefused) as caught:

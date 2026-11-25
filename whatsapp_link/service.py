@@ -956,7 +956,9 @@ def send(draft_id, tries=0):
 def _sent(draft, status_, reason):
     fields = {}
     if status_ in (WhatsAppDraft.Status.SENT, WhatsAppDraft.Status.UNKNOWN):
-        fields = {'sealed': _seal({}), 'expires_at': timezone.now() + timedelta(hours=1)}  # the text goes now
+        # The card keeps showing what went and where (sealed) for as long as the chat's context is kept (consent
+        # v4: 48 hours), then it goes with it.
+        fields = {'expires_at': timezone.now() + timedelta(hours=conf.get('WHATSAPP_LINK_CONTEXT_HOURS'))}
     if WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(
             status=status_, reason=reason, **fields):
         if status_ == WhatsAppDraft.Status.SENT:
