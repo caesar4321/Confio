@@ -38,6 +38,7 @@ from config import admin_dashboard_sections as sections
 from config import admin_dashboard_growth as growth
 from config import admin_dashboard_smart_account as smart_account_section
 from config import admin_dashboard_assistant as assistant_section
+from config import admin_dashboard_cuenta_pivot as cuenta_pivot_section
 from config.admin_dashboard_sections import get_fcm_reachability_metrics  # noqa: F401 — re-exported for tests
 
 
@@ -831,13 +832,22 @@ ConfioAdminSite.DASH_PAGES = [
             ('Location checks', 'marketplace_marketplacelocationcheck_changelist', ''),
         )}),
     ('cuenta', 'Cuenta inteligente', [
+        _w(cuenta_pivot_section.cuenta_pivot),
         _chain(smart_account_section.smart_account),
     ], [
+        'admin/dash/_cuenta_pivot.html',
         'admin/dash/_cuenta.html',
     ], {'chain': True,
-        'intro': 'The paid smart account on BSC: subscribers and recurring revenue, billing and forced sales, '
-                 'rules and payouts, inheritance, Confío IA+ and the relayer. Counts read the reconciled mirror; '
-                 '"window" is the last 7 days.'}),
+        'intro': 'Confío IA\'s paid hands first (the offer in the chat, v2, caps, hands-off trades and purchases, '
+                 'every account), then the subscription business: revenue, billing and forced sales, rules and '
+                 'payouts, inheritance, IA+ and the relayer. Counts read the reconciled mirror.',
+        'tools': (
+            ('Hands-off trades', 'smart_account_smartrelaytrade_changelist', ''),
+            ('Hands-off purchases', 'smart_account_smartrelaypurchase_changelist', ''),
+            ('Store purchase pulls', 'smart_account_smartaccountcardpull_changelist', ''),
+            ('Rules', 'smart_account_smartaccountrule_changelist', ''),
+            ('Accounts', 'smart_account_smartaccount_changelist', ''),
+        )}),
     ('ops', 'Ops', [
         _w(sections.verifications),
         _w(sections.sponsorship),

@@ -422,4 +422,129 @@ def _build(w):
         'countries': country_rows,
         'paid_kinds': [{'label': label, 'count': kinds_30.get(key, 0)} for key, label in PAID_KINDS],
         'excluded': len(excluded),
+        'retention': chat_retention(w, counted),
+        'depth': depth(turns),
+        'connections': connections(w, counted),
+        'recent': recent(counted),
     }
+
+
+COHORT_WEEKS = 6
+RECENT_ROWS = 25
+DEPTH_BUCKETS = ((1, 1, '1 message'), (2, 3, '2–3'), (4, 9, '4–9'), (10, 29, '10–29'), (30, None, '30 or more'))
+
+
+def chat_retention(w, counted):
+    """Weekly cohorts by the week of a person's first message to Confío IA: how many wrote again in each of the
+    following weeks. Plus how many of last week's people came back this week."""
+    from assistant.models import AssistantTurn
+
+    start = w.now - timedelta(days=7 * (COHORT_WEEKS + 1))
+    first = {u: at for u, at in AssistantTurn.objects.order_by().values('user_id').annotate(
+        first=Min('created_at')).values_list('user_id', 'first') if u in counted}
+    active = defaultdict(set)                        # week index (0 = this week) -> people
+    for user, at in AssistantTurn.objects.filter(created_at__gte=start).order_by().values_list('user_id',
+                                                                                               'created_at'):
+        if user in counted:
+            active[int((w.now - at).days // 7)].add(user)
+    cohorts = []
+    for week in range(COHORT_WEEKS, 0, -1):
+        end = w.now - timedelta(days=7 * (week - 1))
+        begin = end - timedelta(days=7)
+        people = {u for u, at in first.items() if begin <= at < end}
+        # This cohort is week index week-1; the weeks after it are week-2 … 0 (this week).
+        later = [len(people & active.get(week - 2 - k, set())) for k in range(week - 1)]
+        cohorts.append({'week_start': begin, 'people': len(people),
+                        'later': [{'n': n, 'pct': _pct(n, len(people))} for n in later]})
+    last_week, this_week = active.get(1, set()), active.get(0, set())
+    return {'cohorts': cohorts, 'max_later': COHORT_WEEKS - 1,
+            'came_back': len(last_week & this_week), 'last_week': len(last_week),
+            'came_back_pct': _pct(len(last_week & this_week), len(last_week))}
+
+
+def depth(turns):
+    """How many messages each person sent in the window, bucketed."""
+    per = Counter(row[0] for row in turns)
+    out = []
+    for low, high, label in DEPTH_BUCKETS:
+        n = sum(1 for c in per.values() if c >= low and (high is None or c <= high))
+        out.append({'label': label, 'people': n, 'pct': _pct(n, len(per))})
+    return out
+
+
+def connections(w, counted):
+    """The errands' reach: WhatsApp linked as a device, Gmail and calendar. Each block on its own: a missing
+    app or table leaves only that block empty."""
+    since = w.now - timedelta(days=WINDOW_DAYS)
+    out = {}
+    try:
+        from whatsapp_link.models import WhatsAppDraft, WhatsAppLink, WhatsAppNotice
+        links = [r for r in WhatsAppLink.objects.order_by().values_list('user_id', 'state', 'linked_at', 'id')
+                 if r[0] in counted]
+        link_ids = [r[3] for r in links]       # a handful: never an IN of every real user
+        out['whatsapp'] = {
+            'by_state': Counter(r[1] for r in links).most_common(),
+            'linked': sum(1 for r in links if r[1] == 'linked'),
+            'linked_30': sum(1 for r in links if r[2] and r[2] >= since),
+            'notices_30': WhatsAppNotice.objects.filter(created_at__gte=since, link_id__in=link_ids).count(),
+            'drafts': Counter(WhatsAppDraft.objects.filter(link_id__in=link_ids).values_list(
+                'status', flat=True)).most_common(),
+        }
+    except Exception:  # noqa: BLE001
+        logger.info('assistant dashboard: WhatsApp unavailable', exc_info=True)
+    try:
+        from assistant.gmail.models import GmailConnection, GmailGrant, MailDraft
+        conns = [r for r in GmailConnection.objects.order_by().values_list('user_id', 'status', 'can_calendar',
+                                                                          'connected_at') if r[0] in counted]
+        out['gmail'] = {
+            'by_status': Counter(r[1] for r in conns).most_common(),
+            'calendar': sum(1 for r in conns if r[2]),
+            'connected_30': sum(1 for r in conns if r[3] and r[3] >= since),
+            'grants': GmailGrant.objects.count(),
+            'grant_cap': 100,
+            'drafts': Counter(MailDraft.objects.values_list('status', flat=True)).most_common(),
+        }
+    except Exception:  # noqa: BLE001
+        logger.info('assistant dashboard: Gmail unavailable', exc_info=True)
+    return out
+
+
+def recent(counted):
+    """The latest money-job asks and the latest errors, for reading the conversations themselves."""
+    from django.urls import NoReverseMatch, reverse
+
+    from assistant.models import AssistantTurn
+
+    def user_url(pk):
+        try:
+            return reverse('confio_admin:users_user_change', args=[pk])
+        except NoReverseMatch:
+            return ''
+
+    def turn_url(pk):
+        try:
+            return reverse('confio_admin:assistant_assistantturn_change', args=[pk])
+        except NoReverseMatch:
+            return ''
+
+    asks, errors = [], []
+    for pk, user, at, tools, error, modality in AssistantTurn.objects.order_by('-created_at').values_list(
+            'id', 'user_id', 'created_at', 'tools', 'error', 'modality')[:5000]:
+        if user not in counted:
+            continue
+        names = [tool_name(t) for t in tools or []]
+        want_ask = len(asks) < RECENT_ROWS and any(tool_category(n) in MONEY_CATEGORIES for n in names)
+        want_error = bool(error) and len(errors) < RECENT_ROWS
+        if not (want_ask or want_error):
+            continue
+        # Admin links only for the rows kept: reversing two URLs per scanned turn cost over a second.
+        row = {'at': at, 'user_id': user, 'user_url': user_url(user), 'turn_url': turn_url(pk),
+               'tools': ', '.join(names) or '—', 'voice': str(modality or '').upper() == 'VOICE_NOTE',
+               'error': error}
+        if want_ask:
+            asks.append(row)
+        if want_error:
+            errors.append(row)
+        if len(asks) >= RECENT_ROWS and len(errors) >= RECENT_ROWS:
+            break
+    return {'asks': asks, 'errors': errors}

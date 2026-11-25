@@ -100,3 +100,31 @@ class AssistantPivotTests(TestCase):
     def test_a_failed_build_renders_as_unavailable(self):
         with mock.patch.object(ia, '_build', side_effect=RuntimeError('boom')):
             self.assertEqual(ia.assistant_pivot(Window.current()), {'ia': {'unavailable': True}})
+
+
+class WiderAssistantTests(AssistantPivotTests):
+    def test_depth_buckets_people_by_messages(self):
+        rows = [(1, None)] * 1 + [(2, None)] * 3 + [(3, None)] * 12
+        self.assertEqual([b['people'] for b in ia.depth(rows)], [1, 1, 0, 1, 0])
+
+    def test_retention_and_drilldowns_build(self):
+        a, b, *_ = self.people
+        self.turn(a, ['prepare_payment'])
+        self.turn(b, ['get_portfolio'])
+        out = self.build()
+        self.assertEqual(len(out['retention']['cohorts']), ia.COHORT_WEEKS)
+        self.assertEqual(out['retention']['cohorts'][-1]['people'], 2)     # this week's first messages
+        self.assertEqual([r['user_id'] for r in out['recent']['asks']], [a.pk])
+        self.assertIn('whatsapp', out['connections'])
+        self.assertIn('gmail', out['connections'])
+
+
+class CuentaPivotTests(TestCase):
+    def test_builds_empty_and_fails_soft(self):
+        from config import admin_dashboard_cuenta_pivot as cp
+        out = cp.cuenta_pivot(Window.current())['sap']
+        self.assertEqual(out['accounts'], [])
+        self.assertEqual([s['all'] for s in out['funnel']], [0] * len(out['funnel']))
+        self.assertIsNone(out['trade_paused'])
+        with mock.patch.object(cp, '_build', side_effect=RuntimeError('boom')):
+            self.assertEqual(cp.cuenta_pivot(Window.current()), {'sap': {'unavailable': True}})

@@ -1,0 +1,135 @@
+{% load humanize %}
+<!-- Cuenta inteligente after the pivot: config/admin_dashboard_cuenta_pivot.py -->
+<style>
+    .sap { --sap-gap: 16px; margin-top: 8px; }
+    .sap-section { margin: 36px 0 0; }
+    .sap-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--dash-line); }
+    .sap-head h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--dash-ink); margin: 0; padding: 0; background: none; text-transform: none; }
+    .sap-head p { margin: 0; color: var(--dash-muted); font-size: 13px; flex: 1 1 320px; }
+    .sap-head a { margin-left: auto; color: var(--dash-brand); font-size: 13px; text-decoration: none; font-weight: 500; white-space: nowrap; }
+    .sap-grid { display: grid; gap: var(--sap-gap); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+    .sap .panel { padding: 16px 18px; }
+    .sap .panel h3 { margin: 0 0 10px; }
+    .sap .mini-table td.num, .sap .mini-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .sap .mini-table tr.team td { color: var(--dash-muted); }
+    .sap .is-zero { color: var(--dash-muted); }
+    .sap .alarm { color: var(--dash-critical); font-weight: 600; }
+    .sap-note { color: var(--dash-muted); font-size: 12px; margin-top: 8px; }
+    .sap-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--dash-sunken); color: var(--dash-muted); }
+    .sap-badge.on { background: var(--dash-brand-soft); color: var(--dash-ok); }
+    .sap-badge.crit { background: var(--dash-critical-soft); color: var(--dash-critical); }
+</style>
+<div class="sap">
+{% if sap.unavailable %}
+    <div class="panel"><h3>Cuenta inteligente after the pivot</h3><p class="sap-note">Unavailable: the numbers could not be built. The error is in the server log ("cuenta pivot dashboard failed").</p></div>
+{% else %}
+    <section class="sap-section">
+        <div class="sap-head">
+            <h2>Hands-off: Confío IA's paid hands</h2>
+            <p>From the offer in the chat to a first hands-off job. "Real" leaves out staff, founder, preview and banned accounts; "team" is them.</p>
+            <span class="sap-badge {% if sap.trade_paused %}crit{% elif sap.trade_paused is None %}{% else %}on{% endif %}">Hands-off trading {% if sap.trade_paused %}paused{% elif sap.trade_paused is None %}never set{% else %}on{% endif %}</span>
+        </div>
+        <div class="sap-grid">
+            <div class="panel">
+                <h3>Getting there</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Step</th><th class="num">Real</th><th class="num">Team</th></tr></thead>
+                    <tbody>
+                        {% for s in sap.funnel %}<tr><td>{{ s.label }}</td><td class="num{% if not s.real %} is-zero{% endif %}">{{ s.real|intcomma }}</td><td class="num is-zero">{{ s.team|intcomma }}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+                <p class="sap-note">Live accounts by version: {% for g, n in sap.generations %}{{ g }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}none{% endfor %} · {{ sap.migrations|intcomma }} moved to v2{% if sap.last_migration %} (last {{ sap.last_migration|naturaltime }}){% endif %}.</p>
+            </div>
+            <div class="panel">
+                <h3>Cards Confío IA showed, {{ sap.window_days }} days</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Card</th><th class="num">Real people</th><th class="num">Team</th></tr></thead>
+                    <tbody>
+                        {% for s in sap.chat_cards %}<tr><td>{{ s.label }}</td><td class="num{% if not s.real %} is-zero{% endif %}">{{ s.real|intcomma }}</td><td class="num is-zero">{{ s.team|intcomma }}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+                <h3 style="margin-top:16px;">Caps people signed</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Rule</th><th class="num">Active</th><th class="num">Smallest</th><th class="num">Median</th><th class="num">Largest</th></tr></thead>
+                    <tbody>
+                        {% for c in sap.caps %}<tr><td>{{ c.label }}</td><td class="num{% if not c.n %} is-zero{% endif %}">{{ c.n }}</td><td class="num">{% if c.n %}US${{ c.min|floatformat:0|intcomma }}{% endif %}</td><td class="num">{% if c.n %}US${{ c.median|floatformat:0|intcomma }}{% endif %}</td><td class="num">{% if c.n %}US${{ c.max|floatformat:0|intcomma }}{% endif %}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="sap-section">
+        <div class="sap-head"><h2>What the accounts did, {{ sap.window_days }} days</h2><p>Hands-off trades, Comprar purchases and store purchases pulled by the purchase spender.</p>{% if sap.links.trades %}<a href="{{ sap.links.trades }}">All hands-off trades →</a>{% endif %}</div>
+        <div class="sap-grid">
+            <div class="panel">
+                <h3>Hands-off trades</h3>
+                <table class="mini-table">
+                    <tbody>
+                        <tr><td>Done</td><td class="num">{{ sap.trades.done|intcomma }} · US${{ sap.trades.usd|floatformat:2|intcomma }}</td></tr>
+                        <tr><td>People (real / team)</td><td class="num">{{ sap.trades.people.real }} / {{ sap.trades.people.team }}</td></tr>
+                        {% for s, n in sap.trades.by_status %}{% if s != 'done' %}<tr><td>{{ s|capfirst }}</td><td class="num{% if s == 'failed' %} alarm{% endif %}">{{ n }}</td></tr>{% endif %}{% endfor %}
+                        <tr><td>Median time to done</td><td class="num">{% if sap.trades.median_s is not None %}{{ sap.trades.median_s|floatformat:0 }} s{% else %}—{% endif %}</td></tr>
+                        <tr><td>Done but no result note in the chat</td><td class="num{% if sap.trades.unnotified %} alarm{% else %} is-zero{% endif %}">{{ sap.trades.unnotified }}</td></tr>
+                        <tr><td>Done, ever</td><td class="num">{{ sap.trades.ever|intcomma }}</td></tr>
+                    </tbody>
+                </table>
+                <p class="sap-note">{% for k, n in sap.trades.by_side %}{{ k }} {{ n }}{% if not forloop.last %} · {% endif %}{% endfor %}{% if sap.trades.tickers %} — {% for t, n in sap.trades.tickers %}{{ t }} {{ n }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p>
+                {% if sap.trades.errors %}<p class="sap-note">Why they failed: {% for e, n in sap.trades.errors %}{{ e }} ({{ n }}){% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+            </div>
+            <div class="panel">
+                <h3>Hands-off Comprar purchases</h3>
+                <table class="mini-table">
+                    <tbody>
+                        <tr><td>Done</td><td class="num">{{ sap.purchases.done|intcomma }} · US${{ sap.purchases.usd|floatformat:2|intcomma }}</td></tr>
+                        <tr><td>People (real / team)</td><td class="num">{{ sap.purchases.people.real }} / {{ sap.purchases.people.team }}</td></tr>
+                        {% for s, n in sap.purchases.by_status %}{% if s != 'done' %}<tr><td>{{ s|capfirst }}</td><td class="num{% if s == 'failed' %} alarm{% endif %}">{{ n }}</td></tr>{% endif %}{% empty %}<tr><td colspan="2" class="is-zero">None yet.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+                {% if sap.purchases.stores %}<p class="sap-note">Stores: {% for s, n in sap.purchases.stores %}{{ s }} {{ n }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+                {% if sap.purchases.errors %}<p class="sap-note">Why they failed: {% for e, n in sap.purchases.errors %}{{ e }} ({{ n }}){% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+            </div>
+            <div class="panel">
+                <h3>Store purchases paid by the account</h3>
+                <table class="mini-table">
+                    <tbody>
+                        <tr><td>Pulls by the purchase spender</td><td class="num">{{ sap.store.pulls|intcomma }}</td></tr>
+                        <tr><td>Dollars</td><td class="num">US${{ sap.store.usd|floatformat:2|intcomma }}</td></tr>
+                        <tr><td>People (real / team)</td><td class="num">{{ sap.store.people.real }} / {{ sap.store.people.team }}</td></tr>
+                    </tbody>
+                </table>
+                <h3 style="margin-top:16px;">Confío IA+</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Prepared for signing</th><th class="num">Made</th><th class="num">Signed</th></tr></thead>
+                    <tbody>
+                        {% for p in sap.ia_plus.prepared %}<tr><td>{{ p.kind }}</td><td class="num">{{ p.n }}</td><td class="num">{{ p.used }}</td></tr>{% empty %}<tr><td colspan="3" class="is-zero">Nothing prepared in {{ sap.window_days }} days.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+                <p class="sap-note">{{ sap.ia_plus.watches }} price alerts · {{ sap.ia_plus.targets }} target splits set.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="sap-section">
+        <div class="sap-head"><h2>Every account</h2><p>Newest first ({{ sap.accounts|length }} of {{ sap.accounts_total }}). Team accounts are greyed. Jobs = hands-off trades, purchases and store pulls in {{ sap.window_days }} days.</p>{% if sap.links.rules %}<a href="{{ sap.links.rules }}">All rules →</a>{% endif %}</div>
+        <div class="panel">
+            <table class="mini-table">
+                <thead><tr><th>Person</th><th>Status</th><th>Plan</th><th>Billing</th><th>Paid until</th><th>Version</th><th>Active rules</th><th class="num">Jobs</th><th class="num">Dollars in it</th><th>Since</th></tr></thead>
+                <tbody>
+                    {% for a in sap.accounts %}
+                    <tr{% if a.team %} class="team"{% endif %}>
+                        <td>{% if a.user_url %}<a href="{{ a.user_url }}">#{{ a.user_id }}</a>{% else %}#{{ a.user_id }}{% endif %}{% if a.team %} (team){% endif %}</td>
+                        <td>{{ a.status }}</td><td>{{ a.plan }}</td><td>{{ a.billing }}</td>
+                        <td>{% if a.paid_until %}{{ a.paid_until|date:"M j, Y" }}{% else %}—{% endif %}</td>
+                        <td>{{ a.generation }}</td><td>{{ a.rules }}</td>
+                        <td class="num{% if not a.jobs_30 %} is-zero{% endif %}">{{ a.jobs_30 }}</td>
+                        <td class="num">{% if a.dollars is not None %}US${{ a.dollars|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+                        <td>{{ a.since|date:"M j" }}</td>
+                    </tr>
+                    {% empty %}<tr><td colspan="10" class="is-zero">No accounts yet.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+{% endif %}
+</div>

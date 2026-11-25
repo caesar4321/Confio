@@ -187,6 +187,79 @@
     </section>
 
     <section class="ia-section">
+        <div class="ia-head"><h2>Do they come back?</h2><p>People grouped by the week of their first message to Confío IA, and how many wrote again in each week after.</p></div>
+        <div class="ia-grid">
+            <div class="panel">
+                <h3>Weekly cohorts</h3>
+                <table class="mini-table">
+                    <thead><tr><th>First message, week of</th><th class="num">People</th>{% for i in ia.retention.cohorts.0.later %}<th class="num">+{{ forloop.counter }} wk</th>{% endfor %}</tr></thead>
+                    <tbody>
+                        {% for c in ia.retention.cohorts %}
+                        <tr><td>{{ c.week_start|date:"M j" }}</td><td class="num">{{ c.people|intcomma }}</td>
+                            {% for l in c.later %}<td class="num{% if not l.n %} is-zero{% endif %}">{{ l.n }}{% if l.pct is not None %} <span class="ia-note">({{ l.pct|floatformat:0 }}%)</span>{% endif %}</td>{% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <p class="ia-note">Of last week's {{ ia.retention.last_week|intcomma }} people, {{ ia.retention.came_back|intcomma }} came back this week{% if ia.retention.came_back_pct is not None %} ({{ ia.retention.came_back_pct|floatformat:1 }}%){% endif %}.</p>
+            </div>
+            <div class="panel">
+                <h3>Messages per person, {{ ia.window_days }} days</h3>
+                <table class="mini-table">
+                    <tbody>
+                        {% for b in ia.depth %}<tr><td>{{ b.label }}</td><td class="num">{{ b.people|intcomma }}</td><td class="num">{% if b.pct is not None %}{{ b.pct|floatformat:1 }}%{% endif %}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Connected errands</h3>
+                {% with wa=ia.connections.whatsapp gm=ia.connections.gmail %}
+                <table class="mini-table">
+                    <tbody>
+                        {% if wa %}
+                        <tr><td>WhatsApp linked now</td><td class="num">{{ wa.linked|intcomma }}</td></tr>
+                        <tr><td>…linked in {{ ia.window_days }} days</td><td class="num">{{ wa.linked_30|intcomma }}</td></tr>
+                        <tr><td>WhatsApp messages told in the chat</td><td class="num">{{ wa.notices_30|intcomma }}</td></tr>
+                        <tr><td>Reply drafts</td><td class="num">{% for st, n in wa.drafts %}{{ st }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}0{% endfor %}</td></tr>
+                        {% else %}<tr><td colspan="2" class="is-zero">WhatsApp: unavailable.</td></tr>{% endif %}
+                        {% if gm %}
+                        <tr><td>Gmail connected</td><td class="num">{% for st, n in gm.by_status %}{{ st }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}0{% endfor %}</td></tr>
+                        <tr><td>…with Google Calendar</td><td class="num">{{ gm.calendar|intcomma }}</td></tr>
+                        <tr><td>Google accounts used of the {{ gm.grant_cap }} allowed</td><td class="num{% if gm.grants >= 90 %} alarm{% endif %}">{{ gm.grants|intcomma }}</td></tr>
+                        <tr><td>Mail reply drafts</td><td class="num">{% for st, n in gm.drafts %}{{ st }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}0{% endfor %}</td></tr>
+                        {% else %}<tr><td colspan="2" class="is-zero">Gmail: unavailable.</td></tr>{% endif %}
+                    </tbody>
+                </table>
+                {% endwith %}
+            </div>
+        </div>
+    </section>
+
+    <section class="ia-section">
+        <div class="ia-head"><h2>Read the conversations</h2><p>The latest money-job asks and the latest answers with an error, real users only. Open one to read what was said.</p></div>
+        <div class="ia-grid">
+            <div class="panel">
+                <h3>Latest money-job asks</h3>
+                <table class="mini-table">
+                    <thead><tr><th>When</th><th>Person</th><th>Tools</th></tr></thead>
+                    <tbody>
+                        {% for r in ia.recent.asks %}<tr><td>{% if r.turn_url %}<a href="{{ r.turn_url }}">{{ r.at|naturaltime }}</a>{% else %}{{ r.at|naturaltime }}{% endif %}{% if r.voice %} · voice{% endif %}</td><td>{% if r.user_url %}<a href="{{ r.user_url }}">#{{ r.user_id }}</a>{% else %}#{{ r.user_id }}{% endif %}</td><td>{{ r.tools }}</td></tr>{% empty %}<tr><td colspan="3" class="is-zero">No real user has asked for a money job yet.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Latest errors</h3>
+                <table class="mini-table">
+                    <thead><tr><th>When</th><th>Person</th><th>Error</th></tr></thead>
+                    <tbody>
+                        {% for r in ia.recent.errors %}<tr><td>{% if r.turn_url %}<a href="{{ r.turn_url }}">{{ r.at|naturaltime }}</a>{% else %}{{ r.at|naturaltime }}{% endif %}</td><td>{% if r.user_url %}<a href="{{ r.user_url }}">#{{ r.user_id }}</a>{% else %}#{{ r.user_id }}{% endif %}</td><td>{{ r.error|truncatechars:90 }}</td></tr>{% empty %}<tr><td colspan="3" class="is-zero">No errors.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="ia-section">
         <div class="ia-head"><h2>Countries and quality</h2><p>Where Confío IA is used, and how well it answers.</p></div>
         <div class="ia-grid">
             <div class="panel">
