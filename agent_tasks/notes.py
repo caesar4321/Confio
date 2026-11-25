@@ -1,5 +1,6 @@
 """What a task says in the assistant thread. Written by code, never by a model."""
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,25 @@ STOPPED = {
     'cancelled_ordered': ('Dejé de seguir esta compra. Puede que el pedido haya quedado hecho en {site}: revísalo en '
                           'tus compras de la tienda.'),
     'unavailable': 'Ahora no puedo abrir el navegador para comprar por ti. Pídemelo más tarde.',
+    # Any store may be searched (founder, 2026-11-25); paying it is what depends on the country.
+    'no_rail': ('Encontré lo que elegiste en {site}, pero todavía no puedo pagar tiendas de {{country}}, así que no '
+                'lo compré. Puedes comprarlo tú directamente en {site}.'),
 }
+COUNTRY_NAMES = {'AR': 'Argentina', 'BO': 'Bolivia', 'BR': 'Brasil', 'CL': 'Chile', 'CO': 'Colombia', 'CR': 'Costa Rica',
+                 'EC': 'Ecuador', 'ES': 'España', 'GT': 'Guatemala', 'MX': 'México', 'PA': 'Panamá', 'PE': 'Perú',
+                 'PY': 'Paraguay', 'DO': 'República Dominicana', 'SV': 'El Salvador', 'US': 'Estados Unidos',
+                 'UY': 'Uruguay', 'VE': 'Venezuela'}
+# The reasons a give-up names in its own words; anything else ends as before.
+WHY_REASONS = frozenset({'cannot_do', 'not_found', 'no_payment', 'out_of_stock'})
+_WHY_DROP = re.compile(r'(https?://\S+|www\.\S+|\b[\w.-]+\.(com|net|org|ly|io|me|co|mx|br|ar|ve|bo|pe|cl|app|link)\b\S*'
+                       r'|[\w.+-]+@[\w-]+\.[\w.]+|@\w+|\+?\d[\d\s().-]{6,}\d|[<>*_`#\[\]]+)', re.I)
+
+
+def reason_text(text):
+    """The agent's few words on why it stopped, safe to show: no link, address, handle, phone or markup (a
+    seller writes on the pages it read), one line, short. '' when nothing readable is left."""
+    text = ' '.join(_WHY_DROP.sub(' ', str(text or '')).split()).strip(' .,;:-')
+    return text[:140] if re.search(r'[a-záéíóúñ]{3}', text, re.I) else ''
 # After the hand-over, nothing may suggest there is no order.
 AFTER_CHECKOUT = (' Si ya confirmaste el pedido, sigue en tus compras de {site}: para pagarlo, {paste}.')
 TASK_ACTION = {'type': 'task', 'label': 'Ver la compra'}
@@ -129,7 +148,10 @@ def stopped_text(task, reason):
         text = STOPPED['cancelled_ordered' if reason in ('cancelled', 'replaced') else 'unpaid']
     else:
         text = STOPPED.get(reason, STOPPED['error'])
-    return say(text, task)
+        why = str((task.order or {}).get('why') or '') if reason in WHY_REASONS else ''
+        if why:
+            text = text.rstrip() + ' Motivo: ' + why.replace('{', '(').replace('}', ')') + '.'
+    return say(text, task).replace('{country}', COUNTRY_NAMES.get(task.country or '', 'ese país'))
 
 
 def manual_text(task):
@@ -142,6 +164,54 @@ def manual_text(task):
 # An order placed on "Elegir" alone, within its top total (spec decision 42): said as it happens.
 PLACED_BY_CAP = ('Estoy haciendo tu pedido en {site}: {{total}}, dentro del máximo que aprobaste al elegir '
                  '({{cap}}). Te aviso cuando la tienda lo confirme.')
+
+# A purchase the person's Cuenta inteligente pays (spec decisions 38 to 41, account_pay.py). {{total}} is the
+# store's total, {{usd}} the dollars the account pays for it, the 0.9% exit fee included.
+PAID_BY_ACCOUNT = ('Tu Cuenta inteligente está pagando tu pedido en {site}: {{total}}, {{usd}} con la comisión '
+                   'de salida de 0,9%, dentro de tu límite de «Compras con Confío IA». No tienes que firmar nada; '
+                   'sigue el pago en tu actividad.')
+PAID_BY_ACCOUNT_PUSH = 'Tu Cuenta inteligente está pagando tu pedido en {site}.'
+# The order was reserved for the account to pay and the pull could not be sent: no money left.
+ACCOUNT_NOT_PAID = ('No pude pagar tu pedido en {site} desde tu Cuenta inteligente y no salió dinero de ella. '
+                    'Puede que el pedido esté hecho y esperando el pago: revísalo en tus compras de {site}.')
+# Why the account cannot pay a purchase now (smart_account.purchases.Standing), for the order card and the
+# assistant. {{gross}}: the purchase with its exit fee; {{room}}/{{cap}}: the period's room and cap;
+# {{short}}: what the account lacks; {{offer}}: what is offered to move (more than this purchase).
+ACCOUNT_PAY = {
+    'no_rule': ('Para que pague tus compras desde tu Cuenta inteligente, activa «Compras con Confío IA»: hasta '
+                'US$200 cada 28 días, lo firmas una vez con Confío Face y puedes cambiar el límite.'),
+    'move': ('A tu Cuenta inteligente le faltan {{short}} para este pedido ({{gross}} con la comisión de salida). '
+             'Mueve {{offer}} de tu cuenta personal a tu Cuenta inteligente con Confío Face y lo pago desde ahí.'),
+    'topup': ('Ni tu Cuenta inteligente ni tu cuenta personal tienen {{gross}} para este pedido. Recarga dólares '
+              'y pásalos a tu Cuenta inteligente: lo pago desde ahí.'),
+    'cap': ('Este pedido ({{gross}} con la comisión de salida) pasa tu límite de «Compras con Confío IA» para '
+            'estos 28 días: te quedan {{room}} de {{cap}}. Si quieres, cambia el límite con Confío Face.'),
+    # Their Cuenta inteligente lapsed (a payment due) or is not active: theirs to renew.
+    'renew': ('Tu Cuenta inteligente no está al día o no está activa, así que no puede pagar este pedido. '
+              'Ponla al día y lo pago desde ahí.'),
+}
+# The purchase spender is not allowed right now (Confío's gap, ops were told): nothing paid, said plainly.
+ACCOUNT_PAUSED = ('Ahora no puedo pagar compras desde tu Cuenta inteligente, así que no pagué tu pedido en {site} y '
+                  'no salió dinero. Puede que el pedido esté hecho y esperando el pago: revísalo en tus compras de '
+                  '{site}.')
+# A purchase waiting for the account (account_pay.wait): never paid from the personal wallet (founder, 2026-11-24).
+# {{hours}}: AGENT_TASKS_ACCOUNT_WAIT_HOURS.
+ACCOUNT_WAIT_TAIL = (' Tu pedido espera sin pagarse hasta {{hours}} horas; no lo pago desde tu cuenta personal. '
+                     'Cuando lo hagas, toca «Ya lo hice: pagar».')
+# The person said they had done it, and the account still cannot pay it.
+ACCOUNT_STILL = 'Todavía no puedo pagarlo desde tu Cuenta inteligente. '
+# The lock screen: no figures there.
+ACCOUNT_WAIT_PUSH = 'Tu pedido en {site} espera a tu Cuenta inteligente.'
+# The wait ran out (AGENT_TASKS_ACCOUNT_WAIT_HOURS): the order exists at the store, unpaid.
+ACCOUNT_WAIT_EXPIRED = ('Dejé de esperar a tu Cuenta inteligente para pagar tu pedido en {site}, y no salió dinero '
+                        'de ninguna de tus cuentas. El pedido quedó hecho en {site} sin pagar: revísalo en tus compras '
+                        'de la tienda.')
+# The chain or a provider could not be read, a few times: nothing paid, said plainly.
+ACCOUNT_UNREAD = ('No pude confirmar que tu Cuenta inteligente pudiera pagar tu pedido en {site}, así que no lo pagué '
+                  'y no salió dinero. Puede que el pedido esté hecho y esperando el pago: revísalo en tus compras de '
+                  '{site}.')
+# How a purchase the account was to pay ended, by its stop reason (schema.task_type).
+ACCOUNT_STOPPED = {'account_timeout': ACCOUNT_WAIT_EXPIRED}
 
 BREAKDOWN_LABELS = {'products': 'productos', 'shipping': 'envío', 'tax': 'impuestos', 'discount': 'descuento',
                     'fee': 'cargos', 'other': 'otros cargos'}

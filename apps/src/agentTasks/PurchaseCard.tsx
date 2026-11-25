@@ -19,7 +19,7 @@ import { PurchaseDone } from './PurchaseDone';
 import { PurchaseJourney } from './PurchaseJourney';
 import {
   ACTIVE, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
-  CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, SIGN_IN_AGENT_STORE,
+  CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, RESUME_AGENT_PAYMENT, SIGN_IN_AGENT_STORE,
 } from './api';
 import { CapRule, cartTop } from './helpers';
 
@@ -265,6 +265,13 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           </Pressable>
         </View>
       ) : null}
+      {/* Paid by the Cuenta inteligente, never by the personal wallet: the one action that lets it pay, then
+          "Ya lo hice: pagar". Loaded only for this card (its signing flow is the Cuenta inteligente one). */}
+      {waiting && task.reason === 'account_wait' ? (() => {
+        const { AccountWait } = require('./AccountWait');
+        return <AccountWait taskId={taskId} resuming={tapping === 'resume'} onOpen={onOpen}
+          onResume={() => act('resume', RESUME_AGENT_PAYMENT, {}, 'resumeAgentPayment')} />;
+      })() : null}
       {task.status === 'payment_ready' && task.payQr ? <StoreQr code={task.payQr} total={task.order?.total ?? ''} /> : null}
       {task.status === 'payment_ready' && task.payDetails?.length ? <PayDetails details={task.payDetails} /> : null}
       {task.status === 'payment_ready' && task.openAccountMethod && onOpen ? (
@@ -422,6 +429,11 @@ function Products({ options, rule, picking, onBuy }: {
                 <Photo uri={item.image} size={132} />
                 <Text style={styles.title} numberOfLines={3}>{item.title}</Text>
                 {item.price ? <Text style={styles.price}>{item.price}</Text> : null}
+                {item.rating ? (
+                  <Text style={styles.rating} accessibilityLabel={`${item.rating} de 5 estrellas${item.reviews ? `, ${item.reviews} opiniones` : ''}`}>
+                    ★ {item.rating}{item.reviews ? ` (${item.reviews})` : ''}
+                  </Text>
+                ) : null}
                 {/* One unit's top total, said before any tap. */}
                 {item.cap ? <Text style={styles.cap}>Hasta {item.cap} con envío</Text> : null}
                 {quantity ? null : <View style={styles.pick}><Text style={styles.pickText}>Elegir</Text></View>}
@@ -558,6 +570,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 14, lineHeight: 19, color: colors.text.primary },
   price: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
   cap: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  rating: { fontSize: 13, color: '#B45309', marginTop: 2 },
   pick: {
     minHeight: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.primaryDark, marginTop: 2,

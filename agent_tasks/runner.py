@@ -117,6 +117,11 @@ def fingerprint(code):
     return hashlib.sha256(code.encode()).hexdigest()[:24]
 
 
+def _whole(page_text, figure):
+    """A figure written on the page as a whole number of its own (never a piece of "540 g" or "4.85")."""
+    return bool(re.search(r'(?<![\d.,])' + re.escape(figure) + r'(?![\d]|[.,]\d)', str(page_text or '')[:100000]))
+
+
 def max_steps(task):
     """The step budget: more for a cart of several products (each is opened, added and set to its quantity)."""
     cart = (task.order or {}).get('cart')
@@ -270,6 +275,9 @@ class Step:
         if not task.checkout_at and (task.steps >= max_steps(task)
                                      or task.cost_usd >= Decimal(str(conf.get('AGENT_TASKS_MAX_COST_USD')))):
             return self.stop('too_long')
+        if task.state == 'awaiting_code' and (task.order or {}).get('pay_hold'):
+            # A purchase waiting for the Cuenta inteligente: its payment is read from what was kept, no browser.
+            return self.pay_held()
         if not task.session_id:
             if task.state != 'queued':
                 return self.stop('session_expired')
@@ -458,7 +466,13 @@ class Step:
             cap, cap_text = operate.top_total(price, task.country)
             if cap is not None and not operate.figure_on(seen.text, operate.unit_price(price, task.country)):
                 cap, cap_text = None, ''   # a price the page does not write sets no top total
-            options.append({'title': title, 'price': price, 'cap': cap_text, 'cap_amount': format(cap, 'f') if cap else '',
+            # Stars and reviews as the page writes them for it: kept only when those very figures are on the page.
+            rating = guard.clean(agent.redact(item.get('rating')), 8)
+            rating = rating if re.fullmatch(r'[0-5][.,]\d', rating) and _whole(seen.text, rating) else ''
+            reviews = guard.clean(agent.redact(item.get('reviews')), 12)
+            reviews = reviews if rating and re.fullmatch(r'\d[\d.,]*', reviews) and _whole(seen.text, reviews) else ''
+            options.append({'title': title, 'price': price, 'rating': rating, 'reviews': reviews,
+                            'cap': cap_text, 'cap_amount': format(cap, 'f') if cap else '',
                             'image': element.get('image') or pictures.get(href.split('#')[0], ''), 'href': href})
             if len(options) >= MAX_OPTIONS:
                 break
@@ -482,8 +496,8 @@ class Step:
         try:
             # Never ask someone to confirm an order they could not pay here.
             service.require_payable(self.task.account, self.task.user, self.task.country, app_meta(self.task))
-        except service.TaskRefused:
-            return self.stop('cannot_pay')
+        except service.TaskRefused as exc:
+            return self.stop('no_rail' if exc.code == 'country' else 'cannot_pay')
         # From here the agent buys it itself (operate.py): into the cart if it is not there, then the checkout.
         return self.remember('ready for the checkout', 'add the item to the cart if it is not there, then go to '
                                                        'the checkout', phase='ordering')
@@ -506,7 +520,8 @@ class Step:
             return self.offer(seen, args)
         if name == 'give_up':
             reason = args.get('reason')
-            return self.stop(reason if reason in GIVE_UP else 'cannot_do')
+            return self.stop(reason if reason in GIVE_UP else 'cannot_do',
+                             order={**(task.order or {}), 'why': notes.reason_text(args.get('why'))})
         element = seen.element(args.get('ref'))
         if name not in ('click', 'search') or element is None:
             return self.remember(f'{name}'[:30], 'refused: no such element')
@@ -568,8 +583,6 @@ class Step:
         """The order's payment data, read off the tab the agent left on it. No
         script runs and nothing is touched. What cannot be read goes back to
         the agent to find the page (operate.AFTER), a few times."""
-        from payment_accounts import payment_intents
-        from payment_accounts.services import PaymentAccountError
         task = self.task
         shots = browser.capture(task.shown_target) if task.shown_target else None
         if not shots:
@@ -610,6 +623,28 @@ class Step:
                 extra = {**extra, 'reference': concept.strip()[:40]}
         if not code:
             return self.unread(why)
+        return self.pay_read(rail, code, extra)
+
+    def pay_held(self):
+        """A purchase the Cuenta inteligente did not pay yet (account_pay.wait or retry_later): the payment
+        prepared again from the details kept off the store's page, with the same checks, never the browser."""
+        from . import account_pay
+        task = self.task
+        held = (task.order or {}).get('pay_hold') or {}
+        until = account_pay.deadline(held)
+        if until is None or until <= timezone.now():
+            return self.stop('account_timeout', body=notes.say(notes.ACCOUNT_WAIT_EXPIRED, task))
+        rail = countries.rail(task.country)
+        if rail is None or rail.kind == 'manual' or not held.get('code'):
+            return self.stop('unpaid', body=notes.say(notes.ACCOUNT_NOT_PAID, task))
+        return self.pay_read(rail, str(held['code']), dict(held.get('extra') or {}), held=held)
+
+    def pay_read(self, rail, code, extra, held=None):
+        """The order's payment, read off its page now or kept by a hold: prepared, checked against the approved
+        order, and paid by the account (or, before a purchase spender exists, offered as the person's card)."""
+        from payment_accounts import payment_intents
+        from payment_accounts.services import PaymentAccountError
+        task = self.task
         from . import service
         # Asked again now: an account opened since the order card pays it.
         mode, offer = service.pay_mode(task, app_meta(task))
@@ -652,6 +687,13 @@ class Step:
             # A name the QR wrote about itself is not read off a screen. Pasted, it is asked about (confirm.py).
             payment_intents.cancel(task.account, intent.internal_id)
             return self.stop('unpaid')
+        from . import account_pay
+        if account_pay.pay(self, intent, code=code, extra=extra, held=held):
+            return   # the person's Cuenta inteligente pays it, or the purchase waits for it: never a card then
+        if held:
+            # A held purchase is never handed to the personal wallet's card.
+            payment_intents.cancel(task.account, intent.internal_id)
+            return self.stop('unpaid', body=notes.say(notes.ACCOUNT_NOT_PAID, task))
         try:
             self.save(payment_intent=intent, state='payment_ready', reason='', wait_until=None)
         except Lost:

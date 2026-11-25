@@ -653,6 +653,11 @@ def authorize_journey(funding, *, owner, destination, bridge, local_account) -> 
     """create_journey's gate in place of the per-journey Face grant: the live
     standing authorization, bound to this very bridge. Returns what the
     journey records."""
+    from . import purchase_funding
+    if type(funding) is purchase_funding.PurchaseFunding:
+        # A purchase the person approved, paid by the account (spec decision 38).
+        return purchase_funding.authorize_journey(funding, owner=owner, destination=destination, bridge=bridge,
+                                                  local_account=local_account)
     if type(funding) is not ContractFunding:
         raise PaymentAccountError(OWNER_REFUSAL)
     terms = funding.terms()
@@ -741,8 +746,12 @@ def close_unfunded(bridge_pk) -> bool:
                 bridge.status == 'submitted'
                 or (bridge.status == 'needs_review' and bridge.failure_code == 'contract_funding_unreported')):
             return bridge.status == 'expired'
-        run = ((bridge.quote.money_flow.metadata or {}).get(KEY) or {}).get('run')
-        if run and funding_may_land(run, bridge.pk):
+        bound = (bridge.quote.money_flow.metadata or {}).get(KEY) or {}
+        from . import purchase_funding
+        if purchase_funding.is_purchase_bound(bound):
+            if purchase_funding.may_land(bridge):
+                return False
+        elif bound.get('run') and funding_may_land(bound['run'], bridge.pk):
             return False
         bridge.status, bridge.failure_code = 'expired', 'payout_not_sent'
         bridge.save(update_fields=['status', 'failure_code', 'updated_at'])
@@ -803,6 +812,9 @@ def signed_terms_problem(bridge, tx_hash: str, units) -> str:
     from smart_account import payouts
     from smart_account.models import SmartAccountRule
     bound = (bridge.quote.money_flow.metadata or {}).get(KEY) or {}
+    from . import purchase_funding
+    if purchase_funding.is_purchase_bound(bound):
+        return purchase_funding.terms_problem(bridge, tx_hash, units)
     rule = SmartAccountRule.all_objects.select_related('smart_account').filter(
         internal_id=bound.get('rule')).first() if bound.get('rule') else None
     if rule is None or address(rule.smart_account.contract_address) != bound.get('contract'):
@@ -898,6 +910,9 @@ def rate_refused(journey) -> None:
     alert(f'no hubo una tasa dentro del límite firmado (puente {journey.bridge.internal_id}). Los dólares '
           'siguen en la cuenta Infinia del dueño y no se pagan por debajo: volver a revisar o devolver a mano.',
           f'contract_funding_rate:{journey.bridge_id}')
+
+    if not bound.get('run'):
+        return      # a purchase has no rule run to tell about; ops were told above
 
     def tell():
         from smart_account import notifications
@@ -1003,6 +1018,9 @@ def payee_problem(journey) -> tuple[str, bool]:
     """(why funded money may not be paid, whether to wait for the bank
     instead of parking). Asked before converting and before paying."""
     from smart_account import payouts
+    from . import purchase_funding
+    if purchase_funding.is_purchase(journey.bridge):
+        return purchase_funding.payee_problem(journey)
     if not (journey.funding_credit_id or journey.bridge.provider_credit_id):
         return '', False        # nothing has arrived to pay
     destination, authorization = _signed_payee(journey)
@@ -1063,6 +1081,10 @@ def prove_funding(transfer):
         pk=transfer.pk)
     if bridge.source_tx_hash:
         return bridge
+    from . import purchase_funding
+    if purchase_funding.is_purchase(bridge):
+        # Funded by the purchase spender's pull: proven by its own receipt.
+        return purchase_funding.prove_funding(bridge)
     data = bridge.binding.get(KEY) or {}
     now = int(time.time())
     reported = data.get('reported') or []

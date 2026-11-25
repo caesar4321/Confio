@@ -238,6 +238,9 @@ RELAY_GAS = {
     'smart_latch_confio': 150_000,
     'smart_designation_approval': 120_000,
     'smart_acceptance_approval': 120_000,
+    # Measured in the spender's Foundry tests at about 540k (a cUSD+ pull),
+    # never on BSC: simulated under this budget before every send.
+    'smart_purchase_pull': 900_000,
 }
 RELAY_GAS_RULE = {'send': 1_100_000, 'payout': 1_200_000, 'buy_stock': 2_400_000, 'buy_crypto': 1_900_000}
 RELAY_GAS_SALE_LEG = {'stock': 2_300_000, 'crypto': 1_700_000, 'confio': 1_700_000}
@@ -457,3 +460,54 @@ def decode_log(log: dict, *, factory: bool = False):
     for (type_, arg), value in zip(plain, values):
         args[arg] = _jsonable(type_, value)
     return name, args
+
+
+# ── the purchase spender (decisions 38 to 42) ───────────────────────────
+# Not an account function and not in RELAY_KIND_CALLS: its target is the
+# spender (purchases.spender_address), never the account, and relayer.
+# relay_target checks that the call names the account it is sent for.
+PURCHASE_KIND = 'smart_purchase_pull'
+PURCHASE_PULL_SIG = 'pullTo(address,uint256,uint256,address,bytes32)'
+PURCHASE_PULL_TYPES = ['address', 'uint256', 'uint256', 'address', 'bytes32']
+SEL_PURCHASE_PULL = selector(PURCHASE_PULL_SIG)
+FORWARDED_FIELDS = [('address', True, 'account'), ('uint256', True, 'ruleId'), ('address', True, 'to'),
+                    ('uint256', False, 'usdtOut'), ('bytes32', False, 'ref')]
+FORWARDED_TOPIC = event_topic('Forwarded', FORWARDED_FIELDS)
+
+
+def purchase_pull_call(account: str, rule_id: int, usdt_out: int, to: str, ref: bytes) -> str:
+    """0x-prefixed lowercase calldata of spender.pullTo."""
+    return '0x' + SEL_PURCHASE_PULL + abi_encode(
+        PURCHASE_PULL_TYPES, [account, int(rule_id), int(usdt_out), to, bytes(ref)]).hex()
+
+
+def decode_purchase_pull(data: str) -> tuple:
+    """(account, ruleId, usdtOut, to, ref) of a pullTo call. Raises
+    ValueError for anything else or for non-canonical bytes."""
+    data_hex = (data or '')[2:].lower()
+    if data_hex[:8] != SEL_PURCHASE_PULL:
+        raise ValueError('not_pull_to')
+    raw = bytes.fromhex(data_hex[8:])
+    try:
+        args = abi_decode(PURCHASE_PULL_TYPES, raw)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError('bad_calldata') from exc
+    if abi_encode(PURCHASE_PULL_TYPES, list(args)) != raw:
+        raise ValueError('bad_calldata')
+    return (str(args[0]).lower(), int(args[1]), int(args[2]), str(args[3]).lower(), bytes(args[4]))
+
+
+def decode_forwarded(log: dict) -> dict | None:
+    """{'account', 'ruleId', 'to', 'usdtOut', 'ref'} of the spender's Forwarded
+    event (json-safe, as decode_log), or None for any other log."""
+    topics = [(t or '').lower() for t in (log.get('topics') or [])]
+    if not topics or topics[0] != FORWARDED_TOPIC:
+        return None
+    if len(topics) != 4:
+        raise ValueError('Forwarded: topic count mismatch')
+    args = {}
+    for (type_, _indexed, arg), topic in zip(FORWARDED_FIELDS[:3], topics[1:]):
+        args[arg] = _jsonable(type_, abi_decode([type_], bytes.fromhex(topic[2:]))[0])
+    values = abi_decode(['uint256', 'bytes32'], bytes.fromhex((log.get('data') or '0x')[2:]))
+    args['usdtOut'], args['ref'] = _jsonable('uint256', values[0]), _jsonable('bytes32', values[1])
+    return args

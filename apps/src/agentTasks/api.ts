@@ -2,6 +2,8 @@
 // Kept apart from the shared query files: a server without agent_tasks rejects only these.
 import { gql } from '@apollo/client';
 
+import type { SmartAccountPreparedBatch } from '../services/smartAccount';
+import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
 import type { CapRule } from './helpers';
 
 const TASK_FIELDS = `
@@ -20,7 +22,7 @@ const TASK_FIELDS = `
   payQr
   payDetails { label value }
   openAccountMethod
-  options { title price image cap unit }
+  options { title price image cap unit rating reviews }
   capRule { margin minExtra commaDecimals maxQuantity }
   order { item items { title quantity image } total image address breakdown { label value } }
 `;
@@ -89,6 +91,32 @@ export const CANCEL_AGENT_TASK = gql`
   }
 `;
 
+// A purchase waiting for the person's Cuenta inteligente (reason 'account_wait', spec decisions 38 to 40):
+// read only for that card, in its own query, so a server without it fails this one alone.
+export const GET_AGENT_ACCOUNT_WAIT = gql`
+  query GetAgentAccountWait($id: UUID!) {
+    agentAccountWait(id: $id) { code amountUsd until }
+  }
+`;
+
+// "Ya lo hice: pagar": the account is asked again; nothing is ever paid from the personal wallet.
+export const RESUME_AGENT_PAYMENT = gql`
+  mutation ResumeAgentPayment($id: UUID!) {
+    resumeAgentPayment(id: $id) { ${RESULT} }
+  }
+`;
+
+// The owner-signed batch the waiting purchase needs (switch purchases on, raise the cap, move money in).
+// Its amount is the server's, from the task: never sent from here.
+export const PREPARE_AGENT_ACCOUNT_WAIT = gql`
+  mutation PrepareAgentAccountWait($id: UUID!) {
+    prepareAgentAccountWait(id: $id) { success errorCode errorMessage requestId calls { to valueWei data } notAfter summary }
+  }
+`;
+
+// code: no_rule | move | cap | topup | renew. amountUsd: what the one action is for ("200.00" cap, "65.00" to move).
+export type AgentAccountWait = { code: string; amountUsd?: string | null; until?: string | null };
+
 export const FORGET_AGENT_STORE = gql`
   mutation ForgetAgentStore($site: String!) {
     forgetAgentStore(site: $site) { success errors errorCode }
@@ -97,7 +125,11 @@ export const FORGET_AGENT_STORE = gql`
 
 // `cap`: the most it may cost with shipping and taxes; choosing it approves up to that (spec decision 42).
 // `unit`: its price as a plain number, from which the top total of several chosen products is worked out.
-export type AgentOption = { title: string; price: string; image: string; cap?: string | null; unit?: string | null };
+export type AgentOption = {
+  title: string; price: string; image: string; cap?: string | null; unit?: string | null;
+  // Stars out of 5 and the review count, as the store writes them; empty when it shows none.
+  rating?: string | null; reviews?: string | null;
+};
 export type AgentOrderItem = { title: string; quantity: number; image: string };
 export type AgentOrder = {
   item: string; total: string; image: string; address?: string | null;
@@ -137,5 +169,28 @@ export type AgentTask = {
 };
 
 export type AgentAnswer = { success?: boolean; errors?: string[]; errorCode?: string | null; task?: AgentTask | null };
+
+/** prepareAgentAccountWait for the shared signing flow (useSignFlow). Nothing is signed here, so a failure is
+ *  definite; a server that predates it says so instead of "check your connection". */
+export async function prepareAgentAccountWait(client: { mutate: (options: any) => Promise<any> }, id: string):
+Promise<SmartAccountPreparedBatch> {
+  const failed = (errorCode: string, errorMessage: string): SmartAccountPreparedBatch => ({
+    success: false, errorCode, errorMessage, requestId: null, calls: null, notAfter: null, summary: null,
+  });
+  try {
+    const { data } = await client.mutate({ mutation: PREPARE_AGENT_ACCOUNT_WAIT, variables: { id },
+      fetchPolicy: 'no-cache' });
+    const out = data?.prepareAgentAccountWait as SmartAccountPreparedBatch | null | undefined;
+    if (!out) {
+      return failed('no_response', 'No pudimos preparar la operación. No se movió nada. Inténtalo de nuevo.');
+    }
+    return out;
+  } catch (e) {
+    if (isSchemaMismatch(e as any)) {
+      return failed('unsupported', 'Esta opción todavía no está disponible. No se movió nada.');
+    }
+    return failed('network', 'No pudimos preparar la operación. No se movió nada. Inténtalo de nuevo.');
+  }
+}
 
 export { ACTIVE, FINISHED, taskIdOf, agentTaskNotificationRoute, taskActions, latestCardFor, showCard, cartTop } from './helpers';

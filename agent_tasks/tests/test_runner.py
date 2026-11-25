@@ -251,9 +251,9 @@ class HandOverTests(StepBase):
             amount, text = operate.top_total(price, task.country)
             return {'cap': text, 'cap_amount': format(amount, 'f')}
         self.assertEqual(task.options, [
-            {'title': 'Chocolate Abuelita 6 tabletas', 'price': 'R$ 89,00', **top('R$ 89,00'),
+            {'title': 'Chocolate Abuelita 6 tabletas', 'price': 'R$ 89,00', 'rating': '', 'reviews': '', **top('R$ 89,00'),
              'image': 'https://img.example/a.jpg', 'href': f'{BASE}/p/A'},
-            {'title': 'Chocolate Ibarra 540 g', 'price': 'R$ 112,50', **top('R$ 112,50'),
+            {'title': 'Chocolate Ibarra 540 g', 'price': 'R$ 112,50', 'rating': '', 'reviews': '', **top('R$ 112,50'),
              'image': 'https://img.example/b.jpg', 'href': f'{BASE}/p/B'}])
         self.assertIsNone(task.checkout_at)
         self.assertIn('Elige una', self.post.call_args.args[1])
@@ -272,6 +272,15 @@ class HandOverTests(StepBase):
         self.decide.assert_not_called()
         # Picked: the agent buys it from its page (its add to cart included) under the checkout's lines.
         self.assertEqual((task.state, task.phase), ('working', 'ordering'))
+
+    def test_stars_and_reviews_are_kept_only_as_the_page_writes_them(self):
+        self.decide.return_value = ('offer_products', {'items': [
+            {'ref': 1, 'title': 'Chocolate Abuelita 6 tabletas', 'price': 'R$ 89,00', 'rating': '4,8', 'reviews': '1.234'},
+            {'ref': 2, 'title': 'Chocolate Ibarra 540 g', 'price': 'R$ 112,50', 'rating': '5', 'reviews': '99999'}]})
+        page = self.results()
+        page.text += ' 4,8 (1.234)'
+        task = self.step(self.make_task(), page)
+        self.assertEqual([(o['rating'], o['reviews']) for o in task.options], [('4,8', '1.234'), ('', '')])
 
     def test_a_build_that_never_showed_the_top_total_approves_none(self):
         task = self.offered()
@@ -375,6 +384,26 @@ class HandOverTests(StepBase):
         self.assertEqual(operate.cart_top([('$1,249.00', 2), ('$85.00', 1)], 'MX'), (Decimal('4133'), '$4,133.00'))
         for picks in ([], [('$85.00', 0)], [('$85.00', 10)], [('$85.00', 1), ('desde $10', 1)]):
             self.assertEqual(operate.cart_top(picks, 'MX'), (None, ''))
+
+    def test_where_confio_cannot_pay_it_says_so_naming_the_country_and_buys_nothing(self):
+        from agent_tasks import notes
+        self.payable.side_effect = service.TaskRefused('country')   # as the real check says for a country with no rail
+        task = self.make_task(site='mercadolibre.com.pe', country='PE', pending_url='https://mercadolibre.com.pe/p/1')
+        task = self.step(task, snap())
+        self.assertEqual((task.state, task.reason), ('stopped', 'no_rail'))
+        said = notes.stopped_text(task, 'no_rail')
+        self.assertIn('todavía no puedo pagar tiendas de Perú', said)
+        self.assertIn('no lo compré', said)
+
+    def test_a_give_up_says_why_without_links_phones_or_handles(self):
+        from agent_tasks import notes
+        self.decide.return_value = ('give_up', {'reason': 'out_of_stock',
+                                                'why': 'el producto está agotado, escribe a @vendedor o al +51 999 888 777 en tienda.pe/x'})
+        task = self.step(self.make_task(), snap())
+        said = notes.stopped_text(task, task.reason)
+        self.assertIn('Motivo: el producto está agotado', said)
+        for leaked in ('@vendedor', '999', 'tienda.pe'):
+            self.assertNotIn(leaked, said)
 
     def test_a_single_match_is_still_the_persons_to_choose(self):
         # "Elegir" approves the purchase up to its top total (spec decision 42): never chosen for them.

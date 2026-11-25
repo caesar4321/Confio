@@ -40,7 +40,8 @@ def step(st, browser, reader, seen):
         reason = args.get('reason')
         submitted = (task.order or {}).get('submitted')
         # After a request was sent the person is told it may be on its way, never that nothing happened.
-        return st.stop('request_unclear' if submitted else ('not_found' if reason == 'not_found' else 'cannot_do'))
+        return st.stop('request_unclear' if submitted else ('not_found' if reason == 'not_found' else 'cannot_do'),
+                       order={**(task.order or {}), 'why': notes.reason_text(args.get('why'))})
     if name == 'sign_in':
         done = sign_in(st, browser, reader, seen, asked=True)
         return st.remember('sign_in', 'refused: no sign-in form on this page') if done is NOT_A_FORM else done

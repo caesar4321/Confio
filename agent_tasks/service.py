@@ -81,9 +81,10 @@ def require_owner(account, user):
         raise TaskRefused('not_personal')
 
 
-def require_payable(account, user, country, meta):
-    """A purchase this person could not pay here is never started, and they
-    are never asked to confirm one: so this is asked at both."""
+def require_payable(account, user, country, meta, *, rail_needed=True):
+    """A purchase this person could not pay here is never ordered, and they are never asked to confirm one.
+    `rail_needed=False` at the start: any store may be searched (founder, 2026-11-25); the country's rail is
+    asked when shopping turns into ordering, and its absence is said as the reason (stop 'no_rail')."""
     from payment_accounts import payment_intents
     from security.minors import minor_refusal
     if not user.is_active or not payment_intents.allowed(user):
@@ -91,7 +92,7 @@ def require_payable(account, user, country, meta):
     minor = minor_refusal(user)
     if minor:
         raise TaskRefused('unavailable', minor)
-    if countries.rail(country) is None:
+    if rail_needed and countries.rail(country) is None:
         raise TaskRefused('country')
     # A verified identity, whoever pays it: the buying agent is not open to accounts nobody verified.
     # (Where Confío's own rail cannot serve them, pay_mode hands them the store's data instead.)
@@ -177,8 +178,6 @@ def start(account, user, *, goal, site, meta=None, kind='buy'):
         raise TaskRefused('store')
     # The store's country decides how its checkout is paid, not the person's.
     country = countries.country_of(store, user)
-    if country not in conf.get('AGENT_TASKS_COUNTRIES') or countries.rail(country) is None:
-        raise TaskRefused('country')
     mine = AgentTask.objects.filter(user=user)
     # An order they may have confirmed at the store is never set aside by a new request.
     open_order = mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=False).first()
@@ -190,7 +189,7 @@ def start(account, user, *, goal, site, meta=None, kind='buy'):
     per_day = conf.get('AGENT_TASKS_PER_DAY_PLUS' if _plus(user) else 'AGENT_TASKS_PER_DAY')
     if mine.filter(created_at__gte=timezone.now() - timedelta(days=1)).exclude(free).count() >= per_day:
         raise TaskRefused('daily_limit', MESSAGES['daily_limit'].format(limit=per_day))
-    require_payable(account, user, country, meta)
+    require_payable(account, user, country, meta, rail_needed=False)
     now = timezone.now()
     try:
         with transaction.atomic():
@@ -257,7 +256,8 @@ def resume(account, user, task_id, view=None):
         raise TaskRefused('unavailable')
     task = get(account, user, task_id)
     # A card in the chat has its own answer (choose, sign_in, give_code, approve): this is not one.
-    if task.state != 'needs_person' or task.reason in ('choose', 'login', 'otp', 'approve', 'subscribe'):
+    if task.state != 'needs_person' or task.reason in ('choose', 'login', 'otp', 'approve', 'subscribe',
+                                                        'account_wait'):
         raise TaskRefused('not_open')
     if not task.wait_until or task.wait_until <= timezone.now():
         runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
@@ -272,6 +272,58 @@ def resume(account, user, task_id, view=None):
         runner.kick(task.pk)
     task.refresh_from_db()
     return task
+
+
+def _end_wait(task):
+    """A purchase that waited for the Cuenta inteligente and ran out of time: the order exists unpaid."""
+    return runner.end(task, 'stopped', 'account_timeout', body=notes.say(notes.ACCOUNT_WAIT_EXPIRED, task),
+                      only={'state': 'needs_person', 'reason': 'account_wait'})
+
+
+def _ask_account_again(task, *, asked):
+    """The held purchase goes back to the runner, which prepares its payment again from what was kept
+    (runner.Step.pay_held) and lets the account pay it, or waits again. Never the personal wallet."""
+    order = dict(task.order or {})
+    held = dict(order.get('pay_hold') or {})
+    if not held:
+        return False
+    if asked:
+        held['asked'] = True
+    order['pay_hold'] = held
+    history = [*(task.history or []), {'did': 'account_wait', 'result': 'asked again' if asked else 'rechecked'}]
+    with transaction.atomic():
+        if not AgentTask.objects.filter(pk=task.pk, state='needs_person', reason='account_wait',
+                                        steps=task.steps).update(
+                state='awaiting_code', reason='', wait_until=None, order=order,
+                history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now()):
+            return False
+        runner.kick(task.pk)
+    return True
+
+
+def resume_payment(account, user, task_id):
+    """"Ya lo hice: pagar": the person switched purchases on, moved money in or raised the cap. The account is
+    asked again; if it still cannot pay, the purchase keeps waiting and they are told why."""
+    if not conf.get('AGENT_TASKS_ENABLED'):
+        raise TaskRefused('unavailable')
+    task = get(account, user, task_id)
+    if task.state != 'needs_person' or task.reason != 'account_wait':
+        raise TaskRefused('not_open')
+    if not task.wait_until or task.wait_until <= timezone.now():
+        _end_wait(task)
+        raise TaskRefused('not_open')
+    if not _ask_account_again(task, asked=True):
+        raise TaskRefused('not_open')
+    task.refresh_from_db()
+    return task
+
+
+def account_wait(account, user, task_id):
+    """order['account_wait'] of a purchase waiting for the account, or None."""
+    task = get(account, user, task_id)
+    if task.state != 'needs_person' or task.reason != 'account_wait':
+        return None, task
+    return (task.order or {}).get('account_wait') or None, task
 
 
 def _answered(account, user, task_id, reason, **fields):
@@ -584,6 +636,24 @@ def sweep():
     _sweep()
 
 
+def account_changed(task):
+    """Whether the account's standing for this held purchase is not what the person was told (it pays now, or
+    something else is missing). Read with the dollars of its last prepared payment; the runner prices it again
+    before anything moves. Unread is 'no change'."""
+    from smart_account import purchases
+    held = (task.order or {}).get('pay_hold') or {}
+    told = ((task.order or {}).get('account_wait') or {}).get('code')
+    try:
+        units = int(held.get('units') or 0)
+        if units <= 0:
+            return False
+        found = purchases.standing(task.user, units, personal_address=task.account.bsc_address or '')
+    except Exception as exc:  # noqa: BLE001 - asked again next time
+        logger.warning('agent task account recheck failed: %s', type(exc).__name__)
+        return False
+    return found.pays or (found.code != told and found.code != 'off')
+
+
 def _sweep():
     """Expired waits end (first: they are the person's), lost steps run again,
     finished tasks release their browser, and what is old or a deleted
@@ -592,6 +662,11 @@ def _sweep():
     active = AgentTask.objects.filter(state__in=AgentTask.ACTIVE)
 
     def expire(task):
+        if task.reason == 'account_wait':
+            # The order exists at the store, unpaid: said so, never "pídemelo otra vez".
+            runner.end(task, 'stopped', 'account_timeout', body=notes.say(notes.ACCOUNT_WAIT_EXPIRED, task),
+                       only={'state': 'needs_person', 'reason': 'account_wait', 'wait_until__lte': now})
+            return
         runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person', 'wait_until__lte': now})
 
     _each(active.filter(state='needs_person', wait_until__lte=now).order_by('wait_until'), expire, 'waits')
@@ -625,12 +700,29 @@ def _sweep():
         else:
             runner.close_session(task)
 
+    def recheck(task):
+        # Touched first, so a slow chain is one look per interval, not one per sweep.
+        if not AgentTask.objects.filter(pk=task.pk, state='needs_person', reason='account_wait',
+                                        updated_at=task.updated_at).update(updated_at=now):
+            return
+        task.refresh_from_db()
+        if account_changed(task):
+            _ask_account_again(task, asked=False)
+
+    # A purchase waiting for the Cuenta inteligente is asked again every few minutes: when the person has
+    # done what it needed, it is paid without another tap.
+    _each(active.filter(state='needs_person', reason='account_wait', wait_until__gt=now,
+                        updated_at__lt=now - timedelta(seconds=conf.get('AGENT_TASKS_ACCOUNT_RECHECK_SECONDS')))
+          .order_by('updated_at'), recheck, 'account waits')
+
     # Random order, so rows that keep failing cannot starve the others.
     _each(AgentTask.objects.exclude(session_id='').exclude(state__in=AgentTask.ACTIVE).order_by('?'), release, 'sessions')
     # A worker that died between the payment card's row and its message.
+    # A purchase the account pays (reason 'account') has no card: its note is account_pay's.
     _each(AgentTask.objects.filter(state='payment_ready', payment_intent__isnull=False,
                                    updated_at__gt=now - timedelta(minutes=10),
-                                   updated_at__lt=now - timedelta(seconds=90)).order_by('?'),
+                                   updated_at__lt=now - timedelta(seconds=90)).exclude(reason='account')
+          .order_by('?'),
           lambda task: runner.post_payment(task, task.payment_intent), 'payment cards')
 
     def scrub(task):
@@ -655,6 +747,8 @@ def _sweep():
     AgentCredential.objects.filter(unused | Q(user__is_active=False)).exclude(
         user__in=active.values('user')).delete()
     # A purchase a worker left behind after its browser closed is ended and said, never left in the way.
-    _each(active.filter(state__in=AgentTask.RUNNING, session_expires_at__lt=now).exclude(lease_until__gt=now),
+    # A held purchase (order['pay_hold']) needs no browser: its payment is read from what was kept.
+    _each(active.filter(state__in=AgentTask.RUNNING, session_expires_at__lt=now).exclude(lease_until__gt=now)
+          .exclude(order__has_key='pay_hold'),
           lambda task: runner.end(task, 'stopped', 'session_expired', only={'state__in': AgentTask.RUNNING}),
           'expired sessions')

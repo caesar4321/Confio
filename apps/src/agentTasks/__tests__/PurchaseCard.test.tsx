@@ -172,6 +172,13 @@ it('several products, each with a quantity, are confirmed once within the whole 
     id: ID, items: [{ index: 1, quantity: 2 }, { index: 2, quantity: 2 }], cap: '$4,269.00' });
 });
 
+it('a product shows its stars and reviews as the store writes them', async () => {
+  mockTask = task({ reason: 'choose', message: 'Elige…',
+    options: [{ title: 'Milka 90g', price: 'R$ 12,99', image: 'https://http2.mlstatic.com/D_milka.webp', rating: '4,8', reviews: '1.234' }] });
+  const tree = await mount();
+  expect(texts(tree).join(' ')).toContain('★ 4,8 (1.234)');
+});
+
 it('a quantity stays between 1 and 9', async () => {
   mockTask = task({ reason: 'choose', capRule: { margin: '0.6', minExtra: '30', commaDecimals: true, maxQuantity: 9 },
     options: [{ title: 'Café', price: 'R$ 12,50', image: '', cap: 'R$ 43,00', unit: '12.50' }] });
@@ -361,4 +368,26 @@ it('a refusal is said on the card and the card stays', async () => {
   await act(async () => { labelled(tree, 'Elegir Chocolate Abuelita 6 tabletas, $89.00').props.onPress(); });
   await act(async () => { labelled(tree, 'Comprar 1 producto').props.onPress(); });
   expect(texts(tree)).toContain('Esto ya no está esperando tu respuesta.');
+});
+
+it('a purchase waiting for the Cuenta inteligente offers its one action and "Ya lo hice: pagar", never a card', async () => {
+  jest.doMock('../../components/smartAccount/SignFlowSheet', () => ({ SignFlowSheet: () => null }));
+  const mockStart = jest.fn();
+  jest.doMock('../../components/smartAccount/useSignFlow', () => ({
+    useSignFlow: () => ({ state: { phase: 'idle' }, start: mockStart, confirm: jest.fn(), reset: jest.fn() }),
+  }));
+  mockTask = task({ reason: 'account_wait', options: [], message: 'Para que pague tus compras… activa «Compras con Confío IA»' });
+  mockQuery.mockImplementation(async () => ({ data: { agentTask: { ...mockTask },
+    agentAccountWait: { code: 'no_rule', amountUsd: '200.00', until: null } } }));
+  mockMutate.mockResolvedValue(answered('resumeAgentPayment'));
+  const tree = await mount();
+  expect(texts(tree)).toEqual(expect.arrayContaining(['Activar compras', 'Ya lo hice: pagar']));
+  expect(texts(tree)).not.toContain('Confirmar pedido');
+  const activate = tree.root.findAll((n) => n.props.title === 'Activar compras' && typeof n.props.onPress === 'function')[0];
+  act(() => { activate.props.onPress(); });
+  expect(mockStart).toHaveBeenCalledWith(expect.objectContaining({ faceStepUp: true }));
+  await act(async () => { labelled(tree, 'Ya lo hice: pagar').props.onPress(); });
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID });
+  expect(String(mockMutate.mock.calls[0][0].mutation)).toContain('resumeAgentPayment');
+  mockQuery.mockImplementation(async () => ({ data: { agentTask: mockTask && { ...mockTask } } }));
 });

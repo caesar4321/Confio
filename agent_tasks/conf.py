@@ -69,6 +69,12 @@ DEFAULTS = {
     'AGENT_TASKS_CAP_MIN_EXTRA': {'MX': '80', 'BR': '30', 'BO': '50'},
     # Cuenta inteligente / IA+ (assistant.billing.has_plus): the shopping assistant is part of what they pay for.
     'AGENT_TASKS_PER_DAY_PLUS': 20,
+    # A purchase the Cuenta inteligente cannot pay yet waits this long for the person (account_pay.wait), and is
+    # asked again this often meanwhile (the sweep). Never paid from the personal wallet.
+    'AGENT_TASKS_ACCOUNT_WAIT_HOURS': 48,
+    # A one-time CLABE (a store's or Mercado Pago's order account) may lapse: its hold is never longer than this.
+    'AGENT_TASKS_ACCOUNT_WAIT_CLABE_HOURS': 24,
+    'AGENT_TASKS_ACCOUNT_RECHECK_SECONDS': 300,
     'AGENT_TASKS_MAX_CONCURRENT': 3,
     'AGENT_TASKS_ALL_PER_DAY': 300,
     'AGENT_TASKS_KEEP_DAYS': 30,

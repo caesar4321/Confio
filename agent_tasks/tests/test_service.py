@@ -44,10 +44,15 @@ class StartTests(ServiceBase):
                            ('update_app', {'meta': {}}),
                            ('update_app', {'meta': {'HTTP_X_CONFIO_VERSION': '5.4.0'}}),
                            ('store', {'site': 'mercadolivre-ofertas.com'}), ('store', {'site': 'itau.com.br'}),
-                           ('country', {'site': 'tienda.es'}), ('goal', {'goal': 'x'}), ('goal', {'goal': 'x' * 401})):
+                           ('goal', {'goal': 'x'}), ('goal', {'goal': 'x' * 401})):
             with self.subTest(code=code, over=str(over)[:50]):
                 self.refused(code, self.start, **over)
         self.assertFalse(AgentTask.objects.exists())
+
+    def test_any_store_may_be_searched_whatever_its_country(self):
+        # Founder, 2026-11-25: try any store; paying is what depends on the country (stop 'no_rail').
+        task = self.start(site='mercadolibre.com.pe')
+        self.assertEqual((task.state, task.country), ('queued', 'PE'))
 
     def test_the_kill_switch(self):
         with override_settings(AGENT_TASKS_ENABLED=False):
@@ -514,3 +519,67 @@ class ChooseCartTests(ServiceBase):
                                    [{'index': 1, 'quantity': 3}, {'index': 0, 'quantity': 1}], cap='R$ 683,00')
         self.assertEqual((task.order['cap']['amount'], task.order['cap']['item']),
                          ('683', '1 × Chocolate Abuelita · 3 × Ibarra'))
+
+
+class AccountWaitTests(ServiceBase):
+    """A purchase the Cuenta inteligente pays: it waits for the account, never for the personal wallet's card."""
+
+    HOLD = {'code': '646180157000000004', 'extra': {'amount_local': '925.00', 'reference': 'Pedido 1'},
+            'since': '2026-11-24T00:00:00+00:00', 'until': '2099-01-01T00:00:00+00:00', 'tries': 0, 'units': '1'}
+
+    def on_hold(self, **over):
+        return self.waiting(reason='account_wait', checkout_at=timezone.now(),
+                            order={'total': '$925.00', 'pay_hold': dict(self.HOLD),
+                                   'account_wait': {'code': 'no_rule', 'amount_usd': '200.00', 'text': 'Activa'}},
+                            **over)
+
+    def test_ya_lo_hice_asks_the_account_again_through_the_runner(self):
+        task = self.on_hold()
+        self.refused('not_open', service.resume, self.account, self.user, task.internal_id)
+        resumed = service.resume_payment(self.account, self.user, task.internal_id)
+        self.assertEqual((resumed.state, resumed.reason, resumed.order['pay_hold']['asked']),
+                         ('awaiting_code', '', True))
+        self.kick.assert_called_with(task.pk)
+        self.refused('not_open', service.resume_payment, self.account, self.user, task.internal_id)
+        AgentTask.objects.filter(pk=task.pk).update(state='stopped')
+        other = self.waiting(reason='approve')
+        self.refused('not_open', service.resume_payment, self.account, self.user, other.internal_id)
+
+    def test_the_card_states_and_the_wait_shown(self):
+        from agent_tasks import schema
+        task = self.on_hold()
+        shown = schema.task_type(task)
+        self.assertEqual((shown.reason, shown.message), ('account_wait', 'Activa'))
+        figures, _ = service.account_wait(self.account, self.user, task.internal_id)
+        self.assertEqual(figures['amount_usd'], '200.00')
+        AgentTask.objects.filter(pk=task.pk).update(state='payment_ready', reason='account',
+                                                    order={'total': '$925.00', 'account_usd': '52.48'})
+        task.refresh_from_db()
+        message = schema.task_type(task).message
+        self.assertIn('Tu Cuenta inteligente está pagando', message)
+        self.assertIn('US$52.48', message)
+        self.assertNotIn('Preparé el pago', message)
+
+    def test_the_sweep_rechecks_expires_and_never_posts_a_card_for_the_account(self):
+        task = self.on_hold()
+        AgentTask.objects.filter(pk=task.pk).update(updated_at=timezone.now() - timedelta(minutes=10))
+        with mock.patch.object(service, 'account_changed', return_value=True) as changed, \
+                mock.patch.object(service, 'worker_alive', return_value=True):
+            service._sweep()
+        changed.assert_called_once()
+        task.refresh_from_db()
+        self.assertEqual(task.state, 'awaiting_code')
+        # Retrying with no browser: its expired session is not a reason to end it.
+        AgentTask.objects.filter(pk=task.pk).update(session_expires_at=timezone.now() - timedelta(minutes=1),
+                                                    updated_at=timezone.now())
+        with mock.patch.object(service, 'worker_alive', return_value=True):
+            service._sweep()
+        task.refresh_from_db()
+        self.assertEqual(task.state, 'awaiting_code')
+        AgentTask.objects.filter(pk=task.pk).update(state='needs_person', reason='account_wait',
+                                                    wait_until=timezone.now() - timedelta(seconds=1))
+        with mock.patch.object(service, 'worker_alive', return_value=True):
+            service._sweep()
+        task.refresh_from_db()
+        self.assertEqual((task.state, task.reason), ('stopped', 'account_timeout'))
+        self.assertIn('sin pagar', self.post.call_args.args[1])

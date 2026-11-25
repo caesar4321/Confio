@@ -169,6 +169,10 @@ def task_type(task):
         message = WORKING_AT.get(stage, WORKING['working']).format(site=task.site)
     elif task.state in WORKING:
         message = WORKING[task.state].format(site=task.site)
+    elif task.state == 'needs_person' and task.reason == 'account_wait':
+        # Why the Cuenta inteligente cannot pay it yet, with its figures (account_pay.figures).
+        message = str(((task.order or {}).get('account_wait') or {}).get('text') or '') or notes.say(
+            notes.ACCOUNT_STILL, task).strip()
     elif task.state == 'needs_person':
         reason = task.reason
         if reason == 'login' and int((task.counts or {}).get('asked_login') or 0) > 1:
@@ -182,8 +186,13 @@ def task_type(task):
             message += notes.breakdown_text(task.order)   # what the total is made of: today's app shows this text
     elif task.state == 'payment_ready' and task.reason == 'manual':
         message = notes.manual_text(task)
+    elif task.state == 'payment_ready' and task.reason == 'account':
+        from . import account_pay
+        message = account_pay.paid_text(task)   # paid by the account: there is no card to review
     elif task.state == 'payment_ready':
         message = notes.say(notes.PAYMENT_READY, task)
+    elif task.reason in notes.ACCOUNT_STOPPED:
+        message = notes.say(notes.ACCOUNT_STOPPED[task.reason], task)
     else:
         message = notes.stopped_text(task, task.reason)
     return AgentTaskType(
@@ -237,11 +246,32 @@ def _cap_rule(country):
                             comma_decimals=country in operate.COMMA_DECIMALS, max_quantity=operate.MAX_QUANTITY)
 
 
+class AgentAccountWaitType(graphene.ObjectType):
+    """A purchase waiting for the Cuenta inteligente (reason `account_wait`). Never paid from the personal
+    wallet: the one action is signed with prepareAgentAccountWait, then resumeAgentPayment."""
+    code = graphene.String(required=True, description='no_rule | move | cap | topup | renew')
+    amount_usd = graphene.String(description='The action\'s amount: the cap to sign (no_rule, cap) or the dollars '
+                                             'to move (move). The server\'s, never sent back.')
+    until = graphene.DateTime(description='How long it waits; then it stops with nothing paid.')
+
+
+def _account_wait(found):
+    figures, task = found
+    if not figures:
+        return None
+    return AgentAccountWaitType(code=str(figures.get('code') or ''), amount_usd=str(figures.get('amount_usd') or '')
+                                or None, until=task.wait_until)
+
+
 class Query(graphene.ObjectType):
+    agent_account_wait = graphene.Field(AgentAccountWaitType, id=graphene.UUID(required=True))
     agent_task = graphene.Field(AgentTaskType, id=graphene.UUID(required=True))
     agent_active_task = graphene.Field(AgentTaskType)
     agent_stores = graphene.List(graphene.NonNull(graphene.String),
                                  description="Stores that keep the person's sign-in, each deletable")
+
+    def resolve_agent_account_wait(self, info, id):
+        return _read(lambda: _account_wait(service.account_wait(*_owner(info), id)))
 
     def resolve_agent_task(self, info, id):
         return _read(lambda: task_type(service.get(*_owner(info), id)))
@@ -300,6 +330,55 @@ class ResumeAgentTask(_Result):
             return cls(success=True, errors=[], task=task_type(service.resume(*_owner(info), id, view=view)))
         except Exception as exc:  # noqa: BLE001
             return _failure(cls, exc)
+
+
+class ResumeAgentPayment(_Result):
+    """"Ya lo hice: pagar" on a purchase waiting for the Cuenta inteligente: the account is asked again."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.resume_payment(*_owner(info), id)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
+def _prepare_account_wait(info, id):
+    """The owner-signed batch a waiting purchase needs, as the Cuenta inteligente's own prepare flows build it
+    (smart_account.purchases): its amount is the task's, never the client's."""
+    from decimal import Decimal
+
+    from smart_account import purchases
+    from smart_account.schema import _batch_error, _prepare
+    try:
+        figures, _task = service.account_wait(*_owner(info), id)
+    except service.TaskRefused as exc:
+        return _batch_error(exc.code, str(exc))
+    code = str((figures or {}).get('code') or '')
+    amount = str((figures or {}).get('amount_usd') or '')
+    if code in ('no_rule', 'cap') and amount:
+        return _prepare(info, lambda viewer: purchases.prepare_purchase_rule(viewer, Decimal(amount)))
+    if code == 'move' and amount:
+        return _prepare(info, lambda viewer: purchases.prepare_move_for_purchase(viewer, amount))
+    return _batch_error('not_open', service.MESSAGES['not_open'])
+
+
+def _prepared_batch_type():
+    from smart_account.schema import SmartAccountPreparedBatchType
+    return SmartAccountPreparedBatchType
+
+
+class PrepareAgentAccountWait(graphene.Mutation):
+    """Switch purchases on, raise the cap or move money in, for the purchase waiting for the account."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+
+    Output = _prepared_batch_type()
+
+    def mutate(self, info, id):
+        return _prepare_account_wait(info, id)
 
 
 class ChooseAgentOption(_Result):
@@ -462,6 +541,8 @@ class ForgetAgentStore(graphene.Mutation):
 class Mutation(graphene.ObjectType):
     start_agent_task = StartAgentTask.Field()
     resume_agent_task = ResumeAgentTask.Field()
+    resume_agent_payment = ResumeAgentPayment.Field()
+    prepare_agent_account_wait = PrepareAgentAccountWait.Field()
     cancel_agent_task = CancelAgentTask.Field()
     choose_agent_option = ChooseAgentOption.Field()
     choose_agent_options = ChooseAgentOptions.Field()

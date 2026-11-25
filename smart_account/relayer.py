@@ -108,6 +108,8 @@ def relay_target(account, calldata: str, kind: str) -> str:
     calldata is exactly the one function its kind allows (abi.RELAY_KIND_CALLS):
     an account function on the account itself, or a factory approval naming
     this account. Anything else is refused before signing."""
+    if kind == abi.PURCHASE_KIND:
+        return _purchase_target(account, calldata)
     if kind not in abi.RELAY_KIND_CALLS:
         raise RelayError('bad_kind', kind)
     target, allowed = abi.RELAY_KIND_CALLS[kind]
@@ -127,6 +129,23 @@ def relay_target(account, calldata: str, kind: str) -> str:
         # A factory approval only ever names the account this row is for.
         raise RelayError('call_not_allowed', f'{kind}: other account')
     return factory
+
+
+def _purchase_target(account, calldata: str) -> str:
+    """The purchase spender's pullTo (spec decisions 38 to 42), only for this
+    very account. The spender's own checks (operator, exact receipt) and the
+    account's (rule, payee, cap, allowlist, pause) still decide on chain."""
+    from . import purchases
+    spender = purchases.spender_address()
+    if not spender:
+        raise RelayError('disabled')
+    try:
+        pulled_from = abi.decode_purchase_pull(calldata)[0]
+    except ValueError as exc:
+        raise RelayError('bad_calldata', abi.PURCHASE_KIND) from exc
+    if pulled_from != (account.contract_address or '').lower():
+        raise RelayError('call_not_allowed', f'{abi.PURCHASE_KIND}: other account')
+    return spender
 
 
 def send_relayer_call(account, calldata: str, kind: str, source_id, *, gas: int | None = None,

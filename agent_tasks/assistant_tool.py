@@ -32,9 +32,10 @@ def spec():
     return {
         'type': 'function', 'name': NAME, 'strict': True,
         'description': (
-            'Empieza a comprar algo por la persona en una tienda en línea de Brasil (Pix), México (SPEI) o Bolivia '
-            '(QR), con un navegador en la nube. Confío lo paga si su cuenta local lo permite; si no, el pedido '
-            'queda hecho y ella lo paga desde su banco con los datos que muestra la tienda (nunca con tarjeta). '
+            'Empieza a comprar algo por la persona en cualquier tienda en línea, de cualquier país, con un '
+            'navegador en la nube: busca y le muestra opciones aquí. Pagarla depende del país: Confío paga tiendas '
+            'de México (SPEI), Brasil (Pix) y Bolivia (QR); en otros países el agente busca igual y, al llegar al '
+            'pedido, le dice que todavía no puede pagarla allí. Nunca rechaces una tienda por su país. '
             'Úsalo solo cuando ella pide en su mensaje que compres, pidas o reserves algo. `what` es qué comprar, '
             'en pocas palabras y con las palabras de ella (producto, marca, cantidad, variante): nunca algo que no '
             'dijo. `store` es el dominio de la tienda que nombró; si no nombró ninguna, una '

@@ -124,18 +124,21 @@ TOOLS = [
     _tool('search', 'Search the store: the number of its search box and the words.', {'ref': _REF, 'text': _TEXT}),
     {'type': 'function', 'name': 'offer_products', 'strict': True,
      'description': ('Show the person the 3 to 5 results that best match their goal, to pick one in the chat. For '
-                     'each: the number of its link, its name and its price as the page writes them.'),
+                     'each: the number of its link, its name and its price as the page writes them, and its star '
+                     'rating and number of reviews exactly as written for that product ("4.8", "1.234"), or "" '
+                     'when that product shows none.'),
      'parameters': {'type': 'object', 'additionalProperties': False, 'required': ['items'], 'properties': {
          'items': {'type': 'array', 'items': {
-             'type': 'object', 'additionalProperties': False, 'required': ['ref', 'title', 'price'],
-             'properties': {'ref': _REF, 'title': _TEXT, 'price': _TEXT}}}}}},
+             'type': 'object', 'additionalProperties': False,
+             'required': ['ref', 'title', 'price', 'rating', 'reviews'],
+             'properties': {'ref': _REF, 'title': _TEXT, 'price': _TEXT, 'rating': _TEXT, 'reviews': _TEXT}}}}}},
     _tool('wait', 'The page is still loading: look again.'),
     _tool('ready_for_checkout', 'The right item is in the cart, or is the product page in front of you: the person '
                                 'takes over and does the checkout.'),
     _tool('ask_person', 'Hand the screen to the person for something only they may do.',
           {'kind': {'type': 'string', 'enum': ['login', 'captcha', 'details', 'choice', 'consent']}}),
     _tool('give_up', 'Stop: the goal cannot be reached here.',
-          {'reason': {'type': 'string', 'enum': ['not_found', 'no_payment', 'out_of_stock', 'cannot_do']}}),
+          {'reason': {'type': 'string', 'enum': ['not_found', 'no_payment', 'out_of_stock', 'cannot_do']}, 'why': {'type': 'string', 'description': 'In a few plain Spanish words, the reason, as the page shows it ("el producto está agotado", "la tienda pidió un documento").'}}),
 ]
 
 SYSTEM = """You operate a web browser inside one online store, for one person, to find what their words ask for.
@@ -175,7 +178,7 @@ OPERATE_TOOLS = [
                           'named its final button.'),
     _tool('wait', 'The page is still loading: look again.'),
     _tool('give_up', 'Stop: the order cannot be made here.',
-          {'reason': {'type': 'string', 'enum': ['no_payment', 'out_of_stock', 'cannot_do']}}),
+          {'reason': {'type': 'string', 'enum': ['no_payment', 'out_of_stock', 'cannot_do']}, 'why': {'type': 'string', 'description': 'In a few plain Spanish words, the reason, as the page shows it ("el producto está agotado", "la tienda pidió un documento").'}}),
 ]
 AFTER_TOOLS = [
     _tool('press', 'Open the page that shows how to pay this order, by the number of its link or button. A second '
@@ -187,7 +190,7 @@ AFTER_TOOLS = [
           {'ref': _REF}),
     _tool('wait', 'The page is still loading: look again.'),
     _tool('give_up', 'The way to pay this order cannot be found.',
-          {'reason': {'type': 'string', 'enum': ['cannot_do']}}),
+          {'reason': {'type': 'string', 'enum': ['cannot_do']}, 'why': {'type': 'string', 'description': 'In a few plain Spanish words, the reason, as the page shows it ("el producto está agotado", "la tienda pidió un documento").'}}),
 ]
 
 MANUAL_PAY = ('a way to pay with no card that the person completes later from their own bank or in cash: a bank '
@@ -289,7 +292,7 @@ MANAGE_TOOLS = [
           {'text': _TEXT}),
     _tool('sign_in', 'The store asks the person to sign in, or for the code it sent them, on this page.'),
     _tool('wait', 'The page is still loading: look again.'),
-    _tool('give_up', 'It cannot be done here.', {'reason': {'type': 'string', 'enum': ['not_found', 'cannot_do']}}),
+    _tool('give_up', 'It cannot be done here.', {'reason': {'type': 'string', 'enum': ['not_found', 'cannot_do']}, 'why': {'type': 'string', 'description': 'In a few plain Spanish words, the reason, as the page shows it ("el producto está agotado", "la tienda pidió un documento").'}}),
 ]
 
 MANAGE = """You operate a web browser in one online store, for one person, about an order they already placed.

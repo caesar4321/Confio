@@ -334,8 +334,8 @@ def checkout(step, browser, reader, seen):
         try:
             # Nobody is asked to approve an order they could not pay here.
             service.require_payable(task.account, task.user, task.country, step.app_meta())
-        except service.TaskRefused:
-            return step.stop('cannot_pay')
+        except service.TaskRefused as exc:
+            return step.stop('no_rail' if exc.code == 'country' else 'cannot_pay')
         step.save(phase='ordering')
     _trace(step, seen)
     if not after:
@@ -351,7 +351,8 @@ def checkout(step, browser, reader, seen):
         return step.remember('wait', 'ok')
     if name == 'give_up':
         reason = args.get('reason')
-        return step.stop(reason if reason in step.GIVE_UP else 'cannot_do')
+        return step.stop(reason if reason in step.GIVE_UP else 'cannot_do',
+                         order={**(task.order or {}), 'why': notes.reason_text(args.get('why'))})
     if name == 'sign_in' and not after:
         done = sign_in(step, browser, reader, seen, asked=True)
         return step.remember('sign_in', 'refused: no sign-in form on this page') if done is NOT_A_FORM else done
