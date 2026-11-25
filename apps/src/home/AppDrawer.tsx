@@ -18,6 +18,7 @@ import {
   type GestureResponderHandlers,
   type ViewProps,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
@@ -45,6 +46,8 @@ import { drawerWidth, useDrawerMotion } from './useDrawerMotion';
 const EMERALD = '#047857';
 // Opening the menu twice in a row does not ask for the balances twice.
 const REFRESH_EVERY_MS = 20_000;
+// A pull's spinner never outlives this, whatever the network does.
+const PULL_TIMEOUT_MS = 12_000;
 const INK = '#111827';
 const MUTED = '#4B5563';
 
@@ -245,6 +248,34 @@ function DrawerPanel({
     }
   }, [isOpen]);
 
+  // Pulled down, like the old Inicio: the balances are asked for again and
+  // the spinner stays until they are back.
+  const [pulling, setPulling] = useState(false);
+  const pull = useRef(money.pull);
+  pull.current = money.pull;
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  const onPull = useCallback(async () => {
+    setPulling(true);
+    // It counts as the menu's own refresh: opening it again right after does not ask twice.
+    refreshedAt.current = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => pull.current()),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, PULL_TIMEOUT_MS); }),
+      ]);
+    } catch {
+      // The figures stay as they were; the next pull asks again.
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (alive.current) setPulling(false);
+    }
+  }, []);
+
   // The wallet strip takes sideways drags only when it has more wallets than
   // fit: with two tiles a drag to the left there still closes the menu.
   const stripSize = useRef({ layout: 0, content: 0 });
@@ -315,7 +346,15 @@ function DrawerPanel({
       <Animated.View
         style={[styles.panel, { width, paddingTop: insets.top + 8, transform: [{ translateX }] }]}
       >
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          // Short menus still pull: the gesture is how the person asks for fresh balances.
+          alwaysBounceVertical
+          refreshControl={(
+            <RefreshControl refreshing={pulling} onRefresh={onPull} tintColor={EMERALD} colors={[EMERALD]} />
+          )}
+        >
           {/* ── Money ── */}
           <View style={styles.money}>
             <View style={styles.totalRow}>

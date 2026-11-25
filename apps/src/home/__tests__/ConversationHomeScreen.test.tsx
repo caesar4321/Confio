@@ -46,7 +46,7 @@ const resetHomeMoney = () => sharedHomeMoneyStore.reset();
 
 const money = (over: Partial<HomeMoney> = {}): HomeMoney => ({
   ready: true, total: 'US$254,30', masked: false, canToggle: true, toggleBalance: jest.fn(),
-  currencyCode: 'USD', currencyHint: 'Mostrar en bolivianos', toggleCurrency: jest.fn(), refresh: jest.fn(),
+  currencyCode: 'USD', currencyHint: 'Mostrar en bolivianos', toggleCurrency: jest.fn(), refresh: jest.fn(), pull: jest.fn(),
   accounts: [], switchAccount: jest.fn(), createBusiness: jest.fn(),
   month: { kind: 'month', summary: { year: 2026, month: 11, current: { incomeUsd: '340', spendingUsd: '185' } } as any },
   openMonth: mockOpenMonth, tiles: [], actions: [], notice: null, ...over,

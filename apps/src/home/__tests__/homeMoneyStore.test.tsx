@@ -7,7 +7,7 @@ import {
 
 const snapshot = (total: string): HomeMoney => ({
   ready: true, total, masked: false, canToggle: true, toggleBalance: () => {}, month: { kind: 'hidden' },
-  currencyCode: 'USD', currencyHint: 'Mostrar en bolivianos', toggleCurrency: () => {}, refresh: () => {},
+  currencyCode: 'USD', currencyHint: 'Mostrar en bolivianos', toggleCurrency: () => {}, refresh: () => {}, pull: () => {},
   accounts: [], switchAccount: () => {}, createBusiness: () => {},
   openMonth: () => {}, tiles: [], actions: [], notice: null,
 });

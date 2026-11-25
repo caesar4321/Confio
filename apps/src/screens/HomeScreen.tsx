@@ -1183,11 +1183,13 @@ export const HomeScreen = ({ embedded = false }: { embedded?: boolean } = {}) =>
   const masked = !(canViewBalance && showBalance);
   const billingEntry = isAuthReady && isPersonalAccount && billingSummaryData?.myBillingSummary?.linked
     ? billingSummaryData?.myBillingSummary?.entry : null;
-  const moneyHandlers = useRef<Record<string, () => void>>({});
+  const moneyHandlers = useRef<Record<string, () => void | Promise<void>>>({});
   moneyHandlers.current = {
     toggleBalance: toggleBalanceVisibility,
     toggleCurrency: () => setShowLocalCurrency(!showLocalCurrency),
     refresh: () => { void onRefresh(true); },
+    // A pull by the person in the menu: with the haptic, and awaited there.
+    pull: () => onRefresh(),
     createBusiness: handleCreateBusinessAccount,
     openMonth: () => {
       AnalyticsService.logFunnelEvent('hero_cashflow_tapped', { state: heroMonth.kind === 'month' ? 'month' : 'invite' });
@@ -1280,9 +1282,10 @@ export const HomeScreen = ({ embedded = false }: { embedded?: boolean } = {}) =>
   }, (key: string) => () => {
     if (key.startsWith('switchAccount:')) {
       void handleAccountSwitch(key.slice('switchAccount:'.length));
-    } else {
-      moneyHandlers.current[key]?.();
+      return undefined;
     }
+    // Returned so the menu's pull can wait for the refresh to end.
+    return moneyHandlers.current[key]?.();
   }),
   [masked, canViewBalance, isInitialized, totalText, currencyCode, currencyHint, menuAccounts, handleAccountSwitch, publishedMonth, balancesKnown, dollarUsd, legacyDollarUsd,
    investments.visible, investments.totalKnown, investments.totalUsd, confioTotal, smartAccountRow,

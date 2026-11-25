@@ -41,7 +41,7 @@ import {
 } from '../homeMoneyStore';
 
 const handlers = {
-  toggle: jest.fn(), currency: jest.fn(), refresh: jest.fn(), month: jest.fn(), dollar: jest.fn(), smart: jest.fn(),
+  toggle: jest.fn(), currency: jest.fn(), refresh: jest.fn(), pull: jest.fn(), month: jest.fn(), dollar: jest.fn(), smart: jest.fn(),
   send: jest.fn(), receive: jest.fn(), switchAccount: jest.fn(), createBusiness: jest.fn(),
 };
 const money = (over: Partial<HomeMoney> = {}): HomeMoney => ({
@@ -54,6 +54,7 @@ const money = (over: Partial<HomeMoney> = {}): HomeMoney => ({
   currencyHint: 'Mostrar en bolivianos',
   toggleCurrency: handlers.currency,
   refresh: handlers.refresh,
+  pull: handlers.pull,
   accounts: [
     { id: 'personal_0', name: 'Ana Pérez', kind: 'Personal', avatar: 'A', selected: true },
     { id: 'business_1_0', name: 'Panadería', kind: 'Negocio', avatar: 'P', selected: false },
@@ -236,6 +237,37 @@ describe('the money block: the one place for the person\'s money', () => {
     await act(async () => { store.publish(money({ total: 'US$300,00', refresh: later })); });
     expect(later).not.toHaveBeenCalled();
     expect(handlers.refresh).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  });
+
+  it('pulled down, it asks for the balances like the old Inicio and spins until they are back', async () => {
+    let back!: () => void;
+    handlers.pull.mockImplementationOnce(() => new Promise<void>((resolve) => { back = resolve; }));
+    publishHomeMoney(money());
+    const tree = await openDrawer(await mount());
+    const control = () => tree.root.findAll((n) => !!n.props?.refreshControl)[0].props.refreshControl.props;
+    expect(control().refreshing).toBe(false);
+    await act(async () => { void control().onRefresh(); });
+    expect(handlers.pull).toHaveBeenCalledTimes(1);
+    expect(control().refreshing).toBe(true);
+    await act(async () => { back(); });
+    expect(control().refreshing).toBe(false);
+    // A pull that fails ends the spinner too, and the next pull asks again.
+    handlers.pull.mockImplementationOnce(() => Promise.reject(new Error('sin red')));
+    await act(async () => { await control().onRefresh(); });
+    expect(control().refreshing).toBe(false);
+    expect(handlers.pull).toHaveBeenCalledTimes(2);
+    // Balances that never come back do not leave the spinner on.
+    jest.useFakeTimers();
+    try {
+      handlers.pull.mockImplementationOnce(() => new Promise<void>(() => {}));
+      await act(async () => { void control().onRefresh(); });
+      expect(control().refreshing).toBe(true);
+      await act(async () => { jest.advanceTimersByTime(12_000); });
+      expect(control().refreshing).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
     await act(async () => tree.unmount());
   });
 

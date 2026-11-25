@@ -65,7 +65,9 @@ const NOTICES = {
   },
 } as const;
 
-export function buildHomeMoney(input: HomeMoneyInput, call: (key: string) => () => void): HomeMoney {
+export function buildHomeMoney(
+  input: HomeMoneyInput, call: (key: string) => () => void | Promise<void>,
+): HomeMoney {
   const { masked } = input;
   const usd = (value: number) => (masked ? MASK : formatUsdAmount(floor2(value), { decimals: 2 }));
   const spoken = (amount: string) => (masked ? 'saldo oculto' : amount);
@@ -133,6 +135,7 @@ export function buildHomeMoney(input: HomeMoneyInput, call: (key: string) => () 
     currencyHint: input.currencyHint,
     toggleCurrency: call('toggleCurrency'),
     refresh: call('refresh'),
+    pull: call('pull'),
     accounts: input.accounts,
     // One handler per account, named by its id.
     switchAccount: (id: string) => call(`switchAccount:${id}`)(),

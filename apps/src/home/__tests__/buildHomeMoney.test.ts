@@ -126,13 +126,14 @@ it('every tap goes through the named handler', () => {
   money.toggleBalance();
   money.toggleCurrency();
   money.refresh();
+  void money.pull();
   money.openMonth();
   money.tiles.forEach((t) => t.onPress());
   money.actions.forEach((a) => a.onPress());
   money.notice?.onPress();
   money.switchAccount('business_1_0');
   money.createBusiness();
-  expect(calls).toEqual(['toggleBalance', 'toggleCurrency', 'refresh', 'openMonth', 'dollar', 'invest', 'confio', 'smart',
+  expect(calls).toEqual(['toggleBalance', 'toggleCurrency', 'refresh', 'pull', 'openMonth', 'dollar', 'invest', 'confio', 'smart',
     'send', 'receive', 'pendingIncoming', 'switchAccount:business_1_0', 'createBusiness']);
 });
 

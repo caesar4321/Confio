@@ -60,6 +60,9 @@ export type HomeMoney = {
   toggleCurrency: () => void;
   /** Ask for the balances again (the menu does when it opens). */
   refresh: () => void;
+  /** The person pulled the menu down: the same refresh as the old Inicio's
+   * pull, ending when the figures are back (so the spinner knows when to stop). */
+  pull: () => void | Promise<void>;
   /** Every account of this person, the current one marked. */
   accounts: HomeAccount[];
   switchAccount: (id: string) => void;
@@ -83,6 +86,7 @@ const EMPTY: HomeMoney = {
   currencyHint: '',
   toggleCurrency: () => {},
   refresh: () => {},
+  pull: () => {},
   accounts: [],
   switchAccount: () => {},
   createBusiness: () => {},
