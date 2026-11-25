@@ -262,3 +262,22 @@ Each extra token moved in a migration costs about 25–30k. The cUSD+ legs cost 
 cUSD+ to USDT through the vault (USDY) before swapping. Server gas limits for `relayTrade` must allow about
 800k on the cUSD+ path. `CUSD_PLUS_7702_GAS_LIMIT` (2.5M) covers a migration batch with all six tokens and the
 rules.
+
+## Deployed on BSC mainnet (2026-11-25)
+
+| What | Address / tx |
+|---|---|
+| ConfioSmartAccountV2 (implementation) | `0x0b3DAf407AF2cF5bC7a1475bF44bD3952533cdF7` (24,236 bytes; `VERSION()` 2) |
+| ConfioSmartAccountFactory (new logic) | `0xD3F24fd9822B42a691379Fe47886b9Fb971cFea1` |
+| ConfioMarketEscrow (new logic) | `0xf729d76Dd16EaBCCA2461390D15768ae627D493A` |
+| Deployer | KMS sponsor `0xf9f93Ba8ebf50515Ed2729Eb07657c8298cdfc9D` (`manage.py deploy_hands_off_impls --broadcast --yes-mainnet`, ≈ 0.0007 BNB) |
+| Safe batch (nonce 32) | tx `0x8195a04b564bae92b9886c906db806139d740c0bfa2cc3bb2ab0e64ae1bf1e01`, block 135679815, 260,248 gas; SafeTxHash `0x3e64091ff96ffe0790ce6f18669cf3fd5d2a091c5a7fe9d8133e674b8b726ebc` |
+
+Fork replay with these exact addresses passed before signing. Mainnet post-checks after the batch: factory ERC-1967
+slot = new logic; `implementation()` = v2; `implementationAt(0)` = v1 `0x8a20…e44A`, `implementationAt(1)` = v2;
+`tradePaused()` true; owners still the Safe; escrow slot = new logic, `accountFactory()` = the factory; Safe nonce 33.
+
+Server: `SMART_ACCOUNT_V2_IMPLEMENTATION_ADDRESS` set in `.env.mainnet` (hands-off routing on; while `tradePaused`
+a v2 account falls back to the signed card, v1 subscribers get the migration offer). Still to do: BscScan
+verification and proxy re-link; a separate KMS key for the escrow's order signer (audit M2) before hands-off
+Comprar; canary migration of a founder account; then Safe nonce 33 `setTradePaused(false)`.
