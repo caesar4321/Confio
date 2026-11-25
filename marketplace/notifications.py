@@ -37,6 +37,20 @@ _MESSAGES = {
 ADULTS_NOTE = ' Entrégalo solo a un mayor de 18 que muestre su carnet.'
 
 
+# An order a Cuenta inteligente paid (depositFrom): the buyer's money left from
+# the account and a refund lands back there, never in the wallet.
+_ACCOUNT_BUYER = {
+    'funded': 'Tu pago por {title} desde tu Cuenta inteligente está protegido hasta que lo recibas.',
+    'refunded': 'Te devolvimos el pago por {title} a tu Cuenta inteligente.',
+}
+
+
+def _for_account(order, role: str, message: str) -> str:
+    if role == 'buyer' and getattr(order, 'payer_address', '') and order.status in _ACCOUNT_BUYER:
+        return _ACCOUNT_BUYER[order.status]
+    return message
+
+
 def order_status_changed(order, previous: str) -> None:
     from notifications.models import NotificationType
     from notifications.utils import create_notification
@@ -49,7 +63,7 @@ def order_status_changed(order, previous: str) -> None:
                 user=user, account=account,
                 notification_type=NotificationType.MARKETPLACE_ORDER_UPDATED,
                 title=title,
-                message=message.format(
+                message=_for_account(order, role, message).format(
                     buyer=order.buyer.first_name or 'Un cliente', qty=order.quantity,
                     title=order.product_title, store=order.store.name,
                     adults=ADULTS_NOTE if order.age_restricted else ''),

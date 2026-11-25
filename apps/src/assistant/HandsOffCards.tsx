@@ -5,6 +5,7 @@
 //   trade_move         dollars moved in from the personal wallet (after a top-up), with Face; then it runs
 //   trade_offer        "Activa Cuenta inteligente" (the offer, door chip) and/or "Hazlo tú" (the menu's screen)
 //   account_migration  the one-Face update to the account version that trades for the person
+//   relay_purchase, purchase_cap, purchase_move, purchase_offer: the same for a Comprar purchase (ComprarCards.tsx)
 //
 // Every figure is the server's (assistantRelayTrade); the only number sent from here is the cap the person picks.
 import React, { useCallback, useEffect, useState } from 'react';
@@ -17,6 +18,8 @@ import { SignFlowSheet } from '../components/smartAccount/SignFlowSheet';
 import { useSignFlow } from '../components/smartAccount/useSignFlow';
 import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import type { AssistantAction } from './api';
+import { ComprarCard } from './ComprarCards';
+import { PURCHASE_TYPES } from './comprarHandsOff';
 import {
   capAmount, capText, diyScreenAllowed, GET_RELAY_TRADE, handsOffActions, prepareAccountMigration,
   prepareTradeCap, prepareTradeMove, RelayTrade, RESUME_RELAY_TRADE,
@@ -239,6 +242,7 @@ export function HandsOffCards({ messageId, actions, onOpen }: {
         if (a.type === 'trade_move' && a.target) return <TradeMoveCard key={key} action={a} />;
         if (a.type === 'trade_offer') return <TradeOfferCard key={key} action={a} onOpen={onOpen} />;
         if (a.type === 'account_migration') return <MigrationCard key={key} action={a} />;
+        if (PURCHASE_TYPES.has(a.type)) return <ComprarCard key={key} action={a} onOpen={onOpen} />;
         return null;
       })}
     </>

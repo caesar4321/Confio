@@ -235,6 +235,71 @@ class ResumeAssistantRelayTrade(graphene.Mutation):
             'status', 'gone') if row is not None else 'gone')
 
 
+class AssistantRelayPurchaseType(graphene.ObjectType):
+    # waiting_rule | waiting_move | pending | done | failed | cancelled (smart_account/relay_purchases.py)
+    status = graphene.String(required=True)
+    tx_hash = graphene.String()
+    label = graphene.String(required=True)
+    error_code = graphene.String()
+    amount = graphene.String(description='The total the person said "sí" to, US dollars')
+    order = graphene.String(description='The Comprar order (public id) once paid')
+    # While waiting_rule (the cap card): new | raise, the choices, the one preselected, the cap today.
+    mode = graphene.String()
+    choices = graphene.List(graphene.NonNull(graphene.String))
+    preselected = graphene.String()
+    current_cap = graphene.String()
+    # While waiting_move: the dollars the move card moves in (the server's).
+    move_amount = graphene.String()
+
+
+class PrepareAssistantPurchaseCap(graphene.Mutation):
+    """The weekly Comprar cap the person chose on a chat purchase's cap card:
+    the Purchase rule (created, or raised), signed once with Confío Face."""
+    class Arguments:
+        purchase = graphene.UUID(required=True)
+        amount = graphene.String(required=True, description='US dollars per week, as chosen on the card')
+
+    Output = _prepared_batch_output()
+
+    def mutate(self, info, purchase, amount):
+        from smart_account import relay_purchases
+        from smart_account.models import SmartRelayPurchase
+        from smart_account.schema import _batch_error
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated or not SmartRelayPurchase.objects.filter(
+                user=user, internal_id=purchase, status='waiting_rule').exists():
+            return _batch_error('not_open', 'Esa compra ya no está pendiente. Pídemela de nuevo en el chat.')
+        return _hands_off_prepare(info, lambda viewer: relay_purchases.prepare_purchase_rule(viewer, amount))
+
+
+class PrepareAssistantPurchaseMove(graphene.Mutation):
+    """Personal wallet -> Cuenta inteligente for a chat purchase it is short of (its amount is the server's)."""
+    class Arguments:
+        purchase = graphene.UUID(required=True)
+
+    Output = _prepared_batch_output()
+
+    def mutate(self, info, purchase):
+        from smart_account import relay_purchases
+        return _hands_off_prepare(info, lambda viewer: relay_purchases.prepare_purchase_move(viewer, purchase))
+
+
+class ResumeAssistantRelayPurchase(graphene.Mutation):
+    """The cap or move card was signed: the chat purchase waiting for it goes ahead."""
+    class Arguments:
+        purchase = graphene.UUID(required=True)
+
+    status = graphene.String(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, purchase):
+        from smart_account import relay_purchases
+        row = relay_purchases.resume(info.context.user, purchase)
+        return ResumeAssistantRelayPurchase(status=(relay_purchases.status_of(info.context.user, purchase) or {}).get(
+            'status', 'gone') if row is not None else 'gone')
+
+
 class AssistantThreadType(graphene.ObjectType):
     messages = graphene.List(graphene.NonNull(AssistantMessageType), required=True)
     has_more = graphene.Boolean(required=True)
@@ -585,6 +650,16 @@ class Query(graphene.ObjectType):
         from smart_account import relay_trades
         found = relay_trades.status_of(info.context.user, trade)
         return AssistantRelayTradeType(**found) if found else None
+
+    assistant_relay_purchase = graphene.Field(
+        AssistantRelayPurchaseType, purchase=graphene.UUID(required=True),
+        description="One hands-off chat purchase in Comprar of the viewer's (its own query: older servers lack it).")
+
+    @login_required
+    def resolve_assistant_relay_purchase(self, info, purchase):
+        from smart_account import relay_purchases
+        found = relay_purchases.status_of(info.context.user, purchase)
+        return AssistantRelayPurchaseType(**found) if found else None
 
     assistant_thread = graphene.Field(
         AssistantThreadType,
@@ -1006,3 +1081,6 @@ class Mutation(graphene.ObjectType):
     prepare_assistant_account_migration = PrepareAssistantAccountMigration.Field()
     prepare_assistant_trade_move = PrepareAssistantTradeMove.Field()
     resume_assistant_relay_trade = ResumeAssistantRelayTrade.Field()
+    prepare_assistant_purchase_cap = PrepareAssistantPurchaseCap.Field()
+    prepare_assistant_purchase_move = PrepareAssistantPurchaseMove.Field()
+    resume_assistant_relay_purchase = ResumeAssistantRelayPurchase.Field()

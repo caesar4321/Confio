@@ -53,6 +53,8 @@ export type RelayTrade = {
 
 export const HANDS_OFF_TYPES = new Set([
   'relay_trade', 'trade_cap', 'trade_move', 'trade_offer', 'account_migration',
+  // Hands-off Comprar purchases (ComprarCards.tsx).
+  'relay_purchase', 'purchase_cap', 'purchase_move', 'purchase_offer',
 ]);
 
 export function handsOffActions(actions: AssistantAction[]): AssistantAction[] {

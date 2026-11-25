@@ -1534,6 +1534,13 @@ def _relay_traded(account, event):
     return [lambda: relay_trades.on_relay_traded(account, event)]
 
 
+def _relay_purchased(account, event):
+    """Every hands-off Comprar purchase is told to the owner at once, and one
+    no chat proposal asked for goes to ops too (relay_purchases.py)."""
+    from . import relay_purchases
+    return [lambda: relay_purchases.on_relay_purchased(account, event)]
+
+
 def _confio_latched(account, event):
     account.confio_sale_latched = True
     account.save(update_fields=['confio_sale_latched', 'updated_at'])
@@ -1567,4 +1574,5 @@ _HANDLERS = {
     'ConfioSaleLatched': _confio_latched,
     'CardPulled': _card_pulled,
     'RelayTraded': _relay_traded,
+    'RelayPurchased': _relay_purchased,
 }

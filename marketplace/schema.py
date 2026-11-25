@@ -233,7 +233,8 @@ class MarketplaceOrderType(graphene.ObjectType):
         role = 'buyer' if order.buyer_account_id == account.id else 'merchant'
         actions = []
         if order.status == 'draft' and role == 'buyer':
-            actions = ['deposit']
+            # An order the Cuenta inteligente pays (depositFrom) is never paid from the wallet.
+            actions = [] if order.payer_address else ['deposit']
         elif not order.pending_action:
             now = timezone.now()
             side = order.buyer_account if role == 'buyer' else order.store.owner_account
@@ -645,6 +646,8 @@ class Query(graphene.ObjectType):
             from .checkout import REUSE_MIN_REMAINING_S
             qs = qs.exclude(status='draft',
                             deposit_deadline__lt=int(_time.time()) + REUSE_MIN_REMAINING_S)
+            # A Cuenta inteligente's draft is the account's to pay (hands-off chat purchase): listed once paid.
+            qs = qs.exclude(status='draft', payer_address__gt='')
         else:
             qs = qs.exclude(status__in=('draft', 'depositing'))
         return [MarketplaceOrderType.from_model(o, user, account)
@@ -1352,6 +1355,8 @@ class MarketOrderActionCalls(graphene.Mutation):
             return MarketOrderActionCalls(success=False, error='order_not_found')
         if not escrow.enabled():
             return MarketOrderActionCalls(success=False, error='marketplace_disabled')
+        if action == 'deposit' and order.payer_address:
+            return MarketOrderActionCalls(success=False, error='order_not_payable')
         if action == 'deposit':
             from .checkout import deposit_age_error
             age_error = deposit_age_error(info.context.user, order)

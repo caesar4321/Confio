@@ -254,7 +254,7 @@ class SmartAccountRule(SoftDeleteModel):
     # 'card' (decision 35): pulled by an allowlisted card spender, never run
     # by the relayer (automation.due_rules leaves it out).
     KIND_CHOICES = [('send', 'Send'), ('payout', 'Bank payout'), ('buy', 'Buy'), ('card', 'Card allowance'),
-                    ('trade', 'Hands-off trades (v2)')]
+                    ('trade', 'Hands-off trades (v2)'), ('purchase', 'Hands-off Comprar purchases (v2)')]
     FREQUENCY_CHOICES = [('daily', 'Daily'), ('weekly', 'Weekly'), ('biweekly', 'Every two weeks'),
                          ('monthly', 'Monthly')]
     STATE_CHOICES = [('draft', 'Prepared, not on chain'), ('onchain', 'On chain'), ('cancelled', 'Cancelled')]
@@ -695,6 +695,57 @@ class SmartRelayTrade(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['user', 'nonce'], name='smart_relay_trade_nonce_uniq')]
         indexes = [models.Index(fields=['status', 'updated_at'], name='smart_relay_trade_status_idx')]
+
+
+class SmartRelayPurchase(models.Model):
+    """One hands-off Comprar purchase the person asked for in the chat
+    (smart_account/relay_purchases.py): their exact "sí" makes this row; a
+    Celery task creates the escrow order (marketplace.checkout.
+    prepare_account_order, signed over depositFromDigest with payer = the
+    account), checks it and sends relayPurchase from the sponsor through
+    relayer.send_relayer_call; the result is posted in the chat after the
+    receipt. `nonce` is the question's own id: a second "sí" finds this row."""
+    STATUS_CHOICES = [
+        ('waiting_rule', 'Waiting for the Purchase rule (cap card)'),
+        ('waiting_move', 'Waiting for dollars moved in from the personal wallet'),
+        ('pending', 'Asked, not sent'), ('sent', 'relayPurchase broadcast, receipt pending'),
+        ('done', 'Paid into the escrow'), ('failed', 'Nothing paid'), ('cancelled', 'Withdrawn before sending'),
+        ('unknown', 'Broadcast outcome unknown (resolved by the receipt)'),
+    ]
+    LIVE = ('waiting_rule', 'waiting_move', 'pending', 'sent', 'unknown')
+
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    smart_account = models.ForeignKey(SmartAccount, on_delete=models.PROTECT, null=True, blank=True,
+                                      related_name='relay_purchases')
+    rule = models.ForeignKey(SmartAccountRule, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    nonce = models.CharField(max_length=40)
+    conversation_id = models.BigIntegerField(null=True, blank=True)
+    product = models.ForeignKey('marketplace.Product', on_delete=models.PROTECT, related_name='+')
+    quantity = models.PositiveIntegerField(default=1)
+    delivery_address = models.ForeignKey('marketplace.DeliveryAddress', on_delete=models.PROTECT,
+                                         related_name='+')
+    # The total the person said "sí" to (product + delivery, US dollars): the order must not cost more.
+    amount_usd = models.DecimalField(max_digits=14, decimal_places=2)
+    title = models.CharField(max_length=100)
+    store_name = models.CharField(max_length=80, blank=True, default='')
+    order = models.ForeignKey('marketplace.Order', on_delete=models.PROTECT, null=True, blank=True,
+                              related_name='+')
+    meta = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=14, choices=STATUS_CHOICES, default='pending')
+    error_code = models.CharField(max_length=60, blank=True, default='')
+    relay_tx = models.ForeignKey(SmartAccountRelayTx, on_delete=models.PROTECT, null=True, blank=True,
+                                 related_name='+')
+    tx_hash = models.CharField(max_length=66, blank=True, default='')
+    usd_counted = models.CharField(max_length=80, blank=True, default='')
+    attempts = models.PositiveIntegerField(default=0)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'nonce'], name='smart_relay_purchase_nonce_uniq')]
+        indexes = [models.Index(fields=['status', 'updated_at'], name='smart_relay_purch_status_idx')]
 
 
 pre_save.connect(_keep_bank_rejection, sender='payment_accounts.PayoutDestination',

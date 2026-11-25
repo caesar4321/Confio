@@ -9,7 +9,7 @@ from .models import (
     SmartAccountForcedSale, SmartAccountForcedSaleLeg, SmartAccountPagoMovilDestination, SmartAccountPayout,
     SmartAccountPreparedAction,
     SmartAccountRelayTx, SmartAccountRule, SmartAccountRuleRun, SmartAccountScanCursor,
-    SmartAccountStandingAuthorization, SmartAccountTargetAllocation, SmartAccountWatch,
+    SmartAccountStandingAuthorization, SmartAccountTargetAllocation, SmartAccountWatch, SmartRelayPurchase,
 )
 
 
@@ -225,6 +225,14 @@ class SmartAccountScanCursorAdmin(ReadOnlyAdmin):
     list_display = ('key', 'block_number', 'updated_at')
 
 
+class SmartRelayPurchaseAdmin(ReadOnlyAdmin):
+    """Hands-off Comprar purchases from the chat (relay_purchases.py)."""
+    list_display = ('created_at', 'user', 'title', 'amount_usd', 'status', 'error_code', 'order', 'tx_hash')
+    list_filter = ('status',)
+    search_fields = ('tx_hash', 'user__username', 'internal_id', 'nonce')
+    raw_id_fields = ('user', 'smart_account', 'rule', 'product', 'delivery_address', 'order', 'relay_tx')
+
+
 REGISTRY = (
     (SmartAccount, SmartAccountAdmin),
     (SmartAccountEvent, SmartAccountEventAdmin),
@@ -245,4 +253,5 @@ REGISTRY = (
     (SmartAccountCardPause, SmartAccountCardPauseAdmin),
     (SmartAccountCardPull, SmartAccountCardPullAdmin),
     (SmartAccountScanCursor, SmartAccountScanCursorAdmin),
+    (SmartRelayPurchase, SmartRelayPurchaseAdmin),
 )

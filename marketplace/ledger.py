@@ -7,6 +7,10 @@ One order writes at most two rows, keyed by payment_reference_id
   sale    escrow → store owner, the merchant's net (amount − fee) on release
   refund  escrow → buyer, the full amount on refund
 
+An order a Cuenta inteligente paid (payer_address, depositFrom) left from the
+account and its refund lands back in the account (the escrow's refundToOf),
+never in the wallet: both legs name the account's address and say so.
+
 Each row names only the party it belongs to (buy: sender_user = buyer; sale:
 counterparty_user = store owner; refund: counterparty_user = buyer), so a
 row never lands in the other party's history: money held in escrow is
@@ -138,6 +142,8 @@ def _write(order) -> None:
     seller_account = store.owner_account
     title = order.product_title
     funded_at = order.funded_at or order.created_at
+    payer = (order.payer_address or order.buyer_address).lower()
+    by_account = ' (Cuenta inteligente)' if order.payer_address else ''
 
     _upsert(
         reference(order.pk, 'buy'),
@@ -154,7 +160,7 @@ def _write(order) -> None:
             'sender_type': 'business' if _business(buyer_account) else 'user',
             'sender_display_name': _name(buyer_account),
             'sender_phone': '',
-            'sender_address': order.buyer_address,
+            'sender_address': payer,
             # The store is named, never linked: its owner must not see the
             # buyer's deposit as money received (it sits in escrow).
             'counterparty_user': None,
@@ -165,8 +171,8 @@ def _write(order) -> None:
             'counterparty_display_name': store.name,
             'counterparty_phone': None,
             'counterparty_address': '',
-            'description': f'{DESCRIPTION_PREFIX}{title}',
-            'from_address': order.buyer_address,
+            'description': f'{DESCRIPTION_PREFIX}{title}{by_account}',
+            'from_address': payer,
             'to_address': escrow,
             'transaction_date': funded_at,
             'deleted_at': None,
@@ -182,9 +188,11 @@ def _write(order) -> None:
         amount = Decimal(order.amount_usd) - order.fee_usd
         description = f'{DESCRIPTION_PREFIX}venta de {title}'
     else:
-        leg, owner, account, to = 'refund', order.buyer, buyer_account, order.buyer_address
+        # The escrow refunds the payer: the account for a depositFrom order.
+        leg, owner, account, to = 'refund', order.buyer, buyer_account, payer
         amount = Decimal(order.amount_usd)
-        description = f'{DESCRIPTION_PREFIX}reembolso de {title}'
+        description = f'{DESCRIPTION_PREFIX}reembolso de {title}' + (
+            ' a tu Cuenta inteligente' if order.payer_address else '')
     _upsert(
         reference(order.pk, leg),
         {

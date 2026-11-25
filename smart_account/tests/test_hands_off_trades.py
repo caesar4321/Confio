@@ -340,7 +340,7 @@ class ExecutionTests(HandsOffBase):
             relay_trades.run(self.row.pk)
         self.row.refresh_from_db()
         self.assertEqual(self.row.status, 'waiting_rule')
-        self.assertEqual(self.notes[0][1], f'relay_trade:{self.row.internal_id}:cap')
+        self.assertTrue(self.notes[0][1].startswith(f'relay_trade:{self.row.internal_id}:cap:'))
 
     def test_below_feed_requotes_once_then_says_the_price_moved(self):
         from smart_account.relayer import RelayError

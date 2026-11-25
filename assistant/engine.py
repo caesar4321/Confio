@@ -137,13 +137,15 @@ SHORT_TOPUP_FORM = {'type': 'form', 'target': 'topup', 'why': 'shortfall'}
 # Cards that answer a request: once one follows a message, that request was served ("gracias" never
 # proposes it again). The trade card, and the hands-off ones (assistant/trades.py).
 SERVED_CARD_TYPES = frozenset(('trade', 'relay_trade', 'trade_cap', 'trade_move', 'trade_offer',
-                               'account_migration'))
+                               'account_migration',
+                               # Hands-off Comprar purchases (assistant/comprar.py).
+                               'relay_purchase', 'purchase_cap', 'purchase_move', 'purchase_offer'))
 PAYMENT_CHIP = {'type': 'navigate', 'destination': 'pay_qr', 'target': 'payment_intent', 'label': 'Revisar y pagar'}
 # After a "no" to a payment in the same reply (engine.withdraw_payment_card, a refused code), none of these run.
 _NOTHING_AFTER_A_NO = frozenset({'prepare_payment', 'propose_stock_trade', 'propose_topup', 'ask_details',
                                  'start_store_task', 'propose_smart_account_rule', 'propose_target_allocation',
                                  'smart_account_alerts', 'categorize_transactions', 'act_here',
-                                 'prepare_whatsapp_reply', 'prepare_mail'})
+                                 'prepare_whatsapp_reply', 'prepare_mail', 'propose_comprar_purchase'})
 PAYMENT_CODE_WINDOW = timedelta(minutes=15)
 # Replies code writes when the model left none.
 DONE_REPLY = 'Listo.'
@@ -1629,6 +1631,10 @@ class Toolbelt:
             # A stock bought or sold from a card in the chat.
             if trades.offered(self):
                 specs.append(trades.SPEC)
+            # A Comprar product bought by the Cuenta inteligente (hands-off, dormant until v2).
+            from . import comprar
+            if comprar.offered(self):
+                specs.append(comprar.SPEC)
             # What they want Confío for, when they say it in words.
             from . import first_use
             if first_use.due(self.viewer):
@@ -1664,6 +1670,11 @@ class Toolbelt:
             if self.waiting_for_team or not trades.offered(self):
                 return {'error': f'herramienta desconocida: {name}'}
             return trades.propose(self, **args)
+        if name == 'propose_comprar_purchase':
+            from . import comprar
+            if self.waiting_for_team or not comprar.offered(self):
+                return {'error': f'herramienta desconocida: {name}'}
+            return comprar.propose(self, **args)
         if name == 'note_first_use':
             from . import first_use
             if self.waiting_for_team:

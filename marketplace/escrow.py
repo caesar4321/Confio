@@ -56,6 +56,11 @@ CHAIN_STATES = {0: 'none', 1: 'funded', 2: 'shipped', 3: 'disputed', 4: 'release
 DEPOSIT_TYPEHASH = keccak(text=(
     'Deposit(bytes32 orderId,address buyer,address merchant,address token,'
     'uint256 amount,uint16 feeBps,uint256 deadline)'))
+# depositFrom (hands-off Cuenta inteligente purchases): the payer, the owner's
+# smart account, is bound too. Never the plain Deposit digest.
+DEPOSIT_FROM_TYPEHASH = keccak(text=(
+    'DepositFrom(bytes32 orderId,address buyer,address payer,address merchant,address token,'
+    'uint256 amount,uint16 feeBps,uint256 deadline)'))
 DOMAIN_TYPEHASH = keccak(
     text='EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)')
 
@@ -228,6 +233,51 @@ def deposit_digest(order_id32: str, buyer: str, merchant: str, token: str,
     return keccak(b'\x19\x01' + domain + struct_hash)
 
 
+def deposit_from_digest(order_id32: str, buyer: str, payer: str, merchant: str, token: str,
+                        amount_wei: int, fee_bps: int, deadline: int, escrow: str | None = None) -> bytes:
+    """The escrow's depositFromDigest: the owner (buyer) AND their Cuenta
+    inteligente (payer, msg.sender of depositFrom) are both in it, so the
+    authorization pays from that one account for that one owner."""
+    escrow = escrow or escrow_address()
+    domain = keccak(abi_encode(
+        ['bytes32', 'bytes32', 'bytes32', 'uint256', 'address'],
+        [DOMAIN_TYPEHASH, keccak(text='ConfioMarketEscrow'), keccak(text='1'),
+         chain_id(), to_checksum_address(escrow)]))
+    struct_hash = keccak(abi_encode(
+        ['bytes32', 'bytes32', 'address', 'address', 'address', 'address', 'uint256', 'uint16', 'uint256'],
+        [DEPOSIT_FROM_TYPEHASH, bytes.fromhex(order_id32), to_checksum_address(buyer),
+         to_checksum_address(payer), to_checksum_address(merchant), to_checksum_address(token),
+         int(amount_wei), int(fee_bps), int(deadline)]))
+    return keccak(b'\x19\x01' + domain + struct_hash)
+
+
+def order_digest(order) -> bytes:
+    """The digest this order's authorization signed: depositFrom's for an
+    order a Cuenta inteligente pays, the plain deposit's otherwise."""
+    if order.payer_address:
+        return deposit_from_digest(order.order_id32, order.buyer_address, order.payer_address,
+                                   order.merchant_address, order.token_address, int(order.amount_wei),
+                                   int(order.fee_bps), int(order.deposit_deadline))
+    return deposit_digest(order.order_id32, order.buyer_address, order.merchant_address, order.token_address,
+                          int(order.amount_wei), int(order.fee_bps), int(order.deposit_deadline))
+
+
+def refund_recipient(order) -> str:
+    """Where a refund of this order lands (the escrow's refundToOf): the
+    account that paid a depositFrom order, the buyer's wallet otherwise."""
+    return (order.payer_address or order.buyer_address or '').lower()
+
+
+SEL_ACCOUNT_FACTORY = _sel('accountFactory()')
+
+
+def deposit_from_enabled() -> bool:
+    """The escrow accepts depositFrom (its accountFactory is set). Raises when unread."""
+    from cusd_plus.sponsor_7702 import _rpc
+    raw = _rpc('eth_call', [{'to': escrow_address(), 'data': '0x' + SEL_ACCOUNT_FACTORY}, 'latest'])
+    return int(raw or '0x0', 16) != 0
+
+
 def sign_deposit(digest: bytes) -> tuple[str, str]:
     """(signature_hex, signer_address). The KMS sponsor is the orderSigner,
     the same key that authorizes Pay invoices."""
@@ -396,7 +446,8 @@ def submit_action(user, order, action: str, nonce: int, deadline: int,
         return {'success': False, 'error': 'bad_deadline'}
 
     if action == 'deposit':
-        if order.status != 'draft':
+        if order.status != 'draft' or order.payer_address:
+            # An order a Cuenta inteligente pays (depositFrom) is never paid from the wallet.
             return {'success': False, 'error': 'order_not_payable'}
         # Adults-only: checked on the PAYER, not just whoever prepared it.
         from .checkout import deposit_age_error

@@ -224,6 +224,10 @@ def run_relay_trade(self, trade_id: int):
         relay_trades.run(trade_id)
     except relay_trades.Later as wait:
         raise self.retry(countdown=wait.seconds)
+    except Exception as exc:  # noqa: BLE001 — never stranded 'pending': tried again, then told as failed
+        logger.warning('relay trade %s run failed: %s', trade_id, exc, exc_info=True)
+        if relay_trades.on_error(trade_id):
+            raise self.retry(countdown=min(60, 10 + 5 * self.request.retries))
 
 
 @shared_task(name='smart_account.finish_relay_trade', bind=True, max_retries=200, ignore_result=True)
@@ -237,3 +241,44 @@ def finish_relay_trade(self, trade_id: int):
     except Exception as exc:  # noqa: BLE001 — never guess an outcome; read again
         logger.warning('relay trade %s finish failed: %s', trade_id, exc)
         raise self.retry(countdown=min(60, 5 + 2 * self.request.retries))
+
+
+@shared_task(name='smart_account.run_relay_purchase', bind=True, max_retries=120, ignore_result=True)
+def run_relay_purchase(self, purchase_id: int):
+    """One hands-off Comprar purchase from the chat (relay_purchases.py): order, check, send."""
+    from . import relay_purchases
+    try:
+        relay_purchases.run(purchase_id)
+    except relay_purchases.Later as wait:
+        raise self.retry(countdown=wait.seconds)
+    except Exception as exc:  # noqa: BLE001 — never stranded 'pending': tried again, then told as failed
+        logger.warning('relay purchase %s run failed: %s', purchase_id, exc, exc_info=True)
+        if relay_purchases.on_error(purchase_id):
+            raise self.retry(countdown=min(60, 10 + 5 * self.request.retries))
+
+
+@shared_task(name='smart_account.finish_relay_purchase', bind=True, max_retries=200, ignore_result=True)
+def finish_relay_purchase(self, purchase_id: int):
+    """After a hands-off purchase's broadcast: the receipt decides, the chat is told."""
+    from . import relay_purchases
+    try:
+        relay_purchases.finish(purchase_id)
+    except relay_purchases.Later as wait:
+        raise self.retry(countdown=wait.seconds)
+    except Exception as exc:  # noqa: BLE001 — never guess an outcome; read again
+        logger.warning('relay purchase %s finish failed: %s', purchase_id, exc)
+        raise self.retry(countdown=min(60, 5 + 2 * self.request.retries))
+
+
+@shared_task(name='smart_account.sweep_hands_off_relays', ignore_result=True)
+def sweep_hands_off_relays():
+    """Beat: hands-off chat trades and purchases a lost schedule or a dead worker left 'pending', 'sent' or
+    'unknown' (relay_trades.sweep, relay_purchases.sweep)."""
+    from . import relay_purchases, relay_trades
+    out = {}
+    for name, module in (('trades', relay_trades), ('purchases', relay_purchases)):
+        try:
+            out[name] = module.sweep()
+        except Exception:  # noqa: BLE001 — the other sweep still runs; next beat retries
+            logger.exception('hands-off %s sweep failed', name)
+    return out

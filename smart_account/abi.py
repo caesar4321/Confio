@@ -532,6 +532,12 @@ RELAY_TRADE_TYPES = ['uint256', 'address', 'bytes', 'uint256', 'uint256']
 SEL_RELAY_TRADE = selector(RELAY_TRADE_SIG)
 RELAY_PURCHASE_SIG = 'relayPurchase(uint256,bytes32,address,uint256,uint16,uint256,bytes)'
 SEL_RELAY_PURCHASE = selector(RELAY_PURCHASE_SIG)
+# Hands-off Comprar purchases (relay_purchases.py): relayPurchase on the account itself.
+RELAY_PURCHASE_KIND = 'smart_relay_purchase'
+RELAY_PURCHASE_TYPES = ['uint256', 'bytes32', 'address', 'uint256', 'uint16', 'uint256', 'bytes']
+# A cUSD+ rule unwraps (about 500k measured for a Payout) before the escrow's depositFrom (about 250k):
+# simulated under this budget before every send.
+RELAY_PURCHASE_GAS = 1_200_000
 # bucketOf(id) -> (used, lastAt): `used` already decayed to now (leaky bucket:
 # amountUsd * elapsed / gap leaks out); a buy fits while used + usd <= amountUsd.
 BUCKET_OF = ('bucketOf(uint256)', ['uint256'], ['uint256', 'uint256'])
@@ -551,6 +557,8 @@ V2_ACCOUNT_EVENTS = {
     'RelayTraded': [('uint256', True, 'id'), ('address', True, 'venue'), ('address', False, 'tokenIn'),
                     ('address', False, 'tokenOut'), ('uint256', False, 'amountIn'), ('uint256', False, 'amountOut'),
                     ('uint256', False, 'usdCounted')],
+    'RelayPurchased': [('uint256', True, 'id'), ('bytes32', True, 'orderId'), ('uint256', False, 'amount'),
+                       ('uint256', False, 'usdCounted')],
 }
 RELAY_TRADED_TOPIC = event_topic('RelayTraded', V2_ACCOUNT_EVENTS['RelayTraded'])
 # relayTrade's own reverts the server acts on: beyond the bucket (buys and sells count, at the value of what
@@ -610,4 +618,40 @@ def decode_relay_traded(log: dict) -> dict | None:
         ['address', 'address', 'uint256', 'uint256', 'uint256'], bytes.fromhex((log.get('data') or '0x')[2:]))
     return {'id': str(int(topics[1], 16)), 'venue': '0x' + topics[2][-40:], 'tokenIn': token_in.lower(),
             'tokenOut': token_out.lower(), 'amountIn': str(amount_in), 'amountOut': str(amount_out),
+            'usdCounted': str(usd_counted)}
+
+
+def relay_purchase_call(rule_id: int, order_id32: str, merchant: str, amount: int, fee_bps: int, deadline: int,
+                        auth_sig: bytes) -> str:
+    return '0x' + SEL_RELAY_PURCHASE + abi_encode(RELAY_PURCHASE_TYPES, [
+        int(rule_id), bytes.fromhex(order_id32.removeprefix('0x')), merchant, int(amount), int(fee_bps),
+        int(deadline), bytes(auth_sig)]).hex()
+
+
+def decode_relay_purchase(data: str) -> tuple:
+    """(id, orderId hex without 0x, merchant, amount, feeBps, deadline, authSig bytes); ValueError otherwise."""
+    data_hex = (data or '')[2:].lower()
+    if data_hex[:8] != SEL_RELAY_PURCHASE:
+        raise ValueError('not relayPurchase')
+    raw = bytes.fromhex(data_hex[8:])
+    try:
+        args = abi_decode(RELAY_PURCHASE_TYPES, raw)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError('bad_calldata') from exc
+    if abi_encode(RELAY_PURCHASE_TYPES, list(args)) != raw:
+        raise ValueError('bad_calldata')
+    return (int(args[0]), bytes(args[1]).hex(), str(args[2]).lower(), int(args[3]), int(args[4]), int(args[5]),
+            bytes(args[6]))
+
+
+RELAY_PURCHASED_TOPIC = event_topic('RelayPurchased', V2_ACCOUNT_EVENTS['RelayPurchased'])
+
+
+def decode_relay_purchased(log: dict) -> dict | None:
+    """RelayPurchased's arguments (json-safe), or None for another log."""
+    topics = [(t or '').lower() for t in (log.get('topics') or [])]
+    if not topics or topics[0] != RELAY_PURCHASED_TOPIC or len(topics) != 3:
+        return None
+    amount, usd_counted = abi_decode(['uint256', 'uint256'], bytes.fromhex((log.get('data') or '0x')[2:]))
+    return {'id': str(int(topics[1], 16)), 'orderId': topics[2][2:], 'amount': str(amount),
             'usdCounted': str(usd_counted)}

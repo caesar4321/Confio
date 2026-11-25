@@ -362,20 +362,12 @@ def checkout_quote(product, quantity: int, delivery_country: str, delivery_city:
     return {'quote': q, **terms}
 
 
-def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country: str,
-                  delivery_city: str, delivery_address: str, delivery_phone: str,
-                  delivery_note: str = '', outside_city_ack: bool = False,
-                  delivery_latitude=None, delivery_longitude=None):
-    """Create a draft Order with the server's deposit authorization. Returns
-    (order, calls, intent_id_hex). Raises CheckoutError."""
-    from cusd_plus import sponsor_7702
-
-    if not escrow.enabled():
-        raise CheckoutError('marketplace_disabled')
-    account = jwt_account(user, jwt_ctx)
-    if not user.is_identity_verified:
-        raise CheckoutError('identity_required')
-
+def _order_terms(user, account, *, product_id, quantity: int, delivery_country: str, delivery_city: str,
+                 delivery_address: str, delivery_phone: str, delivery_note: str = '',
+                 delivery_latitude=None, delivery_longitude=None) -> dict:
+    """Every gate of a purchase but payment itself (shared by the wallet's
+    checkout and a Cuenta inteligente's): the product, the price, the
+    delivery, the escrow's on-chain limits, both addresses. Raises CheckoutError."""
     product = Product.objects.select_related('store', 'store__owner_account').filter(
         pk=product_id, deleted_at__isnull=True).first()
     # Listing eligibility only. Stock is checked at reservation (or is already
@@ -459,6 +451,32 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         delivery_latitude=pin[0] if pin else None, delivery_longitude=pin[1] if pin else None,
         delivery_note=(delivery_note or '').strip()[:300],
         age_restricted=age_restricted)
+    return dict(product=product, store=store, q=q, terms=terms, delivery=delivery, buyer_addr=buyer_addr,
+                merchant_addr=merchant_addr, age_restricted=age_restricted)
+
+
+def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country: str,
+                  delivery_city: str, delivery_address: str, delivery_phone: str,
+                  delivery_note: str = '', outside_city_ack: bool = False,
+                  delivery_latitude=None, delivery_longitude=None):
+    """Create a draft Order with the server's deposit authorization. Returns
+    (order, calls, intent_id_hex). Raises CheckoutError."""
+    from cusd_plus import sponsor_7702
+
+    if not escrow.enabled():
+        raise CheckoutError('marketplace_disabled')
+    account = jwt_account(user, jwt_ctx)
+    if not user.is_identity_verified:
+        raise CheckoutError('identity_required')
+
+    found = _order_terms(user, account, product_id=product_id, quantity=quantity,
+                         delivery_country=delivery_country, delivery_city=delivery_city,
+                         delivery_address=delivery_address, delivery_phone=delivery_phone,
+                         delivery_note=delivery_note, delivery_latitude=delivery_latitude,
+                         delivery_longitude=delivery_longitude)
+    product, store, q = found['product'], found['store'], found['q']
+    delivery, buyer_addr, merchant_addr = found['delivery'], found['buyer_addr'], found['merchant_addr']
+    age_restricted = found['age_restricted']
 
     # Re-opening checkout with the same terms reuses the open draft: its signed
     # authorization (and stock reservation) is still good. Only what is not
@@ -467,7 +485,7 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
     reusable = Order.objects.filter(
         buyer=user, buyer_account=account, product=product, status='draft', quantity=quantity,
         unit_price_usd=product.price_usd, delivery_usd=q.delivery_usd, buyer_address=buyer_addr,
-        merchant_address=merchant_addr, stock_reserved=True,
+        merchant_address=merchant_addr, stock_reserved=True, payer_address='',
         deposit_deadline__gte=int(time.time()) + REUSE_MIN_REMAINING_S,
     ).order_by('-created_at').first()
     if reusable is not None:
@@ -517,7 +535,8 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
         # the first in the app. Its authorization stays spendable on chain
         # until its deadline, so it keeps its stock reservation and the keeper
         # reconciles it (resurrected if spent, released once it expired unspent).
-        Order.objects.filter(buyer=user, buyer_account=account, product=product,
+        # A Cuenta inteligente's order (payer_address) is never superseded here: the account pays it.
+        Order.objects.filter(buyer=user, buyer_account=account, product=product, payer_address='',
                              status='draft').update(status='cancelled')
         if not escrow.reserve_stock(product.pk, quantity):
             raise CheckoutError('out_of_stock')
@@ -537,3 +556,55 @@ def prepare_order(user, jwt_ctx, *, product_id, quantity: int, delivery_country:
 
     intent_id = sponsor_7702.intent_id_hex('market_deposit', order.pk)
     return order, order.deposit_calls, intent_id
+
+
+def prepare_account_order(user, account, *, payer: str, product_id, quantity: int, delivery) -> 'Order':
+    """A draft Order that the person's Cuenta inteligente pays through the
+    escrow's depositFrom (a hands-off purchase from the Confío IA chat,
+    smart_account/relay_purchases.py). The same gates as checkout; the owner's
+    wallet stays the buyer (confirm, dispute, reclaim) and the authorization
+    signs depositFromDigest with payer = the account, so only that account can
+    spend it, and a refund goes back to it.
+
+    No Confío Face per order: the owner signed the Purchase rule with Face
+    and said the exact "sí" in the chat. Identity holds still stop it.
+    `delivery` is a saved DeliveryAddress. Raises CheckoutError."""
+    if not escrow.enabled():
+        raise CheckoutError('marketplace_disabled')
+    if not user.is_identity_verified:
+        raise CheckoutError('identity_required')
+    from security.identity_reuse import outgoing_identity_restriction
+    restriction = outgoing_identity_restriction(user)
+    if restriction:
+        raise CheckoutError(restriction)
+    payer = (payer or '').lower()
+    if not payer:
+        raise CheckoutError('no_payer')
+    found = _order_terms(
+        user, account, product_id=product_id, quantity=quantity, delivery_country=delivery.country_code,
+        delivery_city=delivery.city, delivery_address=delivery.address, delivery_phone=delivery.phone,
+        delivery_note=delivery.note, delivery_latitude=delivery.latitude, delivery_longitude=delivery.longitude)
+    product, store, q = found['product'], found['store'], found['q']
+    buyer_addr, merchant_addr = found['buyer_addr'], found['merchant_addr']
+    if payer in (buyer_addr, merchant_addr):
+        raise CheckoutError('own_store' if payer == merchant_addr else 'no_payer')
+    public_id = uuid.uuid4()
+    order_id32 = escrow.new_order_id32(public_id)
+    token = escrow.token_address()
+    deadline = int(time.time()) + DEPOSIT_AUTH_TTL_S
+    digest = escrow.deposit_from_digest(order_id32, buyer_addr, payer, merchant_addr, token,
+                                        q.amount_wei, q.fee_bps, deadline)
+    signature, signer = escrow.sign_deposit(digest)
+    with transaction.atomic():
+        if not escrow.reserve_stock(product.pk, quantity):
+            raise CheckoutError('out_of_stock')
+        order = Order.objects.create(
+            public_id=public_id, order_id32=order_id32, buyer=user, buyer_account=account,
+            buyer_address=buyer_addr, payer_address=payer, store=store, merchant_address=merchant_addr,
+            product=product, product_title=product.title, unit_price_usd=q.unit_price_usd,
+            delivery_usd=q.delivery_usd, quantity=quantity, amount_usd=q.amount_usd, amount_wei=q.amount_wei,
+            token_address=token, fee_bps=q.fee_bps, **found['delivery'],
+            deposit_deadline=deadline, deposit_signature=signature, deposit_signer=signer,
+            # Nothing for a wallet to sign: the account pays it (relayPurchase).
+            deposit_calls=[], stock_reserved=True)
+    return order

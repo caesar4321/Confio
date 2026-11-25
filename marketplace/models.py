@@ -368,6 +368,11 @@ class Order(models.Model):
     last_tx_hash = models.CharField(max_length=66, blank=True, default='')
     # The deposit's own tx (last_tx_hash moves on with later actions).
     deposit_tx_hash = models.CharField(max_length=66, blank=True, default='')
+    # The Cuenta inteligente that paid through the escrow's depositFrom (a
+    # hands-off purchase from the Confío IA chat, smart_account/
+    # relay_purchases.py); '' = the buyer's own wallet paid. The buyer stays
+    # the owner's wallet (confirm, dispute, reclaim); a refund goes HERE.
+    payer_address = models.CharField(max_length=42, blank=True, default='')
 
     # Chain mirror.
     ship_by = models.DateTimeField(null=True, blank=True)

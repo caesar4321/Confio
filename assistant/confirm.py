@@ -522,6 +522,9 @@ def answer(conversation, viewer, text, pending, user_message, *, can_navigate=Tr
             if pending.get('step') == 'amount':
                 data = {**data, 'sell_all': everything, 'amount': None if everything else f'{amount:.2f}'}
             return trades.confirmed(belt, data, lang)
+        if kind == 'purchase':
+            from . import comprar
+            return comprar.confirmed(belt, data, lang)
         if kind == 'payment':
             from . import sends
             if pending.get('step') == 'amount':

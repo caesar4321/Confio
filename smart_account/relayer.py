@@ -117,6 +117,13 @@ def relay_target(account, calldata: str, kind: str) -> str:
         except ValueError as exc:
             raise RelayError('bad_calldata', kind) from exc
         return (account.contract_address or '').lower()
+    if kind == abi.RELAY_PURCHASE_KIND:
+        # v2 only: relayPurchase on this very account, nothing else (relay_purchases.py).
+        try:
+            abi.decode_relay_purchase(calldata)
+        except ValueError as exc:
+            raise RelayError('bad_calldata', kind) from exc
+        return (account.contract_address or '').lower()
     if kind not in abi.RELAY_KIND_CALLS:
         raise RelayError('bad_kind', kind)
     target, allowed = abi.RELAY_KIND_CALLS[kind]

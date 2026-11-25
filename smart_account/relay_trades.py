@@ -140,7 +140,9 @@ def _reply_state(row) -> str:
         return 'shown'
     later = SupportMessage.objects.filter(conversation_id=row.conversation_id, sender_type='AGENT',
                                           created_at__gte=row.created_at - timedelta(seconds=5))
-    if later.filter(metadata__actions__contains=[{'type': ACTION_TYPE, 'trade': str(row.internal_id)}]).exists():
+    # Any card naming this row: its status card, or the cap / move card it waited on (review P2-1: a trade
+    # resumed after the cap card was signed carried 'trade_cap', never 'relay_trade').
+    if later.filter(metadata__actions__contains=[{'trade': str(row.internal_id)}]).exists():
         return 'shown'
     if timezone.now() - row.created_at > REPLY_WAIT:
         return 'withdrawn'
@@ -172,6 +174,11 @@ def _post(row, key: str, **values) -> None:
         logger.exception('relay trade %s result not posted', row.pk)
 
 
+def _offer_mark(row) -> int:
+    """Which raise offer this is: the time the row last moved (a resume), so a later one is a new note."""
+    return int(row.updated_at.timestamp()) if row.updated_at else 0
+
+
 def _offer_raise(row) -> None:
     """Beyond the weekly cap (buys and sells count): never a bare refusal. The
     trade waits for a higher cap, offered in the chat as the cap card."""
@@ -180,7 +187,8 @@ def _offer_raise(row) -> None:
     SmartRelayTrade.objects.filter(pk=row.pk).update(status='waiting_rule', error_code='cap',
                                                      updated_at=timezone.now())
     try:
-        post_system_note(row.user, MESSAGES['cap'], f'relay_trade:{row.internal_id}:cap',
+        # One note per raise offer: a second over-cap after a raise is a new message (the tag dedupes).
+        post_system_note(row.user, MESSAGES['cap'], f'relay_trade:{row.internal_id}:cap:{_offer_mark(row)}',
                          actions=[{'type': 'trade_cap', 'trade': str(row.internal_id),
                                    'target': str(row.internal_id), 'label': 'Subir mi límite semanal'}])
     except Exception:  # noqa: BLE001 — the trade waits; asking again shows the card too
@@ -380,11 +388,73 @@ def run(row_id: int) -> None:
     except Exception:  # noqa: BLE001 — signed, broadcast unknown: the receipt decides (row stays 'unknown')
         logger.exception('relay trade %s broadcast outcome unknown', row.pk)
         relay_row = relayer.live_tx(own, abi.RELAY_TRADE_KIND, str(row.internal_id))
+        if relay_row is None:
+            row.refresh_from_db()
+            if row.status == 'pending':
+                # Nothing was signed and recorded (the claim and the durable row are one transaction):
+                # an error before signing, tried again a bounded number of times (review P2-2).
+                return _retry_or_fail(row)
     if relay_row is not None:
         SmartRelayTrade.objects.filter(pk=row.pk).update(
             relay_tx=relay_row, tx_hash=relay_row.signed_tx_hash,
             status='sent' if relay_row.status == 'sent' else 'unknown', updated_at=timezone.now())
     schedule_finish(row.pk)
+
+
+# ── never stranded (review P2-2) ────────────────────────────────────────
+
+# Unexpected errors one row may hit before it is told as failed.
+MAX_ERRORS = 5
+# A 'pending' row nobody moved for this long is run again; a 'sent'/'unknown' one is resolved again.
+STALE = timedelta(minutes=20)
+# A row still 'pending' this long after it was asked is told as failed.
+GIVE_UP = timedelta(hours=6)
+
+
+def _retry_or_fail(row):
+    from .models import SmartRelayTrade
+    attempts = row.attempts + 1
+    SmartRelayTrade.objects.filter(pk=row.pk).update(attempts=attempts)
+    if attempts < MAX_ERRORS:
+        raise Later(10, 'error before signing')
+    row.attempts = attempts
+    return _end(row, 'failed', 'error')
+
+
+def on_error(row_id: int) -> bool:
+    """The task hit an unexpected error (not Later): True to try again; False once the row was told as failed.
+    A row no longer 'pending' is left to its own path (the receipt decides a claimed one)."""
+    from .models import SmartRelayTrade
+    row = SmartRelayTrade.objects.select_related('user').filter(pk=row_id).first()
+    if row is None or row.status != 'pending':
+        return False
+    try:
+        _retry_or_fail(row)
+    except Later:
+        return True
+    return False
+
+
+def sweep() -> dict:
+    """Beat: rows a lost schedule (broker outage) or a dead worker left behind. 'pending' ones run again
+    (or, past GIVE_UP, are told as failed); 'sent'/'unknown' ones have their receipt read again."""
+    from .models import SmartRelayTrade
+    now, out = timezone.now(), {'rerun': 0, 'gave_up': 0, 'finish': 0}
+    for row in SmartRelayTrade.objects.select_related('user').filter(
+            status='pending', updated_at__lt=now - STALE).order_by('updated_at')[:100]:
+        if row.created_at < now - GIVE_UP:
+            _end(row, 'failed', 'stale')
+            out['gave_up'] += 1
+            continue
+        SmartRelayTrade.objects.filter(pk=row.pk, status='pending').update(updated_at=now)
+        schedule(row.pk, countdown=1)
+        out['rerun'] += 1
+    for row_id in SmartRelayTrade.objects.filter(status__in=('sent', 'unknown'),
+                                                 updated_at__lt=now - STALE).values_list('pk', flat=True)[:100]:
+        SmartRelayTrade.objects.filter(pk=row_id).update(updated_at=now)
+        schedule_finish(row_id, countdown=1)
+        out['finish'] += 1
+    return out
 
 
 def schedule_finish(row_id: int, countdown: int = 5) -> None:
