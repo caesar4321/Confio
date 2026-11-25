@@ -1797,7 +1797,7 @@ export default function AssistantSheet({ home }: { home?: AssistantHomeProps } =
             {kbUp ? <View style={styles.homeKeyboardGap} /> : (
               <Text style={[styles.disclaimer, styles.homeDisclaimer]}>
                 {answeredByAi
-                  ? 'Confio Assistant puede equivocarse. No da asesoría de inversión y nunca mueve tu dinero sin tu confirmación.'
+                  ? 'Confio Assistant puede equivocarse. Revisa lo importante.'
                   : 'Te responde una persona del equipo de Confío.'}
               </Text>
             )}
@@ -2025,7 +2025,7 @@ export default function AssistantSheet({ home }: { home?: AssistantHomeProps } =
           )}
           <Text style={styles.disclaimer}>
             {aiEnabled
-            ? 'Confio Assistant puede equivocarse. No da asesoría de inversión y nunca mueve tu dinero sin tu confirmación.'
+            ? 'Confio Assistant puede equivocarse. Revisa lo importante.'
             : 'Te responde una persona del equipo de Confío.'}
           </Text>
           </>

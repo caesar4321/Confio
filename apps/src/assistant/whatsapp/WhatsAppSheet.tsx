@@ -16,7 +16,7 @@ import { Text, TextInput } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
 import { ACCEPT_WHATSAPP_CONSENT, REFRESH_WHATSAPP, START_WHATSAPP_LINK, UNLINK_WHATSAPP, WHATSAPP_CONSENT_VERSION } from './api';
 import {
-  CONSENT_DATA, CONSENT_POINTS, CONSENT_RISK, PAIRING_STEPS, checkedAgo, codeForCopy, consentText, validPhone,
+  CONSENT_DATA, CONSENT_POINTS, PAIRING_STEPS, checkedAgo, codeForCopy, consentText, validPhone,
 } from './rules';
 import { forgetWhatsAppSession } from './session';
 import { useWhatsApp } from './useWhatsApp';
@@ -125,7 +125,7 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
   const linking = !!link && link.state !== 'pairing' && link.state !== 'linked';
   const phoneReady = validPhone(shownPhone);
 
-  // What anyone reads before linking: three points, what is read and the one risk, then the number.
+  // What anyone reads before linking: three points and what is read, then the number.
   const consent = () => (outdatedApp ? (
     <Text style={styles.text}>Actualiza la app para ver lo que cambió y seguir usando WhatsApp en Confío.</Text>
   ) : (
@@ -187,10 +187,6 @@ export default function WhatsAppSheet({ userId, onClose }: Props) {
         <View style={styles.note}>
           <Icon name="lock" size={15} color={colors.gray600} />
           <Text style={styles.noteText}>{CONSENT_DATA}</Text>
-        </View>
-        <View style={[styles.note, styles.noteDivider]}>
-          <Icon name="alert-triangle" size={15} color={colors.warning.icon} />
-          <Text style={styles.noteText}>{CONSENT_RISK}</Text>
         </View>
       </View>
       <Pressable

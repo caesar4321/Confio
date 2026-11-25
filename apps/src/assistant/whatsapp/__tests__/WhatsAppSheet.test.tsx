@@ -63,12 +63,16 @@ it('consent first, then the pairing asks for the code of the accepted text', asy
   mockLink = link();
   mockMutate.mockResolvedValue({ data: { startWhatsAppLink: { success: true } } });
   const { words, press } = open();
-  expect(words()).toContain('restringir');  // the risk is always in sight, not behind "Cómo funciona"
+  // No warning on the screen or behind "Cómo funciona" (founder, 2026-11-25): what WhatsApp may do to an
+  // account is in the Terms of Service.
+  expect(words()).not.toContain('restringir');
+  expect(words()).not.toContain('alert-triangle');
   // What is read, by an AI, for how long: in sight before the button, not behind a toggle.
   expect(words()).toContain('Guardamos cifradas las últimas 48 horas de cada chat');
   expect(words()).not.toContain('«Chrome»');  // the long text waits behind "Cómo funciona"
   await press('Cómo funciona');
   expect(words()).toContain('«Chrome»');
+  expect(words()).not.toContain('restringir');
   await press('Vincular WhatsApp');
   expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 4, country: 'BO' } }));
 });

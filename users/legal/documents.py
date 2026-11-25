@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.9.0',
-    'last_updated': '2026-11-09',
+    'version': '1.10.0',
+    'last_updated': '2026-11-25',
     'is_legally_binding': True,
     'sections': [
         {
@@ -201,11 +201,21 @@ TERMS = {
             ]
         },
         {
-            'title': '16. Modificaciones',
+            'title': '16. WhatsApp y otros servicios de terceros que usted conecta',
+            'content': [
+                'Si usted vincula su cuenta de WhatsApp, su Gmail o su calendario a Confío, lo hace por decisión propia y puede desvincularlos en cualquier momento desde la app.',
+                'Esos servicios pertenecen a terceros y se rigen por sus propios términos y políticas. Usted es responsable de cumplirlos cuando usa su cuenta a través de Confío.',
+                'Los mensajes que usted aprueba en Confío se envían desde su propio número de WhatsApp y se consideran enviados por usted.',
+                'Confío no es responsable de las suspensiones, bloqueos o restricciones que WhatsApp u otro tercero imponga a su cuenta o a su número por el uso de estas funciones, ni de la pérdida de acceso a esa cuenta, a ese número o a los servicios asociados.',
+                'Confío tampoco es responsable de las interrupciones, fallas o cambios de esos servicios, ni de las decisiones de sus proveedores que afecten el funcionamiento de la conexión.'
+            ]
+        },
+        {
+            'title': '17. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '17. Contacto',
+            'title': '18. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'

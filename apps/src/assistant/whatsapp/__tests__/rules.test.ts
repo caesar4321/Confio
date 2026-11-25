@@ -27,9 +27,9 @@ it('every state says what to do next', () => {
   expect(whatsAppView(link({ state: 'linked', notices: Array(12).fill({}) })).body).toContain('nuestra conversación');
 });
 
-it('the consent says the risks plainly', () => {
+it('the consent says plainly what Confío does', () => {
   const text = consentText().join(' ');
-  for (const words of ['no marcamos nada como leído', 'mientras tu WhatsApp siga vinculado', 'tú lo apruebas', 'en línea', 'restringir', 'desvincularlo',
+  for (const words of ['no marcamos nada como leído', 'mientras tu WhatsApp siga vinculado', 'tú lo apruebas', 'en línea', 'desvincularlo',
     'Mensaje para ti', 'único mensaje que Confío escribe sin']) {
     expect(text).toContain(words);
   }

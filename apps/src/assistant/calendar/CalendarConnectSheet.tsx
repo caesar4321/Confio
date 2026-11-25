@@ -33,7 +33,6 @@ const INTRO_POINTS = [
 ];
 const INTRO_DATA = 'La lectura ocurre en este teléfono. Solo salen de él los títulos que tú marques, hacia Confío y '
   + 'OpenAI (Estados Unidos), y no se guardan.';
-const INTRO_RISK = 'Confío IA puede equivocarse y nunca paga por ti.';
 // The full consent: every rule the screen keeps.
 const INTRO_DETAILS = [
   'Confío lee solo los calendarios de este teléfono que tú elijas (iCloud, Google u otros). La lectura ocurre en tu teléfono.',
@@ -47,8 +46,7 @@ const INTRO_DETAILS = [
   'Confío IA puede equivocarse y nunca paga por ti.',
 ];
 const SEND_DISCLOSURE = 'Al tocar el botón, aceptas enviar a Confío y a OpenAI (Estados Unidos) solo los títulos '
-  + 'marcados, tal como los ves arriba. No enviamos fechas, lugares ni invitados. Confío no los guarda. Confío IA '
-  + 'puede equivocarse y nunca paga por ti.';
+  + 'marcados, tal como los ves arriba. No enviamos fechas, lugares ni invitados. Confío no los guarda.';
 
 const countCalendars = (count: number) => `${count} ${count === 1 ? 'calendario' : 'calendarios'}`;
 
@@ -269,7 +267,7 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
     content = (
       <>
         <Points points={INTRO_POINTS} />
-        <Notes data={INTRO_DATA} risk={INTRO_RISK} />
+        <Notes data={INTRO_DATA} />
         <Details lines={INTRO_DETAILS} />
         {settingsLink}
         {disconnect}
@@ -354,7 +352,7 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
             {reviewed.found.map((item) => (
               <Text key={item.id} style={styles.resultLine}>{`${item.label}: ${item.title}`}</Text>
             ))}
-            {reviewed.found.length ? <Text style={setupStyles.hint}>Toca «Avísame» en cada uno para que te recuerde. Puede equivocarse.</Text> : null}
+            {reviewed.found.length ? <Text style={setupStyles.hint}>Toca «Avísame» en cada uno para que te recuerde.</Text> : null}
           </View>
         ) : null}
         <Text style={setupStyles.text}>

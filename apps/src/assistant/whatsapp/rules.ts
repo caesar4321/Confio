@@ -2,7 +2,7 @@
 // never by the model: a model's summary is shown as a claim ("Parece…"), never as fact.
 import type { WhatsAppDraft, WhatsAppLink } from './api';
 
-/** What anyone reads before linking: three lines and the one risk, in plain words. */
+/** What anyone reads before linking: three lines, in plain words. */
 export const CONSENT_POINTS: { icon: string; text: string }[] = [
   { icon: 'bell', text: 'Te avisamos de cobros, pedidos y citas.' },
   { icon: 'check-circle', text: 'Respondes desde aquí. Nada sale sin tu OK.' },
@@ -16,10 +16,11 @@ export const CONSENT_DATA = 'Recibimos los mensajes de tus chats personales (no 
 
 /** A number with its country code, as WhatsApp takes it: + and 8 to 15 digits. */
 export const validPhone = (value: string) => /^\+\d{8,15}$/.test(value.replace(/[\s\-().]/g, ''));
-export const CONSENT_RISK = 'WhatsApp no permite oficialmente apps como esta y podría restringir tu cuenta.';
 
 /** The whole text the person accepts, behind "Cómo funciona". Version WHATSAPP_CONSENT_VERSION in api.ts:
- * change both together. */
+ * a change in what Confío does with the account needs a new version there and on the server. What WhatsApp
+ * may do to an account is in the Terms of Service (section 16), not here: moving it there changed nothing
+ * Confío does, so the version stayed. */
 export function consentText(): string[] {
   return [
     'Escribes tu número de WhatsApp y WhatsApp te pide confirmarlo con un código en tu teléfono. Confío lo '
@@ -40,8 +41,6 @@ export function consentText(): string[] {
       + 'teléfono, lo borramos todo.',
     'Solo enviamos un mensaje cuando tú lo apruebas aquí, uno por uno y a ritmo de persona. Nunca pagamos nada '
       + 'desde WhatsApp.',
-    'WhatsApp no permite oficialmente clientes como este y podría restringir una cuenta; cuidamos tu número '
-      + 'enviando poco y solo lo que apruebas, pero el riesgo no es cero.',
     'Puedes desvincularlo cuando quieras, aquí o desde tu teléfono.',
   ];
 }
