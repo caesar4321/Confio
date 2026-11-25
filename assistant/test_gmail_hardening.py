@@ -240,7 +240,7 @@ class SyncHardeningTests(GmailPilotTest):
         self.listed('bad', 'good')
         calls = []
 
-        def detect(parsed, _today):
+        def detect(parsed, _today, _thread=None):
             calls.append(parsed.id)
             if parsed.id == 'bad':
                 raise RuntimeError('bad mail')

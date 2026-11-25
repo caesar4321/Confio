@@ -50,7 +50,7 @@ class ReadingTests(GmailPilotTest):
     def test_a_past_date_is_when_it_happened_not_a_reason_to_drop_it(self):
         for kind in ('reply', 'delivery', 'money'):
             self.assertEqual(self.detect(kind=kind, due_date='2026-11-20'), {
-                'kind': kind, 'due_date': None, 'amount': None, 'currency': None, 'summary': ''})
+                'kind': kind, 'due_date': None, 'amount': None, 'currency': None, 'summary': '', 'replies': []})
         for kind in ('payment', 'appointment', 'deadline'):
             self.assertIsNone(self.detect(kind=kind, due_date='2026-11-20'))
         self.assertEqual(self.detect(kind='delivery', due_date='2026-11-25')['due_date'], date(2026, 11, 25))

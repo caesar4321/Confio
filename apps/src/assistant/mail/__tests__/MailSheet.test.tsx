@@ -32,7 +32,7 @@ import MailSheet from '../MailSheet';
 
 const MAIL = {
   available: true, connected: true, needsReconnect: false, canSend: true, canCalendar: true, consentOutdated: false,
-  email: 'owner@gmail.example', needs: [], consentVersion: 3,
+  email: 'owner@gmail.example', needs: [], consentVersion: 4,
 };
 
 let tree: renderer.ReactTestRenderer;
@@ -55,8 +55,8 @@ beforeEach(() => {
 });
 afterEach(() => act(() => tree?.unmount()));
 
-it('asks consent version 3: mail is told and answered in the conversation', () => {
-  expect(MAIL_CONSENT_VERSION).toBe(3);
+it('asks consent version 4: mail is read in its thread and answered in the conversation', () => {
+  expect(MAIL_CONSENT_VERSION).toBe(4);
 });
 
 it('before connecting: what it does, the data, the risk and one button', async () => {

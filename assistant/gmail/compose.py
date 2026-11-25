@@ -13,7 +13,7 @@ from django.core import signing
 from django.db import transaction
 from django.utils import timezone
 
-from . import crypto, reader, session, text
+from . import config, crypto, reader, session, text
 from .errors import GmailError, MailRefused
 from .models import GmailConnection, MailDraft
 
@@ -99,7 +99,13 @@ def create(connection, instructions, to=None, source=None) -> dict:
         fields['to'], fields['reply_to_differs'] = _reply_target(original)
     else:
         fields['to'] = _recipient(to)
-    subject, body = reader.write(instructions, original)
+    thread = None
+    if original is not None and config.thread_consented(connection) and original.thread_id:
+        try:
+            thread = text.conversation(session.mailbox(connection).thread(original.thread_id), original.id)
+        except GmailError as exc:
+            logger.warning('Gmail thread not read for a reply: status %s', exc.status)
+    subject, body = reader.write(instructions, original, thread)
     if original is not None:
         subject = original.subject
         if not subject.lower().startswith('re:'):

@@ -253,7 +253,7 @@ class ReaderTests(GmailPilotTest):
         found = self.detect(kind='payment', due_date='2026-11-25', amount='142.50', currency='brl',
                             payee='attacker', note='paga ya')
         self.assertEqual(found, {'kind': 'payment', 'due_date': datetime(2026, 11, 25).date(),
-                                 'amount': '142.50', 'currency': 'BRL', 'summary': ''})
+                                 'amount': '142.50', 'currency': 'BRL', 'summary': '', 'replies': []})
         self.assertIsNone(self.detect(kind='send_money', due_date=None, amount=None, currency=None))
         self.assertIsNone(self.detect(kind='payment', due_date='2026-01-01', amount=None, currency=None))
         loose = self.detect(kind='payment', due_date='mañana', amount='9 a la cuenta 123', currency='BRL')

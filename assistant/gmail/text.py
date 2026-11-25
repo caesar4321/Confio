@@ -535,6 +535,44 @@ class Mail:
                 'texto': redact_links(body)[:limit]}
 
 
+THREAD_KEEP = 8
+_SKIPPED_LABELS = {'DRAFT', 'TRASH', 'SPAM'}
+# Where a reply starts quoting what it answers: what follows is not hers.
+_QUOTE_START = re.compile(r'^\s*(?:>|On .{0,200}wrote:|El .{0,200}escribió:|Em .{0,200}escreveu:|-{2,} ?(?:Original|Mensaje original))',
+                          re.IGNORECASE | re.MULTILINE)
+
+
+def _own_words(body) -> str:
+    """Her sent mail without the text it quotes: quoted words are a third party's, never hers."""
+    found = _QUOTE_START.search(body or '')
+    return (body[:found.start()] if found else body or '').strip()
+
+
+def conversation(raws, current_id, limit=1200) -> list:
+    """A thread for the model, oldest first: who wrote ("ella" when she sent it, without what it quotes), its day
+    and text, and which one just arrived. Drafts, trash, spam and security mails are left out; the one just arrived
+    is always kept."""
+    rows = []
+    for raw in raws:
+        if _SKIPPED_LABELS & set(raw.get('labelIds') or []):
+            continue
+        try:
+            mail = parse(raw)
+        except Exception:  # noqa: BLE001 - one unreadable message does not hide the rest
+            continue
+        if mail.is_security:
+            continue
+        if mail.sent:
+            mail.body = _own_words(mail.body)
+        shown = mail.for_model(limit)
+        rows.append({'de': 'ella' if mail.sent else shown['de'], 'fecha': shown['fecha'], 'asunto': shown['asunto'],
+                     'texto': shown['texto'], 'nuevo': mail.id == current_id})
+    current = next((index for index, row in enumerate(rows) if row['nuevo']), len(rows) - 1)
+    # The newest around the one judged: up to two after it (did she answer?), the rest before.
+    end = min(len(rows), current + 3)
+    return rows[max(0, end - THREAD_KEEP):end]
+
+
 # --------------------------------------------------------------------- parse
 
 _CHARSET = re.compile(r'charset\s{0,3}=\s{0,3}"?([\w.:-]{1,30})', re.IGNORECASE)

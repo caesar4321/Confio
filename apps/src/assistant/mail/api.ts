@@ -4,7 +4,8 @@ import { gql } from '@apollo/client';
 // and both request logs redact on the name.
 // 2: reads beyond bills, keeps a one-line summary, and reads Google Calendar.
 // 3: what needs you is told in the Confío IA conversation, and mail is written and answered there.
-export const MAIL_CONSENT_VERSION = 3;
+// 4: each mail is read in its whole thread, your own replies included, with replies you could send.
+export const MAIL_CONSENT_VERSION = 4;
 
 export type MailNeed = {
   id: string;

@@ -502,3 +502,10 @@ The founder asked for Gmail to work like WhatsApp: no writing or replying on the
 - **Writing.** The chat model's `prepare_mail` tool, or the "Responder…" chip, puts a mail on a card (`mail_draft`). It leaves only from Enviar, with the display hash. An address counts only if she wrote it whole, or it is the address of the card being changed; links and 3+ digit numbers she never wrote are dropped from her request. A new version deletes the earlier drafts, so only the newest card can be sent. A sender name shared by two addresses is never guessed between.
 - **Consent.** Version 2 stays the floor for reading. Version 3 (this build's text) is needed for anything in the conversation; a connection under 2 keeps the daily notice only, and the new app asks again.
 - The old in-sheet ask, inbox and draft operations stay on the server for older builds.
+
+## 10g. Context like WhatsApp (2026-11-25)
+
+- With consent 4, each mail is judged in its whole thread (`client.Mailbox.thread`, `text.conversation`): up to 8 messages around it, both sides, her sent mail as "ella" without the text it quotes; drafts, trash, spam and security mails are left out. A mail she already answered or settled in the thread is not told.
+- The model offers 2–3 short replies, cleaned of links, addresses and numbers and never accepting or confirming a payment for her; they are chips under the notice (`mail_suggested`) next to "Otro…". Replies are written with the thread in view.
+- An automatic notice from the same sender with the same subject is told once; a person's new mail in a thread always is.
+- Notices are drawn as cards by builds that know `mail_notice` (`MailNoticeCard`); the body text stays for older builds and for the model.

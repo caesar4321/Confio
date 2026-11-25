@@ -73,6 +73,9 @@ def revoke(token) -> bool:
     return True
 
 
+THREAD_MESSAGES = 8
+
+
 class Mailbox:
     def __init__(self, token):
         self._headers = {'Authorization': f'Bearer {token}'}
@@ -88,6 +91,13 @@ class Mailbox:
         if not str(message_id).isalnum():
             raise GmailError(400)
         return _call('GET', f'{API}/messages/{message_id}', headers=self._headers, params={'format': 'full'})
+
+    def thread(self, thread_id) -> list:
+        """The thread's messages, oldest first, in full: what was said before and after, both sides."""
+        if not str(thread_id).isalnum():
+            raise GmailError(400)
+        data = _call('GET', f'{API}/threads/{thread_id}', headers=self._headers, params={'format': 'full'})
+        return list(data.get('messages') or [])[-THREAD_MESSAGES * 3:]  # text.conversation keeps the 8 around it
 
     def send(self, raw, thread_id=None):
         body = {'raw': raw, **({'threadId': thread_id} if thread_id else {})}

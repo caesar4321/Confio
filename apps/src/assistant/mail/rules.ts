@@ -9,8 +9,8 @@ export const CONSENT_POINTS: { icon: string; text: string }[] = [
 ];
 
 /** Always in sight before connecting: what is read, by whom, for how long. */
-export const CONSENT_DATA = 'Leemos los correos que recibes, salvo publicidad, redes, foros y spam. Una IA de OpenAI '
-  + 'marca lo importante; no guardamos tus correos. Lo que te cuento queda en nuestra conversación hasta que '
+export const CONSENT_DATA = 'Leemos los correos que recibes, salvo publicidad, redes, foros y spam, cada uno con su '
+  + 'conversación (también lo que respondiste). Una IA de OpenAI marca lo importante; no guardamos tus correos. Lo que te cuento queda en nuestra conversación hasta que '
   + 'desconectes.';
 
 /** Confío is not verified by Google yet: Google says so on its screen. */
@@ -24,17 +24,20 @@ export function consentText(): string[] {
       + 'correos en tu nombre (opcional) y ver los eventos de tus calendarios (opcional). Confío no puede borrar ni '
       + 'cambiar tus correos ni tus eventos, y nunca recibe tu contraseña de Google.',
     'Cada 15 minutos revisamos los correos que recibes, salvo la publicidad, las redes sociales, los foros, el spam '
-      + 'y la papelera. Para entender cada uno, Confío envía a OpenAI (Estados Unidos) el remitente, el asunto, la '
-      + 'fecha y el texto. OpenAI no entrena modelos con ellos y puede conservarlos hasta 30 días para controlar '
+      + 'y la papelera. Para entender cada uno en su contexto, como en WhatsApp, leemos su conversación completa (hasta '
+      + 'los últimos 8 correos del hilo, también los que tú enviaste), y Confío envía a OpenAI (Estados Unidos) el '
+      + 'remitente, el asunto, la fecha y el texto de esos correos. OpenAI no entrena modelos con ellos y puede conservarlos hasta 30 días para controlar '
       + 'abusos, o más si la ley o la seguridad lo exigen. Antes tapamos los códigos que detectamos y descartamos '
       + 'los correos de códigos o cambios de contraseña, pero esa detección puede fallar.',
     'Cuando un correo reciente parece importante (un pago, un vencimiento, un viaje, una cita, una entrega, dinero '
       + 'que recibes o alguien esperando tu respuesta), te lo cuento en nuestra conversación de Confío IA: quién te '
       + 'escribió, el asunto y un resumen de una línea, sin enlaces, direcciones ni números largos. Esos mensajes '
-      + 'quedan en tu conversación, que el equipo de Confío puede leer si pides ayuda, hasta que desconectes.',
+      + 'quedan en tu conversación, que el equipo de Confío puede leer si pides ayuda, hasta que desconectes. Si ya '
+      + 'respondiste o se resolvió en el mismo hilo, no te aviso.',
     'Te llega como máximo una notificación al día, y una más si después aparece algo que vence hoy. Solo dice '
       + 'cuántas cosas hay de cada tipo y cuántos eventos tienes hoy: nunca de quién son, montos ni títulos.',
-    'En nuestra conversación me puedes pedir que responda un correo o escriba uno nuevo. Lo que me pides se envía a '
+    'Con cada correo importante te propongo 2 o 3 respuestas cortas pensadas para esa conversación. En nuestra '
+      + 'conversación me puedes pedir que responda un correo o escriba uno nuevo. Lo que me pides y el hilo se envían a '
       + 'OpenAI para redactarlo, y el correo queda en una tarjeta con el destinatario, el asunto y el texto exactos. '
       + 'Solo sale cuando tocas Enviar. Nunca pago nada por ti.',
     'Si das el permiso de calendario, cada mañana cuento los eventos de hoy de tu Google Calendar para el aviso. '

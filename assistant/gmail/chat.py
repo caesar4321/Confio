@@ -48,7 +48,7 @@ def sender_name(mail) -> str:
     except Exception:  # noqa: BLE001
         name = ''
     name = text.strict_line(name, 40)
-    name = re.sub(r'conf[ií]o|gmail|google', '', name, flags=re.I)
+    name = re.sub(r'conf[ií]o', '', name, flags=re.I)  # never posing as us; a real "Google Cloud" keeps its name
     name = ' '.join(name.replace('«', '').replace('»', '').split())
     if not name:
         found = text.addresses(mail.headers.get('from'))
@@ -122,6 +122,25 @@ def _post(user, body, tag, actions=(), connection=None, extra=None):
     return message
 
 
+def _about(from_key, subject) -> str:
+    import hashlib
+    return hashlib.sha256(f'{from_key or ""}|{subject.casefold()}'.encode()).hexdigest()[:32]
+
+
+AUTOMATIC_KINDS = ('payment', 'ticket', 'trip', 'deadline', 'delivery', 'money')
+
+
+def _same_told(user, from_key, subject, kind=None) -> bool:
+    """An automatic notice sent again (the same sender and subject): told once. Never a person's new mail in a
+    thread (reply, appointment), and never without a known sender."""
+    from inbox.models import SupportMessage
+    if not from_key or (kind is not None and kind not in AUTOMATIC_KINDS):
+        return False
+    return SupportMessage.objects.filter(
+        conversation__user=user, metadata__gmail=True, metadata__mail_about=_about(from_key, subject),
+        created_at__gte=timezone.now() - timedelta(days=FRESH_DAYS)).exists()
+
+
 def _told_today(user) -> int:
     from inbox.models import SupportMessage
     since = timezone.now() - timedelta(days=1)
@@ -142,11 +161,21 @@ def tell(connection, need, mail):
         if data.get('summary'):
             lines.append(f'Según el correo: {_unquoted(data["summary"])}')
         lines.append(KIND_WORDS.get(need.kind, 'Parece importante.'))
-        actions = []
-        if connection.can_send:
+        # Drawn as a card by builds that know it (MailNoticeCard); the body stays the text for older ones and the model.
+        actions = [{'type': 'mail_notice', 'target': str(need.pk), 'label': need.kind}]
+        # Offered only where a person may answer: who waits for a reply, an appointment, or replies the model wrote
+        # reading the thread. Never under an automatic notice.
+        if connection.can_send and (need.kind in ('reply', 'appointment') or data.get('replies')):
             lines[-1] += ' ¿Le respondo?'
-            actions.append({'type': 'mail_reply', 'target': str(need.pk), 'label': 'Responder…'})
-        if _post(connection.user, '\n'.join(lines), f'gmail-need:{need.pk}', actions, connection=connection):
+            # Replies the model offered, read in the whole thread: one tap writes that one on a card.
+            for reply in (data.get('replies') or [])[:3]:
+                actions.append({'type': 'mail_suggested', 'target': str(need.pk), 'label': _unquoted(reply)})
+            actions.append({'type': 'mail_reply', 'target': str(need.pk), 'label': 'Otro…' if data.get('replies') else 'Responder…'})
+        if _same_told(connection.user, data.get('from_key'), subject, need.kind):
+            MailNeed.objects.filter(pk=need.pk).update(notified_at=timezone.now())  # a copy: settled, not re-tried
+            return
+        if _post(connection.user, '\n'.join(lines), f'gmail-need:{need.pk}', actions, connection=connection,
+                 extra={'mail_about': _about(data.get('from_key'), subject)}):
             _push(connection, need)
     except Exception as exc:  # noqa: BLE001 - the need is kept either way; logged by type only
         logger.warning('Gmail need %s not told in the chat: %s', need.pk, type(exc).__name__)
@@ -165,7 +194,9 @@ def catch_up(connection):
         told = {str(tag).split(':', 1)[1] for tag in SupportMessage.objects.filter(
             conversation__user=connection.user, metadata__gmail=True,
             metadata__notice__startswith='gmail-need:').values_list('metadata__notice', flat=True)}
-        waiting = [need for need in connection.needs.filter(dismissed=False, created_at__gte=since).order_by('created_at')
+        # A copy that was not told is marked noticed (tell): it never takes a catch-up slot again.
+        waiting = [need for need in connection.needs.filter(dismissed=False, created_at__gte=since,
+                                                             notified_at__isnull=True).order_by('created_at')
                    if str(need.pk) not in told][:CATCH_UP]
         if not waiting:
             return

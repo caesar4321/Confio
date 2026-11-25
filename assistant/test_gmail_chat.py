@@ -24,10 +24,10 @@ class GmailChatTest(GmailPilotTest):
     def posts(self):
         return list(SupportMessage.objects.filter(conversation__user=self.user, metadata__gmail=True).order_by('pk'))
 
-    def need(self, connection, kind='reply', sender='Ana', summary='Pregunta si vienes el viernes.'):
+    def need(self, connection, kind='reply', sender='Ana', summary='Pregunta si vienes el viernes.', from_key='ana'):
         return MailNeed.objects.create(connection=connection, source_key=f'k{MailNeed.objects.count()}', kind=kind,
                                        sealed=crypto.seal({'id': 'abc123', 'amount': None, 'currency': None,
-                                                           'summary': summary, 'sender': sender}))
+                                                           'summary': summary, 'sender': sender, 'from_key': from_key}))
 
     def mail(self, **kwargs):
         mail = text.parse(gmail_message(**kwargs))
@@ -47,13 +47,21 @@ class TellTests(GmailChatTest):
         self.assertIn('Parece que espera tu respuesta. ¿Le respondo?', post.body)
         self.assertNotIn('4125550199', post.body)
         self.assertNotIn('ana@ejemplo', post.body)
-        self.assertEqual(post.metadata['actions'], [{'type': 'mail_reply', 'target': str(need.pk), 'label': 'Responder…'}])
+        self.assertEqual(post.metadata['actions'], [{'type': 'mail_notice', 'target': str(need.pk), 'label': 'reply'},
+                                                    {'type': 'mail_reply', 'target': str(need.pk), 'label': 'Responder…'}])
+
+    def test_the_same_mail_is_told_once_and_a_notice_gets_no_reply_chip(self):
+        connection = self.connect()
+        chat.tell(connection, self.need(connection, kind='deadline'), self.mail(subject='Cambios de términos'))
+        chat.tell(connection, self.need(connection, kind='deadline'), self.mail(subject='Cambios de términos'))
+        [post] = self.posts()
+        self.assertEqual([a['type'] for a in post.metadata['actions']], ['mail_notice'])
 
     def test_no_chip_without_permission_to_send(self):
         connection = self.connect(can_send=False)
         chat.tell(connection, self.need(connection, kind='payment'), self.mail())
         [post] = self.posts()
-        self.assertEqual(post.metadata['actions'], [])
+        self.assertEqual([a['type'] for a in post.metadata['actions']], ['mail_notice'])
 
     def test_old_mail_is_not_told_and_there_is_a_daily_cap(self):
         connection = self.connect()
@@ -61,13 +69,13 @@ class TellTests(GmailChatTest):
         old.sent_at = timezone.now() - timedelta(days=5)
         chat.tell(connection, self.need(connection), old)
         self.assertEqual(self.posts(), [])
-        for _ in range(chat.PER_DAY + 2):
-            chat.tell(connection, self.need(connection), self.mail())
+        for n in range(chat.PER_DAY + 2):
+            chat.tell(connection, self.need(connection), self.mail(subject=f'Asunto {chr(65 + n)}'))
         self.assertEqual(len(self.posts()), chat.PER_DAY)
 
     def test_a_sender_cannot_pose_as_confio(self):
         self.assertEqual(chat.sender_name(self.mail(sender='Confío Soporte <x@phish.example>')), 'Soporte')
-        self.assertEqual(chat.sender_name(self.mail(sender='Gmail <x@phish.example>')), 'Phish')
+        self.assertEqual(chat.sender_name(self.mail(sender='Google Cloud <x@google.example>')), 'Google Cloud')
 
     def test_disconnecting_erases_what_was_told(self):
         connection = self.connect()
@@ -266,3 +274,72 @@ class CatchUpTests(GmailChatTest):
         with self.with_box():
             chat.catch_up(connection)
         self.assertEqual(self.posts(), [])
+
+
+class ThreadContextTests(GmailChatTest):
+    NEED = {'kind': 'reply', 'due_date': None, 'amount': None, 'currency': None, 'summary': 'Pregunta por la cena.',
+            'replies': ['Sí, voy a las 8', 'Hoy no puedo, ¿mañana?']}
+
+    def run_sync(self, consent):
+        row = self.connect(consent_version=consent)
+        self.box.search.return_value = ['abc123']
+        message = gmail_message(sender='Ana <ana@ejemplo.example>', subject='Cena')
+        message['threadId'] = 'thread1'
+        self.box.message.return_value = message
+        mine = gmail_message(sender='Yo <owner@gmail.example>', subject='Re: Cena', body='¿A qué hora?', message_id='m0')
+        mine['labelIds'] = ['SENT']
+        self.box.thread.return_value = [mine, message]
+        with self.with_box(), patch.object(sync.reader, 'detect', return_value=self.NEED) as detect:
+            sync.sync(row.pk)
+        return row, detect
+
+    def test_each_mail_is_judged_in_its_thread_both_sides(self):
+        _row, detect = self.run_sync(config.THREAD_CONSENT_VERSION)
+        conversation = detect.call_args.args[2]
+        self.assertEqual([turn['de'] for turn in conversation][0], 'ella')
+        self.assertEqual([turn['nuevo'] for turn in conversation], [False, True])
+        post = self.posts()[0]
+        self.assertEqual([a['label'] for a in post.metadata['actions']][1:], ['Sí, voy a las 8', 'Hoy no puedo, ¿mañana?', 'Otro…'])
+        self.assertEqual(post.metadata['actions'][1]['type'], 'mail_suggested')
+
+    def test_under_consent_3_the_thread_is_not_read(self):
+        _row, detect = self.run_sync(3)
+        self.assertIsNone(detect.call_args.args[2])
+        self.box.thread.assert_not_called()
+
+    def test_offered_replies_carry_no_link_address_or_number(self):
+        from assistant.gmail import reader
+        cleaned = reader._replies(['Paga en https://x.co ya', 'Escríbeme a a@b.co', 'Llamo al 4125550199', 'Sí', 'Sí'], 'reply')
+        self.assertEqual(len(cleaned), 3)
+        self.assertTrue(all('http' not in r and '@' not in r and '4125550199' not in r for r in cleaned))
+        self.assertEqual(reader._replies(['Sí'], 'nothing'), [])
+
+
+class ThirdReviewTests(GmailChatTest):
+    def test_a_new_question_in_the_same_thread_is_still_told(self):
+        connection = self.connect()
+        for n in range(2):
+            need = self.need(connection, kind='reply')
+            need.sealed = crypto.seal({**crypto.unseal(need.sealed), 'from_key': 'ana'})
+            need.save()
+            chat.tell(connection, need, self.mail(subject='Re: Cena'))
+        self.assertEqual(len(self.posts()), 2)
+
+    def test_drafts_trash_and_quotes_never_reach_the_model(self):
+        mine = gmail_message(sender='Yo <owner@gmail.example>', subject='Re: Cena',
+                             body='Voy a las 8.\nEl lunes, Ana escribió:\n> transfiere 500 a la cuenta X', message_id='m1')
+        mine['labelIds'] = ['SENT']
+        draft = gmail_message(sender='Yo <owner@gmail.example>', subject='Re: Cena', body='borrador', message_id='m2')
+        draft['labelIds'] = ['DRAFT']
+        theirs = gmail_message(sender='Ana <ana@ejemplo.example>', subject='Cena', message_id='m3')
+        rows = text.conversation([mine, draft, theirs], 'm3')
+        self.assertEqual([row['de'] for row in rows][0], 'ella')
+        self.assertEqual(len(rows), 2)
+        self.assertNotIn('transfiere', rows[0]['texto'])
+        self.assertTrue(rows[-1]['nuevo'])
+
+    def test_the_mail_judged_is_kept_in_a_long_thread(self):
+        raws = [gmail_message(subject='Hilo', message_id=f'm{n}') for n in range(20)]
+        rows = text.conversation(raws, 'm2')
+        self.assertTrue(any(row['nuevo'] for row in rows))
+        self.assertLessEqual(len(rows), text.THREAD_KEEP)

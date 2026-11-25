@@ -15,7 +15,9 @@ CONSENT_VERSION = 2
 # 3: what needs the person is told in the Confío IA conversation, and mail is written and answered there.
 # Only a connection accepted under it gets that; one under 2 keeps being read and noticed as before.
 CHAT_CONSENT_VERSION = 3
-ACCEPTED_CONSENT = (2, 3)  # what an app may connect under: older builds show the text of 2
+# 4: each mail is judged in its whole thread, her own replies included, with replies she could send.
+THREAD_CONSENT_VERSION = 4
+ACCEPTED_CONSENT = (2, 3, 4)  # what an app may connect under: older builds show older texts
 # Google's own limit for a project in Testing.
 MAX_TESTERS = 100
 
@@ -103,6 +105,11 @@ def may_take_place(user) -> bool:
 def chat_consented(connection) -> bool:
     """Agreed to mail being told and written in the Confío IA conversation."""
     return connection is not None and connection.consent_version >= CHAT_CONSENT_VERSION
+
+
+def thread_consented(connection) -> bool:
+    """Agreed to each mail being read in its thread, her own replies included."""
+    return connection is not None and connection.consent_version >= THREAD_CONSENT_VERSION
 
 
 def consented(connection) -> bool:

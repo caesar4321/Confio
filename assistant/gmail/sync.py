@@ -181,7 +181,13 @@ def _one(connection, box, message_id, key, offset):
         return SKIPPED
     if not _still_mine(connection):
         return STOP
-    need = reader.detect(mail, config.local_today(offset=offset))
+    thread = None
+    if config.thread_consented(connection) and mail.thread_id:
+        try:
+            thread = text.conversation(box.thread(mail.thread_id), mail.id)
+        except GmailError as exc:
+            logger.warning('Gmail thread not read: status %s', exc.status)  # judged alone, as before
+    need = reader.detect(mail, config.local_today(offset=offset), thread)
     if need and not need['due_date'] and mail.sent_at < timezone.now() - timedelta(days=UNDATED_DAYS):
         need = None  # the first read goes back 30 days: an old letter is not news
     if need:
@@ -205,7 +211,8 @@ def _store(connection, message_id, key, need, sender='', from_key=''):
         row, created = MailNeed.objects.get_or_create(connection=current, source_key=key, defaults={
             'kind': need['kind'], 'due_date': need['due_date'],
             'sealed': crypto.seal({'id': message_id, 'amount': need['amount'], 'currency': need['currency'],
-                                   'summary': need.get('summary') or '', 'sender': sender, 'from_key': from_key}),
+                                   'summary': need.get('summary') or '', 'sender': sender, 'from_key': from_key,
+                                   'replies': need.get('replies') or []}),
         })
         return row if created else True
 
