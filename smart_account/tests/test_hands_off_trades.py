@@ -88,7 +88,22 @@ class RouteTests(HandsOffBase):
         # After the Koywe top-up lands in the personal wallet: the move into the account, not a second top-up.
         route = self.route(personal=personal)
         self.assertEqual(route.code, 'move')
-        self.assertEqual(route.facts['move'], Decimal('40'))
+        # A trade moves only what is missing, plus a cent for share rounding (founder, 2026-11-25).
+        self.assertEqual(route.facts['short'], Decimal('20'))
+        self.assertEqual(route.facts['move'], Decimal('20.01'))
+
+    def test_the_chat_buy_floor_clears_ondos_minimum_after_the_fee(self):
+        from assistant import trades
+        from smart_account import quotes
+        from cusd_plus import stock_fees
+        fee = mock.patch('smart_account.quotes._stock_fee', return_value=(90, stock_fees.MODE_PERIMETER))
+        with mock.patch('smart_account.hands_off.enabled', return_value=True), fee:
+            floor = trades.buy_floor()
+            under = quotes.stock_buy_notional(floor - Decimal('0.01'))
+            at = quotes.stock_buy_notional(floor)
+        self.assertGreater(floor, trades.MIN_BUY_USD, 'US$1.01 leaves about US$0.99 after the fee and buffer')
+        self.assertGreaterEqual(at, quotes.MIN_STOCK_ORDER_USD)
+        self.assertLess(under, quotes.MIN_STOCK_ORDER_USD)
 
     def test_a_cusd_trade_rule_is_never_used(self):
         from smart_account.tests.base import CUSD

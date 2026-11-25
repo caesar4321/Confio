@@ -1145,7 +1145,7 @@ PUBLIC_DOCUMENTS = {
     'tokenomics': 'docs/tokenomics/README.md',
     'whitepaper': 'docs/whitepaper/README.md',
 }
-PUBLIC_DOCUMENT_MAX_CHARS = 60_000
+PUBLIC_DOCUMENT_MAX_CHARS = 80_000   # the whitepaper 4.5 is ~71k (2026-11-25)
 # Facts newer than a document's text, verified on-chain; returned first so the
 # model never repeats a stale passage. Empty while the documents are current.
 PUBLIC_DOCUMENT_ERRATA: dict[str, str] = {}

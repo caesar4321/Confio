@@ -198,6 +198,12 @@ def create_trade_authorization(viewer, *, account, amount: Decimal):
         terms=dict(payout_destination=None, payee_address='', rail='', amount_usd=amount, frequency=FREQUENCY))
 
 
+def exact_move(short: Decimal, personal: Decimal) -> Decimal:
+    """What a trade's move card moves: the shortfall rounded up to the cent, one cent more for share rounding,
+    never more than the wallet holds."""
+    return min(Decimal(short).quantize(CENT, rounding=ROUND_UP) + CENT, Decimal(personal).quantize(CENT, rounding=ROUND_DOWN))
+
+
 def move_amount(short: Decimal, personal: Decimal) -> Decimal:
     """What the move card offers: the shortfall plus a margin when the wallet has it (purchases.move_offer)."""
     from .purchases import move_offer
@@ -258,8 +264,10 @@ def route(user, *, side: str, asset_kind: str, token: str, amount: Decimal | Non
         personal_usd = (dollar_usd(dollar, chain.balance_of(dollar, personal_address))
                         if personal_address else Decimal(0))
         if personal_usd >= short:
+            # A trade moves only what is missing (founder, 2026-11-25), plus a cent for share rounding; the
+            # purchase cushion (purchases.move_offer) is for store and Comprar purchases.
             return Route('move', facts={'short': short, 'personal': personal_usd,
-                                        'move': move_amount(short, personal_usd)}, **facts)
+                                        'move': exact_move(short, personal_usd)}, **facts)
         return Route('topup', facts={'short': short}, **facts)
     except Exception as exc:  # noqa: BLE001 - unread is never "the account trades"
         logger.warning('hands-off route unreadable: %s', type(exc).__name__, exc_info=True)

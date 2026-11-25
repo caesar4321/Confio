@@ -266,6 +266,19 @@ def _account_address(viewer):
         return ''
 
 
+def buy_floor() -> Decimal:
+    """The least a chat stock buy may be. Hands-off, the account's order is sized after the fee and its buffer
+    (quotes.stock_buy_notional), so the floor is the smallest amount still above Ondo's minimum after them —
+    never a buy that the quote then refuses below_minimum_order (founder's first hands-off buy, 2026-11-25)."""
+    try:
+        from smart_account import hands_off, quotes
+        if hands_off.enabled():
+            return max(MIN_BUY_USD, quotes.min_stock_rule_amount())
+    except Exception:  # noqa: BLE001 - an unread fee policy keeps the signed card's floor
+        logger.warning('hands-off buy floor unreadable', exc_info=True)
+    return MIN_BUY_USD
+
+
 def _cannot(belt, side, ticker, name, amount, sell_all, rows):
     """Why this trade can't be offered; '' when it can. Run when asked and again on the yes."""
     if side == 'buy':
@@ -276,7 +289,7 @@ def _cannot(belt, side, ticker, name, amount, sell_all, rows):
         return f'No tiene {name or ticker}: no hay nada que vender.'
     if sell_all or amount is None:
         return ''          # the amount is checked when they type it
-    floor = MIN_BUY_USD if side == 'buy' else MIN_SELL_USD
+    floor = buy_floor() if side == 'buy' else MIN_SELL_USD
     if amount < floor:
         return f'El mínimo es {money(floor)}.'
     if amount > Decimal(str(getattr(settings, 'CUSD_PLUS_GM_MAX_TRADE_USD', 100_000))):
