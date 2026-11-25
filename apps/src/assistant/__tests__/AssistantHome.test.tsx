@@ -45,7 +45,8 @@ jest.mock('../../contexts/AuthContext', () => ({
 }));
 jest.mock('../../assets/svg/WhatsApp.svg', () => 'WhatsAppLogo');
 jest.mock('../PaymentIntentCard', () => ({ PaymentIntentCard: 'PaymentIntentCard' }));
-jest.mock('../mail/ChatCards', () => ({ MailDraftCard: 'MailDraftCard', MailReplyChip: 'MailReplyChip' }));
+jest.mock('../mail/ChatCards', () => ({ MailDraftCard: 'MailDraftCard', MailReplyChip: 'MailReplyChip',
+  MailNoticeCard: 'MailNoticeCard', parseMailNotice: () => null }));
 jest.mock('../whatsapp/ChatCards', () => ({ WhatsAppDraftCard: 'WhatsAppDraftCard', WhatsAppReplyChips: 'WhatsAppReplyChips', WhatsAppConsentChip: 'WhatsAppConsentChip',
   WhatsAppNoticeCard: 'WhatsAppNoticeCard', noticeAction: () => null }));
 jest.mock('../StockTradeCard', () => ({ StockTradeCard: 'StockTradeCard' }));

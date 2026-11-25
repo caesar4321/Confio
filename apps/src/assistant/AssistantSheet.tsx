@@ -58,7 +58,7 @@ import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
 import { TAP_ONLY_KEYS, cardFor, openDestination, resolveNavigate } from './destinations';
 import { WhatsAppConsentChip, WhatsAppDraftCard, WhatsAppNoticeCard, WhatsAppReplyChips, noticeAction } from './whatsapp/ChatCards';
-import { MailDraftCard, MailReplyChip } from './mail/ChatCards';
+import { MailDraftCard, MailNoticeCard, MailReplyChip, parseMailNotice } from './mail/ChatCards';
 import { requestGuideWalk } from './guidePointer';
 import ConnectionsHost from './connections/ConnectionsHost';
 import ConnectionsPrompt from './connections/ConnectionsPrompt';
@@ -478,6 +478,9 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
         {/* A WhatsApp message told here: drawn as a card (its text stays for older builds). */}
         {!mine && noticeAction(message.actions) ? (
           <WhatsAppNoticeCard action={noticeAction(message.actions)!} fallback={words} />
+        ) : !mine && words && message.actions.some((a) => a.type === 'mail_notice') && parseMailNotice(words) ? (
+          // A Gmail message told here (assistant/gmail): drawn as a card; any other body stays plain text.
+          <MailNoticeCard body={words} kind={message.actions.find((a) => a.type === 'mail_notice')?.label} />
         ) : words ? (
           <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>
             {words}
