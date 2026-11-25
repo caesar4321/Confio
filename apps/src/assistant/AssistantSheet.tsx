@@ -58,6 +58,7 @@ import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
 import { TAP_ONLY_KEYS, cardFor, openDestination, resolveNavigate } from './destinations';
 import { WhatsAppConsentChip, WhatsAppDraftCard, WhatsAppReplyChips } from './whatsapp/ChatCards';
+import { MailDraftCard, MailReplyChip } from './mail/ChatCards';
 import { requestGuideWalk } from './guidePointer';
 import ConnectionsHost from './connections/ConnectionsHost';
 import ConnectionsPrompt from './connections/ConnectionsPrompt';
@@ -390,6 +391,10 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
       {message.pending ? null : <WhatsAppConsentChip actions={message.actions} />}
       {message.pending ? null : message.actions.filter((a) => a.type === 'whatsapp_draft' && a.target).slice(0, 1)
         .map((a) => <WhatsAppDraftCard key={`${message.id}:wa`} draftId={String(a.target)} />)}
+      {/* Gmail (assistant/gmail/chat.py): "Responder…" under a mail it told, and the card a mail waits on. */}
+      {message.pending ? null : <MailReplyChip actions={message.actions} />}
+      {message.pending ? null : message.actions.filter((a) => a.type === 'mail_draft' && a.target).slice(0, 1)
+        .map((a) => <MailDraftCard key={`${message.id}:mail`} draftId={String(a.target)} />)}
       {/* A stock bought or sold here: one card per answer, approved on the card. */}
       {message.pending ? null : message.actions.map(resolveTrade).filter(Boolean).slice(0, 1).map((trade) => (
         <StockTradeCard key={`${message.id}:trade`} messageId={message.id} action={trade!}
@@ -1370,7 +1375,8 @@ export default function AssistantSheet({ home }: { home?: AssistantHomeProps } =
   const reversed = useMemo(() => [...messages].reverse(), [messages]);
   // The newest message offers WhatsApp replies or holds a reply's card (whatsapp_link/chat.py): that is the one
   // thing to do now. The default chips and cards would push it up and compete with it.
-  const awaitingWhatsApp = !!reversed[0]?.actions?.some((a) => a.type === 'whatsapp_reply' || a.type === 'whatsapp_other' || a.type === 'whatsapp_draft');
+  const awaitingWhatsApp = !!reversed[0]?.actions?.some((a) => a.type === 'whatsapp_reply' || a.type === 'whatsapp_other'
+    || a.type === 'whatsapp_draft' || a.type === 'mail_reply' || a.type === 'mail_draft');
   // Chips and the one-time question, ranked on the server for this person;
   // the built-in STARTERS stay as the fallback (older server, offline).
   const { data: suggestionData, refetch: refetchSuggestions } = useQuery(GET_ASSISTANT_SUGGESTIONS, {

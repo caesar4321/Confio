@@ -21,29 +21,27 @@ jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../connectFlow', () => ({ finishMailConnect: () => null }));
 jest.mock('../connectLink', () => ({ onMailConnectResult: () => () => undefined }));
 jest.mock('../verifier', () => ({ saveVerifier: jest.fn() }));
+jest.mock('../../../components/svg/GmailLogo', () => 'GmailLogo');
+jest.mock('react-native-svg', () => {
+  const View = require('react-native').View;
+  return { __esModule: true, default: View, Circle: View, Defs: View, LinearGradient: View, Rect: View, Stop: View };
+});
 
 import { MAIL_CONSENT_VERSION } from '../api';
 import MailSheet from '../MailSheet';
 
 const MAIL = {
   available: true, connected: true, needsReconnect: false, canSend: true, canCalendar: true, consentOutdated: false,
-  email: 'owner@gmail.example',
-  needs: [{ id: '1', kind: 'reply', dueDate: null, amount: null, currency: null, summary: 'Ana pregunta por el contrato' }],
+  email: 'owner@gmail.example', needs: [], consentVersion: 3,
 };
 
 let tree: renderer.ReactTestRenderer;
 const flush = () => new Promise<void>((resolve) => { setImmediate(() => resolve()); });
 const shown = () => JSON.stringify(tree.toJSON());
-const agendaCalls = () => mockMutate.mock.calls.filter(([options]) => String(options.mutation).includes('ShowAssistantMailAgenda'));
 
-async function open(mail: object, agenda: object | Error = { success: true, events: [] }) {
+async function open(mail: object | null) {
   mockQuery.mockResolvedValue({ data: { assistantMail: mail } });
-  mockMutate.mockImplementation(async () => {
-    if (agenda instanceof Error) {
-      throw agenda;
-    }
-    return { data: { showAssistantMailAgenda: agenda } };
-  });
+  mockMutate.mockResolvedValue({ data: {} });
   await act(async () => {
     tree = renderer.create(React.createElement(MailSheet, { userId: 'u1', onClose: jest.fn() }));
     await flush();
@@ -55,63 +53,49 @@ beforeEach(() => {
   mockQuery.mockReset();
   mockMutate.mockReset();
 });
-afterEach(() => act(() => tree.unmount()));
+afterEach(() => act(() => tree?.unmount()));
 
-it('shows the new kind in our words and the summary as a claim of the mail', async () => {
+it('asks consent version 3: mail is told and answered in the conversation', () => {
+  expect(MAIL_CONSENT_VERSION).toBe(3);
+});
+
+it('before connecting: what it does, the data, the risk and one button', async () => {
+  await open({ ...MAIL, connected: false, email: null });
+  expect(shown()).toContain('Tu Gmail, en Confío');
+  expect(shown()).toContain('Me pides escribir o responder en nuestra conversación');
+  expect(shown()).toContain('aún no está verificado');
+  expect(shown()).toContain('Conectar Gmail');
+});
+
+it('connected: manages the connection only, with no inbox, ask or writing here', async () => {
   await open(MAIL);
-  expect(shown()).toContain('Parece que esperan tu respuesta');
-  expect(shown()).toContain('Según el correo: ');
-  expect(shown()).toContain('Ana pregunta por el contrato');
+  expect(shown()).toContain('Gmail conectado');
+  expect(shown()).toContain('Activo · owner@gmail.example');
+  expect(shown()).toContain('Ir a mi conversación');
+  expect(shown()).not.toContain('Crear borrador');
+  expect(shown()).not.toContain('Pregúntale a tu correo');
+  expect(mockMutate).not.toHaveBeenCalled();  // no agenda or anything read from Google on opening
 });
 
-it('shows today and tomorrow from the calendar', async () => {
-  await open(MAIL, { success: true, events: [
-    { title: 'Dentista', day: '2026-11-23', startsAt: '2026-11-23T21:00:00+00:00', allDay: false },
-    { title: 'Feriado', day: '2026-11-24', startsAt: null, allDay: true },
-  ] });
-  expect(agendaCalls()).toHaveLength(1);
-  expect(shown()).toContain('Dentista');
-  // Day and hour of a timed event both come from its instant, on this phone's clock.
-  const at = new Date('2026-11-23T21:00:00+00:00');
-  expect(shown()).toContain(
-    `${at.toLocaleDateString('es', { day: 'numeric', month: 'short' })} · ${at.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`);
-  expect(shown()).toContain('24 nov · Todo el día');
+it('an older consent shows what changed before reading again', async () => {
+  await open({ ...MAIL, consentOutdated: true, needsReconnect: true });
+  expect(shown()).toContain('Revisa lo que cambió');
+  expect(shown()).toContain('Aceptar y reconectar');
 });
 
-it('an ended grant found by the calendar shows the reconnect button', async () => {
-  await open(MAIL, { success: false, errorCode: 'reconnect', events: null });
-  expect(shown()).toContain('Volver a conectar Gmail');
-  expect(shown()).not.toContain('Hoy y mañana en tu calendario');
+it('a connection accepted under the older text is asked again, to tell mail in the conversation', async () => {
+  await open({ ...MAIL, consentVersion: 2 });
+  expect(shown()).toContain('Revisa lo que cambió');
 });
 
-it('connected under the older text: the new text comes first and nothing is read', async () => {
-  await open({ ...MAIL, needsReconnect: true, consentOutdated: true, needs: [] });
-  expect(shown()).toContain('Esto cambió desde que conectaste tu Gmail');
-  expect(shown()).toContain('Aceptar y conectar Gmail');
-  expect(shown()).not.toContain('Volver a conectar Gmail');
-  expect(agendaCalls()).toHaveLength(0);
+it('missing permissions offer to reconnect', async () => {
+  await open({ ...MAIL, canSend: false, canCalendar: false });
+  expect(shown()).toContain('Sin permiso para enviar correos');
+  expect(shown()).toContain('Reconectar para dar los permisos');
 });
 
-it('a calendar that fails does not cover the mail', async () => {
-  await open(MAIL, new Error('offline'));
-  expect(shown()).toContain('No pude leer tu calendario ahora.');
-  expect(shown()).toContain('Parece que esperan tu respuesta');
-  expect(shown()).not.toContain('No pude completar eso con tu correo');
-});
-
-it('without the calendar permission it never asks Google and offers to reconnect', async () => {
-  await open({ ...MAIL, canCalendar: false });
-  expect(agendaCalls()).toHaveLength(0);
-  expect(shown()).toContain('Reconectar para incluir tu calendario');
-});
-
-it('the consent says what is read now, and carries its own version', async () => {
-  await open({ ...MAIL, connected: false, canCalendar: false, email: null, needs: [] });
-  expect(MAIL_CONSENT_VERSION).toBe(2);
-  expect(shown()).toContain('correos que esperan tu respuesta');
-  expect(shown()).toContain('Tu calendario no se guarda ni se envía a OpenAI');
-  expect(shown()).toContain('busca en todo tu Gmail');
-  expect(shown()).toContain('cuántas');
-  expect(shown()).toContain('un resumen de una línea');
-  expect(agendaCalls()).toHaveLength(0);
+it('a failed read keeps the way out', async () => {
+  await open(null);
+  expect(shown()).toContain('Reintentar');
+  expect(shown()).toContain('Desconectar Gmail y borrar');
 });

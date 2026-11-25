@@ -10,8 +10,12 @@ READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
 # Optional on Google's screen: without it the daily notice counts mail only.
 CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly'
-# 2: reads beyond bills, keeps a one-line summary, and reads Google Calendar.
+# 2: reads beyond bills, keeps a one-line summary, and reads Google Calendar. The floor for reading at all.
 CONSENT_VERSION = 2
+# 3: what needs the person is told in the Confío IA conversation, and mail is written and answered there.
+# Only a connection accepted under it gets that; one under 2 keeps being read and noticed as before.
+CHAT_CONSENT_VERSION = 3
+ACCEPTED_CONSENT = (2, 3)  # what an app may connect under: older builds show the text of 2
 # Google's own limit for a project in Testing.
 MAX_TESTERS = 100
 
@@ -94,6 +98,11 @@ def may_take_place(user) -> bool:
         # them come back, so the account Google counted is recorded (oauth.complete) before the refusal.
         return True
     return connections.seats_left() > 0
+
+
+def chat_consented(connection) -> bool:
+    """Agreed to mail being told and written in the Confío IA conversation."""
+    return connection is not None and connection.consent_version >= CHAT_CONSENT_VERSION
 
 
 def consented(connection) -> bool:

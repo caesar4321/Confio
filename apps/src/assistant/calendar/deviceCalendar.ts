@@ -2,8 +2,10 @@
 // credential is involved and nothing here talks to a server.
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
-export type DeviceCalendar = { id: string; title: string; account: string };
-export type DeviceEvent = { id: string; title: string; startsAt: number; allDay: boolean };
+// color and calendarId are optional: today's native readers do not send them, and the screen shows a dot only
+// when they do.
+export type DeviceCalendar = { id: string; title: string; account: string; color?: string };
+export type DeviceEvent = { id: string; title: string; startsAt: number; allDay: boolean; calendarId?: string };
 
 type NativeCalendar = {
   permissionStatus(): Promise<string>;

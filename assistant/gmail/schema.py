@@ -58,6 +58,7 @@ class AssistantMailType(graphene.ObjectType):
     can_send = graphene.Boolean(required=True)
     can_calendar = graphene.Boolean(required=True)
     consent_outdated = graphene.Boolean(required=True, description='Show the consent text again before reconnecting')
+    consent_version = graphene.Int(description='What the connection was accepted under: an app with newer text asks again')
     email = graphene.String()
     needs = graphene.List(graphene.NonNull(AssistantMailNeedType), required=True)
 
@@ -244,8 +245,46 @@ class SendAssistantMailDraft(_Result, graphene.Mutation):
             connection, draft = _connected(user), _draft_id(id)
             limits.claim(user, 'send')
             compose.send(connection, draft, display_hash)
+            if config.chat_consented(connection):
+                from . import chat
+                chat.sent(user, draft)
             return {}
         return _run(cls, info, action)
+
+
+class PrepareAssistantMailReply(_Result, graphene.Mutation):
+    """From the "Responder…" chip in the conversation: what she wants to say, written into a card there."""
+
+    class Arguments:
+        need_id = graphene.ID(required=True)
+        instructions = graphene.String(required=True)
+
+    draft = graphene.Field(AssistantMailDraftType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, need_id, instructions):
+        def action(user):
+            from . import chat
+            asked = service.words(instructions)
+            limits.claim(user, 'draft')
+            return {'draft': AssistantMailDraftType(**chat.prepare(user, asked, need_id=need_id))}
+        return _run(cls, info, action)
+
+
+class ShowAssistantMailDraft(_Result, graphene.Mutation):
+    """The card in the conversation. A mutation: never cached in the app's store."""
+
+    class Arguments:
+        id = graphene.ID(required=True)
+
+    draft = graphene.Field(AssistantMailDraftType)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, id):
+        return _run(cls, info, lambda user: {'draft': AssistantMailDraftType(
+            **compose.show(_connected(user), _draft_id(id)))})
 
 
 class ShowAssistantMailAgenda(_Result, graphene.Mutation):
@@ -261,6 +300,8 @@ class ShowAssistantMailAgenda(_Result, graphene.Mutation):
 
 
 class Mutation(graphene.ObjectType):
+    prepare_assistant_mail_reply = PrepareAssistantMailReply.Field()
+    show_assistant_mail_draft = ShowAssistantMailDraft.Field()
     show_assistant_mail_agenda = ShowAssistantMailAgenda.Field()
     start_assistant_mail_connect = StartAssistantMailConnect.Field()
     complete_assistant_mail_connect = CompleteAssistantMailConnect.Field()

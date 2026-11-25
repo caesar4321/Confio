@@ -30,9 +30,11 @@ def overview(user, account, jwt_context) -> dict:
     connection = connection_of(user) if config.is_personal(account, jwt_context) else None
     available = config.allowed(user, account, jwt_context)
     result = {'available': available, 'connected': connection is not None, 'needs_reconnect': False,
-              'can_send': False, 'can_calendar': False, 'consent_outdated': False, 'email': None, 'needs': []}
+              'can_send': False, 'can_calendar': False, 'consent_outdated': False, 'email': None, 'needs': [],
+              'consent_version': None}
     if connection is None:
         return result
+    result['consent_version'] = connection.consent_version
     result['needs_reconnect'] = connection.status != GmailConnection.Status.ACTIVE
     if not available:
         return result  # only enough to disconnect

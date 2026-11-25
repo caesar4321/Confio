@@ -134,6 +134,16 @@ def _locked(connection, draft_id):
     return draft
 
 
+def show(connection, draft_id) -> dict:
+    """A draft as its card shows it."""
+    draft = MailDraft.objects.filter(pk=draft_id, connection=connection, expires_at__gt=timezone.now()).first()
+    if draft is None:
+        raise MailRefused('not_found', 'Ese borrador ya no existe.')
+    if draft.status != MailDraft.Status.DRAFT:
+        raise MailRefused('sent_unknown', 'Ese correo ya se intentó enviar. Revisa tu carpeta Enviados.')
+    return present(crypto.unseal(draft.sealed), draft, connection.can_send)
+
+
 def update(connection, draft_id, to, subject, body) -> dict:
     with transaction.atomic():
         draft = _locked(connection, draft_id)

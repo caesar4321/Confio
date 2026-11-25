@@ -39,7 +39,7 @@ def _challenge(verifier):
 
 
 def start(user, consent_version):
-    if consent_version != config.CONSENT_VERSION:
+    if consent_version not in config.ACCEPTED_CONSENT:
         raise MailRefused('consent', 'Actualiza la app para conectar Gmail.')
     state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(64)
     challenge = _challenge(verifier)
@@ -205,6 +205,8 @@ def _forget_notices(user_id):
             Notification.objects.filter(user_id=user_id, data__type=NOTICE_TYPE).delete()
     except Exception as exc:  # noqa: BLE001
         logger.warning('Gmail notices not erased: %s', type(exc).__name__)
+    from . import chat
+    chat.erase(user_id)  # what the assistant said about this mail in the conversation goes too
 
 
 def disconnect(connection) -> bool:

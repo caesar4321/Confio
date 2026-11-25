@@ -1,12 +1,13 @@
-// Connect, choose, review and revoke the phone's calendar for Confío IA.
+// Connect, choose, review and revoke the phone's calendar for Confío IA, on the shared setup screen.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Linking, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { useMutation } from '@apollo/client';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
+import CalendarMark from '../../components/svg/CalendarMark';
 import { Text } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
+import SetupScreen, { Action, Danger, Details, Fine, Notes, Points, Secondary, setupStyles, type Hero } from '../connections/SetupScreen';
 import { ANALYZE_ASSISTANT_CALENDAR, KIND_LABELS, type CalendarKind } from './api';
 import { CALENDAR_CONSENT_VERSION, clearCalendarConsent, readCalendarConsent, saveCalendarConsent } from './consent';
 import { forgetCalendar } from './forgetCalendar';
@@ -18,18 +19,50 @@ import {
   type DeviceCalendar,
   type DeviceEvent,
 } from './deviceCalendar';
+import { calendarColor, calendarName, groupByAccount, groupByDay, timeLabel } from './display';
 import { cleanTitle, MAX_SENT, reminderTime, upcoming, WINDOW_DAYS } from './events';
 import { cancelAllReminders, cancelReminder, pruneReminders, scheduleReminder } from './reminders';
 
 type Step = 'loading' | 'intro' | 'calendars' | 'events';
-type Row = DeviceCalendar | DeviceEvent;
 type Props = { userId: string; onClose: () => void };
 
-const when = (event: DeviceEvent) => {
-  const date = new Date(event.startsAt);
-  const day = date.toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
-  return event.allDay ? day : `${day}, ${date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`;
-};
+const INTRO_POINTS = [
+  { icon: 'calendar', text: 'Veo lo que viene en los calendarios que elijas (Apple, Google y otros de este teléfono).' },
+  { icon: 'bell', text: 'Te aviso antes de lo importante, con avisos en este teléfono.' },
+  { icon: 'zap', text: 'Si quieres, Confío IA te dice qué parece un pago, un viaje o un vencimiento.' },
+];
+const INTRO_DATA = 'La lectura ocurre en este teléfono. Solo salen de él los títulos que tú marques, hacia Confío y '
+  + 'OpenAI (Estados Unidos), y no se guardan.';
+const INTRO_RISK = 'Confío IA puede equivocarse y nunca paga por ti.';
+// The full consent: every rule the screen keeps.
+const INTRO_DETAILS = [
+  'Confío lee solo los calendarios de este teléfono que tú elijas (iCloud, Google u otros). La lectura ocurre en tu teléfono.',
+  'Confío no crea, cambia ni borra eventos.',
+  `Te muestro tus próximos ${WINDOW_DAYS} días, con los números y enlaces de los títulos ocultos.`,
+  'Si me lo pides, te aviso con una notificación de este teléfono. El aviso no muestra tu evento.',
+  `Nada sale del teléfono hasta que marques títulos y toques Enviar. Solo envío esos títulos (hasta ${MAX_SENT}), tal como los ves, a Confío y a OpenAI (Estados Unidos).`,
+  'No enviamos fechas, lugares ni invitados.',
+  'Confío no guarda los títulos que envías.',
+  'Puedes desconectar cuando quieras: borro tu elección y los avisos. El permiso se quita en los ajustes del teléfono.',
+  'Confío IA puede equivocarse y nunca paga por ti.',
+];
+const SEND_DISCLOSURE = 'Al tocar el botón, aceptas enviar a Confío y a OpenAI (Estados Unidos) solo los títulos '
+  + 'marcados, tal como los ves arriba. No enviamos fechas, lugares ni invitados. Confío no los guarda. Confío IA '
+  + 'puede equivocarse y nunca paga por ti.';
+
+const countCalendars = (count: number) => `${count} ${count === 1 ? 'calendario' : 'calendarios'}`;
+
+function Checkbox({ checked, partial = false }: { checked: boolean; partial?: boolean }) {
+  return (
+    <View style={[styles.box, (checked || partial) && styles.boxOn]}>
+      {checked || partial ? <Icon name={checked ? 'check' : 'minus'} size={15} color={colors.white} /> : null}
+    </View>
+  );
+}
+
+function Dot({ color }: { color: string | null }) {
+  return color ? <View style={[styles.dot, { backgroundColor: color }]} /> : null;
+}
 
 export default function CalendarConnectSheet({ userId, onClose }: Props) {
   const [step, setStep] = useState<Step>('loading');
@@ -130,7 +163,11 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
     setOfferSettings(false);
     const found = await listDeviceCalendars();
     setCalendars(found);
-    setAllowed((ids) => ids.filter((id) => found.some((calendar) => calendar.id === id)));
+    // Keep an earlier choice; a first choice starts with every calendar, and the person clears what they don't want.
+    setAllowed((ids) => {
+      const kept = ids.filter((id) => found.some((calendar) => calendar.id === id));
+      return kept.length ? kept : found.map((calendar) => calendar.id);
+    });
     setStep('calendars');
   }, 'No pude abrir tus calendarios. Inténtalo de nuevo.');
 
@@ -200,159 +237,208 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
     }
   }, 'No pude cambiar el aviso. Inténtalo de nuevo.');
 
-  const toggle = (id: string) => {
-    if (step === 'calendars') {
-      setAllowed((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
-    } else {
-      setPicked((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : ids.length < MAX_SENT ? [...ids, id] : ids));
-    }
+  const toggleCalendar = (id: string) => {
+    setAllowed((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   };
 
-  const renderRow = ({ item }: { item: Row }) => {
-    const event = 'startsAt' in item ? item : null;
-    const checked = (event ? picked : allowed).includes(item.id);
-    const title = event ? cleanTitle(event.title) : item.title;
-    const label = event && kinds[item.id] ? KIND_LABELS[kinds[item.id]] : null;
-    const reminderOn = reminded.includes(item.id);
-    return (
-      <View style={styles.row}>
-        <Pressable
-          style={styles.rowMain}
-          disabled={busy}
-          onPress={() => toggle(item.id)}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked }}
-          accessibilityLabel={title}
-        >
-          <Icon name={checked ? 'check-square' : 'square'} size={22} color={colors.successText} />
-          <View style={styles.rowText}>
-            <Text style={styles.rowTitle}>{title}</Text>
-            <Text style={styles.detail}>{'startsAt' in item ? when(item) : item.account}</Text>
-            {label ? <Text style={styles.kind}>{label}</Text> : null}
-          </View>
-        </Pressable>
-        {event && (reminderOn || reminderTime(event)) ? (
-          <Pressable style={styles.remind} disabled={busy} onPress={() => toggleReminder(event)} accessibilityRole="button">
-            <Text style={styles.link}>{reminderOn ? 'Quitar aviso' : 'Avísame'}</Text>
-          </Pressable>
-        ) : null}
-      </View>
+  const allChosen = calendars.length > 0 && calendars.every((calendar) => allowed.includes(calendar.id));
+  const chosenCount = calendars.filter((calendar) => allowed.includes(calendar.id)).length;
+  const toggleAll = () => setAllowed(allChosen ? [] : calendars.map((calendar) => calendar.id));
+
+  const pickEvent = (id: string) => {
+    setPicked((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : ids.length < MAX_SENT ? [...ids, id] : ids));
+  };
+
+  const settingsLink = offerSettings
+    ? <Secondary label="Abrir ajustes del teléfono" onPress={() => void Linking.openSettings()} />
+    : null;
+  const disconnect = connected ? <Danger label="Desconectar y borrar" onPress={revoke} disabled={busy} /> : null;
+
+  let hero: Hero = { title: 'Tu calendario, en Confío' };
+  let content: React.ReactNode = <ActivityIndicator style={styles.loading} color={colors.successText} />;
+  let footer: React.ReactNode = null;
+
+  if (step === 'intro') {
+    hero = { title: 'Tu calendario, en Confío', chip: 'Paso 1 de 2' };
+    content = (
+      <>
+        <Points points={INTRO_POINTS} />
+        <Notes data={INTRO_DATA} risk={INTRO_RISK} />
+        <Details lines={INTRO_DETAILS} />
+        {settingsLink}
+        {disconnect}
+      </>
     );
-  };
-
-  const button = (label: string, onPress: () => void, disabled = false) => (
-    <Pressable
-      style={[styles.button, (busy || disabled) && styles.disabled]}
-      disabled={busy || disabled}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: busy || disabled }}
-    >
-      <Text style={styles.buttonText}>{label}</Text>
-    </Pressable>
-  );
-
-  const heading = step === 'calendars'
-    ? 'Elige qué calendarios puede leer Confío en este teléfono.'
-    : step === 'events'
-      ? `Tus próximos ${WINDOW_DAYS} días, con números y enlaces ocultos. Marca solo lo que quieras que revise Confío IA.`
-      : 'Confío puede leer los calendarios de este teléfono que tú elijas (iCloud, Google u otros) para mostrarte lo que viene y avisarte si se lo pides. La lectura ocurre en tu teléfono. No crea ni cambia eventos.';
-
-  const rows: Row[] = step === 'calendars' ? calendars : step === 'events' ? events : [];
+    footer = (
+      <>
+        <Action label="Permitir acceso al calendario" onPress={chooseCalendars} busy={busy} />
+        <Fine text="Luego eliges qué calendarios leo. No creo ni cambio eventos." />
+      </>
+    );
+  } else if (step === 'calendars') {
+    hero = { title: 'Elige tus calendarios', chip: 'Paso 2 de 2' };
+    content = calendars.length ? (
+      <>
+        <Text style={setupStyles.text}>Elige qué calendarios puede leer Confío en este teléfono.</Text>
+        <Pressable
+          style={[setupStyles.card, styles.allRow]}
+          disabled={busy}
+          onPress={toggleAll}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: allChosen ? true : chosenCount ? 'mixed' : false }}
+          accessibilityLabel="Todos los calendarios"
+        >
+          <View style={styles.allIcon}><Icon name="layers" size={18} color={colors.successText} /></View>
+          <View style={styles.rowText}>
+            <Text style={styles.allTitle}>Todos los calendarios</Text>
+            <Text style={setupStyles.hint}>{`${chosenCount} de ${calendars.length} elegidos`}</Text>
+          </View>
+          <Checkbox checked={allChosen} partial={!allChosen && chosenCount > 0} />
+        </Pressable>
+        {groupByAccount(calendars).map((group) => (
+          <View key={group.account} style={styles.group}>
+            <Text style={styles.groupTitle} numberOfLines={1}>{group.account}</Text>
+            <View style={setupStyles.card}>
+              {group.calendars.map((calendar, index) => {
+                const checked = allowed.includes(calendar.id);
+                const name = calendarName(calendar.title);
+                return (
+                  <Pressable
+                    key={calendar.id}
+                    style={[styles.row, index > 0 && setupStyles.divider]}
+                    disabled={busy}
+                    onPress={() => toggleCalendar(calendar.id)}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked }}
+                    accessibilityLabel={name}
+                  >
+                    <Dot color={calendarColor(calendar)} />
+                    <Text style={styles.rowTitle} numberOfLines={2}>{name}</Text>
+                    <Checkbox checked={checked} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ))}
+        {disconnect}
+      </>
+    ) : (
+      <>
+        <Text style={setupStyles.text}>No encontré calendarios en este teléfono.</Text>
+        {disconnect}
+      </>
+    );
+    footer = <Action label="Listo" onPress={save} disabled={!allowed.length} busy={busy} />;
+  } else if (step === 'events') {
+    hero = { title: 'Calendario conectado', chip: `Activo · ${countCalendars(allowed.length)}`, live: true };
+    const byId = new Map(calendars.map((calendar) => [calendar.id, calendar]));
+    content = (
+      <>
+        <Text style={setupStyles.text}>
+          {`Tus próximos ${WINDOW_DAYS} días, con números y enlaces ocultos. Marca hasta ${MAX_SENT} títulos si quieres que los revise Confío IA.`}
+        </Text>
+        {events.length ? groupByDay(events).map((day) => (
+          <View key={day.key} style={styles.group}>
+            <Text style={styles.groupTitle}>{day.label}</Text>
+            <View style={setupStyles.card}>
+              {day.events.map((event, index) => {
+                const checked = picked.includes(event.id);
+                const title = cleanTitle(event.title);
+                const label = kinds[event.id] ? KIND_LABELS[kinds[event.id]] : null;
+                const reminderOn = reminded.includes(event.id);
+                const color = event.calendarId ? calendarColor(byId.get(event.calendarId)) : null;
+                return (
+                  <View key={event.id} style={[styles.eventRow, index > 0 && setupStyles.divider]}>
+                    <Pressable
+                      style={styles.eventMain}
+                      disabled={busy}
+                      onPress={() => pickEvent(event.id)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked }}
+                      accessibilityLabel={title}
+                    >
+                      <Checkbox checked={checked} />
+                      <View style={styles.rowText}>
+                        <Text style={styles.eventTitle}>{title}</Text>
+                        <View style={styles.meta}>
+                          <Dot color={color} />
+                          <Text style={setupStyles.hint}>{timeLabel(event)}</Text>
+                        </View>
+                        {label ? (
+                          <View style={styles.kind}>
+                            <Icon name="zap" size={12} color={colors.successText} />
+                            <Text style={styles.kindText}>{label}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                    {reminderOn || reminderTime(event) ? (
+                      <Pressable
+                        style={[styles.remind, reminderOn && styles.remindOn]}
+                        disabled={busy}
+                        onPress={() => toggleReminder(event)}
+                        accessibilityRole="button"
+                      >
+                        <Icon name={reminderOn ? 'bell-off' : 'bell'} size={13} color={colors.successText} />
+                        <Text style={styles.remindText}>{reminderOn ? 'Quitar aviso' : 'Avísame'}</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )) : <Text style={setupStyles.text}>No hay eventos en estos días.</Text>}
+        <Secondary label="Cambiar calendarios" onPress={chooseCalendars} disabled={busy} />
+        {settingsLink}
+        {disconnect}
+      </>
+    );
+    footer = picked.length ? (
+      <>
+        <Fine text={SEND_DISCLOSURE} />
+        <Action label={`Enviar y revisar (${picked.length}/${MAX_SENT})`} onPress={review} busy={busy} />
+      </>
+    ) : <Action label="Ir a mi conversación" onPress={onClose} />;
+  }
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose}>
-      <SafeAreaProvider>
-        <SafeAreaView style={styles.screen}>
-          <View style={styles.header}>
-            <Text style={styles.title}>Tu agenda</Text>
-            <Pressable style={styles.close} onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar">
-              <Icon name="x" size={24} color={colors.textFlat} />
-            </Pressable>
-          </View>
-          {step === 'loading' ? (
-            <ActivityIndicator style={styles.loading} color={colors.successText} />
-          ) : (
-            <FlatList
-              data={rows}
-              extraData={[allowed, picked, kinds, reminded, busy]}
-              keyExtractor={(item) => item.id}
-              renderItem={renderRow}
-              initialNumToRender={20}
-              maxToRenderPerBatch={10}
-              windowSize={21}
-              contentContainerStyle={styles.content}
-              ListHeaderComponent={<Text style={styles.intro}>{heading}</Text>}
-              ListEmptyComponent={step === 'intro' ? null : (
-                <Text style={styles.detail}>
-                  {step === 'calendars' ? 'No encontré calendarios en este teléfono.' : 'No hay eventos en estos días.'}
-                </Text>
-              )}
-              ListFooterComponent={(
-                <View style={styles.footer}>
-                  {step === 'intro' ? button('Elegir calendarios', chooseCalendars) : null}
-                  {step === 'calendars' ? button('Guardar', save, !allowed.length) : null}
-                  {step === 'events' && events.length ? (
-                    <>
-                      <Text style={styles.detail}>
-                        Al tocar el botón, aceptas enviar a Confío y a OpenAI (Estados Unidos) solo los títulos
-                        marcados, tal como los ves arriba. No enviamos fechas, lugares ni invitados. Confío no los
-                        guarda. Confío IA puede equivocarse y nunca paga por ti.
-                      </Text>
-                      {button(`Enviar y revisar (${picked.length}/${MAX_SENT})`, review, !picked.length)}
-                    </>
-                  ) : null}
-                  {busy ? <ActivityIndicator color={colors.successText} /> : null}
-                  {message ? <Text style={styles.message} accessibilityLiveRegion="polite">{message}</Text> : null}
-                  {offerSettings ? (
-                    <Pressable style={styles.linkButton} onPress={() => Linking.openSettings()} accessibilityRole="button">
-                      <Text style={styles.link}>Abrir ajustes del teléfono</Text>
-                    </Pressable>
-                  ) : null}
-                  {connected ? (
-                    <View style={styles.manage}>
-                      {step === 'events' ? (
-                        <Pressable style={styles.linkButton} disabled={busy} onPress={chooseCalendars} accessibilityRole="button">
-                          <Text style={styles.link}>Cambiar calendarios</Text>
-                        </Pressable>
-                      ) : null}
-                      <Pressable style={styles.linkButton} disabled={busy} onPress={revoke} accessibilityRole="button">
-                        <Text style={styles.revoke}>Desconectar y borrar</Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-                </View>
-              )}
-            />
-          )}
-        </SafeAreaView>
-      </SafeAreaProvider>
-    </Modal>
+    <SetupScreen logo={<CalendarMark size={36} />} hero={hero} onClose={onClose} footer={footer} message={message}>
+      {content}
+    </SetupScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 20 },
-  title: { fontSize: 20, fontWeight: '700', color: colors.textFlat },
-  close: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center' },
-  loading: { marginTop: 40 },
-  content: { paddingHorizontal: 20, paddingBottom: 32 },
-  intro: { fontSize: 15, color: colors.gray600, marginBottom: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.borderLight },
-  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
-  rowText: { flex: 1 },
-  rowTitle: { fontSize: 15, color: colors.textFlat },
-  detail: { fontSize: 13, color: colors.textSecondary },
-  kind: { fontSize: 13, fontWeight: '600', color: colors.successText },
-  remind: { minHeight: 44, justifyContent: 'center', paddingLeft: 12 },
-  footer: { gap: 12, marginTop: 20 },
-  button: { minHeight: 48, borderRadius: 14, backgroundColor: colors.successText, alignItems: 'center', justifyContent: 'center', padding: 12 },
-  disabled: { opacity: 0.45 },
-  buttonText: { color: colors.white, fontSize: 15, fontWeight: '700' },
-  message: { fontSize: 14, color: colors.textFlat },
-  manage: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  linkButton: { minHeight: 44, justifyContent: 'center' },
-  link: { color: colors.successText, fontSize: 14, fontWeight: '600' },
-  revoke: { color: colors.error.text, fontSize: 14, fontWeight: '600' },
+  loading: { marginTop: 24 },
+  allRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, minHeight: 64 },
+  allIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
+  allTitle: { fontSize: 16, fontWeight: '800', color: colors.textFlat },
+  group: { gap: 8 },
+  groupTitle: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, paddingHorizontal: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingVertical: 12 },
+  rowText: { flex: 1, gap: 2 },
+  rowTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.textFlat },
+  eventTitle: { fontSize: 15, fontWeight: '600', color: colors.textFlat },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  box: {
+    width: 22, height: 22, borderRadius: 7, borderWidth: 2, borderColor: colors.border, alignItems: 'center',
+    justifyContent: 'center',
+  },
+  boxOn: { backgroundColor: colors.successText, borderColor: colors.successText },
+  eventRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  eventMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, minHeight: 52 },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  kind: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 4, borderRadius: 999,
+    backgroundColor: colors.mint, paddingHorizontal: 8, paddingVertical: 2,
+  },
+  kindText: { fontSize: 12, fontWeight: '700', color: colors.successText },
+  remind: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, paddingHorizontal: 10, borderRadius: 999,
+    alignSelf: 'center',
+  },
+  remindOn: { backgroundColor: colors.mint },
+  remindText: { fontSize: 13, fontWeight: '700', color: colors.successText },
 });

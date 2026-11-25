@@ -491,3 +491,14 @@ The founder chose unverified production: the Google project `confio-gmail-pilot`
 - Someone who consented is never refused for capacity: the hold was taken before Google's screen. A place taken away is not taken again by connecting.
 - `GMAIL_PILOT_FULL=True` stays the backstop when Google's console shows a higher count than ours.
 - The refresh token no longer expires every 7 days (that was Testing mode only).
+
+## 10f. Gmail in the conversation (2026-11-24)
+
+The founder asked for Gmail to work like WhatsApp: no writing or replying on the Gmail screen; everything happens in the Confío IA conversation.
+
+- **Screens.** Gmail and the phone Calendario use the WhatsApp setup design (`apps/src/assistant/connections/SetupScreen.tsx`). The Gmail screen only manages the connection. The calendar screen picks all calendars at once, groups them by account and cleans Android's raw names (`calendar_displayname_local`).
+- **Told in the conversation** (`assistant/gmail/chat.py`). A new need from mail of the last two days is posted by code: sender name and subject between «», cleaned of links, addresses and numbers, «» stripped from them; the one-line summary after «Según el correo»; our own kind words. At most six a day. Replay to the model marks them as third parties' words (`engine.GMAIL_PREFIX`). Erased on disconnect and on a mailbox change, under the connection's row lock, so a post racing a disconnect is either erased or never written.
+- **A prompt notice.** Each told need also sends a fixed-text push at once ("Tu Gmail trae un pago pendiente. Te lo cuento en Confío IA."), in the person's daytime, at most one an hour; it counts as noticed, so the morning notice does not repeat it. The morning notice stays for the rest and for the calendar.
+- **Writing.** The chat model's `prepare_mail` tool, or the "Responder…" chip, puts a mail on a card (`mail_draft`). It leaves only from Enviar, with the display hash. An address counts only if she wrote it whole, or it is the address of the card being changed; links and 3+ digit numbers she never wrote are dropped from her request. A new version deletes the earlier drafts, so only the newest card can be sent. A sender name shared by two addresses is never guessed between.
+- **Consent.** Version 2 stays the floor for reading. Version 3 (this build's text) is needed for anything in the conversation; a connection under 2 keeps the daily notice only, and the new app asks again.
+- The old in-sheet ask, inbox and draft operations stay on the server for older builds.

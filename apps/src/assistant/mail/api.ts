@@ -3,7 +3,8 @@ import { gql } from '@apollo/client';
 // Own documents, all named *AssistantMail*: an older server rejects only these,
 // and both request logs redact on the name.
 // 2: reads beyond bills, keeps a one-line summary, and reads Google Calendar.
-export const MAIL_CONSENT_VERSION = 2;
+// 3: what needs you is told in the Confío IA conversation, and mail is written and answered there.
+export const MAIL_CONSENT_VERSION = 3;
 
 export type MailNeed = {
   id: string;
@@ -33,6 +34,8 @@ export type MailState = {
   canSend: boolean;
   canCalendar: boolean;
   consentOutdated: boolean;
+  // Accepted under: below MAIL_CONSENT_VERSION the screen asks again (an older server leaves it out).
+  consentVersion?: number | null;
   email: string | null;
   needs: MailNeed[];
 };
@@ -55,7 +58,7 @@ const SOURCE = 'handle sender subject sentAt';
 export const GET_MAIL = gql`
   query GetAssistantMail {
     assistantMail {
-      available connected needsReconnect canSend canCalendar consentOutdated email
+      available connected needsReconnect canSend canCalendar consentOutdated consentVersion email
       needs { id kind dueDate amount currency summary }
     }
   }
@@ -119,5 +122,18 @@ export const UPDATE_DRAFT = gql`
 export const SEND_DRAFT = gql`
   mutation SendAssistantMailDraft($id: ID!, $displayHash: String!) {
     sendAssistantMailDraft(id: $id, displayHash: $displayHash) { success error errorCode }
+  }
+`;
+
+// In the Confío IA conversation (assistant/gmail/chat.py): a reply from the "Responder…" chip, and the card.
+export const PREPARE_MAIL_REPLY = gql`
+  mutation PrepareAssistantMailReply($needId: ID!, $instructions: String!) {
+    prepareAssistantMailReply(needId: $needId, instructions: $instructions) { success error errorCode draft { id } }
+  }
+`;
+
+export const SHOW_MAIL_DRAFT = gql`
+  mutation ShowAssistantMailDraft($id: ID!) {
+    showAssistantMailDraft(id: $id) { success error errorCode draft { ${DRAFT} } }
   }
 `;

@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import F, Q
 from django.utils import timezone
 
-from . import config, crypto, oauth, reader, session, text
+from . import chat, config, crypto, oauth, reader, session, text
 from .errors import GmailError, MailRefused
 from .models import GmailConnection, GmailOAuthState, MailDraft, MailNeed
 
@@ -42,7 +42,7 @@ CALENDAR_SECONDS = 60
 # A calendar that failed this often today no longer holds the mail part of the notice.
 CALENDAR_TRIES = 3
 MANY = 9
-TITLE, WHERE = 'Confío IA', 'Míralo en Confío IA: ✨ Tu asistente → Tu correo.'
+TITLE, WHERE = 'Confío IA', 'Te lo cuento en Confío IA.'
 # Fixed words and counts: a lock screen never shows anything from a mail or an event.
 WORDS = {'payment': ('pago', 'pagos'), 'deadline': ('vencimiento', 'vencimientos'),
          'reply': ('correo por responder', 'correos por responder'), 'appointment': ('cita', 'citas'),
@@ -182,23 +182,30 @@ def _one(connection, box, message_id, key, offset):
     need = reader.detect(mail, config.local_today(offset=offset))
     if need and not need['due_date'] and mail.sent_at < timezone.now() - timedelta(days=UNDATED_DAYS):
         need = None  # the first read goes back 30 days: an old letter is not news
-    if need and not _store(connection, message_id, key, need):
-        return STOP
+    if need:
+        found = text.addresses(mail.headers.get('from'))
+        stored = _store(connection, message_id, key, need, chat.sender_name(mail),
+                        crypto.opaque(found[0].lower()) if len(found) == 1 else '')
+        if stored is False:
+            return STOP
+        if stored is not True:
+            chat.tell(connection, stored, mail)  # new: told once, in the conversation
     return READ
 
 
-def _store(connection, message_id, key, need):
+def _store(connection, message_id, key, need, sender='', from_key=''):
+    """False: disconnected or reconnected meanwhile. True: already stored. Else the new need."""
     with transaction.atomic():
         # Disconnected or reconnected meanwhile: write nothing.
         current = GmailConnection.objects.select_for_update().filter(pk=connection.pk, grant=connection.grant).first()
         if current is None:
             return False
-        MailNeed.objects.get_or_create(connection=current, source_key=key, defaults={
+        row, created = MailNeed.objects.get_or_create(connection=current, source_key=key, defaults={
             'kind': need['kind'], 'due_date': need['due_date'],
             'sealed': crypto.seal({'id': message_id, 'amount': need['amount'], 'currency': need['currency'],
-                                   'summary': need.get('summary') or ''}),
+                                   'summary': need.get('summary') or '', 'sender': sender, 'from_key': from_key}),
         })
-        return True
+        return row if created else True
 
 
 def _notify(user, copy):

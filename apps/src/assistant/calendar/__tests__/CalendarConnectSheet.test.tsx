@@ -18,7 +18,7 @@ jest.mock('../consent', () => ({
 jest.mock('../deviceCalendar', () => ({
   hasCalendarAccess: jest.fn(async () => true),
   requestCalendarAccess: jest.fn(async () => true),
-  listDeviceCalendars: jest.fn(async () => [{ id: 'c', title: 'Personal', account: 'iCloud' }]),
+  listDeviceCalendars: jest.fn(),
   listDeviceEvents: jest.fn(),
 }));
 jest.mock('../reminders', () => ({
@@ -73,6 +73,7 @@ async function press(label: string) {
 beforeEach(() => {
   jest.clearAllMocks();
   (device.hasCalendarAccess as jest.Mock).mockResolvedValue(true);
+  (device.listDeviceCalendars as jest.Mock).mockResolvedValue([{ id: 'c', title: 'Personal', account: 'iCloud' }]);
   (device.listDeviceEvents as jest.Mock).mockResolvedValue([
     { id: 'e1', title: 'Pagar luz 142', startsAt: soon, allDay: false },
     { id: 'e2', title: 'Médico', startsAt: soon + 1, allDay: false },
@@ -82,7 +83,8 @@ afterEach(() => act(() => tree.unmount()));
 
 it('reads nothing and sends nothing before consent', async () => {
   await open(null);
-  expect(text()).toContain('Elegir calendarios');
+  expect(text()).toContain('Permitir acceso al calendario');
+  expect(text()).toContain('Paso 1 de 2');
   expect(device.listDeviceEvents).not.toHaveBeenCalled();
   expect(mockAnalyze).not.toHaveBeenCalled();
 });
@@ -131,11 +133,10 @@ it('keeps revoke on screen when startup fails', async () => {
 
 it('does not read the calendar when closed while saving', async () => {
   await open(null);
-  await press('Elegir calendarios');
-  await press('Personal');
+  await press('Permitir acceso al calendario');
   let finish!: () => void;
   (consent.saveCalendarConsent as jest.Mock).mockReturnValueOnce(new Promise<void>((done) => { finish = done; }));
-  await press('Guardar');
+  await press('Listo');
   act(() => tree.unmount());
   await act(async () => {
     finish();
@@ -147,8 +148,75 @@ it('does not read the calendar when closed while saving', async () => {
 it('says what failed when the choice saved but reading did not', async () => {
   (device.listDeviceEvents as jest.Mock).mockRejectedValue(new Error('read'));
   await open(null);
-  await press('Elegir calendarios');
-  await press('Personal');
-  await press('Guardar');
+  await press('Permitir acceso al calendario');
+  await press('Listo');
   expect(text()).toContain('Guardé tu elección');
+});
+
+const checkbox = (label: string) => tree.root.findAll((node) => node.props.accessibilityRole === 'checkbox'
+  && node.props.accessibilityLabel === label && typeof node.props.onPress === 'function').pop()!;
+const SAMSUNG = [
+  { id: 'local', title: 'calendar_displayname_local', account: 'account_name_local' },
+  { id: 'bday', title: 'calendar_displayname_birthday', account: 'account_name_local' },
+  { id: 'work', title: 'Trabajo', account: 'ana@example.com' },
+  { id: 'odd', title: 'some_raw_key', account: 'ana@example.com', color: '#FF0000' },
+];
+
+it('starts a first choice with every calendar, and select-all clears and fills them', async () => {
+  (device.listDeviceCalendars as jest.Mock).mockResolvedValue(SAMSUNG);
+  await open(null);
+  await press('Permitir acceso al calendario');
+  expect(text()).toContain('Paso 2 de 2');
+  expect(text()).toContain('4 de 4 elegidos');
+  expect(checkbox('Todos los calendarios').props.accessibilityState).toEqual({ checked: true });
+  await press('Todos los calendarios');
+  expect(text()).toContain('0 de 4 elegidos');
+  expect(checkbox('Trabajo').props.accessibilityState).toEqual({ checked: false });
+  await press('Trabajo');
+  expect(text()).toContain('1 de 4 elegidos');
+  expect(checkbox('Todos los calendarios').props.accessibilityState).toEqual({ checked: 'mixed' });
+  await press('Todos los calendarios');
+  expect(text()).toContain('4 de 4 elegidos');
+  await press('Listo');
+  expect(consent.saveCalendarConsent).toHaveBeenCalledWith('7', ['local', 'bday', 'work', 'odd']);
+});
+
+it('cleans raw Android names and groups calendars by account', async () => {
+  (device.listDeviceCalendars as jest.Mock).mockResolvedValue(SAMSUNG);
+  await open(null);
+  await press('Permitir acceso al calendario');
+  const shown = text();
+  expect(shown).not.toMatch(/calendar_displayname|account_name_local|some_raw_key/);
+  expect(shown.indexOf('En este teléfono')).toBeLessThan(shown.indexOf('Calendario del teléfono'));
+  expect(shown.indexOf('Calendario del teléfono')).toBeLessThan(shown.indexOf('Cumpleaños'));
+  expect(shown.indexOf('Cumpleaños')).toBeLessThan(shown.indexOf('ana@example.com'));
+  expect(shown.indexOf('ana@example.com')).toBeLessThan(shown.indexOf('Trabajo'));
+  expect(checkbox('Calendario')).toBeTruthy();
+});
+
+it('keeps an earlier choice when changing calendars', async () => {
+  (device.listDeviceCalendars as jest.Mock).mockResolvedValue(SAMSUNG);
+  await open(['work']);
+  expect(text()).toContain('Activo · 1 calendario');
+  await press('Cambiar calendarios');
+  expect(text()).toContain('1 de 4 elegidos');
+});
+
+it('cannot save an empty choice', async () => {
+  await open(null);
+  await press('Permitir acceso al calendario');
+  await press('Todos los calendarios');
+  const listo = tree.root.findAll((node) => node.props.accessibilityRole === 'button'
+    && node.findAll((child) => child.props.children === 'Listo').length > 0).pop()!;
+  expect(listo.props.accessibilityState.disabled).toBe(true);
+});
+
+it('shows the events by day and closes to the conversation when nothing is ticked', async () => {
+  await open(['c']);
+  expect(text()).toContain('Calendario conectado');
+  expect(text()).toContain('Ir a mi conversación');
+  expect(text()).not.toContain('Al tocar el botón');
+  await press('Médico');
+  expect(text()).toContain('Al tocar el botón, aceptas enviar a Confío y a OpenAI (Estados Unidos)');
+  expect(text()).not.toContain('Ir a mi conversación');
 });
