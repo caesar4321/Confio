@@ -303,4 +303,6 @@ Comprar; canary migration of a founder account; then Safe nonce 33 `setTradePaus
   address `0x6D611FDD68290f68F7e7089F5c68f607304E9F3C`. Safe nonce 34 `escrow.setOrderSigner` (SafeTxHash
   `0xcd79b864b3566133365148edc948f6c2c6e1227ba48271e0b683e86c9d3cc9ea`); server `MARKETPLACE_ORDER_SIGNER_*` set
   (748a06c71). The arbiter and Pay invoices stay on the sponsor. Safe nonce now 35.
-- Still open: BscScan verification of the four contracts and the proxy re-link.
+- BscScan: ConfioSmartAccountV2, the factory logic, the escrow logic and ConfioPurchaseSpender verified (forge
+  verify-contract, Pass - Verified); the factory and escrow proxies re-linked to their new implementations
+  (verifyproxycontract). Nothing open.
