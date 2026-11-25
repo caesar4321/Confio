@@ -37,6 +37,7 @@ from inbox.models import ContentPlatformClick
 from config import admin_dashboard_sections as sections
 from config import admin_dashboard_growth as growth
 from config import admin_dashboard_smart_account as smart_account_section
+from config import admin_dashboard_assistant as assistant_section
 from config.admin_dashboard_sections import get_fcm_reachability_metrics  # noqa: F401 — re-exported for tests
 
 
@@ -743,6 +744,20 @@ ConfioAdminSite.DASH_PAGES = [
             ('Raw funnel events', 'users_funnelevent_changelist', ''),
             ('Daily rollups', 'users_funneldailyrollup_changelist', ''),
             ('ICP + ratings', 'icp_rating_analytics', ''),
+        )}),
+    ('ia', 'Confío IA', [
+        _w(assistant_section.assistant_pivot),
+    ], [
+        'admin/dash/_assistant.html',
+    ], {'intro': 'The AI-first pivot: who talks to Confío IA, who asks it for a money job, whom it pays for, and '
+                 'who lets it pay again within 30 days. People, not events; staff, founder and banned accounts '
+                 'are left out.',
+        'tools': (
+            ('Assistant turns', 'assistant_assistantturn_changelist', ''),
+            ('Payment cards', 'payment_accounts_paymentintent_changelist', ''),
+            ('Store tasks', 'agent_tasks_agenttask_changelist', ''),
+            ('Hands-off trades', 'smart_account_smartrelaytrade_changelist', ''),
+            ('Hands-off purchases', 'smart_account_smartrelaypurchase_changelist', ''),
         )}),
     ('money', 'Money', [
         lambda w, request, refresh: sections.rails_by_period(w, request),

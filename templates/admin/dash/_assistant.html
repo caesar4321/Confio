@@ -1,0 +1,220 @@
+{% load humanize %}
+<!-- Confío IA tab: config/admin_dashboard_assistant.py -->
+<style>
+    .ia { --ia-gap: 16px; }
+    .ia-section { margin: 36px 0 0; }
+    .ia-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--dash-line); }
+    .ia-head h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--dash-ink); margin: 0; padding: 0; background: none; text-transform: none; }
+    .ia-head p { margin: 0; color: var(--dash-muted); font-size: 13px; flex: 1 1 320px; }
+    .ia-grid { display: grid; gap: var(--ia-gap); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+    .ia .panel { padding: 16px 18px; }
+    .ia .panel h3 { margin: 0 0 10px; }
+    .ia-sub { color: var(--dash-muted); font-size: 12.5px; margin: -4px 0 10px; }
+    .ia-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+    @media (max-width: 1100px) { .ia-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .ia-funnel { display: grid; gap: 10px; }
+    .ia-step { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(0, 3fr) 70px 90px; gap: 12px; align-items: center; }
+    .ia-step .name { color: var(--dash-ink); font-weight: 500; }
+    .ia-track { height: 22px; border-radius: 6px; background: var(--dash-sunken); overflow: hidden; }
+    .ia-fill { height: 100%; background: var(--dash-brand); border-radius: 6px; min-width: 2px; }
+    .ia-step .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--dash-ink); }
+    .ia-step .p { text-align: right; color: var(--dash-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    .ia-days { display: grid; grid-template-columns: repeat(30, minmax(0, 1fr)); gap: 3px; align-items: end; height: 120px; margin: 8px 0 6px; }
+    .ia-day { background: var(--dash-brand-soft); border-radius: 3px 3px 0 0; position: relative; min-height: 2px; }
+    .ia-day.paid { background: var(--dash-brand); }
+    .ia-days-axis { display: flex; justify-content: space-between; color: var(--dash-muted); font-size: 12px; }
+    .ia .mini-table td.num, .ia .mini-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .ia .mini-table tr.total td { font-weight: 600; color: var(--dash-ink); border-top: 1px solid var(--dash-line); }
+    .ia .mini-table tr.money td:first-child { font-weight: 500; color: var(--dash-ink); }
+    .ia .is-zero { color: var(--dash-muted); }
+    .ia-note { color: var(--dash-muted); font-size: 12px; margin-top: 8px; }
+</style>
+<div class="ia">
+{% if ia.unavailable %}
+    <div class="panel"><h3>Confío IA</h3><p class="ia-sub">Unavailable: the numbers could not be built. The error is in the server log ("assistant dashboard failed").</p></div>
+{% else %}
+    <div class="ia-kpis">
+        <div class="kpi kpi-hero">
+            <div class="kpi-label">Paid again within {{ ia.repeat_days }} days</div>
+            <div class="kpi-value">{% if ia.north.pct is not None %}{{ ia.north.pct|floatformat:0 }}%{% else %}<span class="unknown">—</span>{% endif %}</div>
+            <div class="kpi-sub">{{ ia.north.repeated|intcomma }} of {{ ia.north.mature|intcomma }} first-time payers whose {{ ia.repeat_days }} days are up · {{ ia.north.young_repeated|intcomma }} of {{ ia.north.young|intcomma }} newer already did</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Talked to Confío IA</div>
+            <div class="kpi-value">{{ ia.talked_30|intcomma }}</div>
+            <div class="kpi-sub">people, {{ ia.window_days }} days · {{ ia.talked_7|intcomma }} in 7</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Asked for a money job</div>
+            <div class="kpi-value">{{ ia.money_30|intcomma }}</div>
+            <div class="kpi-sub">{% if ia.money_pct is not None %}{{ ia.money_pct|floatformat:1 }}% of those who talked{% else %}—{% endif %}</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Confío IA paid for them</div>
+            <div class="kpi-value">{{ ia.paid_people_30|intcomma }}</div>
+            <div class="kpi-sub">people · {{ ia.paid_actions_30|intcomma }} jobs · US${{ ia.paid_usd_30|floatformat:2|intcomma }}</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Payers ever</div>
+            <div class="kpi-value">{{ ia.north.payers|intcomma }}</div>
+            <div class="kpi-sub">people Confío IA has paid for</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Model cost per person</div>
+            <div class="kpi-value">{% if ia.quality.cost_per_person is not None %}US${{ ia.quality.cost_per_person|floatformat:3 }}{% else %}<span class="unknown">—</span>{% endif %}</div>
+            <div class="kpi-sub">US${{ ia.quality.cost|floatformat:2|intcomma }} in {{ ia.window_days }} days</div>
+        </div>
+    </div>
+
+    <section class="ia-section">
+        <div class="ia-head"><h2>Funnel, last {{ ia.window_days }} days</h2><p>People who talked to Confío IA, and how far each got. Each step is a subset of the one above. A QR scanned or a code pasted in the chat counts as asking.</p></div>
+        <div class="panel">
+            <div class="ia-funnel">
+                {% for step in ia.funnel %}
+                <div class="ia-step">
+                    <span class="name">{{ step.label }}</span>
+                    <div class="ia-track"><div class="ia-fill" style="width: {{ step.bar }}%"></div></div>
+                    <span class="n">{{ step.count|intcomma }}</span>
+                    <span class="p">{% if step.of_previous is not None %}{{ step.of_previous|floatformat:1 }}% of above{% elif forloop.first %}&nbsp;{% else %}—{% endif %}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <section class="ia-section">
+        <div class="ia-head"><h2>Every day</h2><p>People who talked to Confío IA each Argentina day; darker bars are days it paid for someone.</p></div>
+        <div class="panel">
+            <div class="ia-days">
+                {% for d in ia.days %}<div class="ia-day{% if d.paid %} paid{% endif %}" style="height: {{ d.bar }}%" title="{{ d.day|date:'M j' }}: {{ d.people }} people, {{ d.turns }} messages, {{ d.voice }} voice notes, {{ d.money }} asked for a money job, {{ d.paid }} paid"></div>{% endfor %}
+            </div>
+            <div class="ia-days-axis"><span>{{ ia.days.0.day|date:"M j" }}</span><span>today</span></div>
+            <table class="mini-table" style="margin-top:12px;">
+                <thead><tr><th>Day</th><th class="num">People</th><th class="num">Messages</th><th class="num">Voice notes</th><th class="num">Money job</th><th class="num">Paid</th></tr></thead>
+                <tbody>
+                    {% for d in ia.days reversed %}{% if forloop.counter <= 7 %}
+                    <tr><td>{{ d.day|date:"D M j" }}</td><td class="num">{{ d.people|intcomma }}</td><td class="num">{{ d.turns|intcomma }}</td><td class="num">{{ d.voice|intcomma }}</td><td class="num">{{ d.money|intcomma }}</td><td class="num{% if not d.paid %} is-zero{% endif %}">{{ d.paid|intcomma }}</td></tr>
+                    {% endif %}{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="ia-section">
+        <div class="ia-head"><h2>What people ask for</h2><p>From the tools each answer used. Money jobs are in bold.</p></div>
+        <div class="ia-grid">
+            <div class="panel">
+                <h3>Requests, {{ ia.window_days }} days</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Asked for</th><th class="num">People</th><th class="num">Times</th></tr></thead>
+                    <tbody>
+                        {% for row in ia.intents %}
+                        <tr{% if row.money %} class="money"{% endif %}><td>{{ row.label }}</td><td class="num{% if not row.people %} is-zero{% endif %}">{{ row.people|intcomma }}</td><td class="num{% if not row.calls %} is-zero{% endif %}">{{ row.calls|intcomma }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>New signups, {{ ia.window_days }} days</h3>
+                <p class="ia-sub">Does Confío IA reach the people who just joined?</p>
+                <table class="mini-table">
+                    <tbody>
+                        <tr><td>Finished signup</td><td class="num">{{ ia.cohort.signups|intcomma }}</td><td class="num"></td></tr>
+                        <tr><td>Talked to Confío IA</td><td class="num">{{ ia.cohort.talked|intcomma }}</td><td class="num">{% if ia.cohort.talked_pct is not None %}{{ ia.cohort.talked_pct|floatformat:1 }}%{% endif %}</td></tr>
+                        <tr><td>…within their first day</td><td class="num">{{ ia.cohort.talked_first_day|intcomma }}</td><td class="num">{% if ia.cohort.talked_first_day_pct is not None %}{{ ia.cohort.talked_first_day_pct|floatformat:1 }}%{% endif %}</td></tr>
+                        <tr><td>Asked for a money job</td><td class="num">{{ ia.cohort.money|intcomma }}</td><td class="num">{% if ia.cohort.money_pct is not None %}{{ ia.cohort.money_pct|floatformat:1 }}%{% endif %}</td></tr>
+                        <tr><td>Confío IA paid for them</td><td class="num">{{ ia.cohort.paid|intcomma }}</td><td class="num">{% if ia.cohort.paid_pct is not None %}{{ ia.cohort.paid_pct|floatformat:1 }}%{% endif %}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Paid jobs, {{ ia.window_days }} days</h3>
+                <table class="mini-table">
+                    <tbody>
+                        {% for k in ia.paid_kinds %}<tr><td>{{ k.label }}</td><td class="num{% if not k.count %} is-zero{% endif %}">{{ k.count|intcomma }}</td></tr>{% endfor %}
+                        <tr class="total"><td>All</td><td class="num">{{ ia.paid_actions_30|intcomma }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="ia-section">
+        <div class="ia-head"><h2>Each job</h2><p>From asking to paid, for each kind of money job, {{ ia.window_days }} days.</p></div>
+        <div class="ia-grid">
+            <div class="panel">
+                <h3>Payment cards</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Card</th><th class="num">Made</th><th class="num">Signed</th><th class="num">Paid</th><th class="num">Failed</th><th class="num">Expired</th><th class="num">US$ paid</th></tr></thead>
+                    <tbody>
+                        {% for c in ia.cards %}
+                        <tr><td>{{ c.label }}</td><td class="num{% if not c.created %} is-zero{% endif %}">{{ c.created|intcomma }}</td><td class="num">{{ c.signed|intcomma }}</td><td class="num">{{ c.paid|intcomma }}</td><td class="num">{{ c.failed|intcomma }}</td><td class="num">{{ c.dropped|intcomma }}</td><td class="num">{{ c.paid_usd|floatformat:2|intcomma }}</td></tr>
+                        {% endfor %}
+                        <tr class="total"><td>{{ ia.cards_total.label }}</td><td class="num">{{ ia.cards_total.created|intcomma }}</td><td class="num">{{ ia.cards_total.signed|intcomma }}</td><td class="num">{{ ia.cards_total.paid|intcomma }}</td><td class="num">{{ ia.cards_total.failed|intcomma }}</td><td class="num">{{ ia.cards_total.dropped|intcomma }}</td><td class="num">{{ ia.cards_total.paid_usd|floatformat:2|intcomma }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Shopping agent</h3>
+                <p class="ia-sub">{{ ia.shopping.started|intcomma }} store tasks by {{ ia.shopping.people|intcomma }} people · {{ ia.shopping.active|intcomma }} running now · model and browser US${{ ia.shopping.cost|floatformat:2 }}{% if ia.shopping.cost_per_task is not None %} (US${{ ia.shopping.cost_per_task|floatformat:3 }} a task){% endif %}</p>
+                <table class="mini-table">
+                    <thead><tr><th>Store country</th><th class="num">Tasks</th><th class="num">Reached checkout</th><th class="num">Paid</th></tr></thead>
+                    <tbody>
+                        {% for c in ia.shopping.countries %}<tr><td>{{ c.country }}</td><td class="num">{{ c.tasks|intcomma }}</td><td class="num">{{ c.checkout|intcomma }}</td><td class="num{% if not c.paid %} is-zero{% endif %}">{{ c.paid|intcomma }}</td></tr>{% empty %}<tr><td colspan="4" class="is-zero">No store tasks.</td></tr>{% endfor %}
+                        <tr class="total"><td>All</td><td class="num">{{ ia.shopping.started|intcomma }}</td><td class="num">{{ ia.shopping.checkout|intcomma }}</td><td class="num">{{ ia.shopping.paid|intcomma }}</td></tr>
+                    </tbody>
+                </table>
+                {% if ia.shopping.reasons %}
+                <p class="ia-note">Why tasks ended without paying: {% for reason, n in ia.shopping.reasons %}{{ reason }} ({{ n }}){% if not forloop.last %} · {% endif %}{% endfor %}</p>
+                {% endif %}
+            </div>
+            <div class="panel">
+                <h3>Trades in the chat</h3>
+                <table class="mini-table">
+                    <tbody>
+                        <tr><td>People who asked</td><td class="num">{{ ia.trades.asked_people|intcomma }}</td></tr>
+                        <tr><td>Proposals and answers</td><td class="num">{{ ia.trades.proposals|intcomma }}</td></tr>
+                        <tr><td>Refused by code</td><td class="num{% if not ia.trades.denied %} is-zero{% endif %}">{{ ia.trades.denied|intcomma }}</td></tr>
+                        <tr><td>Signed on a chat card</td><td class="num">{{ ia.trades.chat_signed|intcomma }}</td></tr>
+                        <tr><td>Hands-off done</td><td class="num">{{ ia.trades.handsoff_done|intcomma }}</td></tr>
+                        <tr><td>Hands-off failed</td><td class="num{% if not ia.trades.handsoff_failed %} is-zero{% endif %}">{{ ia.trades.handsoff_failed|intcomma }}</td></tr>
+                        <tr><td>Hands-off waiting for a cap or a move</td><td class="num{% if not ia.trades.handsoff_waiting %} is-zero{% endif %}">{{ ia.trades.handsoff_waiting|intcomma }}</td></tr>
+                    </tbody>
+                </table>
+                <p class="ia-note">Cuenta inteligente: {{ ia.cuenta.active|intcomma }} active accounts · {{ ia.cuenta.purchases_done|intcomma }} hands-off Comprar purchases done{% for s, n in ia.cuenta.purchases %}{% if s != 'done' %} · {{ s }} {{ n }}{% endif %}{% endfor %}.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="ia-section">
+        <div class="ia-head"><h2>Countries and quality</h2><p>Where Confío IA is used, and how well it answers.</p></div>
+        <div class="ia-grid">
+            <div class="panel">
+                <h3>By country, {{ ia.window_days }} days</h3>
+                <table class="mini-table">
+                    <thead><tr><th>Country</th><th class="num">Talked</th><th class="num">Money job</th><th class="num">Paid</th><th class="num">Paid %</th></tr></thead>
+                    <tbody>
+                        {% for c in ia.countries %}<tr><td>{{ c.country }}</td><td class="num">{{ c.talked|intcomma }}</td><td class="num">{{ c.money|intcomma }}</td><td class="num{% if not c.paid %} is-zero{% endif %}">{{ c.paid|intcomma }}</td><td class="num">{% if c.paid_pct is not None %}{{ c.paid_pct|floatformat:1 }}%{% endif %}</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h3>Answer quality</h3>
+                <table class="mini-table">
+                    <tbody>
+                        <tr><td>Answers</td><td class="num">{{ ia.quality.turns|intcomma }}</td></tr>
+                        <tr><td>Voice notes</td><td class="num">{{ ia.quality.voice|intcomma }}{% if ia.quality.voice_pct is not None %} ({{ ia.quality.voice_pct|floatformat:1 }}%){% endif %}</td></tr>
+                        <tr><td>Answers with an error</td><td class="num{% if not ia.quality.errors %} is-zero{% endif %}">{{ ia.quality.errors|intcomma }}{% if ia.quality.error_pct is not None %} ({{ ia.quality.error_pct|floatformat:1 }}%){% endif %}</td></tr>
+                        <tr><td>Asked for the team</td><td class="num">{{ ia.quality.handoffs|intcomma }}</td></tr>
+                        <tr><td>Answer time, median / 95th</td><td class="num">{% if ia.quality.p50_s is not None %}{{ ia.quality.p50_s|floatformat:1 }} s / {{ ia.quality.p95_s|floatformat:1 }} s{% else %}—{% endif %}</td></tr>
+                    </tbody>
+                </table>
+                {% if ia.quality.denied %}
+                <p class="ia-note">Refused by code: {% for tool, n in ia.quality.denied %}{{ tool }} ({{ n }}){% if not forloop.last %} · {% endif %}{% endfor %}</p>
+                {% endif %}
+            </div>
+        </div>
+        <p class="ia-note">Real users only: {{ ia.excluded|intcomma }} staff, founder, preview and banned accounts are left out of every number on this page.</p>
+    </section>
+{% endif %}
+</div>
