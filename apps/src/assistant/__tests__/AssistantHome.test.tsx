@@ -142,6 +142,8 @@ jest.mock('../useHomeGuide', () => ({
 }));
 jest.mock('../AssistantContext', () => ({ useAssistant: () => mockAssistant }));
 jest.mock('@apollo/client', () => ({
+  // Modules the sheet loads build their documents at import (mail/api.ts, handsOff.ts).
+  gql: (s: TemplateStringsArray) => s.join(''),
   useApolloClient: () => ({ query: jest.fn(), refetchQueries: jest.fn(async () => []) }),
   useMutation: (mutation: string) => [
     mutation === 'ask' ? mockAsk : mutation === 'askPhoto' ? mockAskPhoto : jest.fn(async () => ({})),

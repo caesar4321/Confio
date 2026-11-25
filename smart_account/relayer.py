@@ -110,6 +110,13 @@ def relay_target(account, calldata: str, kind: str) -> str:
     this account. Anything else is refused before signing."""
     if kind == abi.PURCHASE_KIND:
         return _purchase_target(account, calldata)
+    if kind == abi.RELAY_TRADE_KIND:
+        # v2 only (abi.V2_*): relayTrade on this very account, nothing else.
+        try:
+            abi.decode_relay_trade(calldata)
+        except ValueError as exc:
+            raise RelayError('bad_calldata', kind) from exc
+        return (account.contract_address or '').lower()
     if kind not in abi.RELAY_KIND_CALLS:
         raise RelayError('bad_kind', kind)
     target, allowed = abi.RELAY_KIND_CALLS[kind]

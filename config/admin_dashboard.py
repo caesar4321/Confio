@@ -906,6 +906,7 @@ from inbox.models import (
     CommunityProfileSettings,
     PortfolioDailySnapshot,
     PortfolioValueSnapshot,
+    SmartAccountTrade as InboxSmartAccountTrade,
     DirectConversation,
     DirectMessage,
     DirectMessageReport,
@@ -940,6 +941,7 @@ from inbox.admin import (
     CommunityProfileSettingsAdmin,
     PortfolioDailySnapshotAdmin,
     PortfolioValueSnapshotAdmin,
+    SmartAccountTradeAdmin as InboxSmartAccountTradeAdmin,
     DirectConversationAdmin,
     DirectMessageAdmin,
     DirectMessageReportAdmin,
@@ -1243,6 +1245,7 @@ confio_admin_site.register(CommunityActivityShare, CommunityActivityShareAdmin)
 confio_admin_site.register(CommunityProfileSettings, CommunityProfileSettingsAdmin)
 confio_admin_site.register(PortfolioDailySnapshot, PortfolioDailySnapshotAdmin)
 confio_admin_site.register(PortfolioValueSnapshot, PortfolioValueSnapshotAdmin)
+confio_admin_site.register(InboxSmartAccountTrade, InboxSmartAccountTradeAdmin)
 confio_admin_site.register(DirectConversation, DirectConversationAdmin)
 confio_admin_site.register(DirectMessage, DirectMessageAdmin)
 confio_admin_site.register(DirectMessageReport, DirectMessageReportAdmin)

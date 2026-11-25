@@ -376,6 +376,8 @@ def _inherited_target(user, target: str) -> bool:
 def _check_shape(action, calls: list, user, signer: str) -> None:
     """Independent of the stored row: destinations, selectors and recipients."""
     kind = action.kind
+    if kind == abi.MIGRATE_KIND:
+        return _check_migration(action, calls, user, signer)
     allowed = abi.BATCH_KIND_FUNCTIONS.get(kind)
     if allowed is None:
         raise _error('smart_kind_not_allowed')
@@ -545,6 +547,68 @@ def _check_trade(calls: list, target: str) -> None:
             raise _error('bad_smart_trade')
 
 
+HANDS_OFF_CRYPTO = ('BTCB', 'XAUT')
+
+
+def _stock_max_fee_bps(venue_data: bytes, kind: str) -> int:
+    from cusd_plus import sponsor_7702
+    types = ([sponsor_7702.GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256', 'uint256'] if kind == 'stock_buy'
+             else [sponsor_7702.GM_QUOTE_ABI, 'bytes', 'uint256', 'uint256', 'uint256'])
+    return int(sponsor_7702.abi_decode(types, bytes(venue_data)[4:])[-1])
+
+
+def check_relay_trade(own, rule, calldata: str, user, meta) -> dict:
+    """The hands-off twin of _check_trade + trade_refusal, run on the exact
+    relayTrade calldata the relayer is about to sign (relay_trades.py): the
+    wrapped router call passes the same live quote and slippage checks as a
+    personal-wallet trade, relayTrade's own arguments are exactly what that
+    call implies, it names this account's live Trade rule, the asset is one
+    the rule allows (and bitcoin or gold only on the swap router), the
+    stock fee ceiling is the contract's, and the personal rail's entry gates
+    pass now (services.trade_gate). Returns the trade parameters; raises
+    PolicyError. Fails closed."""
+    from cusd_plus import crypto_catalog
+    from cusd_plus.sponsor_7702 import PolicyError
+    from .services import trade_gate, trade_parameters
+    try:
+        rule_id, venue, venue_data, max_in, min_out = abi.decode_relay_trade(calldata)
+    except ValueError as exc:
+        raise _error('bad_smart_trade') from exc
+    if rule is None or rule.kind != 'trade' or rule.onchain_id is None or int(rule.onchain_id) != rule_id \
+            or rule.smart_account_id != own.pk or int(rule.epoch) != int(own.subscription_epoch):
+        raise _error('rule_not_found')
+    try:
+        params = trade_parameters({'to': venue, 'value': '0', 'data': '0x' + venue_data.hex()})
+    except PolicyError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — money policy fails closed
+        logger.warning('hands-off trade validation failed: %s', exc, exc_info=True)
+        raise _error('trade_quote_unavailable') from exc
+    if venue != params['venue'] or int(max_in) != params['max_in'] or int(min_out) != params['min_out'] \
+            or int(min_out) <= 0:
+        raise _error('bad_smart_trade')
+    kind = params['kind']
+    asset = params['token_out'] if kind.endswith('buy') else params['token_in']
+    if (rule.token_out or '').lower() not in ('', abi.ZERO_ADDRESS, asset):
+        raise _error('asset_not_in_rule')
+    if kind.endswith('buy') and params['token_in'] != (rule.token_in or '').lower():
+        raise _error('bad_smart_trade')
+    if kind.startswith('crypto'):
+        token = crypto_catalog.by_address(asset)
+        if token is None or token.symbol not in HANDS_OFF_CRYPTO:
+            raise _error('token_not_listed')
+        from cusd_plus.perps_risk import _is_ios
+        if _is_ios(meta):
+            # Oro y Bitcoin are never offered on iOS (compile-time DEX_TRADING_UI_ENABLED off).
+            raise _error('trade_not_available')
+    elif _stock_max_fee_bps(venue_data, kind) > abi.MAX_STOCK_FEE_BPS:
+        raise _error('stock_fee_above_max')
+    refusal = trade_gate(user, meta or {}, params)
+    if refusal:
+        raise _error(refusal)
+    return params
+
+
 def trade_refusal(action, calls: list, user, meta) -> str | None:
     """Submit-time re-run of the personal rail's entry gates for an account
     trade (services.trade_gate: complex-product acknowledgement, review
@@ -604,13 +668,18 @@ def face_refusal(action, user) -> str | None:
                 return 'smart_action_not_prepared'
             # Send and Card rules (decision 35) let money leave to someone
             # else with nobody present: their Face authorization is checked.
-            if draft.kind not in ('send', 'card'):
+            # Trade and Purchase rules (v2, hands-off) too: Confío acts on them.
+            if draft.kind not in ('send', 'card', 'trade', 'purchase'):
                 return None
             authorization = draft.standing_authorization
             if (authorization is None or authorization.revoked_at is not None
                     or authorization.kind != draft.kind):
                 return FACE_STEP_UP_MESSAGE
             key, required = authorization.face_action_key, authorization.face_required
+        elif action.kind == abi.MIGRATE_KIND:
+            if 'face_required' not in payload:
+                return FACE_STEP_UP_MESSAGE
+            key, required = payload.get('face_action_key') or '', bool(payload['face_required'])
         elif action.kind == 'smart_beneficiary' and any(
                 (abi.decode_call(c['data'])[0] == 'setBeneficiary') for c in action.calls):
             if 'face_required' not in payload:
@@ -643,6 +712,70 @@ def duplicate_create_refusal(action) -> str:
     return duplicate_create(action.smart_account, action.user, draft.kind, draft.amount, draft.frequency,
                             payee_address=draft.payee_address, payout_ref=draft.payout_ref,
                             token_out=draft.token_out, exclude_rule_pk=draft.pk)
+
+
+def _check_migration(action, calls: list, user, signer: str) -> None:
+    """The one-Face migration batch (services.prepare_migration), independent
+    of the stored row: exactly this order and nothing else.
+
+      [old.cancelSubscription()]  factory.migrate()  [old.withdrawAll(tokens)
+      token.transfer(new, x) for each withdrawn token, at most once each]
+      new.createRule(buy | trade in cUSD+)...  [new.subscribe(plan, fee)]
+
+    `old` is the signer's own live account, `new` is where the factory opens
+    the next generation for this signer, read from the chain again now."""
+    if len(calls) > abi.MIGRATION_MAX_CALLS:
+        raise _error('bad_smart_batch')
+    own = _own_account(user)
+    old = action.target_address.lower()
+    if own is None or own.contract_address.lower() != old or not _owner_target(
+            user, signer, old, allow_predicted=False):
+        raise _error('smart_account_not_registered')
+    factory = chain.factory_address()
+    new = str((action.payload or {}).get('new_account') or '').lower()
+    if not new or new != chain.predict_address_at(signer, chain.generation_of(signer) + 1).lower():
+        raise _error('bad_smart_batch')
+    plus = chain.cusd_plus_address()
+    stage, withdrawn, moved, trade_rules = 0, set(), set(), 0
+    for i, c in enumerate(calls):
+        if int(c['value']) != 0:
+            raise _error('value_not_allowed')
+        to, data = c['to'], c['data'].lower()
+        if to == factory:
+            if stage > 0 or data != '0x' + abi.SEL_MIGRATE:
+                raise _error('selector_not_allowed')
+            stage = 1
+            continue
+        if _selector(c) == abi.SEL_TRANSFER:
+            if stage != 2 or _transfer_recipient(c) != new or to not in withdrawn or to in moved:
+                raise _error('deposit_recipient_not_allowed')
+            moved.add(to)
+            continue
+        try:
+            name, args = abi.decode_call(data)
+        except ValueError as exc:
+            raise _error('bad_calldata') from exc
+        if to == old and name == 'cancelSubscription' and i == 0:
+            continue
+        if to == old and name == 'withdrawAll' and stage == 1:
+            withdrawn = {str(t).lower() for t in args[0]}
+            stage = 2
+            continue
+        if to == new and name == 'createRule' and stage >= 1:
+            kind = abi.RULE_KIND_KEYS.get(int(args[0][0]))
+            if kind not in ('buy', 'trade'):
+                raise _error('selector_not_allowed')
+            if kind == 'trade':
+                trade_rules += 1
+                if str(args[0][2]).lower() != plus:
+                    raise _error('bad_smart_batch')
+            stage = 3
+            continue
+        if to == new and name == 'subscribe' and stage >= 1 and i == len(calls) - 1:
+            continue
+        raise _error('selector_not_allowed')
+    if stage < 1 or trade_rules != 1 or moved != withdrawn:
+        raise _error('bad_smart_batch')
 
 
 def validate_batch(calls: list, user, user_addr: str, request_id: str | None = None):

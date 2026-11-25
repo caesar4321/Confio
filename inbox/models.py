@@ -1229,3 +1229,30 @@ class ExternalShareTap(models.Model):
 
     def __str__(self):
         return f'{self.user_id} {self.surface}/{self.product} {self.ticker} -> {self.target}'
+
+
+class SmartAccountTrade(models.Model):
+    """One asset trade inside a Cuenta inteligente, decoded from its contract
+    event (Traded from owner trades, RelayTraded from hands-off trades,
+    RuleExecuted, ForcedSale): the account's side of the person's portfolio
+    ledger (inbox/account_trades.py), beside the personal wallet's sponsored
+    batches. Units are whole tokens; usd is what was paid (buy) or received
+    (sell), exact. kind '' marks an event indexed as no asset trade (a
+    dollars-only rule run, a CONFIO sale); a symbol starting with '?' is an
+    asset trade that could not be read (the ledger is then untrusted)."""
+    event = models.OneToOneField('smart_account.SmartAccountEvent', on_delete=models.PROTECT,
+                                 related_name='portfolio_trade')
+    address = models.CharField(max_length=42)        # the account contract, lowercase
+    symbol = models.CharField(max_length=40, blank=True, default='')
+    kind = models.CharField(max_length=16, blank=True, default='')
+    units = models.DecimalField(max_digits=48, decimal_places=18, default=0)
+    usd = models.DecimalField(max_digits=38, decimal_places=18, null=True, blank=True)
+    traded_at = models.DateTimeField()
+    block_number = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['address', 'block_number'], name='inbox_acct_trade_addr_idx')]
+
+    def __str__(self):
+        return f'{self.address} {self.kind or "-"} {self.units} {self.symbol}'

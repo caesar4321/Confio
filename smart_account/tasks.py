@@ -214,3 +214,26 @@ def reconcile_relay_txs():
     if out['resolved']:
         reconcile_events.apply_async(countdown=1)
     return out
+
+
+@shared_task(name='smart_account.run_relay_trade', bind=True, max_retries=120, ignore_result=True)
+def run_relay_trade(self, trade_id: int):
+    """One hands-off chat trade (relay_trades.py): quote, check, send."""
+    from . import relay_trades
+    try:
+        relay_trades.run(trade_id)
+    except relay_trades.Later as wait:
+        raise self.retry(countdown=wait.seconds)
+
+
+@shared_task(name='smart_account.finish_relay_trade', bind=True, max_retries=200, ignore_result=True)
+def finish_relay_trade(self, trade_id: int):
+    """After a hands-off trade's broadcast: the receipt decides, the chat is told."""
+    from . import relay_trades
+    try:
+        relay_trades.finish(trade_id)
+    except relay_trades.Later as wait:
+        raise self.retry(countdown=wait.seconds)
+    except Exception as exc:  # noqa: BLE001 — never guess an outcome; read again
+        logger.warning('relay trade %s finish failed: %s', trade_id, exc)
+        raise self.retry(countdown=min(60, 5 + 2 * self.request.retries))

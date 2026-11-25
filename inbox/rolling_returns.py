@@ -3,6 +3,11 @@
 gold and Futuros trade around the clock, so 24 h and 7 d are the last
 24 / 168 hours, never UTC days, and every range runs up to now.
 
+`wallet` everywhere here is the person's anchor (their personal wallet):
+the sleeve it states spans every address they own, the personal wallet and
+each Cuenta inteligente (portfolio_returns.trusted_ledger), and moving units
+between them is never a flow.
+
 Every SNAPSHOT_EVERY each investing wallet's sleeve is valued live and
 stored (PortfolioValueSnapshot) when the ledger explains the chain and
 nothing is on the wire. The result now is
@@ -138,7 +143,7 @@ def snapshot_wallet(user, wallet: str, now: datetime, prices: PriceBook) -> bool
     from .models import PortfolioValueSnapshot
 
     try:
-        ledger = trusted_ledger(wallet, prices)
+        ledger = trusted_ledger(wallet, prices, allow_rpc=True)
         if not ledger.all:
             return False
         _check_landing(ledger)

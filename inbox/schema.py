@@ -2393,11 +2393,14 @@ class Query(DirectMessagesQuery, graphene.ObjectType):
     def resolve_community_member_crypto_usd(self, info, user_id):
         from django.utils import timezone as dj_tz
 
+        from .person_wallets import wallets_of
+
         target = _portfolio_target(info.context.user, user_id)
-        wallet = member_portfolio.personal_wallet(target) if target is not None else None
-        if not wallet:
+        # Personal wallet and every Cuenta inteligente, summed.
+        wallets = wallets_of(target) if target is not None else []
+        if not wallets:
             return None
-        return _money(member_portfolio.crypto_part(wallet, dj_tz.now()).total)
+        return _money(member_portfolio.crypto_part(wallets, dj_tz.now()).total)
 
     @login_required
     def resolve_community_member_perps_usd(self, info, user_id):

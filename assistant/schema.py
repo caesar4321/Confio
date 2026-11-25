@@ -153,6 +153,88 @@ class ReleaseAssistantStockTrade(graphene.Mutation):
         return ReleaseAssistantStockTrade(status=trades.release(info.context.user, message_id, request_id))
 
 
+class AssistantRelayTradeType(graphene.ObjectType):
+    # waiting_rule | pending | done | failed | cancelled (smart_account/relay_trades.py)
+    status = graphene.String(required=True)
+    tx_hash = graphene.String()
+    label = graphene.String(required=True)
+    error_code = graphene.String()
+    # While waiting_rule (the cap card): new | raise, the choices, the one preselected, the cap today.
+    mode = graphene.String()
+    choices = graphene.List(graphene.NonNull(graphene.String))
+    preselected = graphene.String()
+    current_cap = graphene.String()
+    # While waiting_move: the dollars the move card moves in (the server's).
+    move_amount = graphene.String()
+
+
+def _hands_off_prepare(info, fn):
+    from smart_account.schema import _prepare
+    return _prepare(info, fn)
+
+
+def _prepared_batch_output():
+    from smart_account.schema import SmartAccountPreparedBatchType
+    return SmartAccountPreparedBatchType
+
+
+class PrepareAssistantTradeCap(graphene.Mutation):
+    """The weekly cap the person chose on a chat trade's cap card: the Trade
+    rule (created, or raised), signed once with Confío Face."""
+    class Arguments:
+        trade = graphene.UUID(required=True)
+        amount = graphene.String(required=True, description='US dollars per week, as chosen on the card')
+
+    Output = _prepared_batch_output()
+
+    def mutate(self, info, trade, amount):
+        from smart_account import services
+        from smart_account.models import SmartRelayTrade
+        from smart_account.schema import _batch_error
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated or not SmartRelayTrade.objects.filter(
+                user=user, internal_id=trade, status='waiting_rule').exists():
+            return _batch_error('not_open', 'Esa operación ya no está pendiente. Pídemela de nuevo en el chat.')
+        return _hands_off_prepare(info, lambda viewer: services.prepare_trade_rule(viewer, amount))
+
+
+class PrepareAssistantTradeMove(graphene.Mutation):
+    """Personal wallet -> Cuenta inteligente for a chat trade it is short of (its amount is the server's)."""
+    class Arguments:
+        trade = graphene.UUID(required=True)
+
+    Output = _prepared_batch_output()
+
+    def mutate(self, info, trade):
+        from smart_account import services
+        return _hands_off_prepare(info, lambda viewer: services.prepare_trade_move(viewer, trade))
+
+
+class PrepareAssistantAccountMigration(graphene.Mutation):
+    """The one-Face batch that updates a Cuenta inteligente to the version that trades for the person."""
+    Output = _prepared_batch_output()
+
+    def mutate(self, info):
+        from smart_account import services
+        return _hands_off_prepare(info, services.prepare_migration)
+
+
+class ResumeAssistantRelayTrade(graphene.Mutation):
+    """The cap card was signed: the chat trade waiting for it goes ahead."""
+    class Arguments:
+        trade = graphene.UUID(required=True)
+
+    status = graphene.String(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, trade):
+        from smart_account import relay_trades
+        row = relay_trades.resume(info.context.user, trade)
+        return ResumeAssistantRelayTrade(status=(relay_trades.status_of(info.context.user, trade) or {}).get(
+            'status', 'gone') if row is not None else 'gone')
+
+
 class AssistantThreadType(graphene.ObjectType):
     messages = graphene.List(graphene.NonNull(AssistantMessageType), required=True)
     has_more = graphene.Boolean(required=True)
@@ -493,6 +575,16 @@ class Query(graphene.ObjectType):
         from . import trades
         status, tx_hash = trades.status(info.context.user, message_id)
         return AssistantStockTradeType(status=status, tx_hash=tx_hash or None)
+
+    assistant_relay_trade = graphene.Field(
+        AssistantRelayTradeType, trade=graphene.UUID(required=True),
+        description="One hands-off chat trade of the viewer's (its own query: older servers lack it).")
+
+    @login_required
+    def resolve_assistant_relay_trade(self, info, trade):
+        from smart_account import relay_trades
+        found = relay_trades.status_of(info.context.user, trade)
+        return AssistantRelayTradeType(**found) if found else None
 
     assistant_thread = graphene.Field(
         AssistantThreadType,
@@ -910,3 +1002,7 @@ class Mutation(graphene.ObjectType):
     claim_assistant_stock_trade = ClaimAssistantStockTrade.Field()
     attach_assistant_top_up = AttachAssistantTopUp.Field()
     release_assistant_stock_trade = ReleaseAssistantStockTrade.Field()
+    prepare_assistant_trade_cap = PrepareAssistantTradeCap.Field()
+    prepare_assistant_account_migration = PrepareAssistantAccountMigration.Field()
+    prepare_assistant_trade_move = PrepareAssistantTradeMove.Field()
+    resume_assistant_relay_trade = ResumeAssistantRelayTrade.Field()

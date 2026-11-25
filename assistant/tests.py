@@ -4397,8 +4397,11 @@ class StockTradeCardTests(TestCase):
         self.assertEqual(belt.result.pending_action['question'],
                          '¿Cuántos dólares de Apple Inc. (AAPL) quieres comprar? Escribe solo el número.')
         self.assertEqual(belt.result.pending_action['step'], 'amount')
-        self.assertEqual(belt.result.pending_action['data'],
-                         {'side': 'buy', 'ticker': 'AAPL', 'sell_all': False, 'amount': None})
+        data = dict(belt.result.pending_action['data'])
+        # The question's own id: a second answer to it is the same hands-off trade (smart_account/relay_trades.py).
+        self.assertRegex(data.pop('nonce'), r'^[0-9a-f]{24}$')
+        self.assertEqual(data, {'side': 'buy', 'ticker': 'AAPL', 'sell_all': False, 'amount': None,
+                                'kind': 'stock'})
         # One thing to answer per reply.
         self.assertFalse(self._propose(belt)['ok'])
 

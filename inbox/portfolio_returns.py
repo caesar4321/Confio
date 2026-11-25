@@ -39,6 +39,14 @@ candle not published yet) write nothing, so the next run retries.
 
 Each proven day stores a signature of the ledger up to its end: a trade
 confirmed or re-settled later reopens exactly the days it touches.
+
+One sleeve per person: the ledger joins the personal wallet's trades with
+every Cuenta inteligente's (inbox/account_trades.py), and the chain check
+sums the holdings of all those addresses (inbox/person_wallets.py). A move
+between the person's own addresses (into the account, back out, an old
+account migrated to a new one) is in neither the ledger nor the summed
+chain: never a flow, a gain or a return. Rows stay keyed by the personal
+wallet, the person's anchor, so every reader keeps working unchanged.
 """
 from __future__ import annotations
 
@@ -113,6 +121,10 @@ class Ledger:
     # rows (margin out = perps_buy, proceeds in = perps_sell, close marker).
     perps: list = field(default_factory=list)
     perps_rows: list = field(default_factory=list)
+    # Every address the ledger spans (inbox/person_wallets.py): the personal
+    # wallet first, then the person's Cuenta inteligente contracts. Empty =
+    # just the wallet it was loaded for.
+    wallets: list = field(default_factory=list)
 
     @property
     def all(self) -> list:
@@ -426,15 +438,44 @@ def _check_running_units(trades: list) -> None:
     _walk_units(trades)
 
 
-def load_ledger(wallet: str, prices: PriceBook) -> Ledger:
-    from cusd_plus import crypto_month, perps_portfolio, stock_month
+def person_addresses(wallet: str) -> list:
+    """The person's addresses for their anchor (personal) wallet: the
+    wallet itself and their Cuenta inteligente contracts."""
+    from .person_wallets import addresses_for
 
     try:
-        stocks = stock_month.confirmed_trades(wallet)
-        crypto = crypto_month.confirmed_trades(wallet)
+        return addresses_for(wallet) or [wallet.lower()]
+    except Exception as exc:  # noqa: BLE001 — unknown accounts: never a smaller sleeve
+        raise Retry('accounts unreadable') from exc
+
+
+def load_ledger(wallet: str, prices: PriceBook, addresses: list | None = None, *,
+                allow_rpc: bool = False) -> Ledger:
+    """The person's joint ledger: the personal wallet's sponsored trades
+    plus every account's trades (inbox/account_trades.py). Moving units
+    between their own addresses is in neither, so it is never a flow.
+    `allow_rpc`: an account trade's Dollar+ price may be read from the chain
+    (jobs only; a request finds it pending, a Retry)."""
+    from cusd_plus import crypto_month, perps_portfolio, stock_month
+
+    from .account_trades import AccountTradesPending, trades_of
+
+    wallet = wallet.lower()
+    addresses = addresses if addresses is not None else person_addresses(wallet)
+    try:
+        stocks = list(stock_month.confirmed_trades(wallet))
+        crypto = list(crypto_month.confirmed_trades(wallet))
         perps = perps_portfolio.episodes(wallet)
+        for address in addresses:
+            if address == wallet:
+                continue
+            account_stocks, account_crypto = trades_of(address, allow_rpc=allow_rpc)
+            stocks += account_stocks
+            crypto += account_crypto
     except perps_portfolio.PerpsLedgerUnknown as exc:
         raise Retry('perps settlement pending') from exc
+    except AccountTradesPending as exc:
+        raise Retry('account trade not priced yet') from exc
     except Exception as exc:  # noqa: BLE001 — a DB/registry blip is not a verdict
         raise Retry('ledger unreadable') from exc
     if any(t.symbol.startswith('?') for t in stocks + crypto):
@@ -446,63 +487,141 @@ def load_ledger(wallet: str, prices: PriceBook) -> Ledger:
     perps_rows = list(perps_portfolio.ledger_trades(perps))
     ledger = Ledger(stocks=sorted((_settled_when(t, prices) for t in stocks), key=lambda t: t.when),
                     crypto=sorted((_settled_when(t, prices) for t in crypto), key=lambda t: t.when),
-                    perps=perps, perps_rows=sorted(perps_rows, key=lambda t: t.when))
+                    perps=perps, perps_rows=sorted(perps_rows, key=lambda t: t.when),
+                    wallets=list(addresses) if len(addresses) > 1 else [])
     _check_running_units(ledger.stocks)
     _check_running_units(ledger.crypto)
     return ledger
 
 
-def in_flight(wallet: str) -> bool:
-    """A stock trade or crypto swap on the wire, each by its own window."""
+def in_flight(wallet: str, addresses: list | None = None) -> bool:
+    """A stock trade or crypto swap on the wire, each by its own window,
+    or anything moving an account's balances (an owner batch, a relayed
+    trade, a deposit into it or a withdrawal back)."""
     from cusd_plus.crypto_holdings import batches_in_flight
     from cusd_plus.gm_holdings import stock_batches_in_flight
     from cusd_plus.perps_portfolio import batches_in_flight as perps_in_flight
 
-    return (stock_batches_in_flight(wallet).exists() or batches_in_flight(wallet).exists()
-            or perps_in_flight(wallet).exists())
+    if (stock_batches_in_flight(wallet).exists() or batches_in_flight(wallet).exists()
+            or perps_in_flight(wallet).exists()):
+        return True
+    accounts = [a for a in (addresses or []) if a != wallet.lower()]
+    if accounts:
+        from smart_account.inflight import address_in_flight
+
+        return any(address_in_flight(a) for a in accounts)
+    return False
 
 
-def check_chain(wallet: str, ledger: Ledger) -> None:
-    """Raise unless the ledger explains every unit the wallet holds now.
-    Confirmed trades a lagging node hasn't seen yet (the RPC pool rotates)
-    are a Retry, never a verdict. Run in_flight() BEFORE loading the
-    ledger: a trade confirming in between is then in one or the other."""
-    from cusd_plus import crypto_month
+# A person with several addresses whose stored scans disagree with the
+# ledger gets one fresh scan of every address before the verdict (a move
+# between their own addresses read on each side at a different moment), at
+# most this often.
+RESCAN_EVERY = timedelta(minutes=5)
+
+
+def _scan_all(addresses: list, fresh: bool) -> tuple[dict, dict, list]:
+    """(stock units summed over the addresses, {address: stock scan blocks},
+    [(address, crypto base units, crypto block)]). Retry when any is unknown."""
+    from blockchain.models import CryptoHoldings
+    from cusd_plus.crypto_holdings import _key as crypto_key
     from cusd_plus.crypto_holdings import holdings_snapshot
     from cusd_plus.gm_holdings import STALE_AFTER, complete_holdings
-    from cusd_plus.stock_month import _dec, _unseen_by_scan, ledger_explains_chain
+    from cusd_plus.stock_month import _dec
 
+    chain: dict = {}
+    blocks: dict = {}
+    crypto: list = []
     try:
-        scan = complete_holdings(wallet, max_age=STALE_AFTER)
-        crypto_scan = holdings_snapshot(wallet, allow_last_known=False)
+        for address in addresses:
+            if fresh:
+                CryptoHoldings.objects.filter(bsc_address=crypto_key(address)).update(is_stale=True)
+            scan = complete_holdings(address, max_age=timedelta(0) if fresh else STALE_AFTER)
+            crypto_scan = holdings_snapshot(address, allow_last_known=False)
+            if scan is None or crypto_scan is None:
+                raise Retry('holdings unreadable')
+            held, blocks[address] = scan
+            for symbol, units in held.items():
+                d = _dec(units)
+                if d is not None and d > 0:
+                    chain[symbol] = chain.get(symbol, Decimal('0')) + d
+            crypto.append((address, crypto_scan[0], crypto_scan[1]))
+    except Retry:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise Retry('holdings unreadable') from exc
-    if scan is None or crypto_scan is None:
-        raise Retry('holdings unreadable')
-    chain_raw, blocks = scan
-    chain = {s: d for s, u in chain_raw.items() if (d := _dec(u)) is not None and d > 0}
-    if _unseen_by_scan(ledger.stocks, blocks):
-        raise Retry('scan behind a confirmed trade')
+    return chain, blocks, crypto
+
+
+def _source(trade, wallet: str) -> str:
+    return getattr(trade, 'source', '') or wallet
+
+
+def _verdict(wallet: str, ledger: Ledger, addresses: list, fresh: bool) -> None:
+    from cusd_plus import crypto_month
+    from cusd_plus.stock_month import _unseen_by_scan, ledger_explains_chain
+
+    chain, blocks, crypto_scans = _scan_all(addresses, fresh)
+    for address in addresses:
+        if _unseen_by_scan([t for t in ledger.stocks if _source(t, wallet) == address], blocks[address]):
+            raise Retry('scan behind a confirmed trade')
     # The same normalized units valuation uses (a sell-all's rounding
     # overshoot is zero, not a negative balance).
     if not ledger_explains_chain(_walk_units(ledger.stocks), chain):
         raise Untrusted(OUTSIDE_UNITS)
-    raw, block = crypto_scan
-    try:
-        crypto_chain = crypto_month._chain_units(raw)
-    except crypto_month.CryptoMonthUnavailable as exc:
-        raise Untrusted(OFF_CATALOG) from exc
-    if block is not None and any(t.block is not None and t.block > block for t in ledger.crypto):
-        raise Retry('crypto scan behind a confirmed swap')
+    crypto_chain: dict = {}
+    for address, raw, block in crypto_scans:
+        try:
+            units = crypto_month._chain_units(raw)
+        except crypto_month.CryptoMonthUnavailable as exc:
+            raise Untrusted(OFF_CATALOG) from exc
+        if block is not None and any(t.block is not None and t.block > block
+                                     for t in ledger.crypto if _source(t, wallet) == address):
+            raise Retry('crypto scan behind a confirmed swap')
+        for symbol, amount in units.items():
+            crypto_chain[symbol] = crypto_chain.get(symbol, Decimal('0')) + amount
     if not ledger_explains_chain(_walk_units(ledger.crypto), crypto_chain):
         raise Untrusted(OUTSIDE_UNITS)
 
 
-def trusted_ledger(wallet: str, prices: PriceBook) -> Ledger:
-    """The wallet's ledger, proven against the chain now."""
-    if in_flight(wallet):
+def check_chain(wallet: str, ledger: Ledger) -> None:
+    """Raise unless the ledger explains every unit the person holds now,
+    summed over every address it spans (ledger.wallets): units moved
+    between their own addresses are explained wherever they sit.
+    Confirmed trades a lagging node hasn't seen yet (the RPC pool rotates)
+    are a Retry, never a verdict. Run in_flight() BEFORE loading the
+    ledger: a trade confirming in between is then in one or the other."""
+    wallet = wallet.lower()
+    addresses = list(ledger.wallets or [wallet])
+    if len(addresses) == 1:
+        _verdict(wallet, ledger, addresses, fresh=False)
+        return
+    try:
+        _verdict(wallet, ledger, addresses, fresh=False)
+        return
+    except Untrusted:
+        if not _may_rescan(wallet):
+            raise
+    _verdict(wallet, ledger, addresses, fresh=True)
+
+
+def _may_rescan(wallet: str) -> bool:
+    from django.core.cache import cache
+
+    try:
+        return bool(cache.add(f'returns:rescan:{wallet}', 1, int(RESCAN_EVERY.total_seconds())))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def trusted_ledger(wallet: str, prices: PriceBook, *, allow_rpc: bool = False) -> Ledger:
+    """The person's ledger (every address of the personal wallet's owner),
+    proven against the chain now."""
+    wallet = wallet.lower()
+    addresses = person_addresses(wallet)
+    if in_flight(wallet, addresses):
         raise Retry('trade on the wire')
-    ledger = load_ledger(wallet, prices)
+    ledger = load_ledger(wallet, prices, addresses, allow_rpc=allow_rpc)
     check_chain(wallet, ledger)
     return ledger
 
@@ -677,9 +796,10 @@ def sync_wallet(user, wallet: str, *, days: int = BACKFILL_DAYS, now: datetime |
     wanted = [today - timedelta(days=n) for n in range(days, 0, -1)]
     ledger, reason = None, ''
     try:
-        if in_flight(wallet):
+        addresses = person_addresses(wallet)
+        if in_flight(wallet, addresses):
             raise Retry('trade on the wire')
-        ledger = load_ledger(wallet, prices)
+        ledger = load_ledger(wallet, prices, addresses, allow_rpc=True)
     except Retry as exc:
         logger.info('returns: retry %s: %s', wallet, exc)
         counts['retry'] += 1
@@ -733,21 +853,37 @@ def sync_wallet(user, wallet: str, *, days: int = BACKFILL_DAYS, now: datetime |
 
 
 def wallets_to_snapshot():
-    """(user, wallet) for every personal account that ever traded stocks or
-    Bitcoin & gold in Confío."""
+    """(user, personal wallet) for every person who ever traded stocks or
+    Bitcoin & gold in Confío, from the personal wallet or inside a Cuenta
+    inteligente. The wallet is the person's anchor: their rows are keyed by
+    it and hold their whole sleeve."""
     from blockchain.models import CRYPTO_BATCH_KINDS, SponsoredBatch
     from users.models import Account
+
+    from .account_trades import accounts_with_trades
+    from .member_portfolio import personal_wallet
 
     wallets = set(
         w.lower() for w in SponsoredBatch.objects.filter(
             kind__in=('stock_buy', 'stock_sell', *CRYPTO_BATCH_KINDS, 'perps_open'), status='confirmed')
         .values_list('user_bsc_address', flat=True).distinct() if w)
-    if not wallets:
+    owners = accounts_with_trades()
+    if not wallets and not owners:
         return []
     accounts = (Account.objects.filter(account_type='personal', deleted_at__isnull=True)
                 .exclude(bsc_address__isnull=True).exclude(bsc_address='')
                 .select_related('user'))
-    return [(a.user, a.bsc_address.lower()) for a in accounts.iterator() if a.bsc_address.lower() in wallets]
+    pairs = [(a.user, a.bsc_address.lower()) for a in accounts.iterator() if a.bsc_address.lower() in wallets]
+    seen = {w for _u, w in pairs}
+    if owners:
+        from django.contrib.auth import get_user_model
+
+        for user in get_user_model().objects.filter(id__in=owners):
+            anchor = personal_wallet(user)
+            if anchor and anchor not in seen:
+                pairs.append((user, anchor))
+                seen.add(anchor)
+    return pairs
 
 
 def sync_all(*, budget_seconds: float, days: int = BACKFILL_DAYS, recompute: bool = False,

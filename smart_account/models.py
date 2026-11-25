@@ -190,7 +190,8 @@ class SmartAccountStandingAuthorization(models.Model):
     rule's own limits for a run with nobody present), or a send rule bound
     to payee wallet, amount and frequency."""
     KIND_CHOICES = [('payout', 'Bank payout'), ('send', 'Send to a person'),
-                    ('card', 'Card spender allowance')]
+                    ('card', 'Card spender allowance'), ('trade', 'Hands-off trades (v2)'),
+                    ('purchase', 'Hands-off purchases (v2)')]
 
     internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     kind = models.CharField(max_length=8, choices=KIND_CHOICES, default='payout')
@@ -252,7 +253,8 @@ class SmartAccountPagoMovilDestination(SoftDeleteModel):
 class SmartAccountRule(SoftDeleteModel):
     # 'card' (decision 35): pulled by an allowlisted card spender, never run
     # by the relayer (automation.due_rules leaves it out).
-    KIND_CHOICES = [('send', 'Send'), ('payout', 'Bank payout'), ('buy', 'Buy'), ('card', 'Card allowance')]
+    KIND_CHOICES = [('send', 'Send'), ('payout', 'Bank payout'), ('buy', 'Buy'), ('card', 'Card allowance'),
+                    ('trade', 'Hands-off trades (v2)')]
     FREQUENCY_CHOICES = [('daily', 'Daily'), ('weekly', 'Weekly'), ('biweekly', 'Every two weeks'),
                          ('monthly', 'Monthly')]
     STATE_CHOICES = [('draft', 'Prepared, not on chain'), ('onchain', 'On chain'), ('cancelled', 'Cancelled')]
@@ -643,6 +645,56 @@ def _keep_bank_rejection(sender, instance, raw=False, update_fields=None, **kwar
         if not kept:
             return
     instance.provider_data = {**data, KEY_REJECTED: kept}
+
+
+class SmartRelayTrade(models.Model):
+    """One hands-off trade the person asked for in the chat (smart_account/
+    relay_trades.py): their exact "sí" makes this row, a Celery task quotes,
+    checks and sends relayTrade from the sponsor through relayer.send_relayer_call
+    (whose SmartAccountRelayTx row is the durable record of the broadcast), and
+    the result is posted in the chat after the receipt.
+
+    `nonce` is the question's own id (assistant/trades.py): a second "sí" to
+    the same question finds this row and makes nothing."""
+    STATUS_CHOICES = [
+        ('waiting_rule', 'Waiting for the Trade rule (cap card)'),
+        ('waiting_move', 'Waiting for dollars moved in from the personal wallet'),
+        ('pending', 'Asked, not sent'), ('sent', 'relayTrade broadcast, receipt pending'),
+        ('done', 'Executed'), ('failed', 'Nothing executed'), ('cancelled', 'Withdrawn before sending'),
+        ('unknown', 'Broadcast outcome unknown (resolved by the receipt)'),
+    ]
+    LIVE = ('waiting_rule', 'waiting_move', 'pending', 'sent', 'unknown')
+
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    smart_account = models.ForeignKey(SmartAccount, on_delete=models.PROTECT, null=True, blank=True,
+                                      related_name='relay_trades')
+    rule = models.ForeignKey(SmartAccountRule, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
+    nonce = models.CharField(max_length=40)
+    conversation_id = models.BigIntegerField(null=True, blank=True)
+    side = models.CharField(max_length=4)            # buy | sell
+    asset_kind = models.CharField(max_length=6)      # stock | crypto
+    ticker = models.CharField(max_length=24)         # TSLA, BTCB, XAUT
+    amount_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    sell_all = models.BooleanField(default=False)
+    # The request headers the gates read (platform, country), never anything else.
+    meta = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=14, choices=STATUS_CHOICES, default='pending')
+    error_code = models.CharField(max_length=60, blank=True, default='')
+    relay_tx = models.ForeignKey(SmartAccountRelayTx, on_delete=models.PROTECT, null=True, blank=True,
+                                 related_name='+')
+    tx_hash = models.CharField(max_length=66, blank=True, default='')
+    amount_in = models.CharField(max_length=80, blank=True, default='')
+    amount_out = models.CharField(max_length=80, blank=True, default='')
+    usd_counted = models.CharField(max_length=80, blank=True, default='')
+    attempts = models.PositiveIntegerField(default=0)
+    notified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'nonce'], name='smart_relay_trade_nonce_uniq')]
+        indexes = [models.Index(fields=['status', 'updated_at'], name='smart_relay_trade_status_idx')]
 
 
 pre_save.connect(_keep_bank_rejection, sender='payment_accounts.PayoutDestination',

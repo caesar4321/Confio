@@ -11,6 +11,18 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
+/// The two reads depositFrom makes of the Cuenta inteligente contracts
+/// (contracts/smart_account/interfaces). Declared here so this package does
+/// not compile against the smart-account tree.
+interface IEscrowAccountFactory {
+    /// True for every account the factory ever created, inherited ones too.
+    function isAccount(address account) external view returns (bool);
+}
+
+interface IEscrowSmartAccount {
+    function owner() external view returns (address);
+}
+
 /**
  * ConfioMarketEscrow — buyer-protected payments for Comprar (marketplace).
  *
@@ -35,6 +47,14 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
  *   refund    merchant, any time before settlement (cancel, return).
  *   reclaim   buyer, Funded and past shipBy — no Confío signature needed, so
  *             an unshipped order is recoverable even with the backend down.
+ *
+ * depositFrom (2026-11-25, hands-off Cuenta inteligente): the person's smart
+ * account pays for its owner. The order's buyer is still the OWNER (their
+ * EOA confirms, disputes and reclaims), the backend signs a separate
+ * DepositFrom digest binding buyer = owner AND payer = the account (so EOA
+ * and account authorizations never cross), the funds come from the account,
+ * and every
+ * refund of that order goes back to the account (`refundToOf`).
  *
  * The fee (≤ MAX_FEE_BPS, 8% at launch) is fixed at deposit and taken only
  * on release; a refund returns the full amount. The partner revenue split
@@ -102,6 +122,14 @@ contract ConfioMarketEscrow is
         "Deposit(bytes32 orderId,address buyer,address merchant,address token,uint256 amount,uint16 feeBps,uint256 deadline)"
     );
 
+    /// depositFrom's own authorization: also binds the PAYER (the smart
+    /// account), so a signature for an EOA order can never be spent by the
+    /// owner's account, nor one account's by another account of the same
+    /// owner, nor an account order's by the owner's EOA via deposit.
+    bytes32 private constant DEPOSIT_FROM_TYPEHASH = keccak256(
+        "DepositFrom(bytes32 orderId,address buyer,address payer,address merchant,address token,uint256 amount,uint16 feeBps,uint256 deadline)"
+    );
+
     // Storage is append-only. Every parent (OZ 5.x Ownable/Ownable2Step/
     // Pausable/EIP712/Initializable) uses ERC-7201 namespaced storage,
     // ReentrancyGuardTransient uses a transient slot and UUPSUpgradeable has
@@ -124,6 +152,15 @@ contract ConfioMarketEscrow is
     /// Fees from released orders, per token — the only owner-collectible funds.
     mapping(address => uint256) public accruedFees;
 
+    // ── appended 2026-11-25 (depositFrom) ──
+    /// The Cuenta inteligente factory whose accounts may depositFrom.
+    /// address(0) = depositFrom disabled (the state right after the upgrade
+    /// until the Safe sets it, ideally in the same upgradeToAndCall).
+    IEscrowAccountFactory public accountFactory;
+    /// Where a refund of the order goes when it is not the buyer: the smart
+    /// account that paid it through depositFrom. Never set by deposit.
+    mapping(bytes32 => address) public refundToOf;
+
     event Deposited(
         bytes32 indexed orderId,
         address indexed buyer,
@@ -143,6 +180,9 @@ contract ConfioMarketEscrow is
     event WindowsChanged(uint64 shipWindow, uint64 releaseWindow, uint64 disputeTimeout);
     event TokenLimitsChanged(address indexed token, uint128 maxOrder, uint128 maxOpen);
     event StrayTokensSwept(address indexed token, address indexed to, uint256 amount);
+    /// Emitted with Deposited when a smart account paid for its owner.
+    event DepositedFrom(bytes32 indexed orderId, address indexed account, address indexed buyer);
+    event AccountFactoryChanged(address indexed previous, address indexed current);
 
     error ZeroAddress();
     error AuthorizationExpired();
@@ -163,6 +203,8 @@ contract ConfioMarketEscrow is
     error TooLate();
     error BadWindow();
     error NothingToCollect();
+    error NotAccount();
+    error NotAccountOwner();
 
     constructor() {
         _disableInitializers();
@@ -214,6 +256,25 @@ contract ConfioMarketEscrow is
         );
     }
 
+    /// The EIP-712 digest the backend signs to authorize one depositFrom by
+    /// `payer` (the smart account) for its owner `buyer`.
+    function depositFromDigest(
+        bytes32 orderId,
+        address buyer,
+        address payer,
+        address merchant,
+        address token,
+        uint256 amount,
+        uint16 feeBps,
+        uint256 deadline
+    ) public view returns (bytes32) {
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(DEPOSIT_FROM_TYPEHASH, orderId, buyer, payer, merchant, token, amount, feeBps, deadline)
+            )
+        );
+    }
+
     // ═════════════════════════ Order flow ═══════════════════════════════
 
     /// Called BY the buyer (their EOA, via the sponsored 7702 batch that
@@ -227,41 +288,37 @@ contract ConfioMarketEscrow is
         uint256 deadline,
         bytes calldata authSig
     ) external nonReentrant whenNotPaused {
-        if (block.timestamp > deadline) revert AuthorizationExpired();
-        if (_orders[orderId].state != State.None) revert OrderExists();
-        if (merchant == address(0) || merchant == address(this) || merchant == msg.sender) revert BadMerchant();
-        if (feeBps > MAX_FEE_BPS) revert FeeTooHigh();
+        _deposit(orderId, msg.sender, merchant, token, amount, feeBps, deadline, authSig);
+    }
 
-        TokenLimits memory limits = tokenLimits[token];
-        if (limits.maxOrder == 0) revert TokenNotAccepted();
-        if (amount > limits.maxOrder) revert OrderTooLarge();
-        if (openPrincipal[token] + amount > limits.maxOpen) revert OpenCapExceeded();
-        // The merchant must receive something on release.
-        if (amount <= feeFor(amount, feeBps)) revert AmountTooSmall();
-
-        bytes32 digest = depositDigest(orderId, msg.sender, merchant, token, amount, feeBps, deadline);
-        if (!SignatureChecker.isValidSignatureNow(orderSigner, digest, authSig)) revert BadAuthorization();
-
-        uint64 shipBy = uint64(block.timestamp) + shipWindow;
-        _orders[orderId] = Order({
-            buyer: msg.sender,
-            shipBy: shipBy,
-            feeBps: feeBps,
-            state: State.Funded,
-            merchant: merchant,
-            releaseAt: 0,
-            releaseWindow: uint32(releaseWindow),
-            token: token,
-            disputedAt: 0,
-            amount: amount
-        });
-        openPrincipal[token] += amount;
-
-        uint256 before = IERC20(token).balanceOf(address(this));
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        if (IERC20(token).balanceOf(address(this)) - before != amount) revert AmountMismatch();
-
-        emit Deposited(orderId, msg.sender, merchant, token, amount, feeBps, shipBy);
+    /// Called BY a Cuenta inteligente (smart account) paying for its owner.
+    /// The caller must be an account of `accountFactory` owned by `buyer`;
+    /// `authSig` is the backend's signature over
+    /// `depositFromDigest` (buyer = that owner, payer = msg.sender) — NOT the
+    /// plain Deposit digest. The order's buyer is the owner
+    /// (confirm/dispute/reclaim stay with their EOA); the account must have
+    /// approved `amount` and every refund of this order goes back to it.
+    function depositFrom(
+        bytes32 orderId,
+        address buyer,
+        address merchant,
+        address token,
+        uint256 amount,
+        uint16 feeBps,
+        uint256 deadline,
+        bytes calldata authSig
+    ) external nonReentrant whenNotPaused {
+        if (address(accountFactory) == address(0) || !accountFactory.isAccount(msg.sender)) revert NotAccount();
+        // buyer != msg.sender keeps _deposit's digest choice exact: plain
+        // deposit always has buyer == payer, depositFrom never.
+        if (buyer == address(0) || buyer == msg.sender || IEscrowSmartAccount(msg.sender).owner() != buyer) {
+            revert NotAccountOwner();
+        }
+        // The owner buying from their own account would be a self-purchase.
+        if (merchant == buyer) revert BadMerchant();
+        refundToOf[orderId] = msg.sender;
+        _deposit(orderId, buyer, merchant, token, amount, feeBps, deadline, authSig);
+        emit DepositedFrom(orderId, msg.sender, buyer);
     }
 
     function markShipped(bytes32 orderId) external {
@@ -343,6 +400,60 @@ contract ConfioMarketEscrow is
 
     // ═════════════════════════ Internals ════════════════════════════════
 
+    /// Shared by deposit and depositFrom: `buyer` is recorded and bound in
+    /// the digest, the funds are pulled from msg.sender (the buyer itself for
+    /// deposit, their smart account for depositFrom).
+    function _deposit(
+        bytes32 orderId,
+        address buyer,
+        address merchant,
+        address token,
+        uint256 amount,
+        uint16 feeBps,
+        uint256 deadline,
+        bytes calldata authSig
+    ) private {
+        if (block.timestamp > deadline) revert AuthorizationExpired();
+        if (_orders[orderId].state != State.None) revert OrderExists();
+        if (merchant == address(0) || merchant == address(this) || merchant == msg.sender) revert BadMerchant();
+        if (feeBps > MAX_FEE_BPS) revert FeeTooHigh();
+
+        TokenLimits memory limits = tokenLimits[token];
+        if (limits.maxOrder == 0) revert TokenNotAccepted();
+        if (amount > limits.maxOrder) revert OrderTooLarge();
+        if (openPrincipal[token] + amount > limits.maxOpen) revert OpenCapExceeded();
+        // The merchant must receive something on release.
+        if (amount <= feeFor(amount, feeBps)) revert AmountTooSmall();
+
+        // deposit: buyer == msg.sender, the original Deposit digest unchanged.
+        // depositFrom: buyer != msg.sender, the DepositFrom digest binding the payer.
+        bytes32 digest = buyer == msg.sender
+            ? depositDigest(orderId, buyer, merchant, token, amount, feeBps, deadline)
+            : depositFromDigest(orderId, buyer, msg.sender, merchant, token, amount, feeBps, deadline);
+        if (!SignatureChecker.isValidSignatureNow(orderSigner, digest, authSig)) revert BadAuthorization();
+
+        uint64 shipBy = uint64(block.timestamp) + shipWindow;
+        _orders[orderId] = Order({
+            buyer: buyer,
+            shipBy: shipBy,
+            feeBps: feeBps,
+            state: State.Funded,
+            merchant: merchant,
+            releaseAt: 0,
+            releaseWindow: uint32(releaseWindow),
+            token: token,
+            disputedAt: 0,
+            amount: amount
+        });
+        openPrincipal[token] += amount;
+
+        uint256 before = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        if (IERC20(token).balanceOf(address(this)) - before != amount) revert AmountMismatch();
+
+        emit Deposited(orderId, buyer, merchant, token, amount, feeBps, shipBy);
+    }
+
     function _requireOpen(Order storage o) private view {
         State s = o.state;
         if (s != State.Funded && s != State.Shipped && s != State.Disputed) revert WrongState(s);
@@ -363,11 +474,14 @@ contract ConfioMarketEscrow is
     function _refund(bytes32 orderId, Order storage o) private {
         uint256 amount = o.amount;
         address token = o.token;
-        address buyer = o.buyer;
+        address to = refundToOf[orderId];
+        if (to == address(0)) to = o.buyer;
         o.state = State.Refunded;
         openPrincipal[token] -= amount;
-        IERC20(token).safeTransfer(buyer, amount);
-        emit Refunded(orderId, buyer, amount, msg.sender);
+        IERC20(token).safeTransfer(to, amount);
+        // `buyer` in the event is the recipient: the buyer, or the account
+        // that paid a depositFrom order.
+        emit Refunded(orderId, to, amount, msg.sender);
     }
 
     function _setWindows(uint64 ship, uint64 release_, uint64 disputeTimeout_) private {
@@ -386,6 +500,13 @@ contract ConfioMarketEscrow is
         if (signer_ == address(0)) revert ZeroAddress();
         emit OrderSignerChanged(orderSigner, signer_);
         orderSigner = signer_;
+    }
+
+    /// The Cuenta inteligente factory (UUPS, address stable). address(0)
+    /// disables depositFrom; open orders and their refunds are unaffected.
+    function setAccountFactory(address factory_) external onlyOwner {
+        emit AccountFactoryChanged(address(accountFactory), factory_);
+        accountFactory = IEscrowAccountFactory(factory_);
     }
 
     function setArbiter(address arbiter_) external onlyOwner {

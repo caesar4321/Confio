@@ -18,6 +18,19 @@ one the person named. What was asked is checked again on the answer.
 A card is one trade. The phone does not invent the request it signs: it
 asks for it here (`claim`), and while one request of a card is out, or one
 of its batches is on record, no other is handed out. A card lasts a day.
+
+Hands-off (Cuenta inteligente v2, smart_account/hands_off.py): once the v2
+implementation is configured, the answer that leaves the card is routed
+first. A subscriber whose v2 account trades it gets no card to sign: one
+SmartRelayTrade row and a status card ('relay_trade'); the account executes
+it and the result is posted in the chat after the receipt
+(smart_account/relay_trades.py). Otherwise the answer leaves what stands in
+the way, as cards: the weekly cap to choose ('trade_cap', signed once with
+Face), dollars to move in from the personal wallet ('trade_move'), the
+paywall beside "Hazlo tú" ('trade_offer'), the top-up form, or the migration
+prompt ('account_migration'). Bitcoin (BTCB) and gold (XAUT) are only ever
+proposed hands-off, and never to an iOS client. With it unset, nothing here
+changes.
 """
 import logging
 import re
@@ -58,7 +71,8 @@ SPEC = {
         'type': 'object',
         'properties': {
             'side': {'type': 'string', 'enum': ['buy', 'sell']},
-            'asset': {'type': 'string', 'description': 'El ticker o el nombre que la persona escribió.'},
+            'asset': {'type': 'string', 'description': ('El ticker o el nombre que la persona escribió (también '
+                                                        'bitcoin u oro digital XAUt, si la app los ofrece).')},
             'amount_usd': {'type': ['number', 'null'], 'description': 'Siempre null: el servidor pregunta el monto.'},
             'sell_all': {'type': 'boolean', 'description': 'Solo en una venta: vende todo lo que tiene de esa acción.'},
         },
@@ -126,6 +140,41 @@ _CALLED = {'SPY': ('s&p', 's&p 500', 's&p500', 'sp500', 'sp 500'), 'QQQ': ('nasd
            'JPM': ('jp morgan', 'jpmorgan')}
 
 
+# Oro y Bitcoin hands-off (BTCB / XAUT through the swap router): what people call them.
+CRYPTO_CALLED = {'BTCB': ('bitcoin', 'btc', 'btcb', 'bitcoins'),
+                 'XAUT': ('xaut', 'xaut0', 'tether gold', 'oro digital', 'oro tokenizado')}
+CRYPTO_NAMES = {'BTCB': 'Bitcoin', 'XAUT': 'Oro digital (XAUt)'}
+
+
+def crypto_offered(viewer) -> bool:
+    """Bitcoin and gold are proposed only hands-off, never to an iOS client
+    (the app ships without Oro y Bitcoin there: DEX_TRADING_UI_ENABLED off)."""
+    try:
+        from cusd_plus import crypto_risk
+        from cusd_plus.perps_risk import _is_ios
+        from smart_account import hands_off
+        meta = viewer.request_meta or {}
+        return (not _is_ios(meta) and hands_off.enabled()
+                and crypto_risk.surfaces_enabled(viewer.user, meta) and crypto_risk.trading_ready())
+    except Exception:  # noqa: BLE001 - unknown: not offered
+        logger.warning('Confio Assistant: crypto offer check failed', exc_info=True)
+        return False
+
+
+def crypto_asset(asset):
+    """'BTCB' / 'XAUT' for what the model wrote, or None."""
+    said = _fold(str(asset or '')).strip()
+    for symbol, names in CRYPTO_CALLED.items():
+        if said in names or said == symbol.lower():
+            return symbol
+    return None
+
+
+def _crypto_named(texts, symbol):
+    names = CRYPTO_CALLED[symbol]
+    return any(re.search(rf'(?<![\w]){re.escape(name)}(?![\w])', _fold(text)) for text in texts for name in names)
+
+
 def _named(texts, ticker, name):
     """The person named this asset: its ticker, its brand, or a word of its
     name that is its own. A question is asked before any card, so this only
@@ -163,9 +212,15 @@ _OR_ALL = {'es': ' O escribe "toda" para vender toda tu posición.', 'pt': ' Ou 
            'en': ' Or type "all" to sell your whole position.'}
 
 
+def _asset_label(ticker, name):
+    if ticker in CRYPTO_NAMES:
+        return CRYPTO_NAMES[ticker]
+    return f'{name} ({ticker})' if name and name != ticker else ticker
+
+
 def how_many(side, ticker, name, lang):
     """Code's "how many dollars": the ticker is always in it."""
-    asset = f'{name} ({ticker})' if name and name != ticker else ticker
+    asset = _asset_label(ticker, name)
     verb = {'es': ('comprar', 'vender'), 'pt': ('comprar', 'vender'), 'en': ('buy', 'sell')}[lang][side == 'sell']
     return {'es': f'¿Cuántos dólares de {asset} quieres {verb}?',
             'pt': f'Quantos dólares de {asset} você quer {verb}?',
@@ -174,7 +229,7 @@ def how_many(side, ticker, name, lang):
 
 def sell_all_question(ticker, name, lang):
     """The yes/no for selling a whole position: the ticker is always in it."""
-    asset = f'{name} ({ticker})' if name and name != ticker else ticker
+    asset = _asset_label(ticker, name)
     return {'es': f'¿Quieres vender toda tu posición en {asset}?',
             'pt': f'Você quer vender toda a sua posição em {asset}?',
             'en': f'Do you want to sell your whole position in {asset}?'}[lang]
@@ -186,10 +241,29 @@ def _held(viewer):
     try:
         from .engine import _holdings
         rows = _holdings(address, limit=None) if address else []
+        account = _account_address(viewer)
+        if account and isinstance(rows, list):
+            # Hands-off sells are the account's first: what it holds can be sold from the chat too.
+            more = _holdings(account, limit=None)
+            rows = rows + (more if isinstance(more, list) else [])
     except Exception:  # noqa: BLE001 - unknown: the phone checks the real balance
         logger.warning('Confio Assistant: holdings unavailable for a trade card', exc_info=True)
         return 'desconocido'
     return rows if isinstance(rows, list) else 'desconocido'
+
+
+def _account_address(viewer):
+    """The person's Cuenta inteligente, while hands-off trading is on; '' otherwise."""
+    try:
+        from smart_account import hands_off
+        from smart_account.context import own_account
+        if not hands_off.enabled():
+            return ''
+        own = own_account(viewer.user)
+        return own.contract_address if own is not None and own.status in ('active', 'cancel_pending') else ''
+    except Exception:  # noqa: BLE001 - the personal wallet alone
+        logger.warning('Confio Assistant: account holdings unavailable', exc_info=True)
+        return ''
 
 
 def _cannot(belt, side, ticker, name, amount, sell_all, rows):
@@ -231,6 +305,9 @@ def propose(belt, side, asset, amount_usd=None, sell_all=False):
     texts = [text for text in texts if len(' '.join(text.split())) <= MAX_REQUEST_CHARS]
     if side not in ('buy', 'sell'):
         return _refuse('Operación desconocida.')
+    crypto = crypto_asset(asset)
+    if crypto is not None:
+        return _propose_crypto(belt, texts, side, crypto, sell_all)
     # What people call it comes first: "nasdaq" is QQQ, not Nasdaq, Inc.; "oro" is two funds: ask which.
     called = [ticker for ticker, names in _CALLED.items() if _fold(str(asset or '')).strip() in names]
     if len(called) > 1:
@@ -252,11 +329,38 @@ def propose(belt, side, asset, amount_usd=None, sell_all=False):
     if why:
         return _refuse(why)
     lang = confirm.language(texts)
-    data = {'side': side, 'ticker': ticker, 'sell_all': sell_all, 'amount': None}
+    data = {'side': side, 'ticker': ticker, 'sell_all': sell_all, 'amount': None, 'kind': 'stock',
+            'nonce': _nonce()}
     if sell_all:
         return confirm.ask(belt.result, 'trade', sell_all_question(ticker, name, lang), data, lang)
     # How many dollars is never the model's nor read from their words: code asks, and the number is it.
     return confirm.ask_amount(belt.result, 'trade', how_many(side, ticker, name, lang), data, lang,
+                              extra=_OR_ALL[lang] if side == 'sell' else '')
+
+
+def _nonce():
+    """The question's own id: a second answer to it is the same hands-off trade (smart_account/relay_trades.py)."""
+    return secrets.token_hex(12)
+
+
+def _propose_crypto(belt, texts, side, symbol, sell_all):
+    """Bitcoin or gold: hands-off only, never on iOS. Same code-asked amount and answer."""
+    from . import confirm
+    if not crypto_offered(belt.viewer):
+        return _refuse('Bitcoin y oro digital no se pueden comprar ni vender desde este chat. No lo ofrezcas.')
+    if not _crypto_named(texts, symbol):
+        return _refuse(f'La persona no nombró {CRYPTO_NAMES[symbol]}: pregúntale cuál quiere, no lo elijas tú.')
+    sell_all = bool(sell_all) and side == 'sell'
+    if side == 'buy':
+        from cusd_plus import crypto_risk
+        if not crypto_risk.buy_enabled(belt.viewer.user, belt.viewer.request_meta):
+            return _refuse('Esta persona no puede comprar bitcoin u oro desde su país o su cuenta.')
+    lang = confirm.language(texts)
+    data = {'side': side, 'ticker': symbol, 'sell_all': sell_all, 'amount': None, 'kind': 'crypto',
+            'nonce': _nonce()}
+    if sell_all:
+        return confirm.ask(belt.result, 'trade', sell_all_question(symbol, CRYPTO_NAMES[symbol], lang), data, lang)
+    return confirm.ask_amount(belt.result, 'trade', how_many(side, symbol, CRYPTO_NAMES[symbol], lang), data, lang,
                               extra=_OR_ALL[lang] if side == 'sell' else '')
 
 
@@ -278,6 +382,8 @@ def _to_them(why, lang, name):
 def confirmed(belt, data, lang='es'):
     """The yes to propose()'s question: every gate again, then the card of exactly that."""
     side, ticker, sell_all = data.get('side'), data.get('ticker'), bool(data.get('sell_all'))
+    if data.get('kind') == 'crypto':
+        return _confirmed_crypto(belt, data, lang)
     found = market.listed_asset(ticker)
     if side not in ('buy', 'sell') or found is None or found[0] != ticker or not offered(belt):
         return False, {'es': 'No puedo dejarte esa tarjeta ahora. Puedes hacerlo en Invertir.',
@@ -297,7 +403,151 @@ def confirmed(belt, data, lang='es'):
     reply = {'es': PREPARED_REPLY,
              'pt': 'Deixei o cartão: confira o preço e a taxa e toque em Aprobar. Ainda não foi feito nada.',
              'en': 'I left the card: check the price and the fee and tap Aprobar there. Nothing has been done yet.'}[lang]
-    return True, reply, {'actions': [{'type': 'trade', 'ticker': ticker, 'target': target, 'label': label}]}
+    signed_card = {'type': 'trade', 'ticker': ticker, 'target': target, 'label': label}
+    routed = _hands_off(belt, data, lang, signed_card=signed_card, diy=_diy_screen('stock', side, ticker))
+    if routed is not None:
+        return routed
+    return True, reply, {'actions': [signed_card]}
+
+
+def _confirmed_crypto(belt, data, lang):
+    side, symbol, sell_all = data.get('side'), data.get('ticker'), bool(data.get('sell_all'))
+    if side not in ('buy', 'sell') or symbol not in CRYPTO_NAMES or not crypto_offered(belt.viewer):
+        return False, {'es': 'No puedo hacer eso desde el chat. Puedes hacerlo en Invertir.',
+                       'pt': 'Não consigo fazer isso pelo chat. Você pode fazer em Invertir.',
+                       'en': "I can't do that from the chat. You can do it in Invertir."}[lang], {}
+    if not sell_all:
+        amount = Decimal(data['amount'])
+        if amount < MIN_SELL_USD or amount > Decimal(str(getattr(settings, 'CUSD_PLUS_GM_MAX_TRADE_USD', 100_000))):
+            return False, _to_them(f'El mínimo es {money(MIN_SELL_USD)}.', lang, CRYPTO_NAMES[symbol]), {}
+    routed = _hands_off(belt, data, lang, signed_card=None, diy=_diy_screen('crypto', side, symbol))
+    if routed is not None:
+        return routed
+    # No signed chat card for bitcoin and gold: their own screen, prefilled.
+    return True, HANDS_OFF_REPLIES['diy'][lang], {'actions': [_offer_card(None, _diy_screen('crypto', side, symbol))]}
+
+
+# ── hands-off (Cuenta inteligente v2) ───────────────────────────────────
+
+HANDS_OFF_REPLIES = {
+    'go': {'es': 'Listo: lo hago desde tu Cuenta inteligente. Te aviso aquí cuando esté hecho.',
+           'pt': 'Certo: faço pela sua Cuenta inteligente. Aviso aqui quando estiver feito.',
+           'en': "Done: I'm doing it from your Cuenta inteligente. I'll tell you here when it's finished."},
+    'paywall': {'es': 'Con Cuenta inteligente lo hago yo por ti, sin firmar cada vez. O puedes hacerlo tú ahora.',
+                'pt': 'Com a Cuenta inteligente eu faço por você, sem assinar cada vez. Ou faça você agora.',
+                'en': 'With Cuenta inteligente I do it for you, without signing each time. Or do it yourself now.'},
+    'no_rule': {'es': 'Para que lo haga por ti, elige una vez cuánto puedo operar por semana y fírmalo con Confío '
+                      'Face. Después lo hago y te aviso aquí.',
+                'pt': 'Para eu fazer por você, escolha uma vez quanto posso comprar por semana e assine com Confío '
+                      'Face. Depois eu faço e aviso aqui.',
+                'en': 'So I can do it for you, choose once how much I may buy per week and sign it with Confío Face. '
+                      "Then I'll do it and tell you here."},
+    'cap': {'es': 'Esa operación supera tu límite semanal ({cap}; compras y ventas cuentan). Si lo subes con Confío '
+                  'Face, la hago y te aviso aquí.',
+            'pt': 'Essa operação passa do seu limite semanal ({cap}; compras e vendas contam). Se você aumentar com '
+                  'Confío Face, eu faço.',
+            'en': "That trade is above your weekly limit ({cap}; buys and sells count). Raise it with Confío Face "
+                  "and I'll do it."},
+    'move': {'es': 'Tu Cuenta inteligente no tiene dólares suficientes, pero tu billetera sí. Mueve {amount} con '
+                   'Confío Face y lo hago.',
+             'pt': 'Sua Cuenta inteligente não tem dólares suficientes, mas sua carteira tem. Mova {amount} com '
+                   'Confío Face e eu faço.',
+             'en': "Your Cuenta inteligente is short, but your wallet has it. Move {amount} with Confío Face and "
+                   "I'll do it."},
+    'topup': {'es': 'Tu Cuenta inteligente no tiene dólares suficientes para esto. Recarga y lo hago.',
+              'pt': 'Sua Cuenta inteligente não tem dólares suficientes. Recarregue e eu faço.',
+              'en': "Your Cuenta inteligente doesn't have enough dollars for this. Top up and I'll do it."},
+    'migrate': {'es': 'Para hacerlo por ti, tu Cuenta inteligente necesita una actualización (una sola firma con '
+                      'Confío Face). O puedes hacerlo tú ahora.',
+                'pt': 'Para fazer por você, sua Cuenta inteligente precisa de uma atualização (uma assinatura com '
+                      'Confío Face). Ou faça você agora.',
+                'en': 'To do it for you, your Cuenta inteligente needs an update (one Confío Face signature). Or do it '
+                      'yourself now.'},
+    'diy': {'es': 'Te dejé el acceso para hacerlo tú. Todavía no se hizo nada.',
+            'pt': 'Deixei o acesso para você fazer. Ainda não foi feito nada.',
+            'en': 'I left you the way to do it yourself. Nothing has been done yet.'},
+}
+
+
+def _diy_screen(kind, side, ticker):
+    """The menu's own buy or sell screen, prefilled with the asset ("Hazlo tú")."""
+    if kind == 'crypto':
+        return {'screen': 'BuyCrypto' if side == 'buy' else 'SellCrypto', 'params': {'symbol': ticker}}
+    return {'screen': 'BuyStock' if side == 'buy' else 'SellStock', 'params': {'ticker': ticker}}
+
+
+def _offer_card(trigger, diy):
+    """The paywall ("Activa Cuenta inteligente") and/or "Hazlo tú". Only the fields every
+    build's AssistantActionType carries: `target` = the offer's trigger, `destination` +
+    `ticker` = the prefilled menu screen."""
+    card = {'type': 'trade_offer', 'label': 'Activa Cuenta inteligente' if trigger else 'Hazlo tú',
+            'target': trigger or '', 'destination': (diy or {}).get('screen', ''),
+            'ticker': next(iter(((diy or {}).get('params') or {}).values()), '')}
+    if trigger:
+        card['trigger'] = trigger
+    return card
+
+
+def _conversation_id(user):
+    from inbox.models import SupportMessage
+    return (SupportMessage.objects.filter(conversation__user=user, sender_type='USER')
+            .order_by('-created_at', '-pk').values_list('conversation_id', flat=True).first())
+
+
+def _hands_off(belt, data, lang, *, signed_card, diy):
+    """(done, reply, extra) for the hands-off paths, or None for today's card."""
+    from smart_account import hands_off, relay_trades
+    if not hands_off.enabled():
+        return None
+    viewer = belt.viewer
+    side, ticker, sell_all = data.get('side'), data.get('ticker'), bool(data.get('sell_all'))
+    kind = 'crypto' if data.get('kind') == 'crypto' else 'stock'
+    amount = None if sell_all else Decimal(data['amount'])
+    personal = getattr(viewer.account, 'bsc_address', '') or ''
+    token = relay_trades.asset_token(kind, ticker)
+    if not token:
+        return None
+    route = hands_off.route(viewer.user, side=side, asset_kind=kind, token=token, amount=amount,
+                            sell_all=sell_all, personal_address=personal)
+    code = route.code
+    if code in ('off', 'personal'):
+        return None
+    nonce = str(data.get('nonce') or '') or _nonce()
+    common = dict(nonce=nonce, side=side, asset_kind=kind, ticker=ticker, amount=amount, sell_all=sell_all,
+                  meta=viewer.request_meta, conversation_id=_conversation_id(viewer.user))
+    if code == 'go':
+        row, _created = relay_trades.create(viewer.user, **common)
+        return True, HANDS_OFF_REPLIES['go'][lang], {'actions': [relay_trades.card(row)]}
+    if code in ('no_rule', 'cap'):
+        row, _created = relay_trades.create(viewer.user, status='waiting_rule', **common)
+        card = {'type': 'trade_cap', 'trade': str(row.internal_id), 'target': str(row.internal_id),
+                'mode': 'raise' if code == 'cap' else 'new',
+                'choices': [str(c) for c in hands_off.CAP_CHOICES], 'preselected': str(route.suggested),
+                'label': 'Subir mi límite semanal' if code == 'cap' else 'Elegir mi límite semanal'}
+        if code == 'cap':
+            card['current'] = str(route.cap)
+        from smart_account.services import usd_text
+        return True, HANDS_OFF_REPLIES[code][lang].format(cap=usd_text(route.cap)), {'actions': [card]}
+    if code == 'move':
+        row, _created = relay_trades.create(viewer.user, status='waiting_move', **common)
+        return True, HANDS_OFF_REPLIES['move'][lang].format(amount=money(route.facts['move'], lang)), {
+            'actions': [{'type': 'trade_move', 'trade': str(row.internal_id), 'target': str(row.internal_id),
+                         'label': f"Mover {money(route.facts['move'])} a mi Cuenta inteligente"}]}
+    if code == 'topup':
+        from .engine import SHORT_TOPUP_FORM
+        return True, HANDS_OFF_REPLIES['topup'][lang], {'actions': [
+            {**SHORT_TOPUP_FORM, 'label': 'Recargar mi Cuenta inteligente'}]}
+    if code == 'migrate':
+        actions = [{'type': 'account_migration', 'label': 'Actualizar mi Cuenta inteligente'}]
+        actions.append(signed_card or _offer_card(None, diy))
+        return True, HANDS_OFF_REPLIES['migrate'][lang], {'actions': actions}
+    # paywall: the priced proposal stays as "Hazlo tú", beside the offer.
+    actions = [_offer_card('chat_trade', None if signed_card is not None else diy)]
+    if signed_card is not None:
+        actions.append(signed_card)
+    return True, HANDS_OFF_REPLIES['paywall'][lang], {'actions': actions}
+
+
 
 
 # ── the card's one trade ────────────────────────────────────────────────────

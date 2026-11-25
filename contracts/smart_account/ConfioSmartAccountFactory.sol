@@ -8,12 +8,17 @@ pragma solidity ^0.8.24;
  *
  * - UUPS, Ownable2Step, owned by the Confío Safe, renounce disabled (as in
  *   CusdVault and CusdPlusVault).
- * - Accounts are EIP-1167 clones of one immutable implementation, at a
+ * - Accounts are EIP-1167 clones of an immutable implementation, at a
  *   CREATE2 address derived from (owner, generation). `accountOf[owner]`
  *   points at the owner's current account and changes only when that one
- *   has been inherited by someone else (or is no longer owned by them);
- *   every account the factory ever created stays in `isAccount`
- *   (invariant 17).
+ *   has been inherited by someone else (or is no longer owned by them), or
+ *   when the owner migrates a live account on an older implementation to
+ *   the current one (migrate, hands-off upgrade 2026-11-25); every account
+ *   the factory ever created stays in `isAccount` (invariant 17).
+ * - Implementations: new accounts use `implementation`; every one ever
+ *   used is listed (append-only) so predictAddressAt finds an existing
+ *   account whatever it was cloned from. A new implementation is added only
+ *   by a reinitializer run in the Safe's upgrade (initializeV2).
  * - The Safe has no function here that moves an account's assets or changes
  *   its owner or beneficiary (invariant 16). What it can change is listed
  *   below, and every value an account reads from here is clamped by limits
@@ -32,6 +37,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {IConfioSmartAccountFactory} from "./interfaces/IConfioSmartAccountFactory.sol";
+import {IConfioSmartAccountFactoryV2} from "./interfaces/IConfioSmartAccountFactoryV2.sol";
 
 /// What the factory reads from the cUSD+ vault: its sponsor set defines the
 /// relayer, exactly as in the account.
@@ -56,10 +62,17 @@ interface ISmartAccountImplementation {
     function initialize(address owner_) external;
     function owner() external view returns (address);
     function inherited() external view returns (bool);
+    // Read from an account being migrated (every implementation has them).
+    function status() external view returns (uint8);
+    function plan() external view returns (uint8);
+    function nextPlan() external view returns (uint8);
+    function paidUntil() external view returns (uint64);
+    // v2 implementations only.
+    function initializeMigrated(address owner_, uint8 plan_, uint8 nextPlan_, uint64 paidUntil_) external;
 }
 
 contract ConfioSmartAccountFactory is
-    IConfioSmartAccountFactory,
+    IConfioSmartAccountFactoryV2,
     Ownable2StepUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable
@@ -121,6 +134,13 @@ contract ConfioSmartAccountFactory is
     mapping(address => bool) public isCardSpender;
     /// Stops every card pull on every account, and nothing else.
     bool public cardPaused;
+    // Appended for the hands-off upgrade (2026-11-25). tradePaused packs
+    // into slot 12 after cardPaused; _implementations is slot 13.
+    /// Stops relayTrade and relayPurchase on every v2 account, and nothing
+    /// else.
+    bool public tradePaused;
+    /// Every implementation accounts were ever cloned from, oldest first.
+    address[] private _implementations;
 
     event CreationPausedSet(bool paused);
 
@@ -145,7 +165,7 @@ contract ConfioSmartAccountFactory is
         __Ownable_init(owner_);
         __Ownable2Step_init();
         __Pausable_init();
-        implementation = implementation_;
+        _addImplementation(implementation_);
         _requireFeeInRange(PLAN_MONTHLY, monthlyFeeUsd_);
         _requireFeeInRange(PLAN_ANNUAL, annualFeeUsd_);
         _fees[PLAN_MONTHLY].current = monthlyFeeUsd_;
@@ -155,6 +175,26 @@ contract ConfioSmartAccountFactory is
         allowedChallengeWindows[365 days] = true;
         claimCooldown = 30 days;
         forcedSaleNotice = 7 days;
+    }
+
+    /// Run by the Safe in the upgrade (upgradeToAndCall): records the
+    /// implementation in use until now (the factory before this upgrade did
+    /// not list it) and makes `implementationV2` the one new accounts and
+    /// migrations are cloned from. Existing accounts are untouched.
+    function initializeV2(address implementationV2) external reinitializer(2) onlyOwner {
+        if (_implementations.length == 0) _implementations.push(implementation);
+        _addImplementation(implementationV2);
+    }
+
+    function _addImplementation(address impl) private {
+        require(impl.code.length > 0, "implementation not contract");
+        require(ISmartAccountImplementation(impl).FACTORY() == address(this), "implementation factory");
+        for (uint256 i = 0; i < _implementations.length; ++i) {
+            require(_implementations[i] != impl, "implementation known");
+        }
+        implementation = impl;
+        _implementations.push(impl);
+        emit ImplementationAdded(impl, _implementations.length - 1);
     }
 
     function _authorizeUpgrade(address) internal view override onlyOwner {}
@@ -198,8 +238,65 @@ contract ConfioSmartAccountFactory is
         return predictAddressAt(owner_, generation);
     }
 
+    /// The existing account of that generation, whatever implementation it
+    /// was cloned from; otherwise where the current implementation would
+    /// put it.
     function predictAddressAt(address owner_, uint64 generation) public view returns (address) {
-        return Clones.predictDeterministicAddress(implementation, _salt(owner_, generation), address(this));
+        bytes32 salt = _salt(owner_, generation);
+        address current = implementation;
+        address predicted = Clones.predictDeterministicAddress(current, salt, address(this));
+        if (isAccount[predicted]) return predicted;
+        for (uint256 i = _implementations.length; i > 0; --i) {
+            address impl = _implementations[i - 1];
+            if (impl == current) continue;
+            address older = Clones.predictDeterministicAddress(impl, salt, address(this));
+            if (isAccount[older]) return older;
+        }
+        return predicted;
+    }
+
+    /// Moves no asset and touches nothing in the old account: it only opens
+    /// the new one. The owner's batch around it (see the README) cancels the
+    /// old subscription, withdraws to the owner and deposits into the new
+    /// account. The old account stays isAccount and the owner's.
+    function migrate() external whenNotPaused returns (address account) {
+        address old = accountOf[msg.sender];
+        require(old != address(0) && !_replaceable(old, msg.sender), "no live account");
+        require(implementationOf(old) != implementation, "already current");
+        uint8 oldStatus = ISmartAccountImplementation(old).status();
+        // An Active, uncancelled subscription would renew on both accounts.
+        require(oldStatus != 1, "cancel subscription first");
+        uint64 generation = ++generationOf[msg.sender];
+        account = Clones.cloneDeterministic(implementation, _salt(msg.sender, generation));
+        accountOf[msg.sender] = account;
+        isAccount[account] = true;
+        if (oldStatus == 2) {
+            // Cancelled and still paid: the unused period is carried, with
+            // any plan change the owner signed there.
+            ISmartAccountImplementation o = ISmartAccountImplementation(old);
+            ISmartAccountImplementation(account).initializeMigrated(msg.sender, o.plan(), o.nextPlan(), o.paidUntil());
+        } else {
+            ISmartAccountImplementation(account).initialize(msg.sender);
+        }
+        emit AccountCreated(msg.sender, account);
+        emit AccountMigrated(msg.sender, old, account, generation);
+    }
+
+    /// The EIP-1167 target, read from the clone's code (bytes 10 to 29).
+    function implementationOf(address account) public view returns (address impl) {
+        if (!isAccount[account]) return address(0);
+        assembly ("memory-safe") {
+            extcodecopy(account, 0x00, 10, 20)
+            impl := shr(96, mload(0x00))
+        }
+    }
+
+    function implementationCount() external view returns (uint256) {
+        return _implementations.length;
+    }
+
+    function implementationAt(uint256 index) external view returns (address) {
+        return _implementations[index];
     }
 
     /// Inherited, or (equivalently, since only a claim changes the owner)
@@ -373,6 +470,15 @@ contract ConfioSmartAccountFactory is
 
     function cardSpenderAllowed(address spender) external view returns (bool) {
         return isCardSpender[spender] && !cardPaused;
+    }
+
+    // ═════════════════════════ Hands-off (2026-11-25) ═══════════════════
+
+    /// Withholds only: relayTrade and relayPurchase stop on every v2
+    /// account; nothing moves and no owner function is affected.
+    function setTradePaused(bool paused_) external onlyOwner {
+        tradePaused = paused_;
+        emit TradePausedSet(paused_);
     }
 
     // ═════════════════════════ Ops ══════════════════════════════════════

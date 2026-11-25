@@ -539,3 +539,26 @@ def _write_row(key: str, held: dict, blocks: dict) -> None:
 def _mark_row_stale(key: str) -> None:
     from blockchain.models import StockHoldings
     StockHoldings.objects.filter(bsc_address=key).update(is_stale=True)
+
+
+def complete_holdings_of(addresses, *, max_age: timedelta | None = None) -> tuple[dict, dict] | None:
+    """complete_holdings summed over several addresses of ONE person (their
+    personal wallet and Cuenta inteligente contracts): ({symbol: Decimal
+    units}, {address: blocks}), or None when any address is unknown (a
+    partial sum would read as a confident, too-low portfolio)."""
+    total: dict = {}
+    blocks: dict = {}
+    for address in addresses:
+        scan = complete_holdings(address, max_age=max_age)
+        if scan is None:
+            return None
+        held, blocks[(address or '').lower()] = scan
+        for symbol, units in held.items():
+            try:
+                d = Decimal(str(units))
+            except Exception:  # noqa: BLE001 — unreadable units: unknown, not dropped
+                return None
+            if not d.is_finite():
+                return None
+            total[symbol] = total.get(symbol, Decimal('0')) + d
+    return total, blocks

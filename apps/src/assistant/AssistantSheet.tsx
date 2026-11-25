@@ -68,6 +68,7 @@ import { resolveTrade } from './stockTrade';
 import { resolveTopUp, TopUpForm } from './TopUpForm';
 import { AddressForm } from './AddressForm';
 import { StockTradeCard } from './StockTradeCard';
+import { handsOffActions } from './handsOff';
 import { PaymentIntentCard } from './PaymentIntentCard';
 import { HereForm, resolveForm } from './HereForm';
 import { PaymentIntentError, preparePaymentInChat } from '../services/paymentIntent';
@@ -400,6 +401,22 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
         <StockTradeCard key={`${message.id}:trade`} messageId={message.id} action={trade!}
           onLeave={roomy ? undefined : onWalk} />
       ))}
+      {/* Hands-off trades by the Cuenta inteligente (assistant/trades.py): status, cap, move, offer, migration.
+          Loaded only for a message that has one (their signing flow is the Cuenta inteligente one). */}
+      {message.pending || !handsOffActions(message.actions).length ? null : (() => {
+        const { HandsOffCards } = require('./HandsOffCards');
+        return (
+        <HandsOffCards messageId={message.id} actions={message.actions} onOpen={(screen: string,
+          params?: Record<string, unknown>) => {
+          onWalk();
+          setTimeout(() => {
+            if (navigationRef.isReady()) {
+              (navigationRef as any).navigate(screen, params);
+            }
+          }, roomy ? 0 : 250);
+        }} />
+        );
+      })()}
       {/* Details the person types here themselves (one form per answer). A
           top-up is its own form: it creates the order and keeps its
           instructions under it. */}

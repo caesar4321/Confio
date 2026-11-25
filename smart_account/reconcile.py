@@ -96,7 +96,7 @@ def _store_logs(logs: list, factory: str, accounts: dict, times: dict, allowed: 
     a Confío owner. An account log is stored only for an address with a
     SmartAccount row (`accounts`) or one in `allowed` (created in this scan
     by a Confío owner); anything else is someone else's contract."""
-    created = []
+    created, trades = [], []
     allowed = allowed or set()
     for log in logs:
         address = (log.get('address') or '').lower()
@@ -116,19 +116,38 @@ def _store_logs(logs: list, factory: str, accounts: dict, times: dict, allowed: 
         if block_number not in times:
             times[block_number] = chain.block_time(block_number)
         block_time, block_hash = times[block_number]
-        SmartAccountEvent.objects.get_or_create(
+        event, stored = SmartAccountEvent.objects.get_or_create(
             tx_hash=(log['transactionHash'] or '').lower(), log_index=int(log['logIndex'], 16),
             defaults={
                 'smart_account': accounts.get(address), 'address': address, 'name': name, 'args': args,
                 'block_number': block_number, 'block_hash': block_hash, 'block_time': block_time,
             })
+        if stored and name in TRADE_EVENT_NAMES:
+            trades.append(event)
         if is_factory and name == 'AccountCreated':
             if _confio_owner(args['owner']):
                 created.append(args['account'].lower())
             else:
                 logger.warning('smart account %s created by non-Confío owner %s: its logs are not read',
                                args['account'], args['owner'])
+    if trades:
+        transaction.on_commit(lambda: _index_trades(trades))
     return created
+
+
+# The portfolio builder's ledger (inbox/account_trades.TRADE_EVENTS): priced as soon as they are stored.
+TRADE_EVENT_NAMES = ('Traded', 'RelayTraded', 'RuleExecuted', 'ForcedSale')
+
+
+def _index_trades(events) -> None:
+    """Every Traded / RelayTraded just stored is priced for the portfolio now
+    (non-archive RPC), after the events are committed. Never fails the scan:
+    the builder prices what is left when it is read."""
+    try:
+        from inbox.account_trades import index_events
+        index_events(events, allow_rpc=True)
+    except Exception:  # noqa: BLE001
+        logger.warning('account trade indexing failed for %d events', len(events), exc_info=True)
 
 
 # Per-address log coverage, for an address whose logs are NOT continuously
@@ -408,6 +427,8 @@ def _apply_factory(event) -> list:
         return _card_spender_set(event)
     if event.name == 'CardPausedSet':
         return _card_paused_set(event)
+    if event.name == 'AccountMigrated':
+        return _account_migrated(event)
     return []
 
 
@@ -452,6 +473,9 @@ def _account_created(event) -> list:
         logger.warning('smart account %s created by unknown owner %s', address, owner)
         return []
     user = owner_account.user
+    migrated_from = _migrated_from(event, address)
+    if migrated_from is not None:
+        _retire_migrated(migrated_from)
     account_row = _own_account_row(user, address)
     smart = SmartAccount.objects.create(
         owner_user=user, owner_account=owner_account, account=account_row, contract_address=address,
@@ -465,6 +489,49 @@ def _account_created(event) -> list:
         # before any of its events is applied.
         _set_coverage(address, int(event.block_number) - 1)
     return []
+
+
+def _migrated_from(event, address: str):
+    """The owner's previous account when this AccountCreated came from
+    factory.migrate() (its AccountMigrated is in the same transaction)."""
+    migrated = SmartAccountEvent.objects.filter(tx_hash=event.tx_hash, name='AccountMigrated').first()
+    if migrated is None or str(migrated.args.get('to') or '').lower() != address.lower():
+        return None
+    return SmartAccount.objects.filter(contract_address__iexact=migrated.args.get('from')).first()
+
+
+def _retire_migrated(old) -> None:
+    """The owner moved to a newer account (v2): the old one stays theirs on
+    chain, emptied by the migration batch, but it is no longer their own
+    account in Confío. Its mirror and its smart_0 row are retired (soft
+    deleted, the users.Account row moved off index 0), so the new account
+    takes index 0 and every context resolves to it."""
+    from users.models import Account
+    now = timezone.now()
+    SmartAccount.objects.filter(pk=old.pk).update(deleted_at=now, updated_at=now)
+    if old.account_id:
+        rows = Account.all_objects.select_for_update().filter(user=old.owner_user, account_type='smart')
+        index = max(rows.values_list('account_index', flat=True) or [0]) + 1
+        Account.all_objects.filter(pk=old.account_id).update(account_index=index, deleted_at=now)
+
+
+def _account_migrated(event) -> list:
+    """AccountMigrated(owner, from, to): the person now trades from the new
+    account; told in the chat once. Its AccountCreated (same transaction,
+    earlier log) already moved the mirror."""
+    new = SmartAccount.objects.filter(contract_address__iexact=event.args.get('to')).first()
+    if new is None:
+        raise RuntimeError(f'migrated account {event.args.get("to")} not mirrored yet')
+    user = new.owner_user
+
+    def tell():
+        try:
+            from assistant.service import post_system_note
+            post_system_note(user, 'Tu Cuenta inteligente ya está actualizada: desde ahora puedo comprar y vender por '
+                             'ti cuando me lo pidas aquí.', f'smart_migrated:{new.contract_address.lower()}')
+        except Exception:  # noqa: BLE001
+            logger.exception('migration notice not posted for %s', new.contract_address)
+    return [tell]
 
 
 def _own_account_row(user, address: str):
@@ -1460,6 +1527,13 @@ def _close_for_inheritance(account, event) -> None:
     account.forced_sale_for_period = None
 
 
+def _relay_traded(account, event):
+    """Every hands-off trade is told to the owner at once (chat note + push),
+    and one no chat proposal asked for goes to ops too (audit M1/M2)."""
+    from . import relay_trades
+    return [lambda: relay_trades.on_relay_traded(account, event)]
+
+
 def _confio_latched(account, event):
     account.confio_sale_latched = True
     account.save(update_fields=['confio_sale_latched', 'updated_at'])
@@ -1492,4 +1566,5 @@ _HANDLERS = {
     'ClaimExecuted': _claim_executed,
     'ConfioSaleLatched': _confio_latched,
     'CardPulled': _card_pulled,
+    'RelayTraded': _relay_traded,
 }

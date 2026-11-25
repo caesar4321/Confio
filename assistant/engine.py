@@ -134,6 +134,10 @@ def third_party_text(value, limit=THIRD_PARTY_MAX_CHARS):
 # The top-up form left beside a payment the dollars held do not cover. `why`
 # marks it as that one: the only action allowed to stand beside a card.
 SHORT_TOPUP_FORM = {'type': 'form', 'target': 'topup', 'why': 'shortfall'}
+# Cards that answer a request: once one follows a message, that request was served ("gracias" never
+# proposes it again). The trade card, and the hands-off ones (assistant/trades.py).
+SERVED_CARD_TYPES = frozenset(('trade', 'relay_trade', 'trade_cap', 'trade_move', 'trade_offer',
+                               'account_migration'))
 PAYMENT_CHIP = {'type': 'navigate', 'destination': 'pay_qr', 'target': 'payment_intent', 'label': 'Revisar y pagar'}
 # After a "no" to a payment in the same reply (engine.withdraw_payment_card, a refused code), none of these run.
 _NOTHING_AFTER_A_NO = frozenset({'prepare_payment', 'propose_stock_trade', 'propose_topup', 'ask_details',
@@ -184,7 +188,7 @@ def payment_texts(history, *, spoken=False):
         def carded(m):
             metadata = getattr(m, 'metadata', None) or {}
             return metadata.get('payment_intent') or any(
-                isinstance(a, dict) and (a.get('type') == 'trade' or (
+                isinstance(a, dict) and (a.get('type') in SERVED_CARD_TYPES or (
                     a.get('type') == 'form' and str(a.get('target') or '').startswith('topup')))
                 for a in metadata.get('actions') or [])
         return any(carded(m) for m in later)

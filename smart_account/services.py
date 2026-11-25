@@ -250,11 +250,11 @@ def with_cancel_claim(user, calls: list) -> list:
 
 def _register(viewer, kind: str, calls: list, *, target: str, smart_account=None, summary=None,
               stored_summary=None,
-              payload=None, append_cancel_claim: bool = True) -> PreparedBatch:
+              payload=None, append_cancel_claim: bool = True, max_calls: int = MAX_CALLS) -> PreparedBatch:
     calls = [abi.call(c['to'], c['data']) for c in calls]
     if append_cancel_claim:
         calls = with_cancel_claim(viewer.user, calls)
-    if not calls or len(calls) > MAX_CALLS:
+    if not calls or len(calls) > max_calls:
         raise PrepareError('too_many_assets')
     request_id = 'sa-' + uuid.uuid4().hex
     not_after = int(timezone.now().timestamp()) + PREPARED_TTL_SECONDS
@@ -1995,6 +1995,147 @@ def prepare_trade(viewer, venue: str, data: str) -> PreparedBatch:
     return _register(viewer, 'smart_trade', [abi.call(own.contract_address, call_data)],
                      target=own.contract_address, smart_account=own,
                      summary=[f'{verb} dentro de tu Cuenta inteligente'], payload={'trade_kind': params['kind']})
+
+
+# ── hands-off trades (v2 accounts) ──────────────────────────────────────
+
+def trade_cap_text(amount) -> str:
+    """The cap as the person reads it. The leaky bucket lets up to about twice
+    the cap through in one full week, so it is said as an average."""
+    return f'hasta {usd_text(amount)} por semana, en promedio'
+
+
+def prepare_trade_rule(viewer, amount_usd, proposal=None) -> PreparedBatch:
+    """The Trade rule (v2 RuleKind.Trade) the chat's cap card signs once with
+    Face: Confío may buy for the person, from the chat and only when they ask,
+    up to `amount_usd` per week (leaky bucket). Sells count too. tokenOut 0
+    (every listed stock, bitcoin and gold), payee 0. With a live Trade rule it
+    is edited (raising or lowering the cap). Only a v2 account stores one."""
+    from . import hands_off
+    _require_enabled()
+    if not hands_off.enabled():
+        raise PrepareError('trade_not_available')
+    own = _own_active(viewer, allow_payment_due=False)
+    if not _chain(hands_off.is_v2, own):
+        raise PrepareError('needs_migration', 'Primero actualiza tu Cuenta inteligente.')
+    amount = _parse_usd(amount_usd)
+    existing = hands_off.trade_rule(own)
+    if existing is not None and (existing.token_in or '').lower() != chain.cusd_plus_address():
+        existing = None     # never edited into cUSD: a new rule in cUSD+ replaces it
+    first_run_at = _first_run_at(own, existing)
+    # Always cUSD+: stocks need it and the swap router accepts it. Never a cUSD Trade rule.
+    token_in = chain.cusd_plus_address()
+    if not token_in:
+        raise PrepareError('chain_unavailable')
+    _refuse_duplicate_create(viewer, own, existing, 'trade', amount, hands_off.FREQUENCY)
+    # Signed once with Face, like a Card rule: bound to (account, cap, period).
+    authorization = hands_off.create_trade_authorization(viewer, account=own, amount=amount)
+    rule_tuple = abi.rule_input('trade', hands_off.FREQUENCY, token_in,
+                                amount_usd_wei=int(amount * WAD), first_run_at=first_run_at)
+    summary = [f'Confío puede comprar y vender por ti, cuando se lo pidas en el chat, {trade_cap_text(amount)}',
+               'Compras y ventas cuentan en el límite. Lo comprado queda en tu Cuenta inteligente.']
+    return _rule_batch(viewer, own, existing, dict(
+        kind='trade', token_in=token_in, amount=amount, frequency=hands_off.FREQUENCY,
+        standing_authorization=authorization), rule_tuple, summary, proposal)
+
+
+def prepare_trade_move(viewer, trade_id) -> PreparedBatch:
+    """Personal wallet -> account in cUSD+, for a chat trade the account is
+    short of (after a Koywe top-up landed in the personal wallet): the
+    ordinary deposit batch, signed with Face like any move out of the
+    personal wallet. The amount is the server's, from the trade."""
+    from . import relay_trades
+    from .models import SmartRelayTrade
+    row = SmartRelayTrade.objects.filter(user=viewer.user, internal_id=trade_id, status='waiting_move').first()
+    if row is None:
+        raise PrepareError('not_open', 'Esa operación ya no está pendiente. Pídemela de nuevo en el chat.')
+    route = relay_trades.move_route(row)
+    if route.code != 'move':
+        raise PrepareError('not_open', 'Ya no hace falta mover dólares para esta operación.')
+    p_plus = _chain(chain.p_plus_wad)
+    units = (int(route.facts['move'] * WAD) * WAD + p_plus - 1) // p_plus
+    return prepare_deposit(viewer, [{'asset_key': 'cusd_plus', 'units': str(units)}])
+
+
+MIGRATION_RULE_KINDS = ('buy', 'trade')
+
+
+def prepare_migration(viewer, trade_cap=None) -> PreparedBatch:
+    """The one-Face batch that moves a v1 account to v2 (opt-in, never forced;
+    the old account keeps working on chain). In order, all to be signed once:
+
+      1. old.cancelSubscription()          only while Active (factory.migrate refuses it otherwise);
+                                           the unused paid period then carries to the new account
+      2. factory.migrate()                 opens the new clone at generation + 1
+      3. old.withdrawAll(tokens)           everything it holds, to the owner
+      4. token.transfer(new, amount)       each of those balances into the new account
+      5. new.createRule(...)               each live buy rule again, plus the Trade rule (cUSD+)
+      6. new.subscribe(plan, fee)          only when no paid period carries
+
+    Send, bank-payment and Card rules are bound to the old account's address
+    by their own Face authorizations: they are not carried, and the summary
+    says so (created again from the new account). relay_policy._check_migration
+    re-checks every call; face_refusal requires this batch's Face grant."""
+    from . import assets as assets_mod, hands_off, payouts
+    _require_enabled()
+    if not hands_off.enabled():
+        raise PrepareError('unsupported', 'La actualización de tu Cuenta inteligente todavía no está disponible.')
+    own = _own_active(viewer, allow_payment_due=False)
+    _require_no_identity_hold(viewer.user)
+    if _chain(hands_off.is_v2, own):
+        raise PrepareError('already_current', 'Tu Cuenta inteligente ya está actualizada.')
+    if claim_pending_on_own_account(viewer.user) is not None:
+        raise PrepareError('claim_pending', 'Hay un reclamo pendiente en tu Cuenta inteligente: resuélvelo primero.')
+    signer, old, factory = viewer.signer_address, own.contract_address.lower(), chain.factory_address()
+    new = _chain(chain.predict_address_at, signer, _chain(chain.generation_of, signer) + 1).lower()
+    plus = chain.cusd_plus_address()
+    if not plus or not new or new == old:
+        raise PrepareError('chain_unavailable')
+    try:
+        held = [a for a in assets_mod.assets_of(old) if int(a.units) > 0]
+    except Exception as exc:  # noqa: BLE001 — never a migration that leaves something behind unseen
+        raise PrepareError('chain_unavailable') from exc
+    if len(held) > MAX_WITHDRAW_ALL_TOKENS:
+        raise PrepareError('too_many_assets')
+    calls = []
+    if own.status == 'active':
+        calls.append(abi.call(old, abi.encode_call('cancelSubscription')))
+    calls.append(abi.call(factory, '0x' + abi.SEL_MIGRATE))
+    if held:
+        calls.append(abi.call(old, abi.encode_call('withdrawAll', [a.address for a in held])))
+        calls += [abi.transfer_call(a.address, new, int(a.units)) for a in held]
+    rules = list(SmartAccountRule.objects.filter(
+        smart_account=own, state='onchain', active=True, onchain_id__isnull=False, epoch=own.subscription_epoch))
+    carried = [r for r in rules if r.kind == 'buy']
+    left = [r for r in rules if r.kind not in MIGRATION_RULE_KINDS]
+    for rule in carried:
+        calls.append(abi.call(new, abi.encode_call('createRule', abi.rule_input(
+            'buy', rule.frequency, rule.token_in, token_out=rule.token_out or abi.ZERO_ADDRESS,
+            amount_usd_wei=int(Decimal(rule.amount) * WAD)))))
+    cap = _parse_usd(trade_cap) if trade_cap not in (None, '') else hands_off.suggested_cap(viewer.user)
+    calls.append(abi.call(new, abi.encode_call('createRule', abi.rule_input(
+        'trade', hands_off.FREQUENCY, plus, amount_usd_wei=int(cap * WAD)))))
+    paid_carries = own.paid_until is not None and own.paid_until > timezone.now()
+    if not paid_carries:
+        plan = own.plan or 'annual'
+        calls.append(abi.call(new, abi.encode_call('subscribe', abi.PLAN_IDS[plan],
+                                                   _chain(chain.factory_fee_usd_wei, plan))))
+    if len(calls) > abi.MIGRATION_MAX_CALLS:
+        raise PrepareError('too_many_assets')
+    digest = calls_hash(calls)
+    action_key, face_required = payouts.claim_face(
+        viewer, 'smart_account_migration', digest, {'old': old, 'new': new},
+        'Confirma con Confío Face para actualizar tu Cuenta inteligente.')
+    summary = ['Actualizar tu Cuenta inteligente a la versión que opera por ti',
+               'Todo lo que tiene pasa a la nueva, con el tiempo ya pagado de tu suscripción',
+               f'Confío puede comprar y vender por ti, cuando se lo pidas en el chat, {trade_cap_text(cap)}']
+    if left:
+        summary.append('Tus envíos, pagos y tarjeta se vuelven a crear desde la nueva cuenta.')
+    return _register(viewer, abi.MIGRATE_KIND, calls, target=old, smart_account=own, summary=summary,
+                     append_cancel_claim=False, max_calls=abi.MIGRATION_MAX_CALLS,
+                     payload={'old_account': old, 'new_account': new, 'tokens': [a.address for a in held],
+                              'trade_cap': format(cap, 'f'), 'face_action_key': action_key,
+                              'face_required': face_required})
 
 
 # ── beneficiary: owner side ─────────────────────────────────────────────

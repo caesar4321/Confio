@@ -2153,6 +2153,11 @@ class SponsorBscBatch(graphene.Mutation):
         # spec 6.4); every policy below still sees at most 4 calls.
         from smart_account.abi import SEL_CANCEL_CLAIM as _SEL_CANCEL_CLAIM
         _max_calls = 5 + (1 if calls and (calls[-1].data or '').lower()[2:10] == _SEL_CANCEL_CLAIM else 0)
+        from smart_account import abi as _smart_abi
+        if _smart_early is not None and getattr(_smart_early, 'kind', '') == _smart_abi.MIGRATE_KIND:
+            # A migration the server prepared for this user (old account → v2): relay_policy._check_migration
+            # matches every call against it, in order.
+            _max_calls = _smart_abi.MIGRATION_MAX_CALLS
         if not calls or len(calls) > _max_calls:
             return SponsorBscBatch(success=False, error='bad_batch_size')
         try:

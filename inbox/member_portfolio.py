@@ -22,6 +22,12 @@ use, never a money path):
   its value without P&L: unknown is never stated as a number.
 - stats: trades, average time a position was held, member since.
 
+All of it spans the member's whole sleeve: the personal wallet AND every
+Cuenta inteligente they own (inbox/person_wallets.py). Holdings and dollars
+are summed over those addresses and the ledger joins the wallet's trades
+with the accounts' (inbox/account_trades.py), so moving a stock or dollars
+between their own addresses changes nothing here.
+
 Anything that can't be read is None, and the app hides it.
 """
 from __future__ import annotations
@@ -102,6 +108,53 @@ def personal_wallet(user) -> str | None:
         .order_by('account_index').first()
     )
     return account.bsc_address.lower() if account else None
+
+
+def person_ledgers(wallets: list) -> tuple[list | None, list | None]:
+    """(stock trades, Bitcoin & gold trades) over the member's addresses,
+    oldest first: the personal wallet's (wallets[0]) confirmed batches plus
+    each account's trades. None = that ledger is unreadable."""
+    from cusd_plus.crypto_month import confirmed_trades as crypto_trades
+    from cusd_plus.stock_month import confirmed_trades as stock_trades
+
+    from .account_trades import trades_of
+
+    anchor = wallets[0]
+    try:
+        stocks = list(stock_trades(anchor))
+    except Exception:  # noqa: BLE001
+        logger.warning('portfolio: trade ledger unreadable', exc_info=True)
+        stocks = None
+    try:
+        crypto = list(crypto_trades(anchor))
+    except Exception:  # noqa: BLE001
+        logger.warning('portfolio: crypto ledger unreadable', exc_info=True)
+        crypto = None
+    for address in wallets[1:]:
+        try:
+            account_stocks, account_crypto = trades_of(address)
+        except Exception:  # noqa: BLE001 — pending or unreadable: unknown, never a smaller ledger
+            logger.info('portfolio: account trades of %s not ready', address, exc_info=True)
+            return None, None
+        if stocks is not None:
+            stocks += account_stocks
+        if crypto is not None:
+            crypto += account_crypto
+    if len(wallets) > 1:
+        stocks = None if stocks is None else sorted(stocks, key=lambda t: t.when)
+        crypto = None if crypto is None else sorted(crypto, key=lambda t: t.when)
+    return stocks, crypto
+
+
+def person_dollars_usd(wallets: list) -> Decimal | None:
+    """dollars_usd summed over the member's addresses; None if any is unknown."""
+    total = Decimal('0')
+    for wallet in wallets:
+        part = dollars_usd(wallet)
+        if part is None:
+            return None
+        total += part
+    return total
 
 
 def dollars_usd(wallet: str) -> Decimal | None:
@@ -256,27 +309,45 @@ class _CryptoPart:
     dust_symbols: list = field(default_factory=list)
 
 
-def crypto_part(wallet: str, now) -> _CryptoPart:
-    """Bitcoin & gold for one wallet. Never scans a wallet that has never
-    swapped in Confío (nothing to show, and no RPC per profile view)."""
+_UNREAD = object()
+
+
+def crypto_part(wallet, now, *, trades=_UNREAD) -> _CryptoPart:
+    """Bitcoin & gold for one wallet, or summed over a member's addresses
+    (a list, personal wallet first). `trades`: their crypto ledger already
+    read (person_ledgers). Never scans a member who has never swapped in
+    Confío (nothing to show, and no RPC per profile view)."""
     from blockchain.models import CryptoHoldings
     from cusd_plus.crypto_catalog import by_symbol
     from cusd_plus.crypto_holdings import holdings_snapshot
-    from cusd_plus.crypto_month import _live_prices, confirmed_trades, display_name
+    from cusd_plus.crypto_month import _live_prices, display_name
     from cusd_plus.crypto_prices import market_rows
 
-    try:
-        trades = confirmed_trades(wallet)
-    except Exception:  # noqa: BLE001
-        logger.warning('portfolio: crypto ledger unreadable', exc_info=True)
-        trades = None
-    if trades == [] and not CryptoHoldings.objects.filter(bsc_address=wallet).exists():
+    wallets = [wallet] if isinstance(wallet, str) else list(wallet)
+    if trades is _UNREAD:
+        if len(wallets) == 1:
+            from cusd_plus.crypto_month import confirmed_trades
+
+            try:
+                trades = confirmed_trades(wallets[0])
+            except Exception:  # noqa: BLE001
+                logger.warning('portfolio: crypto ledger unreadable', exc_info=True)
+                trades = None
+        else:
+            trades = person_ledgers(wallets)[1]
+    if trades == [] and not CryptoHoldings.objects.filter(bsc_address__in=wallets).exists():
         return _CryptoPart(Decimal('0'), Decimal('0'), [], [], [], [], [])
+    raw: dict | None = {}
     try:
         # Fresh only, like stocks: a stale row could still list a coin sold
         # or sent out since, beside its own closed position.
-        snapshot = holdings_snapshot(wallet, allow_last_known=False)
-        raw = snapshot[0] if snapshot is not None else None
+        for address in wallets:
+            snapshot = holdings_snapshot(address, allow_last_known=False)
+            if snapshot is None:
+                raw = None
+                break
+            for symbol, base in snapshot[0].items():
+                raw[symbol] = raw.get(symbol, 0) + int(base or 0)
     except Exception:  # noqa: BLE001
         logger.warning('portfolio: crypto holdings unreadable', exc_info=True)
         raw = None
@@ -337,27 +408,26 @@ def crypto_part(wallet: str, now) -> _CryptoPart:
 def build_portfolio(user, *, stock_trades=None, crypto=None, perps=None, now=None) -> Portfolio | None:
     """`stock_trades` / `crypto`: a ledger snapshot already read (total_return
     values holdings against the very trades it adds up)."""
-    from cusd_plus.gm_holdings import STALE_AFTER, complete_holdings
-    from cusd_plus.stock_month import confirmed_trades
+    from cusd_plus.gm_holdings import STALE_AFTER, complete_holdings_of
 
-    wallet = personal_wallet(user)
-    if not wallet:
+    from .person_wallets import wallets_of
+
+    wallets = wallets_of(user)
+    if not wallets:
         return None
+    wallet = wallets[0]
     now = now or timezone.now()
+    crypto_trades = _UNREAD
     if stock_trades is not None:
         trades = stock_trades
     else:
-        try:
-            trades = confirmed_trades(wallet)
-        except Exception:  # noqa: BLE001
-            logger.warning('portfolio: trade ledger unreadable', exc_info=True)
-            trades = None
+        trades, crypto_trades = person_ledgers(wallets)
     # A complete scan only: a list scan may skip a failing token, and a
     # skipped holding would publish as a confident, too-low total.
     try:
         # Same freshness as the stocks screen: an old scan would keep
         # publishing positions moved out since.
-        scan = complete_holdings(wallet, max_age=STALE_AFTER)
+        scan = complete_holdings_of(wallets, max_age=STALE_AFTER)
         held = scan[0] if scan is not None else None
     except Exception:  # noqa: BLE001
         logger.warning('portfolio: holdings unreadable', exc_info=True)
@@ -412,7 +482,7 @@ def build_portfolio(user, *, stock_trades=None, crypto=None, perps=None, now=Non
         elif position.invested_usd is not None:
             # Left off the list as dust, but explained: still a holding.
             dust_symbols.append(symbol)
-    crypto = crypto if crypto is not None else crypto_part(wallet, now)
+    crypto = crypto if crypto is not None else crypto_part(wallets, now, trades=crypto_trades)
     if crypto.open_positions is not None:
         open_positions.extend(crypto.open_positions)
     from cusd_plus.perps_portfolio import live_part as perps_part
@@ -442,7 +512,7 @@ def build_portfolio(user, *, stock_trades=None, crypto=None, perps=None, now=Non
             closed_on=timezone.localdate(when).isoformat(),
         ))
 
-    dollars = dollars_usd(wallet)
+    dollars = person_dollars_usd(wallets)
     presale_confio, presale_usd = presale_totals(user)
     parts = (dollars, stocks_total, crypto.total, perps.total)
     total = sum(parts, Decimal('0')) if all(p is not None for p in parts) else None
@@ -498,17 +568,17 @@ def total_return(user) -> TotalReturn | None:
     when any part can't be stated exactly: a trade with no known price, a
     symbol the ledger can't read, units from outside Confío, or an open
     position that can't be valued (then the app shows "--", never a guess)."""
-    from cusd_plus.stock_month import confirmed_trades
+    from .person_wallets import wallets_of
 
-    wallet = personal_wallet(user)
-    if not wallet:
+    wallets = wallets_of(user)
+    if not wallets:
         return None
+    wallet = wallets[0]
     now = timezone.now()
-    try:
-        stock_trades = confirmed_trades(wallet)
-    except Exception:  # noqa: BLE001
+    stock_trades, crypto_trades = person_ledgers(wallets)
+    if stock_trades is None:
         return None
-    crypto = crypto_part(wallet, now)
+    crypto = crypto_part(wallets, now, trades=crypto_trades)
     from cusd_plus.perps_portfolio import live_part as perps_part
 
     perps = perps_part(wallet, now)

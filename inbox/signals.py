@@ -154,3 +154,42 @@ def delete_member_content_with_account(sender, instance, **kwargs):
     for url in ProfilePictureSubmission.objects.filter(user=instance).exclude(public_url='').values_list('public_url', flat=True):
         public_objects.doom(settings.AWS_PROFILE_PICTURES_BUCKET, key_from_url(url))
     items.delete()
+
+
+# A Cuenta inteligente's trade event, stored by smart_account/reconcile.py:
+# index it for the portfolio ledger as soon as it commits (its Confío Dollar+
+# leg is priced at the share price IN ITS BLOCK, a read best made while the
+# block is recent). A miss is harmless: the next job read indexes it.
+def _index_account_trade(sender, instance, created, **kwargs):
+    if not created:
+        return
+    from .account_trades import TRADE_EVENTS
+
+    if instance.name not in TRADE_EVENTS:
+        return
+    from django.db import transaction
+
+    def run():
+        from .account_trades import index_event
+
+        try:
+            index_event(instance, allow_rpc=True)
+        except Exception:  # noqa: BLE001 — never breaks the reconciler
+            import logging
+
+            logging.getLogger(__name__).warning('account trades: indexing %s failed', instance.pk,
+                                                exc_info=True)
+
+    transaction.on_commit(run)
+
+
+def _connect_account_trades():
+    from django.db.models.signals import post_save
+
+    from smart_account.models import SmartAccountEvent
+
+    post_save.connect(_index_account_trade, sender=SmartAccountEvent,
+                      dispatch_uid='inbox_index_account_trade')
+
+
+_connect_account_trades()

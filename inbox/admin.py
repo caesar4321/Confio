@@ -22,6 +22,7 @@ from .models import (
     CommunityProfileSettings,
     PortfolioDailySnapshot,
     PortfolioValueSnapshot,
+    SmartAccountTrade,
     DirectConversation,
     DirectMessage,
     DirectMessageReport,
@@ -1291,6 +1292,21 @@ class PortfolioValueSnapshotAdmin(admin.ModelAdmin):
     list_select_related = ('user',)
     date_hierarchy = 'at'
     readonly_fields = [f.name for f in PortfolioValueSnapshot._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(SmartAccountTrade)
+class SmartAccountTradeAdmin(admin.ModelAdmin):
+    list_display = ('address', 'kind', 'symbol', 'units', 'usd', 'traded_at', 'block_number')
+    list_filter = ('kind',)
+    search_fields = ('address', 'symbol')
+    date_hierarchy = 'traded_at'
+    readonly_fields = [f.name for f in SmartAccountTrade._meta.fields]
 
     def has_add_permission(self, request):
         return False

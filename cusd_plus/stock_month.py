@@ -48,6 +48,9 @@ class Trade:
     usd: Decimal | None    # exact settlement; None when its history row is missing
     when: datetime
     block: int | None = None             # the block that holds it (confirmed only)
+    # The address whose balance it moved, when a ledger spans several of the
+    # person's wallets (inbox/person_wallets.py); '' = the only one.
+    source: str = ''
 
 
 @dataclass

@@ -23,7 +23,11 @@ PERIOD_DAYS = {'monthly': 30, 'annual': 365}
 
 # Card (decision 35) is appended: the values of the others are fixed.
 RULE_SEND, RULE_PAYOUT, RULE_BUY, RULE_CARD = 0, 1, 2, 3
-RULE_KIND_IDS = {'send': RULE_SEND, 'payout': RULE_PAYOUT, 'buy': RULE_BUY, 'card': RULE_CARD}
+# v2 (IConfioSmartAccountV2.RuleKind): Trade and Purchase appended. Only a v2
+# account stores them; a v1 account's createRule reverts on these values.
+RULE_TRADE, RULE_PURCHASE = 4, 5
+RULE_KIND_IDS = {'send': RULE_SEND, 'payout': RULE_PAYOUT, 'buy': RULE_BUY, 'card': RULE_CARD,
+                 'trade': RULE_TRADE, 'purchase': RULE_PURCHASE}
 RULE_KIND_KEYS = {v: k for k, v in RULE_KIND_IDS.items()}
 # Kinds the relayer runs with executeRule. A Card rule is pulled by its
 # allowlisted spender (cardPull); executeRule on it reverts BadRule.
@@ -446,6 +450,10 @@ def decode_log(log: dict, *, factory: bool = False):
     table, events = (FACTORY_TOPICS, FACTORY_EVENTS) if factory else (ACCOUNT_TOPICS, ACCOUNT_EVENTS)
     name = table.get(topics[0])
     if name is None:
+        # A v2 event (V2_ACCOUNT_EVENTS / V2_FACTORY_EVENTS, kept apart from the v1 tables).
+        events = V2_FACTORY_EVENTS if factory else V2_ACCOUNT_EVENTS
+        name = {event_topic(n, f): n for n, f in events.items()}.get(topics[0])
+    if name is None:
         return None
     fields = events[name]
     indexed = [(t, n) for t, i, n in fields if i]
@@ -511,3 +519,95 @@ def decode_forwarded(log: dict) -> dict | None:
     values = abi_decode(['uint256', 'bytes32'], bytes.fromhex((log.get('data') or '0x')[2:]))
     args['usdtOut'], args['ref'] = _jsonable('uint256', values[0]), _jsonable('bytes32', values[1])
     return args
+
+
+# ── v2 account (IConfioSmartAccountV2.sol, IConfioSmartAccountFactoryV2.sol) ──
+# Hands-off trades by the Cuenta inteligente. Kept apart from FUNCTIONS and
+# ACCOUNT_EVENTS (checked against the v1 interface in test_abi): every v2
+# constant the server relies on lives here, so a contract change is one edit.
+V2_VERSION = 2
+RELAY_TRADE_KIND = 'smart_relay_trade'
+RELAY_TRADE_SIG = 'relayTrade(uint256,address,bytes,uint256,uint256)'
+RELAY_TRADE_TYPES = ['uint256', 'address', 'bytes', 'uint256', 'uint256']
+SEL_RELAY_TRADE = selector(RELAY_TRADE_SIG)
+RELAY_PURCHASE_SIG = 'relayPurchase(uint256,bytes32,address,uint256,uint16,uint256,bytes)'
+SEL_RELAY_PURCHASE = selector(RELAY_PURCHASE_SIG)
+# bucketOf(id) -> (used, lastAt): `used` already decayed to now (leaky bucket:
+# amountUsd * elapsed / gap leaks out); a buy fits while used + usd <= amountUsd.
+BUCKET_OF = ('bucketOf(uint256)', ['uint256'], ['uint256', 'uint256'])
+VERSION_VIEW = ('VERSION()', [], ['uint256'])
+FACTORY_V2_VIEWS = {
+    'tradePaused': ('tradePaused()', [], ['bool']),
+    'implementationOf': ('implementationOf(address)', ['address'], ['address']),
+}
+FACTORY_MIGRATE_SIG = 'migrate()'
+# The contract's own limits (ConfioSmartAccountV2): mirrored so the server
+# never sends what the account would refuse.
+RELAY_TRADE_MIN_GAP_SECONDS = 60
+TRADE_MAX_SLIPPAGE_BPS = 150
+MAX_STOCK_FEE_BPS = 90
+RELAY_TRADE_GAS = {'stock': 2_400_000, 'crypto': 1_900_000}
+V2_ACCOUNT_EVENTS = {
+    'RelayTraded': [('uint256', True, 'id'), ('address', True, 'venue'), ('address', False, 'tokenIn'),
+                    ('address', False, 'tokenOut'), ('uint256', False, 'amountIn'), ('uint256', False, 'amountOut'),
+                    ('uint256', False, 'usdCounted')],
+}
+RELAY_TRADED_TOPIC = event_topic('RelayTraded', V2_ACCOUNT_EVENTS['RelayTraded'])
+# relayTrade's own reverts the server acts on: beyond the bucket (buys and sells count, at the value of what
+# went out), and less than that value within 1.5% + the conversion fee of the feed / quote.
+V2_ERROR_SELECTORS = {selector('CapExceeded()'): 'CapExceeded', selector('BelowFeed()'): 'BelowFeed'}
+
+
+def v2_revert_error(text) -> str | None:
+    for candidate in re.findall(r'0x([0-9a-fA-F]{8})', str(text or '')):
+        name = V2_ERROR_SELECTORS.get(candidate.lower())
+        if name is not None:
+            return name
+    return None
+V2_FACTORY_EVENTS = {
+    'TradePausedSet': [('bool', False, 'paused')],
+    'ImplementationAdded': [('address', True, 'implementation'), ('uint256', False, 'index')],
+    'AccountMigrated': [('address', True, 'owner'), ('address', True, 'from'), ('address', True, 'to'),
+                        ('uint64', False, 'generation')],
+}
+
+# The owner's one-Face migration batch (services.prepare_migration, relay_policy._check_migration):
+# old.cancelSubscription() while Active; factory.migrate(); old.withdrawAll(tokens) to the owner;
+# token.transfer(new, amount) per balance; new.createRule(...) per carried rule; new.subscribe(...) when
+# no paid period carries. Its own call limit; every other batch keeps services.MAX_CALLS.
+MIGRATE_KIND = 'smart_migrate'
+MIGRATION_MAX_CALLS = 16
+SEL_MIGRATE = selector(FACTORY_MIGRATE_SIG)
+GAS_PER_SELECTOR[SEL_MIGRATE] = 600_000
+
+
+def relay_trade_call(rule_id: int, venue: str, venue_data: bytes, max_in: int, min_out: int) -> str:
+    return '0x' + SEL_RELAY_TRADE + abi_encode(
+        RELAY_TRADE_TYPES, [int(rule_id), venue, bytes(venue_data), int(max_in), int(min_out)]).hex()
+
+
+def decode_relay_trade(data: str) -> tuple:
+    """(id, venue, data bytes, maxIn, minOut); ValueError for anything else."""
+    data_hex = (data or '')[2:].lower()
+    if data_hex[:8] != SEL_RELAY_TRADE:
+        raise ValueError('not relayTrade')
+    raw = bytes.fromhex(data_hex[8:])
+    try:
+        args = abi_decode(RELAY_TRADE_TYPES, raw)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError('bad_calldata') from exc
+    if abi_encode(RELAY_TRADE_TYPES, list(args)) != raw:
+        raise ValueError('bad_calldata')
+    return int(args[0]), str(args[1]).lower(), bytes(args[2]), int(args[3]), int(args[4])
+
+
+def decode_relay_traded(log: dict) -> dict | None:
+    """RelayTraded's arguments (json-safe), or None for another log."""
+    topics = [(t or '').lower() for t in (log.get('topics') or [])]
+    if not topics or topics[0] != RELAY_TRADED_TOPIC or len(topics) != 3:
+        return None
+    token_in, token_out, amount_in, amount_out, usd_counted = abi_decode(
+        ['address', 'address', 'uint256', 'uint256', 'uint256'], bytes.fromhex((log.get('data') or '0x')[2:]))
+    return {'id': str(int(topics[1], 16)), 'venue': '0x' + topics[2][-40:], 'tokenIn': token_in.lower(),
+            'tokenOut': token_out.lower(), 'amountIn': str(amount_in), 'amountOut': str(amount_out),
+            'usdCounted': str(usd_counted)}

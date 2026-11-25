@@ -742,7 +742,8 @@ class LedgerTests(SimpleTestCase):
                 mock.patch('cusd_plus.crypto_month.confirmed_trades', return_value=[]), \
                 mock.patch('cusd_plus.perps_portfolio.episodes', return_value=[]), \
                 mock.patch('cusd_plus.perps_portfolio.ledger_trades', return_value=[mark]):
-            ledger = portfolio_returns.load_ledger('0xabc', prices)
+            # The personal wallet alone (no Cuenta inteligente; no DB here).
+            ledger = portfolio_returns.load_ledger('0xabc', prices, ['0xabc'])
         self.assertEqual(ledger.perps_rows[0].when, late)
         prices.block_time.assert_not_called()
 
