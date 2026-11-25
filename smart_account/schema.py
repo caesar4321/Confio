@@ -603,8 +603,8 @@ class Query(graphene.ObjectType):
             blocked_code=block,
             plans=[SmartAccountPlanType(**p) for p in plans],
             headline=headline,
-            benefits=[SmartAccountBenefitType(key=k, title=offer.BENEFITS[k][0], body=offer.BENEFITS[k][1])
-                      for k in order],
+            benefits=[SmartAccountBenefitType(key=k, **dict(zip(('title', 'body'), offer.benefit(
+                k, crypto=offer.crypto_investing_enabled(user, meta))))) for k in order],
             disclosures=list(offer.DISCLOSURES),
             beneficiary_risk_disclosure=list(offer.BENEFICIARY_RISK_DISCLOSURE),
             beneficiary_enabled=beneficiary_on,

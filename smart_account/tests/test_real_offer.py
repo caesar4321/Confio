@@ -189,3 +189,41 @@ class AssistantDoorTests(SmartAccountTestCase):
         employee = self.viewer(user, account_type='business', owner=False)
         self.assertFalse(smart_account_real_screen(employee))
         self.assertIn('(lista de espera)', _paid_offer_sections(['cuenta_inteligente']))
+
+
+class ShoppingBenefitTests(SmartAccountTestCase):
+    """Buying in stores from the chat is a Cuenta inteligente benefit (spec decision 37): the offer says so, and
+    says "sin firmar cada vez" only once the account itself pays (purchase spender + v2 live)."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = self.make_user('u')
+        patcher = mock.patch('smart_account.offer.crypto_investing_enabled', return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def offer(self, **kw):
+        return schema.Query.resolve_smart_account_offer(None, self.info(self.user, **kw))
+
+    def ia_plus(self, result):
+        return next(b for b in result.benefits if b.key == 'assistant')
+
+    def test_today_it_names_shopping_without_promising_no_signature(self):
+        line = self.ia_plus(self.offer())
+        self.assertEqual(line.title, 'Confío IA+')
+        self.assertIn('compre por ti en tiendas en línea', line.body)
+        self.assertNotIn('sin firmar', line.body)
+
+    def test_once_the_account_pays_by_itself_it_says_so(self):
+        with mock.patch('smart_account.offer.hands_off_live', return_value=True):
+            line = self.ia_plus(self.offer())
+        self.assertIn('sin firmar cada vez', line.body)
+        self.assertIn('Comprar', line.body)
+        self.assertNotIn('bitcoin', line.body, 'this build offers no crypto (patched in setUp)')
+        with mock.patch('smart_account.offer.hands_off_live', return_value=True), \
+                mock.patch('smart_account.offer.crypto_investing_enabled', return_value=True):
+            self.assertIn('oro y bitcoin', self.ia_plus(self.offer()).body)
+
+    def test_an_unreadable_switch_says_only_what_is_true_today(self):
+        with mock.patch('smart_account.hands_off.enabled', side_effect=RuntimeError('db')):
+            self.assertFalse(offer.hands_off_live())

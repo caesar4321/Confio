@@ -53,9 +53,31 @@ BENEFITS = {
     'beneficiary': ('Beneficiario', 'Nombra a una persona que recibe la cuenta si dejas de usarla.'),
     'payments': ('Pagos y envíos automáticos', 'Programa envíos y pagos diarios, semanales, quincenales o mensuales.'),
     'investing': ('Inversión automática', 'Compra acciones, bitcoin y oro de forma periódica.'),
-    'assistant': ('Confío IA+', 'Pídele por chat crear o cambiar tus pagos e inversiones automáticas. Tú confirmas '
-                                'cada cambio.'),
+    'assistant': ('Confío IA+', 'Pídele por chat que compre por ti en tiendas en línea, o que cree y cambie tus '
+                                'pagos e inversiones automáticas. Tú eliges y confirmas.'),
 }
+# Once the account itself pays (the purchase spender and the v2 implementation are live), what the chat does
+# without a signature each time (docs/designs/hands-off-account.md). Never said before it is true.
+ASSISTANT_HANDS_OFF = ('Pídele por chat que compre en tiendas en línea y en Comprar, o que invierta en acciones{crypto}, '
+                       'sin firmar cada vez, dentro del límite semanal que eliges. También crea y cambia tus pagos e '
+                       'inversiones automáticas.')
+
+
+def hands_off_live() -> bool:
+    """The account pays purchases and trades by itself: the spender and the v2 implementation are configured."""
+    try:
+        from . import hands_off, purchases
+        return bool(hands_off.enabled() and purchases.spender_address())
+    except Exception:  # noqa: BLE001 — an unread switch says only what is true today
+        return False
+
+
+def benefit(key: str, *, crypto: bool = True) -> tuple[str, str]:
+    """(title, body) of one benefit line, as true for this build today."""
+    title, body = BENEFITS[key]
+    if key == 'assistant' and hands_off_live():
+        body = ASSISTANT_HANDS_OFF.format(crypto=', oro y bitcoin' if crypto else '')
+    return title, body
 HEADLINE_ORDER = {
     'beneficiary_first': ['beneficiary', 'payments', 'investing', 'assistant'],
     'automation_first': ['payments', 'investing', 'beneficiary', 'assistant'],
