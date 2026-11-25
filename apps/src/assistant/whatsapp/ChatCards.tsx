@@ -3,20 +3,65 @@
 // leaves only from the card, with the hash of exactly what it showed.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { useApolloClient } from '@apollo/client';
+import { useApolloClient, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 
 import WhatsAppLogo from '../../assets/svg/WhatsApp.svg';
 import { Text, TextInput } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
-import { GET_WHATSAPP_DRAFT, PREPARE_WHATSAPP_REPLY, SEND_WHATSAPP_DRAFT, type WhatsAppDraft } from './api';
-import { draftView, mergeDraft } from './rules';
+import {
+  GET_WHATSAPP, GET_WHATSAPP_DRAFT, PREPARE_WHATSAPP_REPLY, SEND_WHATSAPP_DRAFT, type WhatsAppDraft, type WhatsAppNotice,
+} from './api';
+import { NOTICE_LABELS, draftView, mergeDraft } from './rules';
 import { openWhatsAppFromNotification } from '../connections/store';
 
 export type ChatAction = { type: string; target?: string | null; label?: string | null };
 
 const THREAD = ['GetAssistantThread'];
 const FAILED = 'No pude preparar esa respuesta. Inténtalo de nuevo.';
+
+const KIND_ICONS: Record<string, string> = {
+  payment: 'dollar-sign', order: 'shopping-bag', delivery: 'truck', appointment: 'calendar', reply: 'message-circle',
+  urgent: 'alert-circle',
+};
+
+/** The notice a Confío IA message tells about (action whatsapp_notice), or null: the message then shows its text. */
+export function noticeAction(actions: ChatAction[]): ChatAction | null {
+  return actions.find((a) => a.type === 'whatsapp_notice' && a.target) ?? null;
+}
+
+/** A WhatsApp message told in the conversation, drawn like one: who wrote and when, their words as an incoming
+ * bubble, what it seems to be. Read from the WhatsApp data the app already has; `fallback` (the message's own
+ * text) when that notice is gone (dismissed, unlinked). */
+export function WhatsAppNoticeCard({ action, fallback }: { action: ChatAction; fallback: string }) {
+  const { data } = useQuery<any>(GET_WHATSAPP, { fetchPolicy: 'cache-first', errorPolicy: 'ignore' });
+  const notice = ((data?.whatsAppLink?.notices ?? []) as WhatsAppNotice[]).find((n) => n.id === String(action.target));
+  if (!notice) {
+    return <Text style={styles.fallback}>{fallback}</Text>;
+  }
+  const followUp = action.label === 'siguió';
+  return (
+    <View style={styles.notice}>
+      <View style={styles.noticeHead}>
+        <WhatsAppLogo width={18} height={18} />
+        <Text style={styles.noticeFrom} numberOfLines={1}>{notice.chat || 'WhatsApp'}</Text>
+        {notice.time ? <Text style={styles.noticeTime}>{notice.time}</Text> : null}
+      </View>
+      {followUp ? <Text style={styles.noticeNote}>siguió escribiendo</Text> : null}
+      <View style={styles.incoming}>
+        <Text style={styles.incomingText}>{notice.preview}</Text>
+      </View>
+      <View style={styles.kindRow}>
+        <View style={styles.kindChip}>
+          <Icon name={KIND_ICONS[notice.kind] ?? 'star'} size={12} color={colors.primaryDeep} />
+          <Text style={styles.kindText}>{NOTICE_LABELS[notice.kind] ?? 'Parece importante'}</Text>
+        </View>
+      </View>
+      {notice.summary ? <Text style={styles.summary}>{notice.summary}</Text> : null}
+      <Text style={styles.ask}>¿Qué le respondo?</Text>
+    </View>
+  );
+}
 
 const OTHER = '__other__';
 
@@ -287,6 +332,26 @@ export function WhatsAppDraftCard({ draftId }: { draftId: string }) {
 
 const styles = StyleSheet.create({
   replies: { marginTop: 8, gap: 8, alignItems: 'flex-start' },
+  fallback: { fontSize: 16, lineHeight: 23, color: colors.textFlat },
+  notice: { gap: 8, minWidth: 220 },
+  noticeHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  noticeFrom: { flex: 1, fontSize: 16, fontWeight: '800', color: colors.textFlat },
+  noticeTime: { fontSize: 12, color: colors.textSecondary },
+  noticeNote: { marginTop: -4, fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  incoming: {
+    alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: colors.white, borderRadius: 14, borderTopLeftRadius: 4,
+    paddingHorizontal: 12, paddingVertical: 8, shadowColor: '#064E3B', shadowOpacity: 0.06, shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 }, elevation: 1,
+  },
+  incomingText: { fontSize: 15, lineHeight: 21, color: colors.textFlat },
+  kindRow: { flexDirection: 'row' },
+  kindChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.mint, borderRadius: 999,
+    paddingHorizontal: 9, paddingVertical: 4,
+  },
+  kindText: { fontSize: 12, fontWeight: '700', color: colors.primaryDeep },
+  summary: { fontSize: 14, lineHeight: 20, color: colors.gray600 },
+  ask: { fontSize: 15, fontWeight: '700', color: colors.textFlat },
   replyChip: {
     flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', borderRadius: 18, borderWidth: 1.5,
     borderColor: colors.primaryMuted, backgroundColor: colors.background, paddingHorizontal: 14, paddingVertical: 9,

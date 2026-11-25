@@ -57,7 +57,7 @@ import {
 import AssistantMascot, { type MascotMood } from './AssistantMascot';
 import { useAssistant, type BoxChannel } from './AssistantContext';
 import { TAP_ONLY_KEYS, cardFor, openDestination, resolveNavigate } from './destinations';
-import { WhatsAppConsentChip, WhatsAppDraftCard, WhatsAppReplyChips } from './whatsapp/ChatCards';
+import { WhatsAppConsentChip, WhatsAppDraftCard, WhatsAppNoticeCard, WhatsAppReplyChips, noticeAction } from './whatsapp/ChatCards';
 import { MailDraftCard, MailReplyChip } from './mail/ChatCards';
 import { requestGuideWalk } from './guidePointer';
 import ConnectionsHost from './connections/ConnectionsHost';
@@ -475,7 +475,10 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
           </View>
         ) : null}
         {photo ? <SentPhoto uri={message.photoUri ?? sentPhotos.get(message.id)} captioned={!!words} /> : null}
-        {words ? (
+        {/* A WhatsApp message told here: drawn as a card (its text stays for older builds). */}
+        {!mine && noticeAction(message.actions) ? (
+          <WhatsAppNoticeCard action={noticeAction(message.actions)!} fallback={words} />
+        ) : words ? (
           <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>
             {words}
           </Text>

@@ -1,14 +1,16 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 
-import { WhatsAppDraftCard, WhatsAppReplyChips } from '../ChatCards';
+import { WhatsAppDraftCard, WhatsAppNoticeCard, WhatsAppReplyChips } from '../ChatCards';
 
 const mockMutate = jest.fn();
 const mockQuery = jest.fn();
 const mockRefetch = jest.fn(async (..._a: unknown[]) => []);
 const mockClient = { mutate: (...a: unknown[]) => mockMutate(...a), query: (...a: unknown[]) => mockQuery(...a),
   refetchQueries: (...a: unknown[]) => mockRefetch(...a) };
-jest.mock('@apollo/client', () => ({ gql: () => ({}), useApolloClient: () => mockClient }));
+let mockLinkData: any = null;
+jest.mock('@apollo/client', () => ({ gql: () => ({}), useApolloClient: () => mockClient,
+  useQuery: () => ({ data: mockLinkData }) }));
 jest.mock('react-native-vector-icons/Feather', () => 'Icon');
 jest.mock('../../../components/common/AppText', () => ({ Text: require('react-native').Text, TextInput: require('react-native').TextInput }));
 
@@ -108,4 +110,22 @@ it('"Otro" that fails keeps what she wrote', async () => {
   await press(tree, 'Preparar respuesta');
   expect(tree.root.findByProps({ accessibilityLabel: 'Qué quieres responder' }).props.value).toBe('que paso mañana');
   expect(JSON.stringify(tree.toJSON())).toContain('Llegaste al límite de hoy.');
+});
+
+it('a WhatsApp notice is drawn as a card: who, when, the message as a bubble, what it seems', () => {
+  mockLinkData = { whatsAppLink: { notices: [{ id: '7', kind: 'order', chat: 'Farmacia Central', preview: 'Su pedido está listo',
+    summary: 'Pedido listo para retirar', time: '22:08', createdAt: '' }] } };
+  let tree: any;
+  act(() => {
+    tree = create(<WhatsAppNoticeCard action={{ type: 'whatsapp_notice', target: '7', label: 'siguió' }} fallback="texto" />);
+  });
+  const words = JSON.stringify(tree.toJSON());
+  for (const part of ['Farmacia Central', '22:08', 'siguió escribiendo', 'Su pedido está listo', 'Parece un pedido', 'Pedido listo para retirar']) {
+    expect(words).toContain(part);
+  }
+  mockLinkData = null;
+  act(() => {
+    tree.update(<WhatsAppNoticeCard action={{ type: 'whatsapp_notice', target: '7', label: '' }} fallback="«J» te escribió" />);
+  });
+  expect(JSON.stringify(tree.toJSON())).toContain('«J» te escribió');  // gone: its own text
 });

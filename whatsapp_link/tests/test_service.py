@@ -498,10 +498,11 @@ class ChatTests(LinkTestBase):
         self.assertEqual((told.sender_type, told.metadata['ai'], told.metadata['whatsapp']), ('AGENT', True, True))
         self.assertIn('«Farmacia Central» te escribió por WhatsApp', told.body)
         self.assertIn('«Su pedido está listo, son 120 Bs»', told.body)
-        self.assertEqual([a['label'] for a in told.metadata['actions']],
+        self.assertEqual(told.metadata['actions'][0], {'type': 'whatsapp_notice', 'target': str(WhatsAppNotice.objects.get().pk),
+                                                       'label': ''})
+        self.assertEqual([a['label'] for a in told.metadata['actions'][1:]],
                          ['Paso a las 5', 'Gracias, ¿hasta qué hora?', 'Otro…'])
         self.assertEqual(told.metadata['actions'][-1]['type'], 'whatsapp_other')
-        self.assertEqual(told.metadata['actions'][0]['type'], 'whatsapp_reply')
         self.assertEqual(self.pushes.call_args.args[2], {'kind': 'messages'})  # the push opens the conversation
         before = len(self.thread())
         self.message(self.link)  # delivered again

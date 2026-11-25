@@ -77,7 +77,10 @@ def tell(link, notice, replies):
     verb = 'siguió escribiendo' if earlier else 'te escribió'
     lines = [f'«{_name(data.get("chat"))}» {verb} por WhatsApp:', f'«{_quote(data.get("preview"))}»']
     lines.append(KIND_WORDS.get(notice.kind, 'Parece importante.') + ' ¿Qué le respondo?')
-    actions = [{'type': 'whatsapp_reply', 'target': str(notice.pk), 'label': reply} for reply in replies[:3]]
+    # The notice drawn as a card on builds that know it (sender, the message as a chat bubble, what it seems);
+    # the body above stays for older builds and for the assistant's own reading of the conversation.
+    actions = [{'type': 'whatsapp_notice', 'target': str(notice.pk), 'label': 'siguió' if earlier else ''}]
+    actions += [{'type': 'whatsapp_reply', 'target': str(notice.pk), 'label': reply} for reply in replies[:3]]
     # Always a way to say it in her own words: the assistant writes the full reply, on a card she confirms.
     actions.append({'type': 'whatsapp_other', 'target': str(notice.pk), 'label': 'Otro…'})
     try:
