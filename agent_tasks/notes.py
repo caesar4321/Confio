@@ -92,7 +92,8 @@ STOPPED = {
     'unavailable': 'Ahora no puedo abrir el navegador para comprar por ti. Pídemelo más tarde.',
     # Any store may be searched (founder, 2026-11-25); paying it is what depends on the country.
     'no_rail': ('Encontré lo que elegiste en {site}, pero todavía no puedo pagar tiendas de {{country}}, así que no '
-                'lo compré. Puedes comprarlo tú directamente en {site}.'),
+                'lo compré. Hoy pago tiendas de México con SPEI, de Brasil con Pix y de Bolivia con QR. Puedes '
+                'comprarlo tú directamente en {site}.'),
 }
 COUNTRY_NAMES = {'AR': 'Argentina', 'BO': 'Bolivia', 'BR': 'Brasil', 'CL': 'Chile', 'CO': 'Colombia', 'CR': 'Costa Rica',
                  'EC': 'Ecuador', 'ES': 'España', 'GT': 'Guatemala', 'MX': 'México', 'PA': 'Panamá', 'PE': 'Perú',

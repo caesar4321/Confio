@@ -103,3 +103,23 @@ class OtherCountriesTests(SimpleTestCase):
     def test_an_address_with_its_country_domain_is_one(self):
         self.assertEqual(stores.written(['compra esto en tienda.com.pe por favor']), {'tienda.com.pe'})
         self.assertEqual(stores.written(['en liverpool.com.mx']), {'liverpool.com.mx'})
+
+
+class NewestMessageTests(SimpleTestCase):
+    """2026-11-25: "Farmatodo de Venezuela" after an earlier "MercadoLivre Brasil" searched Mercado Livre."""
+    CONVO = ['Snack', 'Me refiero quiero pedir algo de Farmatodo de Venezuela',
+             'Quiero pedir algo desde Farmatodo para mi amigo', '¿Podemos buscar una pizza para J desde MercadoLivre Brasil?']
+
+    def test_the_store_they_named_last_wins_even_one_not_on_the_known_list(self):
+        from agent_tasks import stores
+        country = stores.latest_country(self.CONVO)
+        self.assertEqual(country, 'VE')
+        self.assertEqual(stores.choose('farmatodo.com.ve', self.CONVO, country=country), 'farmatodo.com.ve')
+
+    def test_a_look_alike_is_never_taken_for_the_store_they_named(self):
+        from agent_tasks import stores
+        self.assertNotEqual(stores.choose('farmat0do.com.ve', self.CONVO, country='VE'), 'farmat0do.com.ve')
+
+    def test_a_store_they_never_named_is_never_taken(self):
+        from agent_tasks import stores
+        self.assertIsNone(stores.choose('tiendarandom.com.ve', ['quiero un snack'], country='VE'))

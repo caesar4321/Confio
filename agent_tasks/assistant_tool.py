@@ -33,9 +33,13 @@ def spec():
         'type': 'function', 'name': NAME, 'strict': True,
         'description': (
             'Empieza a comprar algo por la persona en cualquier tienda en línea, de cualquier país, con un '
-            'navegador en la nube: busca y le muestra opciones aquí. Pagarla depende del país: Confío paga tiendas '
-            'de México (SPEI), Brasil (Pix) y Bolivia (QR); en otros países el agente busca igual y, al llegar al '
-            'pedido, le dice que todavía no puede pagarla allí. Nunca rechaces una tienda por su país. '
+            'navegador en la nube: busca y le muestra opciones aquí. `store` es exactamente la tienda que ella '
+            'nombró en su ÚLTIMO mensaje, con el dominio de su país (Farmatodo de Venezuela: farmatodo.com.ve), '
+            'nunca una de un mensaje anterior. Cómo se paga depende del país de la tienda, y dilo con su nombre '
+            'cuando ella pregunte cómo pagar: México con SPEI, Brasil con Pix, Bolivia con QR; Confío lo paga desde '
+            'su cuenta. En Venezuela, Pago Móvil sirve para enviar dinero pero todavía no para pagar pedidos de '
+            'tiendas; en otros países tampoco hay pago de tiendas todavía: el agente busca igual y, al llegar al '
+            'pedido, le dice que todavía no puede pagarlo allí. Nunca rechaces una tienda por su país. '
             'Úsalo solo cuando ella pide en su mensaje que compres, pidas o reserves algo. `what` es qué comprar, '
             'en pocas palabras y con las palabras de ella (producto, marca, cantidad, variante): nunca algo que no '
             'dijo. `store` es el dominio de la tienda que nombró; si no nombró ninguna, una '
@@ -105,7 +109,8 @@ def call(viewer, texts, *, saw_web, store=None, recent=None, what=None, kind='bu
     what = ' '.join(str(what or '').split())[:200]
     # What to buy, in few words: the model's wording of what the person said, or their own messages.
     goal = what if what and _said(what, words.split('\n')) else words
-    site = stores.choose(store, words.split('\n')[::-1], country=stores.said_country([words]) or _country(viewer))
+    newest_first = words.split('\n')[::-1]
+    site = stores.choose(store, newest_first, country=stores.latest_country(newest_first) or _country(viewer))
     if site is None and kind == 'manage':
         site = _last_store(viewer)   # "¿dónde está mi pedido?": the store of their last purchase
     if site is None:

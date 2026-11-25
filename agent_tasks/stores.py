@@ -90,18 +90,41 @@ def said_country(texts):
     return found.pop() if len(found) == 1 else ''
 
 
+def brand(site):
+    """The name a person calls a store by: 'farmatodo' for farmatodo.com.ve. '' when too short to tell."""
+    label = str(site or '').split('.')[0]
+    return label if len(label) >= 4 else ''
+
+
+def latest_country(texts):
+    """The country the newest message that names one names, or '' (texts newest first)."""
+    for text in texts:
+        found = said_country([text])
+        if found:
+            return found
+    return ''
+
+
 def choose(pointer, texts, country=None):
-    """The store for a task: the model's pointer only counts when it is the
-    store the person named, or a known one when they named none. A name
-    that is a store in several countries ("Mercado Libre") is the one in the
-    person's own country."""
+    """The store for a task (texts: the person's own messages, newest first). The newest message that names
+    a store decides; an older one never overrides it (2026-11-25: "Farmatodo" after an earlier "Mercado Livre
+    Brasil" went to Mercado Livre). The model's pointer counts when it is a store the person named: a known
+    one by its names, or any other store by its brand in their words (any store may be tried), never a
+    look-alike. A name that is a store in several countries is the one in the person's country."""
     from . import countries
-    theirs = named(texts) | written(texts)
-    if len(theirs) > 1 and country:
-        own = {site for site in theirs if countries.country_of(site) == country}
-        theirs = own or theirs
     store = sites.store(pointer) if pointer else None
-    if theirs:
+    if store and imitates(store):
+        store = None
+    mark = brand(store) if store and store not in KNOWN else ''
+    for text in texts:
+        theirs = named([text]) | written([text])
+        if mark and re.search(rf'(?<!\w){re.escape(mark)}(?!\w)', guard.fold(text)):
+            theirs.add(store)
+        if not theirs:
+            continue
+        if len(theirs) > 1 and country:
+            own = {site for site in theirs if countries.country_of(site) == country}
+            theirs = own or theirs
         if store in theirs:
             return store
         return next(iter(theirs)) if len(theirs) == 1 else None
