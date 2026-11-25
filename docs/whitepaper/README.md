@@ -8,9 +8,9 @@ Confío is a consumer personal assistant for Latin America. Like the personal AI
 Julian Moon · Founder & CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
-*Lo tuyo, tuyo. · Pídelo en palabras; Confío lo hace y lo paga.*
+*La confianza ya existe. Falta un sistema que la merezca.* — Trust already exists. What’s missing is a system that deserves it. · *Confío en vos.*
 
-**Authoritative original:** This English document is the sole authoritative version of the Confío whitepaper. A Spanish translation is provided for convenience and may lag behind this original. If the translation differs from the English text, the English text controls.
+**Authoritative original:** This English document is the sole authoritative version of the Confío whitepaper. [Spanish](README.es.md) and [Korean](README.ko.md) translations are provided for convenience and may lag behind this original. If a translation differs from the English text, the English text controls.
 
 This paper is the current global reference for Confío’s product, strategy, operating model, and material risks. Detailed $CONFIO allocation and vesting terms remain in the separate tokenomics document.
 
@@ -87,7 +87,7 @@ People across the region hold and receive dollars — through remittances, estim
 
 ### 2.4 Trust decides who people let pay
 
-Giving money to an AI raises the question every Latin American user already asks of a financial app: what stops it from doing the wrong thing? Confío’s answer has three layers: **verifiable control** (the wallet key is generated on the person’s device and is not held by Confío), **bounded agency** (the assistant cannot invent amounts or payees; every payment is an exact confirmation or falls inside a limit signed on-chain), and **human trust** (Spanish-first explanations, clear prices, visible leadership, and an assistant that says plainly what it cannot do). *Lo tuyo, tuyo* is both a brand promise and an architectural constraint.
+Giving money to an AI raises the question every Latin American user already asks of a financial app: what stops it from doing the wrong thing? Confío’s answer has three layers: **verifiable control** (the wallet key is generated on the person’s device and is not held by Confío), **bounded agency** (the assistant cannot invent amounts or payees; every payment is an exact confirmation or falls inside a limit signed on-chain), and **human trust** (Spanish-first explanations, clear prices, visible leadership, and an assistant that says plainly what it cannot do). *La confianza ya existe; falta un sistema que la merezca*: people already trust one another with money, and these limits are how Confío earns that trust. The promise is also an architectural constraint.
 
 ## 3. Competitive landscape
 

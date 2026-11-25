@@ -8,9 +8,9 @@ Confío es un asistente personal de consumo para América Latina. Como los agent
 Julian Moon · Fundador y CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
-*Lo tuyo, tuyo. · Pídelo en palabras; Confío lo hace y lo paga.*
+*La confianza ya existe. Falta un sistema que la merezca. · Confío en vos.*
 
-**Original autoritativo:** el [documento en inglés](README.md) es la única versión autoritativa del whitepaper de Confío. Esta traducción al español se ofrece por conveniencia y puede quedar rezagada respecto del original; si difiere del texto en inglés, prevalece el texto en inglés. Traducción sincronizada con la versión 4.5 el 25 de noviembre de 2026.
+**Original autoritativo:** el [documento en inglés](README.md) es la única versión autoritativa del whitepaper de Confío. Esta traducción al español (también hay una [en coreano](README.ko.md)) se ofrece por conveniencia y puede quedar rezagada respecto del original; si difiere del texto en inglés, prevalece el texto en inglés. Traducción sincronizada con la versión 4.5 el 25 de noviembre de 2026.
 
 Este documento es la referencia global actual sobre el producto, la estrategia, el modelo operativo y los riesgos materiales de Confío. Las condiciones detalladas de asignación y vesting de $CONFIO se mantienen en el documento separado de tokenomics.
 
@@ -87,7 +87,7 @@ Las personas de toda la región tienen y reciben dólares: mediante remesas, est
 
 ### 2.4 La confianza decide a quién se le deja pagar
 
-Darle dinero a una IA plantea la pregunta que todo usuario latinoamericano ya le hace a una app financiera: ¿qué le impide hacer algo indebido? La respuesta de Confío tiene tres capas: **control verificable** (la clave de la billetera se genera en el dispositivo de la persona y Confío no la conserva), **autonomía acotada** (el asistente no puede inventar montos ni beneficiarios; cada pago es una confirmación exacta o cae dentro de un límite firmado on-chain) y **confianza humana** (explicaciones primero en español, precios claros, un liderazgo visible y un asistente que dice con claridad lo que no puede hacer). *Lo tuyo, tuyo* es a la vez una promesa de marca y una restricción de arquitectura.
+Darle dinero a una IA plantea la pregunta que todo usuario latinoamericano ya le hace a una app financiera: ¿qué le impide hacer algo indebido? La respuesta de Confío tiene tres capas: **control verificable** (la clave de la billetera se genera en el dispositivo de la persona y Confío no la conserva), **autonomía acotada** (el asistente no puede inventar montos ni beneficiarios; cada pago es una confirmación exacta o cae dentro de un límite firmado on-chain) y **confianza humana** (explicaciones primero en español, precios claros, un liderazgo visible y un asistente que dice con claridad lo que no puede hacer). *La confianza ya existe; falta un sistema que la merezca*: la gente ya confía en otras personas con su dinero, y estos límites son la forma en que Confío se gana esa confianza. La promesa es también una restricción de arquitectura.
 
 ## 3. Panorama competitivo
 

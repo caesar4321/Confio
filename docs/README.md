@@ -6,10 +6,14 @@ operational documentation for the Confío repository.
 ## Product and strategy
 
 - [English whitepaper](whitepaper/README.md) - Confío’s global product and
-  strategy reference.
+  strategy reference: the personal assistant that pays in Latin America.
+- [Whitepaper — Español](whitepaper/README.es.md) · [한국어](whitepaper/README.ko.md) - Convenience
+  translations.
 - [$CONFIO tokenomics](tokenomics/README.md) - Authoritative English supply,
   allocation, vesting, presale, and token-risk reference.
 - [$CONFIO tokenomics — Español](tokenomics/README.es.md) - Convenience
+  translation.
+- [$CONFIO tokenomics — 한국어](tokenomics/README.ko.md) - Convenience
   translation.
 - [Chain decision note](CHAIN_DECISION_NOTE.md) - Role-based chain selection
   for cUSD, cUSD+, and $CONFIO.

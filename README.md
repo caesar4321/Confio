@@ -8,7 +8,7 @@ Personal AI assistants that act for people are arriving: they search, remind, co
 
 Confío IA runs the errand and finishes it by paying: the store, the merchant or the person, on that country's own rail, from a dollar balance only the user controls. Every payment needs the user's exact confirmation or stays within limits they signed on-chain. Confío is fully open source and non-custodial.
 
-*Lo tuyo, tuyo. · Pídelo en palabras; Confío lo hace y lo paga.*
+*La confianza ya existe. Falta un sistema que la merezca.* — Trust already exists. What’s missing is a system that deserves it. · *Confío en vos.*
 
 ## What Confío IA does
 
@@ -109,8 +109,8 @@ The repository still contains Algorand code and documentation used by the earlie
 
 ## Documentation
 
-- **Whitepaper:** [English — authoritative original](docs/whitepaper/README.md) · [Español](docs/whitepaper/README.es.md)
-- **$CONFIO tokenomics:** [English — authoritative original](docs/tokenomics/README.md) · [Español](docs/tokenomics/README.es.md)
+- **Whitepaper:** [English — authoritative original](docs/whitepaper/README.md) · [Español](docs/whitepaper/README.es.md) · [한국어](docs/whitepaper/README.ko.md)
+- **$CONFIO tokenomics:** [English — authoritative original](docs/tokenomics/README.md) · [Español](docs/tokenomics/README.es.md) · [한국어](docs/tokenomics/README.ko.md)
 - **Security:** [Account and authentication architecture](docs/security/ACCOUNT_AND_AUTH_DETAILS.md)
 - **Sign-in and phone recovery:** [Current wallet reconciliation and verified phone relinking](docs/signin-wallet-reconciliation.md) · [EC2 rollout](docs/deploy-ec2-ubuntu-systemd.md)
 - **Institutional collections (pilot):** [Plan](docs/payments/RECURRING_PAYMENT_PLATFORM_PLAN.md) · [API contract](docs/payments/openapi-v1.yaml) · [Sandbox and operations](docs/payments/BILLING_OPERATIONS_RUNBOOK.md)

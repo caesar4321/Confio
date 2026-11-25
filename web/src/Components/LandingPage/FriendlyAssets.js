@@ -157,11 +157,11 @@ const FriendlyAssets = () => {
           transition={{ duration: 0.6, delay: 0.5 }}
           className={styles.documents}
         >
-          <a href={t('https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.es.md', 'https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md', 'https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.es.md', 'https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.md', 'https://github.com/caesar4321/Confio/blob/main/docs/whitepaper/README.ko.md')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📄</span>
             <span>{t('Whitepaper', 'Whitepaper', '백서')}</span>
           </a>
-          <a href={t('https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.es.md', 'https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.md', 'https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.md')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.es.md', 'https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.md', 'https://github.com/caesar4321/Confio/blob/main/docs/tokenomics/README.ko.md')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📘</span>
             <span>{t('Tokenomics', 'Tokenomics', '토크노믹스')}</span>
           </a>
