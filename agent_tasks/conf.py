@@ -55,6 +55,7 @@ DEFAULTS = {
 
     # Ceilings, enforced here and never by the model.
     'AGENT_TASKS_MAX_STEPS': 45,
+    'AGENT_TASKS_STEPS_PER_EXTRA_PRODUCT': 8,   # a cart of several products: open, add, set its quantity
     'AGENT_TASKS_MAX_COST_USD': '1.00',
     'AGENT_TASKS_SESSION_SECONDS': 1500,
     # One guarded connection works this long: a late redirect is still checked.

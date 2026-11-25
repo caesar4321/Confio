@@ -423,6 +423,64 @@ def choose(account, user, task_id, index, cap=None):
     return task
 
 
+def choose_cart(account, user, task_id, picks, cap=None):
+    """The person chose one or more of the products offered, each with a quantity, and confirmed once (spec
+    decision 42: "Elegir"). `picks` is [{'index', 'quantity'}]; `cap` the top total the app showed above the
+    confirm button. The agent opens each product and adds it in its quantity; the store's cart must then hold
+    exactly those. Choosing approves the purchase up to that top total only when the app sent back the very
+    top total worked out here from the chosen prices and quantities (operate.cart_top), and only for a
+    subscriber then; otherwise the ordinary order card asks."""
+    from . import operate
+    if not conf.get('AGENT_TASKS_ENABLED'):
+        raise TaskRefused('unavailable')
+    task = get(account, user, task_id)
+    options = task.options or []
+    if task.state != 'needs_person' or task.reason != 'choose' or not task.wait_until:
+        raise TaskRefused('not_open')
+    if task.wait_until <= timezone.now():
+        runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
+        raise TaskRefused('not_open')
+    chosen = {}
+    try:
+        for pick in list(picks or [])[:runner.MAX_OPTIONS + 1]:
+            index, quantity = pick['index'], pick['quantity']
+            if isinstance(index, bool) or isinstance(quantity, bool):
+                raise TypeError
+            index, quantity = int(index), int(quantity)
+            if not 0 <= index < len(options) or index in chosen or not 1 <= quantity <= operate.MAX_QUANTITY:
+                raise ValueError
+            chosen[index] = quantity
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TaskRefused('not_found') from exc
+    if not chosen or len(chosen) > len(options) or len(list(picks or [])) != len(chosen):
+        raise TaskRefused('not_found')
+    # In the order they were offered: the first one's price gives the top total its currency mark.
+    picked = [{**options[index], 'quantity': chosen[index]} for index in sorted(chosen)]
+    cart = [{'title': str(one.get('title') or ''), 'price': str(one.get('price') or ''),
+             'href': str(one.get('href') or ''), 'image': str(one.get('image') or ''),
+             'quantity': one['quantity'], 'opened': False} for one in picked]
+    order = {**(task.order or {}), 'cart': cart}
+    order.pop('cap', None)
+    # Every chosen price was read off the results page (its own top total was set): only then a top total.
+    if all(one.get('cap_amount') for one in picked):
+        amount, text = operate.cart_top([(one['price'], one['quantity']) for one in cart], task.country)
+        if amount is not None and cap is not None and str(cap) == text:
+            order['cap'] = {'item': operate.cart_summary(cart), 'amount': format(amount, 'f'), 'text': text,
+                            'subscribed': subscribed(user),
+                            'items': [{'title': one['title'], 'quantity': one['quantity'],
+                                       'price': format(operate.unit_price(one['price'], task.country), 'f')}
+                                      for one in cart]}
+    history = [*(task.history or []), {'did': runner.CHOSEN, 'result': operate.cart_summary(cart)[:120]}]
+    with transaction.atomic():
+        if not AgentTask.objects.filter(pk=task.pk, state='needs_person', reason='choose', steps=task.steps).update(
+                state='working', reason='', wait_until=None, pending_url=cart[0]['href'], options=picked,
+                order=order, history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now()):
+            raise TaskRefused('not_open')
+        runner.kick(task.pk)
+    task.refresh_from_db()
+    return task
+
+
 def cancel(account, user, task_id):
     task = get(account, user, task_id)
     if not runner.end(task, 'cancelled', 'cancelled'):

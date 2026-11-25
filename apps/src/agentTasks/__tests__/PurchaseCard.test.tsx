@@ -76,8 +76,13 @@ it('shows the products with their photos and prices, and a tap picks one', async
   const photos = tree.root.findAll((n) => (n.type as any) === 'Image' && n.props.source);
   // Only https pictures are loaded.
   expect(photos.map((p) => p.props.source.uri)).toEqual(['https://img.example/a.jpg']);
+  // Choosing marks it; nothing is sent until the one confirm.
   await act(async () => { labelled(tree, 'Elegir Chocolate Ibarra 540 g, $112.50').props.onPress(); });
-  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, index: 1, cap: null });   // no top total shown, none sent
+  expect(mockMutate).not.toHaveBeenCalled();
+  await act(async () => { labelled(tree, 'Comprar 1 producto').props.onPress(); });
+  // No top total shown, none sent.
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, items: [{ index: 1, quantity: 1 }], cap: null });
+  expect(texts(tree)).toContain('Te muestro el total antes de pedirlo.');
 });
 
 it('the sign-in is typed in the card, sent once, and the password is not kept', async () => {
@@ -134,10 +139,63 @@ it('each product says the most it may cost: choosing it approves up to that', as
     options: [{ title: 'Turin Magno Chocolates', price: '$85.00', image: '', cap: '$165.00' }] });
   const tree = await mount();
   expect(texts(tree)).toContain('Hasta $165.00 con envío');
-  mockMutate.mockResolvedValue(answered('chooseAgentOption'));
+  mockMutate.mockResolvedValue(answered('chooseAgentOptions'));
   await act(async () => { labelled(tree, 'Elegir Turin Magno Chocolates, $85.00, hasta $165.00 con envío').props.onPress(); });
-  // The top total the card showed goes back with the tap.
-  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, index: 0, cap: '$165.00' });
+  expect(texts(tree)).toContain('Hasta $165.00 con envío. Si cuesta más, te pregunto antes de pedirlo.');
+  await act(async () => { labelled(tree, 'Comprar 1 producto, hasta $165.00 con envío').props.onPress(); });
+  // The top total the button showed goes back with the tap.
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, items: [{ index: 0, quantity: 1 }], cap: '$165.00' });
+});
+
+it('several products, each with a quantity, are confirmed once within the whole cart\'s top total', async () => {
+  mockTask = task({ reason: 'choose', message: 'Elige…', capRule: { margin: '0.6', minExtra: '80', commaDecimals: false, maxQuantity: 9 },
+    options: [{ title: 'Chocolate Abuelita', price: '$89.00', image: '', cap: '$169.00', unit: '89.00' },
+      { title: 'Café Legal', price: '$1,249.00', image: '', cap: '$1,999.00', unit: '1249.00' },
+      { title: 'Galletas', price: '$85.00', image: '', cap: '$165.00', unit: '85.00' }] });
+  mockMutate.mockResolvedValue(answered('chooseAgentOptions'));
+  const tree = await mount();
+  expect(texts(tree)).toContain('Elige uno o más productos y cuántos de cada uno.');
+  await act(async () => { labelled(tree, 'Elegir Galletas, $85.00, hasta $165.00 con envío').props.onPress(); });
+  await act(async () => { labelled(tree, 'Elegir Café Legal, $1,249.00, hasta $1,999.00 con envío').props.onPress(); });
+  await act(async () => { labelled(tree, 'Una más de Café Legal').props.onPress(); });
+  await act(async () => { labelled(tree, 'Una más de Galletas').props.onPress(); });
+  await act(async () => { labelled(tree, 'Una más de Galletas').props.onPress(); });
+  await act(async () => { labelled(tree, 'Una menos de Galletas').props.onPress(); });
+  // 2 × 1,249 + 2 × 85 = 2,668; + 60% = 4,268.80 → 4,269: before the tap.
+  expect(texts(tree)).toContain('Hasta $4,269.00 con envío. Si cuesta más, te pregunto antes de pedirlo.');
+  // Chosen and then dropped: not in the cart.
+  await act(async () => { labelled(tree, 'Elegir Chocolate Abuelita, $89.00, hasta $169.00 con envío').props.onPress(); });
+  await act(async () => { labelled(tree, 'Quitar Chocolate Abuelita, $89.00, hasta $169.00 con envío').props.onPress(); });
+  await act(async () => { labelled(tree, 'Comprar 4 productos, hasta $4,269.00 con envío').props.onPress(); });
+  expect(mockMutate).toHaveBeenCalledTimes(1);
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({
+    id: ID, items: [{ index: 1, quantity: 2 }, { index: 2, quantity: 2 }], cap: '$4,269.00' });
+});
+
+it('a quantity stays between 1 and 9', async () => {
+  mockTask = task({ reason: 'choose', capRule: { margin: '0.6', minExtra: '30', commaDecimals: true, maxQuantity: 9 },
+    options: [{ title: 'Café', price: 'R$ 12,50', image: '', cap: 'R$ 43,00', unit: '12.50' }] });
+  const tree = await mount();
+  await act(async () => { labelled(tree, 'Elegir Café, R$ 12,50, hasta R$ 43,00 con envío').props.onPress(); });
+  // At 1, "−" is unavailable and its tap keeps the product chosen (it once fell through and removed it).
+  expect(labelled(tree, 'Una menos de Café').props.accessibilityState).toEqual({ disabled: true });
+  await act(async () => { labelled(tree, 'Una menos de Café').props.onPress(); });
+  expect(texts(tree)).toContain('1');
+  expect(labelled(tree, 'Comprar 1 producto, hasta R$ 43,00 con envío')).toBeDefined();
+  for (let i = 0; i < 12; i += 1) {
+    await act(async () => { labelled(tree, 'Una más de Café').props.onPress(); });
+  }
+  expect(texts(tree)).toContain('9');
+  // 9 × 12,50 = 112,50; + 60% = 180,00: written as the store writes it.
+  expect(labelled(tree, 'Comprar 9 productos, hasta R$ 180,00 con envío')).toBeDefined();
+});
+
+it('the order card lists every product of the cart with how many', async () => {
+  mockTask = task({ reason: 'approve', options: [], message: 'Listo para pedir…',
+    order: { item: '2 × Café Legal · 2 × Galletas', total: '$2,730.00', image: '',
+      items: [{ title: 'Café Legal', quantity: 2, image: '' }, { title: 'Galletas', quantity: 2, image: '' }] } });
+  const tree = await mount();
+  expect(texts(tree)).toEqual(expect.arrayContaining(['2 × Café Legal', '2 × Galletas', '$2,730.00']));
 });
 
 it('the card says what the total is made of: the shipping is never a surprise', async () => {
@@ -298,8 +356,9 @@ it('no QR is drawn for a card Confío pays', async () => {
 });
 
 it('a refusal is said on the card and the card stays', async () => {
-  mockMutate.mockResolvedValue({ data: { chooseAgentOption: { success: false, errors: ['Esto ya no está esperando tu respuesta.'] } } });
+  mockMutate.mockResolvedValue({ data: { chooseAgentOptions: { success: false, errors: ['Esto ya no está esperando tu respuesta.'] } } });
   const tree = await mount();
   await act(async () => { labelled(tree, 'Elegir Chocolate Abuelita 6 tabletas, $89.00').props.onPress(); });
+  await act(async () => { labelled(tree, 'Comprar 1 producto').props.onPress(); });
   expect(texts(tree)).toContain('Esto ya no está esperando tu respuesta.');
 });

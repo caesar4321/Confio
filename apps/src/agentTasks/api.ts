@@ -2,6 +2,8 @@
 // Kept apart from the shared query files: a server without agent_tasks rejects only these.
 import { gql } from '@apollo/client';
 
+import type { CapRule } from './helpers';
+
 const TASK_FIELDS = `
   id
   goal
@@ -18,8 +20,9 @@ const TASK_FIELDS = `
   payQr
   payDetails { label value }
   openAccountMethod
-  options { title price image cap }
-  order { item total image address breakdown { label value } }
+  options { title price image cap unit }
+  capRule { margin minExtra commaDecimals maxQuantity }
+  order { item items { title quantity image } total image address breakdown { label value } }
 `;
 
 export const GET_AGENT_TASK = gql`
@@ -51,6 +54,13 @@ export const ANSWER_AGENT_STEP = gql`
 export const CHOOSE_AGENT_OPTION = gql`
   mutation ChooseAgentOption($id: UUID!, $index: Int!, $cap: String) {
     chooseAgentOption(id: $id, index: $index, cap: $cap) { ${RESULT} }
+  }
+`;
+
+// One or more products, each with a quantity, confirmed with one tap; `cap` is the top total the button showed.
+export const CHOOSE_AGENT_OPTIONS = gql`
+  mutation ChooseAgentOptions($id: UUID!, $items: [AgentPickInput!]!, $cap: String) {
+    chooseAgentOptions(id: $id, items: $items, cap: $cap) { ${RESULT} }
   }
 `;
 
@@ -86,9 +96,13 @@ export const FORGET_AGENT_STORE = gql`
 `;
 
 // `cap`: the most it may cost with shipping and taxes; choosing it approves up to that (spec decision 42).
-export type AgentOption = { title: string; price: string; image: string; cap?: string | null };
+// `unit`: its price as a plain number, from which the top total of several chosen products is worked out.
+export type AgentOption = { title: string; price: string; image: string; cap?: string | null; unit?: string | null };
+export type AgentOrderItem = { title: string; quantity: number; image: string };
 export type AgentOrder = {
   item: string; total: string; image: string; address?: string | null;
+  // The products chosen into one cart, with how many of each (empty for one item chosen the older way).
+  items?: AgentOrderItem[] | null;
   // What the total is made of (Productos, Envío…): the server checked it adds up to the total.
   breakdown?: { label: string; value: string }[] | null;
 };
@@ -117,9 +131,11 @@ export type AgentTask = {
   // The local account (LocalAccountApplication methodId) that lets Confío pay the next one.
   openAccountMethod?: string | null;
   options: AgentOption[];
+  // How the top total of the chosen products is worked out (while choosing).
+  capRule?: CapRule | null;
   order?: AgentOrder | null;
 };
 
 export type AgentAnswer = { success?: boolean; errors?: string[]; errorCode?: string | null; task?: AgentTask | null };
 
-export { ACTIVE, FINISHED, taskIdOf, agentTaskNotificationRoute, taskActions, latestCardFor, showCard } from './helpers';
+export { ACTIVE, FINISHED, taskIdOf, agentTaskNotificationRoute, taskActions, latestCardFor, showCard, cartTop } from './helpers';

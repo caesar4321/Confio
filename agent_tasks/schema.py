@@ -50,10 +50,37 @@ class AgentOptionType(graphene.ObjectType):
     image = graphene.String(required=True)
     cap = graphene.String(description='The most it may cost with shipping and taxes: choosing it approves up to this '
                                       '(spec decision 42). Empty when its price could not be read.')
+    unit = graphene.String(description='Its price as a plain number ("1249.00"), only when `cap` is set: the app '
+                                       'works out the top total of several chosen products from it (capRule).')
+
+
+class AgentCapRuleType(graphene.ObjectType):
+    """How a top total is worked out from chosen prices (operate.cart_top): the sum of unit price times
+    quantity, plus the larger of sum × margin and minExtra, rounded up to a whole unit; written in the
+    first chosen product's price text, with `commaDecimals` (1.249,00) or not (1,249.00)."""
+    margin = graphene.String(required=True)
+    min_extra = graphene.String(required=True)
+    comma_decimals = graphene.Boolean(required=True)
+    max_quantity = graphene.Int(required=True)
+
+
+class AgentOrderItemType(graphene.ObjectType):
+    """One product chosen into the order's cart, with how many."""
+    title = graphene.String(required=True)
+    quantity = graphene.Int(required=True)
+    image = graphene.String(required=True)
+
+
+class AgentPickInput(graphene.InputObjectType):
+    index = graphene.Int(required=True)
+    quantity = graphene.Int(required=True)
 
 
 class AgentOrderType(graphene.ObjectType):
     """The order the person approves in the chat: the store's own words."""
+    items = graphene.List(graphene.NonNull(AgentOrderItemType), required=True,
+                          description='The products chosen into one cart with their quantities; empty for one item '
+                                      'chosen the older way (`item` names it)')
     item = graphene.String(required=True)
     total = graphene.String(required=True)
     image = graphene.String(required=True)
@@ -93,7 +120,10 @@ class AgentTaskType(graphene.ObjectType):
     created_at = graphene.DateTime(required=True)
     order = graphene.Field(AgentOrderType, description='With reason `approve`: confirm with approveAgentOrder. With `subscribe`, approveAgentOrder only resumes once subscribed')
     options = graphene.List(graphene.NonNull(AgentOptionType), required=True,
-                            description='With reason `choose`: pick one with chooseAgentOption(index)')
+                            description='With reason `choose`: pick one or more, each with a quantity, with '
+                                        'chooseAgentOptions (older builds: chooseAgentOption(index))')
+    cap_rule = graphene.Field(AgentCapRuleType, description='With reason `choose`: how the top total of the chosen '
+                                                            'products is worked out, shown before the tap')
 
 
 WORKING = {
@@ -169,7 +199,11 @@ def task_type(task):
         if task.state == 'needs_person' and task.reason == 'act' else None,
         request_button=str(((task.order or {}).get('request') or {}).get('button') or '') or None
         if task.state == 'needs_person' and task.reason == 'act' else None,
-        order=(AgentOrderType(item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
+        order=(AgentOrderType(items=[AgentOrderItemType(title=str(one.get('title') or ''),
+                                                        quantity=int(one.get('quantity') or 1),
+                                                        image=str(one.get('image') or ''))
+                                     for one in (task.order.get('items') or []) if isinstance(one, dict)],
+                              item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
                               image=str(task.order.get('image') or ''),
                               address=str(task.order.get('address') or ''),
                               breakdown=[AgentPayDetailType(label=notes.BREAKDOWN_LABELS[line['kind']].capitalize(),
@@ -179,8 +213,26 @@ def task_type(task):
                                          if line.get('kind') in notes.BREAKDOWN_LABELS])
                if task.order else None),
         options=[AgentOptionType(title=str(o.get('title') or ''), price=str(o.get('price') or ''),
-                                 image=str(o.get('image') or ''), cap=str(o.get('cap') or '') or None)
-                 for o in (task.options or [])])
+                                 image=str(o.get('image') or ''), cap=str(o.get('cap') or '') or None,
+                                 unit=_unit(o, task.country))
+                 for o in (task.options or [])],
+        cap_rule=_cap_rule(task.country) if task.state == 'needs_person' and task.reason == 'choose' else None)
+
+
+def _unit(option, country):
+    """An offered product's price as a plain number, only when its top total was set (its price was read)."""
+    from . import operate
+    if not option.get('cap_amount'):
+        return None
+    price = operate.unit_price(option.get('price'), country)
+    return format(price, 'f') if price is not None else None
+
+
+def _cap_rule(country):
+    from . import conf, operate
+    return AgentCapRuleType(margin=str(conf.get('AGENT_TASKS_CAP_MARGIN')),
+                            min_extra=str((conf.get('AGENT_TASKS_CAP_MIN_EXTRA') or {}).get(country, '0')),
+                            comma_decimals=country in operate.COMMA_DECIMALS, max_quantity=operate.MAX_QUANTITY)
 
 
 class Query(graphene.ObjectType):
@@ -259,6 +311,24 @@ class ChooseAgentOption(_Result):
     def mutate(cls, root, info, id, index, cap=None):
         try:
             return cls(success=True, errors=[], task=task_type(service.choose(*_owner(info), id, index, cap=cap)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
+class ChooseAgentOptions(_Result):
+    """One or more of the products offered, each with a quantity, confirmed with one tap (spec decision 42)."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        items = graphene.List(graphene.NonNull(AgentPickInput), required=True,
+                              description='Each chosen option (its index in `options`) and how many (1 to 9)')
+        cap = graphene.String(description='The top total the confirm button showed (capRule): choosing approves up '
+                                          'to it only when it is the one worked out from these items')
+
+    @classmethod
+    def mutate(cls, root, info, id, items, cap=None):
+        try:
+            picks = [{'index': pick.index, 'quantity': pick.quantity} for pick in items or []]
+            return cls(success=True, errors=[], task=task_type(service.choose_cart(*_owner(info), id, picks, cap=cap)))
         except Exception as exc:  # noqa: BLE001
             return _failure(cls, exc)
 
@@ -392,6 +462,7 @@ class Mutation(graphene.ObjectType):
     resume_agent_task = ResumeAgentTask.Field()
     cancel_agent_task = CancelAgentTask.Field()
     choose_agent_option = ChooseAgentOption.Field()
+    choose_agent_options = ChooseAgentOptions.Field()
     sign_in_agent_store = SignInAgentStore.Field()
     give_agent_code = GiveAgentCode.Field()
     approve_agent_order = ApproveAgentOrder.Field()

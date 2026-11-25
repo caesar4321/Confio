@@ -293,6 +293,89 @@ class HandOverTests(StepBase):
         with self.assertRaises(service.TaskRefused):
             service.choose(self.account, self.user, task.internal_id, 0)
 
+    def test_several_products_with_quantities_are_one_cart_opened_one_by_one(self):
+        task = self.offered()
+        # The top total of the whole cart: the sum of unit × quantity, then the margin and floor once.
+        amount, text = operate.cart_top([('R$ 89,00', 2), ('R$ 112,50', 1)], 'BR')
+        self.assertEqual((amount, text), (Decimal('465'), 'R$ 465,00'))   # 290,50 + 60% = 464,80, rounded up
+        picked = service.choose_cart(self.account, self.user, task.internal_id,
+                                     [{'index': 1, 'quantity': 1}, {'index': 0, 'quantity': 2}], cap=text)
+        # In the order offered: the first product opens first.
+        self.assertEqual((picked.state, picked.pending_url), ('working', f'{BASE}/p/A'))
+        self.assertEqual([(one['title'], one['quantity'], one['opened']) for one in picked.order['cart']],
+                         [('Chocolate Abuelita 6 tabletas', 2, False), ('Chocolate Ibarra 540 g', 1, False)])
+        cap = picked.order['cap']
+        self.assertEqual((cap['item'], cap['amount'], cap['text'], cap['subscribed']),
+                         ('2 × Chocolate Abuelita 6 tabletas · 1 × Chocolate Ibarra 540 g', '465', 'R$ 465,00', True))
+        self.assertEqual([(one['price'], one['quantity']) for one in cap['items']], [('89.00', 2), ('112.50', 1)])
+        self.assertIn('2 × Chocolate Abuelita', picked.history[-1]['result'])
+        task = self.step(picked, snap())
+        self.browser.goto.assert_called_with(f'{BASE}/p/A')
+        self.assertEqual((task.phase, task.pending_url), ('ordering', ''))
+        self.assertEqual([one['opened'] for one in task.order['cart']], [True, False])
+        self.assertIn('2 × Chocolate Abuelita', task.history[-1]['did'])
+        self.assertIn('next_product', task.history[-1]['result'])
+        # The driver says this one is in the cart: the next chosen one opens, from its offered address.
+        self.operate.return_value = ('next_product', {})
+        task = self.step(task, snap(url=f'{BASE}/p/A'))
+        self.assertEqual(task.pending_url, f'{BASE}/p/B')
+        task = self.step(task, snap())
+        self.browser.goto.assert_called_with(f'{BASE}/p/B')
+        self.assertEqual([one['opened'] for one in task.order['cart']], [True, True])
+        self.assertIn('go to the cart', task.history[-1]['result'])
+        # None left: never a product nobody chose.
+        self.browser.goto.reset_mock()
+        task = self.step(task, snap(url=f'{BASE}/p/B'))
+        self.assertIn('refused', task.history[-1]['result'])
+        self.assertEqual(task.pending_url, '')
+        self.browser.goto.assert_not_called()
+        # The driver's prompt names what was chosen, in quantities.
+        self.assertIn('<chosen>\n- 2 × Chocolate Abuelita 6 tabletas: its page was opened', agent._chosen(task))
+
+    def test_a_cart_whose_top_total_the_app_did_not_show_approves_none(self):
+        for cap in (None, 'R$ 464,00', 'R$ 201,00'):   # an older figure, a wrong one: the order card asks
+            with self.subTest(cap=cap):
+                task = self.offered()
+                picked = service.choose_cart(self.account, self.user, task.internal_id,
+                                             [{'index': 0, 'quantity': 2}, {'index': 1, 'quantity': 1}], cap=cap)
+                self.assertNotIn('cap', picked.order)
+                self.assertEqual(len(picked.order['cart']), 2)   # still what they chose, for the agent to add
+                AgentTask.objects.filter(pk=picked.pk).update(state='cancelled')
+
+    def test_a_price_that_was_not_read_sets_no_top_total_for_the_cart(self):
+        task = self.offered()
+        options = [*task.options]
+        options[1] = {**options[1], 'cap': '', 'cap_amount': ''}
+        AgentTask.objects.filter(pk=task.pk).update(options=options)
+        amount, text = operate.cart_top([('R$ 89,00', 1), ('R$ 112,50', 1)], 'BR')
+        picked = service.choose_cart(self.account, self.user, task.internal_id,
+                                     [{'index': 0, 'quantity': 1}, {'index': 1, 'quantity': 1}], cap=text)
+        self.assertNotIn('cap', picked.order)
+
+    def test_picks_that_are_not_offered_or_not_a_quantity_are_refused(self):
+        task = self.offered()
+        for picks in ([], [{'index': 2, 'quantity': 1}], [{'index': -1, 'quantity': 1}],
+                      [{'index': 0, 'quantity': 0}], [{'index': 0, 'quantity': 10}],
+                      [{'index': 0, 'quantity': 1}, {'index': 0, 'quantity': 2}], [{'index': True, 'quantity': 1}],
+                      [{'index': 0}], [{'index': 0, 'quantity': '2x'}]):
+            with self.subTest(picks=picks):
+                with self.assertRaises(service.TaskRefused):
+                    service.choose_cart(self.account, self.user, task.internal_id, picks, cap=None)
+        self.assertEqual(AgentTask.objects.get(pk=task.pk).state, 'needs_person')
+        service.choose_cart(self.account, self.user, task.internal_id, [{'index': 0, 'quantity': 9}])
+        with self.assertRaises(service.TaskRefused):   # answered once
+            service.choose_cart(self.account, self.user, task.internal_id, [{'index': 0, 'quantity': 1}])
+
+    def test_the_cart_top_total_is_one_items_for_one_unit(self):
+        for price, country in (('R$ 112,50', 'BR'), ('$1,249.00', 'MX'), ('Bs 150', 'BO'), ('$85.00', 'MX')):
+            with self.subTest(price=price):
+                self.assertEqual(operate.cart_top([(price, 1)], country), operate.top_total(price, country))
+        self.assertEqual(operate.cart_top([('$85.00', 3)], 'MX'), (Decimal('408'), '$408.00'))   # 255 + 60%
+        self.assertEqual(operate.cart_top([('$10.00', 2)], 'MX'), (Decimal('100'), '$100.00'))   # the floor, once
+        self.assertEqual(operate.cart_top([('$1,249.00', 2), ('$85.00', 1)], 'MX'), (Decimal('4133'), '$4,133.00'))
+        for picks in ([], [('$85.00', 0)], [('$85.00', 10)], [('$85.00', 1), ('desde $10', 1)]):
+            self.assertEqual(operate.cart_top(picks, 'MX'), (None, ''))
+
     def test_a_single_match_is_still_the_persons_to_choose(self):
         # "Elegir" approves the purchase up to its top total (spec decision 42): never chosen for them.
         self.decide.return_value = ('offer_products', {'items': [{'ref': 2, 'title': 'Ibarra', 'price': '$112'}]})
@@ -2097,6 +2180,115 @@ class CheckoutTests(StepBase):
                                             {'kind': 'other', 'amount': 'R$ 39,00'}])):
             with self.subTest(total=total, lines=lines):
                 self.assertFalse(operate.cap_allows(allowed, {}, total, Decimal('189'), lines))
+
+    CART = [{'title': 'Chocolate Ibarra', 'price': 'R$ 50,00', 'href': f'{BASE}/p/1', 'image': 'https://img.example/i.jpg',
+             'quantity': 2, 'opened': True},
+            {'title': 'Cafe Pilao', 'price': 'R$ 30,00', 'href': f'{BASE}/p/2', 'image': '', 'quantity': 1,
+             'opened': True}]
+
+    def cart_task(self, top='210', subscribed=True, cart=None):
+        cart = cart or self.CART
+        return self.make_task(phase='ordering', options=[{**one, 'cap': 'x', 'cap_amount': '1'} for one in cart], order={
+            'cart': cart, 'cap': {'item': operate.cart_summary(cart), 'amount': top, 'text': f'R$ {top},00',
+                                  'subscribed': subscribed,
+                                  'items': [{'title': one['title'], 'quantity': one['quantity'],
+                                             'price': str(operate.unit_price(one['price'], 'BR'))} for one in cart]}})
+
+    def cart_page(self, lines, total='R$ 189,00'):
+        """The second reader lists these lines; the page writes them, the products and the total."""
+        self.review.side_effect = lambda task, page, element, item, meter: {
+            **review_by_words(task, page, element, item, meter), 'lines': lines}
+        written = ' '.join(f"{line['kind']} {line['amount']}" for line in lines)
+        return checkout_page(total=total, extra=f'Cafe Pilao 2x {written}')
+
+    def test_a_chosen_cart_within_its_top_total_is_placed_with_no_second_tap(self):
+        # 2 × R$ 50 + 1 × R$ 30 = R$ 130 in products, as one subtotal line or as one line per product.
+        for lines in ([{'kind': 'products', 'amount': 'R$ 130,00'}, {'kind': 'shipping', 'amount': 'R$ 59,00'}],
+                      [{'kind': 'products', 'amount': 'R$ 100,00'}, {'kind': 'products', 'amount': 'R$ 30,00'},
+                       {'kind': 'shipping', 'amount': 'R$ 59,00'}]):
+            with self.subTest(lines=len(lines)):
+                self.reader.click.reset_mock()
+                self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'whatever', 'total': 'R$ 189,00'})
+                task = self.step(self.cart_task(), self.cart_page(lines))
+                self.reader.click.assert_called_once()
+                self.assertEqual((task.phase, task.order['pressed']), ('ordered', True))
+                self.assertEqual(task.order['item'], '2 × Chocolate Ibarra · 1 × Cafe Pilao')
+                # The second reader was asked for these products in these quantities, not one item.
+                self.assertEqual(self.review.call_args.args[3], [{'title': 'Chocolate Ibarra', 'quantity': 2},
+                                                                 {'title': 'Cafe Pilao', 'quantity': 1}])
+                AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+
+    def test_a_cart_the_money_does_not_prove_brings_the_order_card_with_every_item(self):
+        from agent_tasks.schema import task_type
+        named = ('ready_to_order', {'ref': 1, 'item': 'x', 'total': 'R$ 189,00'})
+        for why, lines, top in (
+                ('one unit fewer', [{'kind': 'products', 'amount': 'R$ 80,00'}, {'kind': 'shipping', 'amount': 'R$ 109,00'}], '210'),
+                ('one more unit', [{'kind': 'products', 'amount': 'R$ 160,00'}, {'kind': 'shipping', 'amount': 'R$ 29,00'}], '210'),
+                ('a line per unit price, not per quantity', [{'kind': 'products', 'amount': 'R$ 50,00'},
+                                                             {'kind': 'products', 'amount': 'R$ 30,00'},
+                                                             {'kind': 'shipping', 'amount': 'R$ 109,00'}], '210'),
+                ('a subtotal and its lines', [{'kind': 'products', 'amount': 'R$ 100,00'},
+                                              {'kind': 'products', 'amount': 'R$ 30,00'},
+                                              {'kind': 'products', 'amount': 'R$ 130,00'}], '210'),
+                ('an add-on', [{'kind': 'products', 'amount': 'R$ 130,00'}, {'kind': 'other', 'amount': 'R$ 59,00'}], '210'),
+                ('above the top total', [{'kind': 'products', 'amount': 'R$ 130,00'},
+                                         {'kind': 'shipping', 'amount': 'R$ 59,00'}], '188')):
+            with self.subTest(why=why):
+                self.operate.return_value = named
+                task = self.step(self.cart_task(top=top), self.cart_page(lines))
+                self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+                shown = task_type(task).order
+                self.assertEqual([(one.title, one.quantity) for one in shown.items],
+                                 [('Chocolate Ibarra', 2), ('Cafe Pilao', 1)])
+                self.assertEqual(shown.item, '2 × Chocolate Ibarra · 1 × Cafe Pilao')   # what older builds show
+                self.assertEqual(shown.image, 'https://img.example/i.jpg')
+                AgentTask.objects.filter(pk=task.pk).update(state='cancelled')
+        self.reader.click.assert_not_called()
+
+    def test_a_cart_the_second_reader_does_not_see_whole_is_never_ordered(self):
+        self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'x', 'total': 'R$ 189,00'})
+        self.review.side_effect = lambda task, page, element, item, meter: {
+            **review_by_words(task, page, element, item, meter), 'item_shown': False, 'why': 'café is x1 only',
+            'lines': [{'kind': 'products', 'amount': 'R$ 130,00'}, {'kind': 'shipping', 'amount': 'R$ 59,00'}]}
+        task = self.step(self.cart_task(), checkout_page(extra='Cafe Pilao products R$ 130,00 shipping R$ 59,00'))
+        self.assertEqual(task.state, 'working')
+        self.assertIn('the chosen products in their quantities', task.history[-1]['result'])
+        self.reader.click.assert_not_called()
+
+    def test_a_cart_with_a_product_not_opened_yet_is_never_named_ready(self):
+        cart = [self.CART[0], {**self.CART[1], 'opened': False}]
+        self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'x', 'total': 'R$ 189,00'})
+        task = self.step(self.cart_task(cart=cart), self.cart_page([]))
+        self.assertIn('next_product', task.history[-1]['result'])
+        self.review.assert_not_called()
+        self.reader.click.assert_not_called()
+
+    def test_an_approved_cart_is_pressed_for_its_items_and_total(self):
+        self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'x', 'total': 'R$ 189,00'})
+        task = self.step(self.cart_task(subscribed=False), self.cart_page([]))
+        self.assertEqual(task.reason, 'approve')
+        task = service.approve(self.account, self.user, task.internal_id, total='R$ 189,00')
+        self.assertEqual(task.order['approved']['item'], '2 × Chocolate Ibarra · 1 × Cafe Pilao')
+        task = self.step(task, self.cart_page([]))
+        self.reader.click.assert_called_once()
+        self.assertEqual(task.phase, 'ordered')
+        self.assertEqual(len(task.order['cart']), 2)
+
+    def test_cap_allows_reads_a_cart_as_its_money(self):
+        cap = {'subscribed': True, 'amount': '210', 'items': [{'title': 'a', 'quantity': 2, 'price': '50.00'},
+                                                              {'title': 'b', 'quantity': 1, 'price': '30.00'}]}
+        shipping = {'kind': 'shipping', 'amount': 'R$ 59,00'}
+        self.assertTrue(operate.cap_allows(cap, {}, 'R$ 189,00', Decimal('189'),
+                                           [{'kind': 'products', 'amount': 'R$ 130,00'}, shipping]))
+        self.assertTrue(operate.cap_allows(cap, {}, 'R$ 189,00', Decimal('189'),
+                                           [{'kind': 'products', 'amount': 'R$ 30,00'},
+                                            {'kind': 'products', 'amount': 'R$ 100,00'}, shipping]))
+        for bad in ({**cap, 'items': [{'title': 'a', 'quantity': 0, 'price': '50.00'}]},
+                    {**cap, 'items': [{'title': 'a', 'quantity': 10, 'price': '13.00'}]},
+                    {**cap, 'items': [{'title': 'a', 'quantity': 2}]}, {**cap, 'subscribed': False}):
+            self.assertFalse(operate.cap_allows(bad, {}, 'R$ 189,00', Decimal('189'),
+                                                [{'kind': 'products', 'amount': 'R$ 130,00'}, shipping]))
+        self.assertFalse(operate.cap_allows(cap, {}, 'R$ 189,00', Decimal('189'), [shipping]))   # no products line
 
     def test_above_the_top_total_the_order_card_asks_once(self):
         self.operate.return_value = self.ORDER

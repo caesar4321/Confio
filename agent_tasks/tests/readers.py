@@ -192,11 +192,18 @@ def grand_total(page_text):
 def review_by_words(task, page, element, item, meter):
     verdict, _ = judge_by_words(task, page, element, meter)
     refusal = _method_refusal(task, page)
-    words = [word for word in guard.fold(item).split() if len(word) >= 4][:6]
+    text = guard.fold(page.text[:100000])
+
+    def shown(title):
+        words = [word for word in guard.fold(title).split() if len(word) >= 4][:6]
+        return not words or any(word in text for word in words)
+
+    # A chosen cart ([{'title', 'quantity'}]): a careful reader sees each product on the page.
+    item_shown = all(shown(entry['title']) for entry in item) if isinstance(item, list) else shown(item)
     return {'places_order': verdict == 'places_order' and not guard.product_address(page.url),
             'pays_with': 'asked' if not refusal else ('card' if 'card' in refusal else 'other'),
             'total': grand_total(page.text),
-            'item_shown': not words or any(word in guard.fold(page.text[:100000]) for word in words),
+            'item_shown': item_shown,
             'ship_to': ship_to(page.text), 'why': refusal or 'read by words', 'lines': []}
 
 

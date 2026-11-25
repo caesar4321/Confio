@@ -117,6 +117,13 @@ def fingerprint(code):
     return hashlib.sha256(code.encode()).hexdigest()[:24]
 
 
+def max_steps(task):
+    """The step budget: more for a cart of several products (each is opened, added and set to its quantity)."""
+    cart = (task.order or {}).get('cart')
+    extra = max(len(cart) - 1, 0) if isinstance(cart, list) else 0
+    return conf.get('AGENT_TASKS_MAX_STEPS') + extra * conf.get('AGENT_TASKS_STEPS_PER_EXTRA_PRODUCT')
+
+
 def app_meta(task):
     """The request headers a rail checks, as the build that started the task sent them."""
     return {'HTTP_X_CONFIO_VERSION': task.app_version} if task.app_version else {}
@@ -260,7 +267,7 @@ class Step:
         if not conf.get('AGENT_TASKS_ENABLED'):
             return self.stop('busy')
         # The ceilings are the agent's. After the hand-over reading a code costs no model.
-        if not task.checkout_at and (task.steps >= conf.get('AGENT_TASKS_MAX_STEPS')
+        if not task.checkout_at and (task.steps >= max_steps(task)
                                      or task.cost_usd >= Decimal(str(conf.get('AGENT_TASKS_MAX_COST_USD')))):
             return self.stop('too_long')
         if not task.session_id:
@@ -341,7 +348,7 @@ class Step:
                 return
             if not conf.get('AGENT_TASKS_ENABLED'):
                 return self.stop('busy')
-            if task.steps >= conf.get('AGENT_TASKS_MAX_STEPS') or task.cost_usd + self.meter.usd >= Decimal(
+            if task.steps >= max_steps(task) or task.cost_usd + self.meter.usd >= Decimal(
                     str(conf.get('AGENT_TASKS_MAX_COST_USD'))):
                 return self.stop('too_long')
             if task.session_expires_at <= timezone.now() + SESSION_MARGIN:
@@ -362,12 +369,30 @@ class Step:
             address = task.pending_url
             if guard.address_refusal(address, task.site):
                 return self.stop('cannot_do')
+            # One of several products chosen into one cart (service.choose_cart): marked opened only once its
+            # page loaded, so a page that failed is opened again by next_product (opening twice is harmless;
+            # adding twice is what the reviewer checks), and the driver is told which and how many.
+            cart = (task.order or {}).get('cart') if isinstance((task.order or {}).get('cart'), list) else []
+            entry = next((one for one in cart if one.get('href') == address and not one.get('opened')), None)
             self.save(pending_url='')
             browser.goto(address)
-            self.remember('open the chosen product', 'ok')
-            # Picked: from its own page the agent buys it, pressing what the store needs (its add to
-            # cart included) under the checkout's lines (operate.py, guard.may_press).
-            return self.hand_checkout()
+            if entry is not None:
+                marked = [{**one, 'opened': True} if one is entry else one for one in cart]
+                self.save(order={**task.order, 'cart': marked})
+            if entry is None:
+                self.remember('open the chosen product', 'ok')
+                # Picked: from its own page the agent buys it, pressing what the store needs (its add to
+                # cart included) under the checkout's lines (operate.py, guard.may_press).
+                return self.hand_checkout()
+            self.hand_checkout()
+            if task.state != 'working':
+                return None
+            # Said last, so it is what the driver reads first: which product this is, and how many.
+            left = sum(not one.get('opened') for one in task.order['cart'])
+            return self.remember(f"open the chosen product: {int(entry.get('quantity') or 1)} × "
+                                 f"{guard.clean(entry.get('title'), 60)}",
+                                 f'set that quantity and add it to the cart, then '
+                                 f'{"next_product" if left else "go to the cart"}')
         reader = pages.Reader(browser)
         seen = reader.read()
         self.seen_url = seen.url

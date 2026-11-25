@@ -18,9 +18,10 @@ import { saveImageToGallery } from '../utils/saveImageToGallery';
 import { PurchaseDone } from './PurchaseDone';
 import { PurchaseJourney } from './PurchaseJourney';
 import {
-  ACTIVE, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentTask, CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTION,
-  GET_AGENT_TASK, GIVE_AGENT_CODE, SIGN_IN_AGENT_STORE,
+  ACTIVE, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
+  CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, SIGN_IN_AGENT_STORE,
 } from './api';
+import { CapRule, cartTop } from './helpers';
 
 const POLL_MS = 2500;
 // A tap whose answer never comes stops holding the card after this; the next refresh shows what it did.
@@ -182,10 +183,10 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
       {/* The server's words: they name the right way to pay for the store's country. */}
       <Text style={styles.message}>{task.message}</Text>
       {waiting && task.reason === 'choose' ? (
-        <Products options={task.options} picking={tapping}
-          onPick={(index) => act(`pick:${index}`, CHOOSE_AGENT_OPTION,
-            // The top total this card showed goes back with the tap: only then does "Elegir" approve up to it.
-            { index, cap: task.options[index]?.cap ?? null }, 'chooseAgentOption')} />
+        <Products options={task.options} rule={task.capRule} picking={tapping}
+          onBuy={(items, cap) => act('pick', CHOOSE_AGENT_OPTIONS,
+            // The top total the button showed goes back with the tap: only then does it approve up to it.
+            { items, cap }, 'chooseAgentOptions')} />
       ) : null}
       {waiting && task.reason === 'login' ? (
         <SignIn site={task.site} sending={tapping === 'signin'}
@@ -199,7 +200,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
         <View style={styles.order}>
           <Photo uri={task.order.image} size={72} />
           <View style={styles.orderText}>
-            <Text style={styles.title} numberOfLines={3}>{task.order.item}</Text>
+            <OrderItems order={task.order} />
             {(task.order.breakdown ?? []).map((line) => (
               <View key={line.label} style={styles.line}>
                 <Text style={styles.lineLabel}>{line.label}</Text>
@@ -352,35 +353,114 @@ function StoreQr({ code, total }: { code: string; total: string }) {
   );
 }
 
-function Products({ options, picking, onPick }: {
-  options: AgentOption[]; picking: string | null; onPick: (index: number) => void;
-}) {
+// Every product the order holds, with how many: what the person approves.
+function OrderItems({ order }: { order: AgentOrder }) {
+  const items = order.items ?? [];
+  if (items.length === 0 || (items.length === 1 && items[0].quantity === 1)) {
+    return <Text style={styles.title} numberOfLines={3}>{items[0]?.title || order.item}</Text>;
+  }
   return (
-    <FlatList
-      horizontal
-      data={options}
-      keyExtractor={(_, index) => String(index)}
-      showsHorizontalScrollIndicator={false}
-      initialNumToRender={5}
-      maxToRenderPerBatch={5}
-      windowSize={5}
-      contentContainerStyle={styles.products}
-      renderItem={({ item, index }) => (
-        <Pressable style={styles.product} disabled={picking !== null} onPress={() => onPick(index)}
-          accessibilityRole="button"
-          accessibilityLabel={`Elegir ${item.title}${item.price ? `, ${item.price}` : ''}${item.cap ? `, hasta ${item.cap} con envío` : ''}`}>
-          <Photo uri={item.image} size={132} />
-          <Text style={styles.title} numberOfLines={3}>{item.title}</Text>
-          {item.price ? <Text style={styles.price}>{item.price}</Text> : null}
-          {/* Choosing approves the purchase up to this (spec decision 42): said before the tap. */}
-          {item.cap ? <Text style={styles.cap}>Hasta {item.cap} con envío</Text> : null}
-          <View style={styles.pick}>
-            {picking === `pick:${index}` ? <ActivityIndicator size="small" color="#FFFFFF" />
-              : <Text style={styles.pickText}>Elegir</Text>}
-          </View>
-        </Pressable>
+    <>
+      {items.map((one, index) => (
+        <Text key={`${index}:${one.title}`} style={styles.title} numberOfLines={2}>{`${one.quantity} × ${one.title}`}</Text>
+      ))}
+    </>
+  );
+}
+
+type Pick = { index: number; quantity: number };
+
+// The products found: one or more are chosen, each with a quantity, then confirmed with one tap. The button
+// says the most the whole cart may cost (spec decision 42) before it is tapped; tapping it approves up to that.
+function Products({ options, rule, picking, onBuy }: {
+  options: AgentOption[]; rule?: CapRule | null; picking: string | null;
+  onBuy: (items: Pick[], cap: string | null) => Promise<boolean>;
+}) {
+  const [chosen, setChosen] = useState<Record<number, number>>({});
+  const most = rule?.maxQuantity || 9;
+  const items: Pick[] = Object.keys(chosen).map(Number).sort((a, b) => a - b)
+    .map((index) => ({ index, quantity: chosen[index] }));
+  const units = items.reduce((sum, one) => sum + one.quantity, 0);
+  const picks = items.map((one) => ({ price: options[one.index]?.price ?? '', unit: options[one.index]?.unit,
+    quantity: one.quantity }));
+  // One unit of one product: its own top total, also from a server that sends no rule.
+  const top = cartTop(picks, rule)
+    ?? (items.length === 1 && items[0].quantity === 1 ? options[items[0].index]?.cap ?? null : null);
+  const toggle = (index: number) => setChosen((now) => {
+    const next = { ...now };
+    if (next[index]) {
+      delete next[index];
+    } else {
+      next[index] = 1;
+    }
+    return next;
+  });
+  const step = (index: number, by: number) => setChosen((now) => (
+    now[index] ? { ...now, [index]: Math.min(most, Math.max(1, now[index] + by)) } : now));
+  const busy = picking !== null;
+  return (
+    <View style={styles.choose}>
+      <FlatList
+        horizontal
+        data={options}
+        extraData={chosen}
+        keyExtractor={(_, index) => String(index)}
+        showsHorizontalScrollIndicator={false}
+        initialNumToRender={5}
+        maxToRenderPerBatch={5}
+        windowSize={5}
+        contentContainerStyle={styles.products}
+        renderItem={({ item, index }) => {
+          const quantity = chosen[index] ?? 0;
+          return (
+            // The stepper is a sibling of the toggle, never inside it: a tap at a limit must not fall through
+            // to the toggle (which removed the product), and VoiceOver reaches each control.
+            <View style={[styles.product, quantity ? styles.productChosen : null]}>
+              <Pressable disabled={busy} onPress={() => toggle(index)} accessibilityRole="checkbox"
+                accessibilityState={{ checked: !!quantity, disabled: busy }}
+                accessibilityLabel={`${quantity ? 'Quitar' : 'Elegir'} ${item.title}${item.price ? `, ${item.price}` : ''}${item.cap ? `, hasta ${item.cap} con envío` : ''}`}>
+                <Photo uri={item.image} size={132} />
+                <Text style={styles.title} numberOfLines={3}>{item.title}</Text>
+                {item.price ? <Text style={styles.price}>{item.price}</Text> : null}
+                {/* One unit's top total, said before any tap. */}
+                {item.cap ? <Text style={styles.cap}>Hasta {item.cap} con envío</Text> : null}
+                {quantity ? null : <View style={styles.pick}><Text style={styles.pickText}>Elegir</Text></View>}
+              </Pressable>
+              {quantity ? (
+                <View style={styles.stepper}>
+                  {/* Enabled at the limits too, doing nothing there: a disabled one let the tap reach the toggle. */}
+                  <Pressable onPress={() => { if (!busy && quantity > 1) step(index, -1); }} hitSlop={6}
+                    accessibilityRole="button" accessibilityLabel={`Una menos de ${item.title}`}
+                    accessibilityState={{ disabled: busy || quantity <= 1 }} style={styles.stepButton}>
+                    <Icon name="minus" size={16} color={quantity <= 1 ? '#9CA3AF' : '#FFFFFF'} />
+                  </Pressable>
+                  <Text style={styles.quantity} accessibilityLabel={`Cantidad: ${quantity}`}>{String(quantity)}</Text>
+                  <Pressable onPress={() => { if (!busy && quantity < most) step(index, 1); }} hitSlop={6}
+                    accessibilityRole="button" accessibilityLabel={`Una más de ${item.title}`}
+                    accessibilityState={{ disabled: busy || quantity >= most }} style={styles.stepButton}>
+                    <Icon name="plus" size={16} color={quantity >= most ? '#9CA3AF' : '#FFFFFF'} />
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          );
+        }}
+      />
+      {units ? (
+        <>
+          <Button title={`Comprar ${units} ${units === 1 ? 'producto' : 'productos'}`} loading={picking === 'pick'}
+            disabled={busy} onPress={() => { onBuy(items, top); }}
+            accessibilityLabel={`Comprar ${units} ${units === 1 ? 'producto' : 'productos'}${top ? `, hasta ${top} con envío` : ''}`} />
+          {/* The whole cart's top total, said before the tap: tapping approves up to it. */}
+          <Text style={styles.cartCap}>
+            {top ? `Hasta ${top} con envío. Si cuesta más, te pregunto antes de pedirlo.`
+              : 'Te muestro el total antes de pedirlo.'}
+          </Text>
+        </>
+      ) : (
+        <Text style={styles.cartCap}>Elige uno o más productos y cuántos de cada uno.</Text>
       )}
-    />
+    </View>
   );
 }
 
@@ -460,6 +540,15 @@ const styles = StyleSheet.create({
   site: { flex: 1, fontSize: 13, color: colors.text.secondary },
   message: { fontSize: 15, lineHeight: 21, color: colors.text.primary },
   products: { gap: 10, paddingVertical: 2 },
+  choose: { gap: 8 },
+  productChosen: { borderColor: colors.primaryDark, borderWidth: 2 },
+  stepper: {
+    minHeight: 40, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.primaryDark, marginTop: 2, paddingHorizontal: 4,
+  },
+  stepButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  quantity: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', fontVariant: ['tabular-nums'] },
+  cartCap: { fontSize: 13, color: '#6B7280', textAlign: 'center' },
   product: {
     width: 156, padding: 10, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB',
     backgroundColor: colors.background, gap: 6,

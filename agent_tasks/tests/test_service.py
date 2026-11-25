@@ -463,3 +463,54 @@ class SameStoreTests(ServiceBase):
         with self.assertRaises(service.TaskRefused) as refused:
             service.forget_store(self.account, self.user, SITE)
         self.assertEqual(refused.exception.code, 'store_busy')
+
+
+class ChooseCartTests(ServiceBase):
+    """Several products with quantities, confirmed once (spec decision 42), through the GraphQL mutation."""
+
+    OPTIONS = [{'title': 'Chocolate Abuelita', 'price': 'R$ 89,00', 'cap': 'R$ 143,00', 'cap_amount': '143',
+                'image': '', 'href': f'{BASE}/p/A'},
+               {'title': 'Ibarra', 'price': 'R$ 112,50', 'cap': 'R$ 180,00', 'cap_amount': '180',
+                'image': '', 'href': f'{BASE}/p/B'},
+               {'title': 'Sem preço', 'price': 'consultar', 'cap': '', 'cap_amount': '', 'image': '',
+                'href': f'{BASE}/p/C'}]
+
+    def test_the_app_is_given_the_rule_and_each_read_price_to_show_the_top_total_first(self):
+        from agent_tasks.schema import task_type
+        shown = task_type(self.waiting(reason='choose', options=self.OPTIONS))
+        self.assertEqual([option.unit for option in shown.options], ['89.00', '112.50', None])
+        rule = shown.cap_rule
+        self.assertEqual((rule.margin, rule.min_extra, rule.comma_decimals, rule.max_quantity), ('0.6', '30', True, 9))
+        AgentTask.objects.update(state='working', reason='')
+        self.assertIsNone(task_type(AgentTask.objects.get()).cap_rule)   # only while choosing
+
+    def test_the_mutation_takes_indices_and_quantities_with_the_shown_top_total(self):
+        from agent_tasks import schema
+        task = self.waiting(reason='choose', options=self.OPTIONS)
+        info = SimpleNamespace(context=SimpleNamespace(user=self.user))
+        with mock.patch('agent_tasks.schema._owner', return_value=(self.account, self.user)):
+            answer = schema.ChooseAgentOptions.mutate(None, info, task.internal_id, items=[
+                SimpleNamespace(index=1, quantity=3), SimpleNamespace(index=0, quantity=1)], cap='R$ 774,00')
+            refused = schema.ChooseAgentOptions.mutate(None, info, task.internal_id, items=[
+                SimpleNamespace(index=0, quantity=1)], cap=None)
+        self.assertTrue(answer.success, answer.errors)
+        task.refresh_from_db()
+        # 89 + 3 × 112,50 = 426,50; + 60% = 682,40 → 683: the app sent another figure, so nothing is approved.
+        self.assertNotIn('cap', task.order)
+        self.assertEqual([(one['title'], one['quantity']) for one in task.order['cart']],
+                         [('Chocolate Abuelita', 1), ('Ibarra', 3)])
+        self.assertEqual((refused.success, refused.error_code), (False, 'not_open'))   # answered once
+
+    def test_a_cart_with_an_unread_price_approves_no_top_total(self):
+        task = self.waiting(reason='choose', options=self.OPTIONS)
+        task = service.choose_cart(self.account, self.user, task.internal_id,
+                                   [{'index': 0, 'quantity': 1}, {'index': 2, 'quantity': 1}], cap='R$ 143,00')
+        self.assertNotIn('cap', task.order)
+        self.assertEqual(task.pending_url, f'{BASE}/p/A')
+
+    def test_the_exact_top_total_shown_approves_up_to_it(self):
+        task = self.waiting(reason='choose', options=self.OPTIONS)
+        task = service.choose_cart(self.account, self.user, task.internal_id,
+                                   [{'index': 1, 'quantity': 3}, {'index': 0, 'quantity': 1}], cap='R$ 683,00')
+        self.assertEqual((task.order['cap']['amount'], task.order['cap']['item']),
+                         ('683', '1 × Chocolate Abuelita · 3 × Ibarra'))

@@ -31,6 +31,66 @@ export function agentTaskNotificationRoute(raw: unknown): string | null {
   return taskIdOf(d.task_id ?? d.data_task_id ?? d.extra_task_id);
 }
 
+// How the server works out a top total (agent_tasks/operate.py cart_top), sent with the products to choose.
+export type CapRule = { margin: string; minExtra: string; commaDecimals: boolean; maxQuantity?: number | null };
+export type CartPick = { price: string; unit?: string | null; quantity: number };
+
+const PRICE_NUMBER = /\d[\d.,]*\d|\d/;
+
+// A plain decimal ("112.50", "0.6", "30") as an exact fraction, or null.
+function fraction(text: string | null | undefined): [number, number] | null {
+  const found = /^(\d{1,12})(?:\.(\d{1,6}))?$/.exec(String(text ?? '').trim());
+  if (!found) {
+    return null;
+  }
+  const decimals = found[2] ?? '';
+  return [Number(found[1] + decimals), 10 ** decimals.length];
+}
+
+/** The most the chosen products may cost with shipping and taxes, written as the store writes prices (spec
+ * decision 42): the sum of each unit price times its quantity, plus the larger of sum × margin and the floor,
+ * rounded up to a whole unit, in the first pick's price text. Exactly the server's operate.cart_top: the
+ * server approves up to it only when the two agree to the character. Null when any price was not read. */
+export function cartTop(picks: CartPick[], rule: CapRule | null | undefined): string | null {
+  if (!rule || !picks.length) {
+    return null;
+  }
+  const margin = fraction(rule.margin);
+  const floor = fraction(rule.minExtra);
+  if (!margin || !floor) {
+    return null;
+  }
+  const most = rule.maxQuantity || 9;
+  let cents = 0;
+  for (const pick of picks) {
+    const unit = fraction(pick.unit);
+    if (!unit || unit[1] > 100 || !Number.isInteger(pick.quantity) || pick.quantity < 1 || pick.quantity > most) {
+      return null;
+    }
+    cents += ((unit[0] * 100) / unit[1]) * pick.quantity;
+  }
+  if (cents <= 0) {
+    return null;
+  }
+  // Everything in 1 / (100 × margin's denominator × floor's denominator) of a unit: whole numbers only.
+  const scale = 100 * margin[1] * floor[1];
+  const sum = cents * margin[1] * floor[1];
+  const extra = Math.max(cents * margin[0] * floor[1], floor[0] * 100 * margin[1]);
+  const scaled = sum + extra;
+  if (!Number.isSafeInteger(scaled)) {
+    return null;
+  }
+  const whole = (scaled - (scaled % scale)) / scale + (scaled % scale ? 1 : 0);
+  const [group, point] = rule.commaDecimals ? ['.', ','] : [',', '.'];
+  const written = `${String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, group)}${point}00`;
+  const template = picks[0].price;
+  const found = PRICE_NUMBER.exec(template);
+  if (!found) {
+    return null;
+  }
+  return (template.slice(0, found.index) + written + template.slice(found.index + found[0].length)).trim();
+}
+
 type Action = { type: string; target?: string | null };
 
 /** The purchases a message's actions carry ({type: 'task', target: <id>}), once each. */

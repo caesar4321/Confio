@@ -11,9 +11,10 @@ matched to decide what may be pressed.
             press on that page and decides: safe is pressed; placing the order, a card, the account are
             not; unsure asks the person about that one step.
   _order    the button the driver names as final. A second model (agent.review) reads the page: is it the
-            button that places the order, how is it paid, the total, the item, where it goes. Code checks
-            the facts: both models read the same sum and it is written on the page; the address is on the
-            page; the person approved this item, total, address and payer. Pressed once.
+            button that places the order, how is it paid, the total, the item (or the products chosen into
+            one cart, in their quantities), where it goes. Code checks the facts: both models read the same
+            sum and it is written on the page; the address is on the page; the person approved these items,
+            total, address and payer. Pressed once.
   after     once ordered, links the judge calls safe; a second model (agent.payment_page) says whether a
             page is the order's own payment page; what is paid is read by code (runner.after_checkout):
             one valid CLABE or the provider-checked QR, for exactly the approved amount, on a page new
@@ -123,34 +124,86 @@ def unit_price(price_text, country):
 def top_total(price_text, country):
     """(amount, text) of the most a chosen item may cost with shipping and taxes (spec decision 42), or
     (None, ''). The text keeps the price's currency mark, in the country's number style."""
+    return cart_top([(price_text, 1)], country)
+
+
+MAX_QUANTITY = 9   # units of one chosen product (the app's stepper goes 1 to 9)
+
+
+def cart_top(picks, country):
+    """(amount, text) of the most a cart of chosen products may cost with shipping and taxes (spec decision
+    42), or (None, ''): the sum of each unit price times its quantity, plus the same margin and floor as one
+    item (applied once, to the sum), rounded up to a whole unit. `picks` is [(price_text, quantity)]; its first
+    price's text gives the currency mark. Any price that cannot be read sets none. The app works out the same
+    figure before the tap (apps/src/agentTasks/helpers.ts cartTop): the two must agree to the character."""
     from . import conf
-    price = unit_price(price_text, country)
-    if price is None:
+    if not picks:
         return None, ''
+    total = Decimal(0)
+    for price_text, quantity in picks:
+        price = unit_price(price_text, country)
+        if price is None or not isinstance(quantity, int) or not 1 <= quantity <= MAX_QUANTITY:
+            return None, ''
+        total += price * quantity
     margin = Decimal(str(conf.get('AGENT_TASKS_CAP_MARGIN')))
     floor = Decimal(str((conf.get('AGENT_TASKS_CAP_MIN_EXTRA') or {}).get(country, '0')))
-    cap = (price + max(price * margin, floor)).quantize(Decimal('1'), rounding='ROUND_CEILING')
+    cap = (total + max(total * margin, floor)).quantize(Decimal('1'), rounding='ROUND_CEILING')
     whole = f'{cap:,.2f}'
     if country in COMMA_DECIMALS:
         whole = whole.replace(',', '_').replace('.', ',').replace('_', '.')
-    text = str(price_text)
+    text = str(picks[0][0])
     found = re.search(r'\d[\d.,]*\d|\d', text)
     return cap, (text[:found.start()] + whole + text[found.end():]).strip()
 
 
+def cart_summary(cart):
+    """The chosen products in Confío's words around the store's titles: '2 × Chocolate · 1 × Café', or the
+    title alone for one unit of one product (as a single choice always read). What an approval is bound to."""
+    cart = cart or []
+    if len(cart) == 1 and int(cart[0].get('quantity') or 1) == 1:
+        return str(cart[0].get('title') or '')
+    return ' · '.join(f"{int(entry.get('quantity') or 1)} × {entry.get('title') or ''}" for entry in cart)
+
+
+def _cap_units(cap):
+    """[(unit price, quantity)] that "Elegir" approved: a cart's items, or one unit of the one item an older
+    choice approved. [] when any is unreadable."""
+    try:
+        if cap.get('items'):
+            units = [(Decimal(str(entry['price'])), int(entry['quantity'])) for entry in cap['items']]
+        elif cap.get('price'):
+            units = [(Decimal(str(cap['price'])), 1)]
+        else:
+            return []
+    except (InvalidOperation, KeyError, TypeError, ValueError):
+        return []
+    return units if all(price > 0 and 1 <= quantity <= MAX_QUANTITY for price, quantity in units) else []
+
+
 def cap_allows(cap, read, total, amount, breakdown_lines):
     """Whether "Elegir" already approved this order (spec decision 42): chosen while subscribed, on a card
-    that showed this top total; the total at or under it, in the same money; the products line exactly the
-    chosen price (one unit of that item: a misread or "antes" price, or two units, never matches); and no line
-    but products, shipping, tax or a discount (nothing added). Anything unproven: the order card asks."""
-    if not cap or not cap.get('subscribed') or not cap.get('price') or amount is None:
+    that showed this top total; the total at or under it, in the same money; the products exactly the chosen
+    prices times their quantities; and no line but products, shipping, tax or a discount (nothing added).
+
+    The products are written either as one line (Amazon's "Productos", Mercado Libre's "Productos (3)"),
+    which must be the whole chosen sum, or as one line per product, which must be each product's unit price
+    times its quantity, none missing and none more. A misread or "antes" price, another quantity, an add-on
+    or a store that writes both a subtotal and its lines never matches. Which products and how many is the
+    second reader's (agent.review, item_shown); this is the money. Anything unproven: the order card asks."""
+    units = _cap_units(cap or {})
+    if not cap or not cap.get('subscribed') or not units or amount is None:
         return False
     if FOREIGN_MONEY.search(guard.fold(total)) or amount > Decimal(cap['amount']):
         return False
     if any(line.get('kind') not in ('products', 'shipping', 'tax', 'discount') for line in breakdown_lines):
         return False
     products = [amount_of(line['amount']) for line in breakdown_lines if line.get('kind') == 'products']
-    return len(products) == 1 and products[0] is not None and products[0] == Decimal(cap['price'])
+    if not products or any(figure is None for figure in products):
+        return False
+    expected = [price * quantity for price, quantity in units]
+    if len(products) == 1:
+        return products[0] == sum(expected)
+    return sorted(products) == sorted(expected)
 
 
 def figure_on(page_text, amount):
@@ -302,6 +355,8 @@ def checkout(step, browser, reader, seen):
     if name == 'sign_in' and not after:
         done = sign_in(step, browser, reader, seen, asked=True)
         return step.remember('sign_in', 'refused: no sign-in form on this page') if done is NOT_A_FORM else done
+    if name == 'next_product' and not after:
+        return _next_product(step)
     if name == 'order_placed' and not after:
         # The store says an order exists and nobody named it: said as it is, never paid as an approved one.
         return step.remember('the store shows an order as placed', 'not approved here', phase='ordered',
@@ -361,6 +416,26 @@ def checkout(step, browser, reader, seen):
 REFUSED = object()
 
 
+def chosen_cart(task):
+    """The products the person chose into one cart with their quantities (service.choose_cart), or []."""
+    cart = (task.order or {}).get('cart')
+    return cart if isinstance(cart, list) else []
+
+
+def _next_product(step):
+    """The driver put this product in the cart: the next chosen one is opened by the runner, from the
+    address checked when it was offered (runner.before_checkout, pending_url). Never one the person did not
+    choose."""
+    task = step.task
+    following = next((entry for entry in chosen_cart(task) if not entry.get('opened')), None)
+    if following is None:
+        return step.remember('next_product', 'refused: every chosen product was opened. Go to the cart and on to '
+                                             'the checkout')
+    if guard.address_refusal(following.get('href') or '', task.site):
+        return step.stop('cannot_do')
+    return step.remember('next_product', 'the next chosen product opens', pending_url=following['href'])
+
+
 TRACE_KEPT = 12
 
 
@@ -411,7 +486,8 @@ _NOT_A_BUTTON = ('radio', 'checkbox', 'text', 'email', 'password', 'hidden', 'te
 
 def _reviewed(step, seen, element, item, amount):
     """(the second model's reading, '') when it and the facts agree this button places this very order:
-    this item and only it, paid the asked way, for exactly `amount`. Else (None, why)."""
+    this item and only it (or, for a chosen cart, `item` is its list: these products in these quantities
+    and only them), paid the asked way, for exactly `amount`. Else (None, why)."""
     if element.get('tag') == 'a' and not guard.toggle_link(element.get('href')) \
             and not sites.within(element.get('href') or '', step.task.site, house=True):
         return None, 'it leaves the store'
@@ -429,8 +505,16 @@ def _reviewed(step, seen, element, item, amount):
         return None, (f'the order is not set to be paid the right way ({read["pays_with"]}: {read["why"]}). '
                       'Choose the right payment method first, never a card.')
     if not read['item_shown']:
+        if isinstance(item, list):
+            return None, (f'the order must hold the chosen products in their quantities and nothing else '
+                          f'({read["why"]})')
         return None, f'the order must hold the item and only it ({read["why"]})'
     return read, ''
+
+
+def _review_list(cart):
+    """What the second reader checks the order against: each chosen product and its quantity."""
+    return [{'title': str(entry.get('title') or ''), 'quantity': int(entry.get('quantity') or 1)} for entry in cart]
 
 
 BREAKDOWN_KINDS = ('products', 'shipping', 'tax', 'discount', 'fee', 'other')
@@ -454,15 +538,21 @@ def _order(step, browser, reader, seen, element, label, args):
     checks the facts; the person approves the purchase once; it is pressed only for what they approved."""
     from . import service
     task = step.task
-    picked = (task.options or [{}])[0] if len(task.options or []) == 1 else {}
+    cart = chosen_cart(task)
+    picked = (task.options or [{}])[0] if len(task.options or []) == 1 and not cart else {}
     approved = (task.order or {}).get('approved') or {}
+    if any(not entry.get('opened') for entry in cart):
+        # A fact of this task, not a reading: a chosen product nobody opened is not in the cart.
+        return step.remember('ready_to_order', 'refused: a chosen product was not opened yet: call next_product')
     # The item the person approved stands (a model never words it twice the same); the reader checks it.
-    item = picked.get('title') or approved.get('item') or guard.clean(agent.redact(args.get('item')), 120)
+    # A chosen cart is named by code from what was chosen: these products, these quantities.
+    item = cart_summary(cart) if cart else (
+        picked.get('title') or approved.get('item') or guard.clean(agent.redact(args.get('item')), 120))
     if not item:
         return step.remember('ready_to_order', 'refused: name the item')
     total = guard.clean(agent.redact(args.get('total')), 40)
     amount = amount_of(total)
-    read, why = _reviewed(step, seen, element, item, amount)
+    read, why = _reviewed(step, seen, element, _review_list(cart) if cart else item, amount)
     if read is None:
         return step.remember('ready_to_order', f'refused: {why}')
     # Where it goes: what the second model copied, kept only if the page really writes it. Once approved,
@@ -473,9 +563,13 @@ def _order(step, browser, reader, seen, element, label, args):
         address = read['ship_to'] if written_on(seen.text, read['ship_to']) else ''
     where = step.fingerprint(seen.url)
     order = {'item': item, 'total': total, 'amount': format(amount, 'f'), 'button': label, 'page': where,
-             'image': picked.get('image', ''), 'address': address,
+             'image': picked.get('image', '') or (cart[0].get('image', '') if cart else ''), 'address': address,
              'breakdown': breakdown(read, seen.text, amount),
              'seen_clabes': (task.order or {}).get('seen_clabes') or []}
+    if cart:
+        # What was chosen stays with the order (the card lists it; a later step checks against it).
+        order = {**order, 'cart': cart, 'items': [{'title': entry.get('title') or '', 'quantity': entry.get('quantity'),
+                                                   'image': entry.get('image') or ''} for entry in cart]}
     # Who pays it is part of what they approve: said before they confirm, and asked again if it changed.
     mode, offer = service.pay_mode(task, step.app_meta())
     order = {**order, 'manual': mode == 'manual', 'offer': offer}
@@ -535,7 +629,8 @@ def _again(step, browser, reader, seen, element, label):
         amount = Decimal(str(order.get('amount')))
     except InvalidOperation:
         amount = None
-    read, why = _reviewed(step, seen, element, order.get('item') or '', amount)
+    cart = chosen_cart(task)
+    read, why = _reviewed(step, seen, element, _review_list(cart) if cart else order.get('item') or '', amount)
     if read is not None and order.get('address') and not written_on(seen.text, order.get('address')):
         read, why = None, 'the delivery address is not the one the person approved'
     from . import service
