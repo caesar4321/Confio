@@ -98,9 +98,15 @@ def topup_route(country):
     return 'international' if conf.get('ASSISTANT_INTERNATIONAL_TOPUP_ENABLED') else 'international_soon'
 
 
-def colombia_pause_note():
+COLOMBIA_ONLY = ('\n(Las notas de Colombia que siguen valen solo si la persona vive en Colombia o habla de Colombia, '
+                 'o de sus cuentas, pagos o recargas allí. Si no, no las menciones ni las uses para explicar otra cosa.)')
+
+
+def colombia_pause_note(country=None):
     """What is paused in Colombia right now, from the switches themselves. Told
-    to everyone: people abroad hold Bre-B accounts too."""
+    to everyone (people abroad hold Bre-B accounts too), but outside Colombia
+    only for when the conversation is about Colombia: an "¿por qué no puedo
+    recargar?" from Mexico was answered with the PSE pause (2026-11-25)."""
     try:
         from payment_accounts.models import EligibilityRule
         from ramps.koywe import on_ramp_paused
@@ -108,7 +114,8 @@ def colombia_pause_note():
         from .prompts import CO_BREB_PAUSED_NOTE, CO_PSE_PAUSED_NOTE
         breb = EligibilityRule.objects.filter(is_active=True, policy__is_active=True, decision='block',
                                               reason_code='infinia_co_partner_paused').exists()
-        return (CO_BREB_PAUSED_NOTE if breb else '') + (CO_PSE_PAUSED_NOTE if on_ramp_paused('CO') else '')
+        notes = (CO_BREB_PAUSED_NOTE if breb else '') + (CO_PSE_PAUSED_NOTE if on_ramp_paused('CO') else '')
+        return (COLOMBIA_ONLY + notes) if notes and (country or '').upper() != 'CO' else notes
     except Exception:  # noqa: BLE001 - unknown is no note, never a broken reply
         import logging
         logging.getLogger(__name__).warning('Confio Assistant: Colombia pause state unavailable', exc_info=True)

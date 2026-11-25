@@ -23,7 +23,8 @@ DESTINATIONS = {
     'presale': 'Preventa de $CONFIO.',
     'discover': 'Comunidad (dentro de Invertir): lo que comparten otros miembros sobre su dinero.',
     'community': 'Comunidad (dentro de Invertir): lo que comparten otros miembros sobre recargas, retiros e inversiones.',
-    'comprar': 'Comprar: productos de vendedores verificados de tu ciudad, con pago protegido y envío por Yango.',
+    'comprar': ('Comprar: el mercado de Confío, productos de vendedores verificados de tu ciudad, con pago protegido y '
+                'envío por Yango. No es para tiendas en línea (Amazon, Mercado Libre…).'),
     'my_store': 'Mi tienda: abrir tu tienda en Comprar y publicar productos (cuenta personal verificada).',
     'market_orders': 'Mis compras y ventas en Comprar.',
     'profile': 'Perfil y configuración.',

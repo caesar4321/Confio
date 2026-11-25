@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 # How far back an earlier decline still explains a new, unfinished attempt.
 EARLIER_DECLINE_DAYS = 30
 GUIDANCE = ('Si pregunta por su verificación o por qué no avanza, explícale esto con tus palabras; nunca digas '
-            'que no puedes ver su verificación. Si no hay un motivo concreto, sugiérele repetirla en Perfil → '
-            'Verificación con su documento de identidad nacional o pasaporte, original y vigente, con buena luz y '
+            'que no puedes ver su verificación. Si no hay un motivo concreto, sugiérele repetirla (deja la tarjeta '
+            'de Verificación con `navigate`, `verification`) con su documento de identidad nacional o pasaporte, original y vigente, con buena luz y '
             'sin reflejos, y no adivines otro motivo.\n')
 
 

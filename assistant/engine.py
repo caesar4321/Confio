@@ -133,6 +133,34 @@ def third_party_text(value, limit=THIRD_PARTY_MAX_CHARS):
 # the card key on `target`; `destination` is only the key every build knows.
 # The top-up form left beside a payment the dollars held do not cover. `why`
 # marks it as that one: the only action allowed to stand beside a card.
+LANGUAGE_NAMES = {'pt': 'portugués', 'en': 'inglés'}
+
+
+def language_note(belt):
+    """The language the last message is written in, when it is not Spanish (the words decide,
+    confirm.language): short Portuguese messages were answered in Spanish (2026-11-25)."""
+    try:
+        name = LANGUAGE_NAMES.get(belt.language())
+    except Exception:  # noqa: BLE001 - no note, the prompt's own rule stands
+        return ''
+    return f'\nEl último mensaje de la persona está en {name}: contesta todo en {name}.\n' if name else ''
+
+
+# The walk ("Muéstrame") of each topic, and the card that does the same step from the chat.
+WALK_CARDS = {'top_up': 'top_up', 'usdt': 'receive', 'verify': 'verification', 'send': 'send', 'withdraw': 'withdraw',
+              'pay_qr': 'pay_qr', 'share_number': 'share_username', 'invite': 'invite', 'stocks': 'stocks',
+              'crypto': 'invest', 'perps': 'invest', 'comprar': 'comprar'}
+SHOW_ME = {'es': 'Muéstrame', 'pt': 'Mostre-me', 'en': 'Show me'}
+# Card names in the person's language where the app would write Spanish.
+CARD_LABELS = {
+    'pt': {'receive': 'Receber dinheiro', 'send': 'Enviar dinheiro', 'top_up': 'Recarregar',
+           'verification': 'Verificar minha identidade', 'pay_qr': 'Pagar com QR', 'withdraw': 'Sacar para minha conta',
+           'invest': 'Investir', 'stocks': 'Ações', 'home': 'Ver meu dinheiro', 'share_username': 'Compartilhar meu usuário',
+           'charge': 'Cobrar com QR', 'profile': 'Perfil'},
+    'en': {'receive': 'Receive money', 'send': 'Send money', 'top_up': 'Top up', 'verification': 'Verify my identity',
+           'pay_qr': 'Pay with QR', 'withdraw': 'Withdraw to my account', 'invest': 'Invest', 'stocks': 'Stocks',
+           'home': 'See my money', 'share_username': 'Share my username', 'charge': 'Charge with QR', 'profile': 'Profile'},
+}
 SHORT_TOPUP_FORM = {'type': 'form', 'target': 'topup', 'why': 'shortfall'}
 # Cards that answer a request: once one follows a message, that request was served ("gracias" never
 # proposes it again). The trade card, and the hands-off ones (assistant/trades.py).
@@ -277,7 +305,26 @@ def allowed_destinations(viewer: Viewer, *, paid_offers_allowed=True):
         # keeps the door when the waitlist probe is switched off, and so does
         # everyone on a build whose door opens the real screens.
         or (k == 'cuenta_inteligente' and (smart_account_real_screen(viewer) or _smart_account_open(viewer)))]
+    if 'comprar' in keys and not _comprar_open(viewer):
+        keys = [k for k in keys if k not in COMPRAR_KEYS]
     return keys
+
+
+# Comprar's own screens: only where Comprar sells (marketplace.checkout).
+COMPRAR_KEYS = ('comprar', 'my_store', 'market_orders')
+
+
+def _comprar_open(viewer) -> bool:
+    """Comprar sells in this person's country (marketplace.checkout.country_is_closed).
+    Unknown country or a failed read: kept, as before."""
+    try:
+        from marketplace.checkout import country_is_closed
+        from security.geo import country_of
+        country = (country_of(viewer.user) or '') if viewer.user is not None else ''
+        return not (country and country_is_closed(country))
+    except Exception:  # noqa: BLE001 - the door stays as it was
+        logger.warning('Confio Assistant: Comprar availability unknown', exc_info=True)
+        return True
 
 
 def smart_account_real_screen(viewer) -> bool:
@@ -1738,15 +1785,24 @@ class Toolbelt:
                 self._walk_keys = [k for k in WALKS if walk_trail(self.viewer, k, self.viewer.request_meta)]
             except Exception:  # noqa: BLE001 - no button is always safe
                 logger.warning('Confio Assistant: walks unavailable', exc_info=True)
+        if conversation_home(self.viewer.request_meta):
+            # The chat is Inicio: a step it can hand over as a card here is never a walk out of it.
+            self._walk_keys = [k for k in self._walk_keys if WALK_CARDS.get(k) not in self.destinations]
         return self._walk_keys
+
+    def language(self):
+        """'es', 'pt' or 'en': the language of the message being answered, for the labels code writes."""
+        from .confirm import language
+        return language([self.last_user_message]) if self.last_user_message else 'es'
 
     def show_steps(self, topic):
         if topic not in self._walks():
             return {'ok': False, 'error': 'Eso no está disponible para este usuario.'}
-        action = {'type': 'walk', 'target': topic, 'label': 'Muéstrame'}
+        label = SHOW_ME[self.language()]
+        action = {'type': 'walk', 'target': topic, 'label': label}
         if action not in self.result.actions:
             self.result.actions.append(action)
-        return {'ok': True, 'boton': 'Muéstrame'}
+        return {'ok': True, 'boton': label}
 
     def navigate(self, destination, asset=None, label=None, open_now=True):
         if not self.can_navigate or destination not in self.destinations:
@@ -1782,6 +1838,10 @@ class Toolbelt:
                      'nota': 'No se abrió nada: quedó una tarjeta bajo tu respuesta. Dile que la toque para abrirla.'}
         if destination in FALLBACKS:
             action['target'] = destination
+        named = CARD_LABELS.get(self.language(), {}).get(destination)
+        if named and destination != 'stock':
+            # The app names a card in Spanish unless it carries its own label (with its target).
+            action.update(target=destination, label=named)
         if destination == 'stock':
             if _ondo_allowed(self.viewer) is not True:
                 return {'ok': False, 'error': 'Las acciones no están disponibles para este usuario.'}
@@ -1796,7 +1856,7 @@ class Toolbelt:
                 short = ''
             if not short:
                 short = name if len(name) <= 22 else ticker
-            action.update(ticker=ticker, label=f'Ver {short}')
+            action.update(ticker=ticker, label=f"{'See' if self.language() == 'en' else 'Ver'} {short}")
             reply['activo'] = f'{name} ({ticker})'
         if action not in self.result.actions:
             self.result.actions.append(action)
@@ -2809,7 +2869,8 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
     from .guide import rejected_order_note
     from .rails import colombia_pause_note
     from .verification_note import verification_note
-    system += colombia_pause_note() + rejected_order_note(viewer) + verification_note(viewer)
+    system += colombia_pause_note(country) + rejected_order_note(viewer) + verification_note(viewer)
+    system += language_note(belt)
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
     system += getattr(belt, 'guide_note', '')

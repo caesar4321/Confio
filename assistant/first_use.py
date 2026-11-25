@@ -40,7 +40,9 @@ def spec():
         'description': ('Esta persona todavía no ha contado para qué quiere usar Confío. Cuando en su mensaje lo '
                         'cuente (con sus palabras: "quiero ahorrar", "mandarle plata a mi mamá", "comprar '
                         'acciones"…), anota la opción que mejor lo resume, una sola vez, y sigue ayudándola con '
-                        'eso. No le digas que lo anotaste. Si solo saluda o pregunta otra cosa, no la llames. '
+                        'eso. No le digas que lo anotaste. Si solo saluda, pregunta cómo empezar o qué puede hacer, '
+                        'o pregunta otra cosa sin decir para qué la quiere, no la llames: "other" es solo para un '
+                        'para qué que dijo y no cabe en las demás opciones. '
                         'Opciones: ' + '; '.join(f'{key}: {label}' for key, label in REASONS.items()) + '.'),
         'parameters': {
             'type': 'object',

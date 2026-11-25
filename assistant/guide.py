@@ -196,6 +196,30 @@ INVEST_OPTIONS = {
     )),
 }
 COUNTRY_ENTRY_STEPS = {'top_up', 'awaiting_payment'}
+# Where the chat is Inicio, a step is done in the chat: its chip says the person's
+# words as their message (kind 'ask') and the reply brings the form or the card,
+# instead of a pencil walking them through screens. Verification keeps its chip:
+# it opens Didit's own flow directly (AssistantGuideCard DIRECT_STOPS).
+CHAT_ASKS = {
+    'top_up': 'Quiero recargar', 'international': 'Quiero recargar',
+    'awaiting_payment': '¿Cómo pago mi recarga pendiente?',
+    'international_soon': '¿Cómo recibo USDT?', 'usdt': '¿Cómo recibo USDT?',
+    'send': 'Quiero enviarle dinero a alguien', 'comprar': '¿Qué hay en Comprar?',
+    'stocks': 'Quiero comprar acciones', 'crypto': 'Quiero comprar oro o Bitcoin', 'perps': 'Quiero ver los futuros',
+}
+CHAT_BRIEFS = {
+    'top_up': ('Dile que ya puede recargar (en la app se llama {entry}) y que lo hacen aquí mismo, en esta '
+               'conversación. Pregúntale si empiezan.'),
+}
+
+
+def in_chat_chips(key, chips):
+    """The step's chips for the chat that is Inicio: each walk becomes the person's own words."""
+    out = []
+    for chip in chips:
+        said = CHAT_ASKS.get(chip.answer or key) if chip.kind == 'navigate' and chip.trail else None
+        out.append(Chip(said, 'ask', answer=chip.answer) if said else chip)
+    return tuple(out)
 LADDERS = {
     'invest': ('invest', 'send', 'comprar'),
     'comprar': ('comprar', 'send', 'invest'),
@@ -554,6 +578,10 @@ def current(viewer, request_meta, **context):
         return None
     step = STEPS[key]
     presentation = 'bubble'
+    from .prompts import conversation_home
+    conversation = conversation_home(request_meta)
+    if conversation and key in CHAT_BRIEFS:
+        step = replace(step, brief=CHAT_BRIEFS[key])
     if key in COUNTRY_ENTRY_STEPS:
         # Only the top-up itself moves to the local account; an order still
         # waiting for payment is a Koywe order and stays where it was made.
@@ -571,6 +599,8 @@ def current(viewer, request_meta, **context):
     if key == 'invest':
         options = _invest_options(viewer, _state(viewer, request_meta))
         step = replace(step, chips=(*(INVEST_OPTIONS[o] for o in options), Chip(LATER, 'dismiss')))
+    if conversation:
+        step = replace(step, chips=in_chat_chips(key, step.chips))
     return Guide(key=key, stage=step.stage, text=_text(viewer, key, step, **context), chips=step.chips,
                  presentation=presentation)
 

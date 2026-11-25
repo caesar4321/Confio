@@ -36,7 +36,7 @@ import logging
 import re
 import secrets
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_UP, Decimal
 
 from django.conf import settings
 
@@ -328,6 +328,10 @@ def propose(belt, side, asset, amount_usd=None, sell_all=False):
     why = _cannot(belt, side, ticker, name, None, sell_all, rows)
     if why:
         return _refuse(why)
+    if side == 'buy':
+        empty = _no_dollars(belt)
+        if empty:
+            return empty
     lang = confirm.language(texts)
     data = {'side': side, 'ticker': ticker, 'sell_all': sell_all, 'amount': None, 'kind': 'stock',
             'nonce': _nonce()}
@@ -355,6 +359,9 @@ def _propose_crypto(belt, texts, side, symbol, sell_all):
         from cusd_plus import crypto_risk
         if not crypto_risk.buy_enabled(belt.viewer.user, belt.viewer.request_meta):
             return _refuse('Esta persona no puede comprar bitcoin u oro desde su país o su cuenta.')
+        empty = _no_dollars(belt)
+        if empty:
+            return empty
     lang = confirm.language(texts)
     data = {'side': side, 'ticker': symbol, 'sell_all': sell_all, 'amount': None, 'kind': 'crypto',
             'nonce': _nonce()}
@@ -407,7 +414,10 @@ def confirmed(belt, data, lang='es'):
     routed = _hands_off(belt, data, lang, signed_card=signed_card, diy=_diy_screen('stock', side, ticker))
     if routed is not None:
         return routed
-    return True, reply, {'actions': [signed_card]}
+    actions = [signed_card]
+    if side == 'buy':
+        reply += _short_note(belt, amount, lang, actions)
+    return True, reply, {'actions': actions}
 
 
 def _confirmed_crypto(belt, data, lang):
@@ -424,7 +434,11 @@ def _confirmed_crypto(belt, data, lang):
     if routed is not None:
         return routed
     # No signed chat card for bitcoin and gold: their own screen, prefilled.
-    return True, HANDS_OFF_REPLIES['diy'][lang], {'actions': [_offer_card(None, _diy_screen('crypto', side, symbol))]}
+    actions = [_offer_card(None, _diy_screen('crypto', side, symbol))]
+    reply = HANDS_OFF_REPLIES['diy'][lang]
+    if side == 'buy' and not sell_all:
+        reply += _short_note(belt, Decimal(data['amount']), lang, actions)
+    return True, reply, {'actions': actions}
 
 
 # ── hands-off (Cuenta inteligente v2) ───────────────────────────────────
@@ -540,14 +554,80 @@ def _hands_off(belt, data, lang, *, signed_card, diy):
     if code == 'migrate':
         actions = [{'type': 'account_migration', 'label': 'Actualizar mi Cuenta inteligente'}]
         actions.append(signed_card or _offer_card(None, diy))
-        return True, HANDS_OFF_REPLIES['migrate'][lang], {'actions': actions}
+        reply = HANDS_OFF_REPLIES['migrate'][lang]
+        if side == 'buy' and amount is not None:
+            reply += _short_note(belt, amount, lang, actions)
+        return True, reply, {'actions': actions}
     # paywall: the priced proposal stays as "Hazlo tú", beside the offer.
     actions = [_offer_card('chat_trade', None if signed_card is not None else diy)]
     if signed_card is not None:
         actions.append(signed_card)
-    return True, HANDS_OFF_REPLIES['paywall'][lang], {'actions': actions}
+    reply = HANDS_OFF_REPLIES['paywall'][lang]
+    if side == 'buy' and amount is not None:
+        # Either way (the account or "Hazlo tú") the dollars have to be there first.
+        reply += _short_note(belt, amount, lang, actions)
+    return True, reply, {'actions': actions}
 
 
+
+
+# ── dollars to buy with ──────────────────────────────────────────────────
+
+def _dollars(viewer):
+    """Dollars the person can buy with: the personal wallet and, while hands-off is on, their
+    Cuenta inteligente. None when any part is unknown (payment_accounts.shortfall reads them)."""
+    from types import SimpleNamespace
+
+    from payment_accounts.shortfall import dollars_held
+    held = dollars_held(getattr(viewer, 'account', None))
+    if held is None:
+        return None
+    account = _account_address(viewer)
+    if account:
+        more = dollars_held(SimpleNamespace(bsc_address=account, user=viewer.user))
+        if more is None:
+            return None
+        held += more
+    return held
+
+
+def _no_dollars(belt):
+    """A refusal with the top-up form when there is nothing to buy with yet; None otherwise
+    (or when it can't be read: the amount step and the card still check)."""
+    held = _dollars(belt.viewer)
+    if held is None or held >= MIN_BUY_USD:
+        return None
+    from .sends import _topup_form
+    form = _topup_form(belt, belt.result.actions)
+    return {'ok': False, '_denied': True,
+            'motivo': ('Todavía no tiene dólares para comprar: no le preguntes el monto. Dile en una frase que '
+                       'primero ponga dólares en Confío' + (' con el formulario de recarga que quedó abajo' if form
+                                                            else ' (como se recarga en su país)')
+                       + ' y que después te lo vuelva a pedir.'),
+            'como_decirlo': 'No menciones herramientas ni esta nota.'}
+
+
+def _short_note(belt, amount, lang, actions):
+    """' Te faltan US$…' when the dollars held don't cover a buy, with the top-up form where
+    this person tops up from the chat (as sends._short_note does for a payment). Advisory."""
+    from payment_accounts.shortfall import usd
+    held = _dollars(belt.viewer)
+    if held is None or amount is None:
+        return ''
+    missing = (Decimal(amount) - held).quantize(Decimal('0.01'), rounding=ROUND_UP)
+    if missing <= 0:
+        return ''
+    from .sends import _topup_form
+    form = _topup_form(belt, actions)
+    text = usd(missing)
+    return {
+        'es': f' Tu saldo en dólares no alcanza: te faltan {text}.' + (
+            ' Recarga con el formulario de abajo y después apruébalo.' if form else ' Recarga antes de aprobarlo.'),
+        'pt': f' Seu saldo em dólares não é suficiente: faltam {text}.' + (
+            ' Recarregue com o formulário abaixo e depois aprove.' if form else ' Recarregue antes de aprovar.'),
+        'en': f' Your dollar balance is not enough: {text} is missing.' + (
+            ' Top up with the form below, then approve.' if form else ' Top up before you approve.'),
+    }[lang]
 
 
 # ── the card's one trade ────────────────────────────────────────────────────

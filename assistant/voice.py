@@ -129,7 +129,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         conversation=conversation_home(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
         bo_withdraw=_bo_withdraw(viewer, country),
-    ) + colombia_pause_note() + rejected_order_note(viewer) + verification_note(viewer) + VOICE_NOTE
+    ) + colombia_pause_note(country) + rejected_order_note(viewer) + verification_note(viewer) + VOICE_NOTE
     model = conf.get('CONFIO_ASSISTANT_REALTIME_MODEL')
     # The secret only has to live until the call connects.
     body = {
