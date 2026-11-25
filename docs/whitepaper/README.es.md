@@ -1,38 +1,36 @@
-# Confío: el asistente de IA que paga en América Latina
+# Confío: el asistente personal que paga en América Latina
 
-**Dile a Confío lo que necesitas. Paga, compra e invierte con tus dólares, y tú mantienes el control.**
+**Pídele a Confío que lo resuelva. Hace el encargo y lo termina pagando, por los canales de pago de tu país, con dólares que solo tú controlas.**
 
-Confío es un asistente financiero no custodial, totalmente de código abierto y centrado en la IA, creado para la realidad del dólar en América Latina. Una persona le pide a Confío IA, con sus propias palabras, pagarle a una persona o a una tienda, comprar algo en línea, recargar o invertir; Confío lo prepara en el canal local de pago de ese país, muestra las condiciones exactas y actúa solo con la confirmación de la persona o dentro de límites que ella firmó. Por debajo hay una infraestructura verificable de dólares en BNB Smart Chain de la que Confío no puede retirar fondos.
+Confío es un asistente personal de consumo para América Latina. Como los agentes personales de IA que están llegando en todo el mundo, Confío IA le quita a una persona encargos cotidianos de las manos: buscar y comprar cosas, hacer pedidos, llevar la cuenta de lo que hay que pagar. A diferencia de ellos, termina el trabajo pagando. Paga por el canal local de cada país (Pix, SPEI, Pago Móvil, QR bancario), desde los dólares en autocustodia de la propia persona, tras una confirmación exacta o dentro de límites que la persona firmó on-chain. Confío es totalmente de código abierto y no custodial.
 
 **Referencia global · Versión 4.5 · Noviembre de 2026**<br>
 Julian Moon · Fundador y CEO<br>
 [confio.lat](https://confio.lat) · [GitHub](https://github.com/caesar4321/Confio)
 
-*Lo tuyo, tuyo. · Pídelo en palabras; Confío lo hace.*
+*Lo tuyo, tuyo. · Pídelo en palabras; Confío lo hace y lo paga.*
 
 **Original autoritativo:** el [documento en inglés](README.md) es la única versión autoritativa del whitepaper de Confío. Esta traducción al español se ofrece por conveniencia y puede quedar rezagada respecto del original; si difiere del texto en inglés, prevalece el texto en inglés. Traducción sincronizada con la versión 4.5 el 25 de noviembre de 2026.
 
-Este documento es la referencia global actual sobre la arquitectura de producto, la estrategia, el modelo operativo y los riesgos materiales de Confío. Las condiciones detalladas de asignación y vesting de $CONFIO se mantienen en el documento separado de tokenomics.
+Este documento es la referencia global actual sobre el producto, la estrategia, el modelo operativo y los riesgos materiales de Confío. Las condiciones detalladas de asignación y vesting de $CONFIO se mantienen en el documento separado de tokenomics.
 
 <details>
 <summary><strong>Contenido</strong></summary>
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
-2. [Tesis de mercado](#2-tesis-de-mercado)
-3. [Confío IA: el asistente que paga](#3-confío-ia-el-asistente-que-paga)
-4. [Cuenta inteligente: una cuenta que el asistente puede operar](#4-cuenta-inteligente-una-cuenta-que-el-asistente-puede-operar)
-5. [Por qué se puede confiar en que una IA pague: la base de BNB Smart Chain](#5-por-qué-se-puede-confiar-en-que-una-ia-pague-la-base-de-bnb-smart-chain)
-6. [cUSD y cUSD+: dinero y ahorro](#6-cusd-y-cusd-dinero-y-ahorro)
-7. [Pagos, nóminas, inversión y Comprar](#7-pagos-nóminas-inversión-y-comprar)
-8. [$CONFIO en BNB Smart Chain](#8-confio-en-bnb-smart-chain)
-9. [Billetera, seguridad y arquitectura de código abierto](#9-billetera-seguridad-y-arquitectura-de-código-abierto)
-10. [Usuarios, distribución y entrada al mercado](#10-usuarios-distribución-y-entrada-al-mercado)
-11. [Modelo de negocio](#11-modelo-de-negocio)
-12. [Cumplimiento y modelo operativo](#12-cumplimiento-y-modelo-operativo)
-13. [Riesgos y mitigaciones](#13-riesgos-y-mitigaciones)
-14. [Hoja de ruta y estado actual](#14-hoja-de-ruta-y-estado-actual)
-15. [Aviso legal](#15-aviso-legal)
-16. [Notas](#notas)
+2. [La tesis: asistentes que no pueden pagar](#2-la-tesis-asistentes-que-no-pueden-pagar)
+3. [Panorama competitivo](#3-panorama-competitivo)
+4. [Confío IA: el asistente que hace encargos y paga](#4-confío-ia-el-asistente-que-hace-encargos-y-paga)
+5. [Cuenta inteligente: ejecución pagada dentro de límites firmados](#5-cuenta-inteligente-ejecución-pagada-dentro-de-límites-firmados)
+6. [Por qué se puede confiar en que una IA pague: la base](#6-por-qué-se-puede-confiar-en-que-una-ia-pague-la-base)
+7. [Billetera, seguridad y gobernanza](#7-billetera-seguridad-y-gobernanza)
+8. [Usuarios y distribución](#8-usuarios-y-distribución)
+9. [Modelo de negocio](#9-modelo-de-negocio)
+10. [Cumplimiento y modelo operativo](#10-cumplimiento-y-modelo-operativo)
+11. [Riesgos y mitigaciones](#11-riesgos-y-mitigaciones)
+12. [Hoja de ruta y estado actual](#12-hoja-de-ruta-y-estado-actual)
+13. [Aviso legal](#13-aviso-legal)
+14. [Notas](#notas)
 
 </details>
 
@@ -40,191 +38,164 @@ Este documento es la referencia global actual sobre la arquitectura de producto,
 
 ## 1. Resumen ejecutivo
 
-Confío es un asistente financiero centrado en la IA para América Latina. La conversación con **Confío IA** es la superficie del producto: en las versiones actuales de la app, la pantalla de inicio es el chat, la primera conversación es el proceso de alta y cada tarea de la app se puede alcanzar desde ahí. Una persona escribe lo que necesita con sus propias palabras —paga este QR, mándale dólares a mi hermana, compra esto en esa tienda y págalo, recarga, compra un poco de oro— y Confío lo hace con los dólares de la propia persona, en el canal local de ese país, tras una confirmación exacta. <sup>[3, 26]</sup>
+Están llegando los asistentes personales de IA que actúan en nombre de una persona: Muse de Meta y dots de OpenAI en Estados Unidos, Pickle en Corea y, creado para América Latina, Zapia. <sup>[1–5]</sup> Conversan, buscan, recuerdan, contactan a negocios y arman carritos. Cuando llegan a pagar, pagan con tarjeta. En América Latina, ahí es donde el encargo se detiene, porque el dinero de todos los días se mueve por canales nacionales —Pix en Brasil, SPEI en México, Pago Móvil en Venezuela, códigos QR bancarios en Bolivia, Bre-B en Colombia— a los que no llegan los pagos de agentes basados en tarjetas. <sup>[7, 8]</sup>
 
-> **Tesis de producto**
+> **Tesis**
 >
-> En América Latina, lo difícil de pagar no es elegir un producto; es atravesar canales locales fragmentados, hábitos de pago informales y un déficit de confianza. La plataforma de consumo ganadora no les pedirá a las personas aprender cripto ni instalar diez apps. Les permitirá pedirlo en palabras y demostrará —en código que cualquiera puede leer y con límites on-chain que cualquiera puede comprobar— que el asistente solo puede hacer lo que la persona aprobó. Confío combina ese asistente con dólares no custodiales, canales locales de pago y un canal en español liderado por su fundador de aproximadamente 480,000 personas, con un gasto en medios pagados prácticamente nulo hasta la fecha.
+> Confío es el asistente personal para América Latina que termina el trabajo pagando. Hace el encargo como otros asistentes y luego le paga a la tienda, al comercio o a la persona por el propio canal de ese país, desde un saldo en dólares que la persona controla, con una confirmación exacta o dentro de un límite on-chain que la persona firmó. El encargo es el gancho; los canales, el saldo en autocustodia y los límites que se hacen cumplir son la barrera de protección. Confío no conoce ninguna otra app de consumo en la región que ofrezca esa combinación como un solo producto. En Brasil, las personas ya pueden pedirle al asistente de su propio banco que envíe un Pix; el espacio que cubre Confío es más amplio en la América Latina de habla hispana y en los pagos entre países.
 
-Lo que Confío IA puede hacer hoy, con cada paso confirmado por la persona o acotado por límites que ella firmó:
+Lo que Confío IA hace hoy, con cada pago confirmado por la persona o acotado por límites que ella firmó:
 
 | Tarea | Cómo funciona |
 | --- | --- |
-| Pagar a personas y códigos QR | El asistente prepara un envío o un pago por canal local como una tarjeta en el chat; el código, no el modelo, pregunta el monto y verifica al beneficiario; la persona confirma y firma en su propio teléfono. |
-| Comprar en tiendas en línea | Un agente de compras busca en una o varias tiendas desde un navegador en la nube, arma el carrito, muestra el total real con envío y le paga a la tienda con el canal local de su país: SPEI en México, Pix en Brasil, Pago Móvil en Venezuela (limitado a tiendas que solo piden la referencia del pago); en Bolivia se hace el pedido y la persona paga el QR de la tienda. |
-| Recargar y retirar | El chat lleva al formulario de recarga o retiro con los límites vigentes del proveedor en ese país. |
-| Invertir | Las operaciones en Ondo Stocks, oro y bitcoin se proponen como tarjetas con precio. Para suscriptores de Cuenta inteligente, las operaciones del chat pueden ejecutarse dentro de un tope semanal firmado por el titular. |
-| Automatizar | Cuenta inteligente ejecuta envíos programados, pagos a cuentas bancarias (CLABE, Pix, Pago Móvil) e inversión automática, y puede pasar a un beneficiario designado. |
+| Comprar en tiendas en línea | Un agente de compras busca en una o varias tiendas desde un navegador en la nube, arma el carrito, muestra el total real con envío y le paga a la tienda por el canal de su país: SPEI en México, Pix en Brasil, Pago Móvil en Venezuela (tiendas que solo piden la referencia del pago). En Bolivia hace el pedido y la persona paga el QR de la tienda. |
+| Pagar a personas, códigos QR y comercios | El asistente prepara un envío o un pago por canal local como una tarjeta en el chat; el código, no el modelo, pregunta el monto y valida al beneficiario; la persona confirma y firma en su propio teléfono. |
+| Comprar en comercios locales | Comprar, un mercado dentro de la app con pagos retenidos en garantía y protección al comprador, en piloto en Bolivia. |
+| Seguir los mensajes y lo pendiente | La vinculación del WhatsApp, el Gmail y el calendario de la propia persona, para que el asistente le diga qué requiere atención y redacte respuestas, se está habilitando con nuevas versiones de la app (sección 4.1). |
+| Recargar y retirar | El chat abre el formulario de recarga o retiro, con los límites vigentes del proveedor en ese país. |
+| Invertir y automatizar | Acciones, oro y bitcoin como tarjetas con precio; con Cuenta inteligente, pagos y transferencias programados, inversión automática y operaciones automáticas dentro de un tope semanal. |
 
-La base es lo que hace seguro darle a un asistente acceso al dinero. La clave de la billetera del usuario se genera en su dispositivo y Confío no la conserva; los saldos son cUSD o cUSD+ en BNB Smart Chain; las comisiones de red están patrocinadas; y las acciones automáticas pasan por una cuenta de contrato inteligente propia de cada usuario cuyos límites se aplican on-chain. La clave del relayer de Confío, por sí sola, no puede retirar los fondos de un usuario.
+Al 25 de noviembre de 2026, Confío registra 10,886 usuarios que completaron el registro (14,440 cuentas registradas) y 3,407 dispositivos alcanzables por push, 3,402 de ellos usados en los últimos 30 días. Al 23 de julio de 2026 (la instantánea más reciente disponible con la misma definición), 177 usuarios habían completado la verificación de identidad de Didit con un documento oficial y una selfie en vivo, una tasa de finalización del 61.5% entre los usuarios que la iniciaron. Son métricas internas no auditadas, no cifras de usuarios con fondos ni de usuarios activos mensuales. <sup>[31]</sup>
 
-| Componente | Función principal | Diseño |
+## 2. La tesis: asistentes que no pueden pagar
+
+### 2.1 Llegan los asistentes personales
+
+En 2026, las grandes empresas de IA pasaron de los asistentes que solo conversan a agentes que hacen encargos. Meta lanzó Muse en Estados Unidos en septiembre de 2026 como un agente que envía correos, reserva viajes, llena formularios y sigue trabajando después de cerrar la app; su pago pasa por Link de Stripe, que emite una tarjeta de un solo uso. <sup>[1]</sup> OpenAI lanzó dots, un asistente siempre activo que se conecta con miles de apps, <sup>[3]</sup> y en noviembre de 2026 agregó ChatGPT Wallet para que dots pueda comprar por el usuario con una tarjeta tokenizada, desarrollada con American Express, Chase, Mastercard y Visa e inicialmente limitada a tarjetas elegibles emitidas en Estados Unidos. <sup>[2]</sup> En Corea, Pickle se encarga de tareas cotidianas de principio a fin en servicios como KakaoTalk y Coupang, y se ha informado que hace llamadas telefónicas por sus usuarios. <sup>[4]</sup>
+
+América Latina tiene los suyos. Zapia se describe como un agente personal de IA creado para latinoamericanos, disponible en WhatsApp, como app y en la web; busca en la web, contacta a negocios por WhatsApp, agenda reuniones, responde en nombre del usuario y sigue precios. <sup>[5]</sup> Luzia comenzó como un asistente gratuito dentro de WhatsApp que responde preguntas y transcribe notas de voz. <sup>[6]</sup> Sus descripciones públicas no incluyen pagarle a un comercio desde un saldo por un canal local.
+
+### 2.2 En América Latina, el dinero se mueve por canales nacionales
+
+Cada país tiene su propio sistema de pagos, y esos sistemas no son interoperables entre sí:
+
+| País | Cómo se mueve el dinero de todos los días | Lo que debe manejar un asistente |
 | --- | --- | --- |
-| Confío IA | El asistente y la superficie del producto. | Los modelos leen y proponen; el código verifica hechos, pregunta montos y aplica confirmaciones, topes e interruptores por país. |
-| Cuenta inteligente | Una cuenta que el asistente puede operar dentro de límites. | Una cuenta de contrato inteligente inmutable por usuario, cuya propietaria es la billetera del usuario; US$149.99 al año (predeterminado) o US$14.99 al mes. |
-| cUSD | Dólar universal para pagos. | Token BSC actualizable y respaldado 1:1 por USDT; el único perímetro de la comisión externa de conversión del 0.9%. |
-| cUSD+ | Instrumento de ahorro en dólares para usuarios elegibles. | Participaciones acumulativas actualizables y respaldadas por USDY para usuarios elegibles según Ondo; la conversión interna cUSD↔cUSD+ no tiene comisión. |
-| Ondo Stocks, oro, bitcoin, Futuros | Inversión. | Routers con código fuente verificado liquidan las operaciones directamente al usuario; Oro y Bitcoin y Futuros no se ofrecen en la versión para iOS. |
-| $CONFIO | Token comunitario y del ecosistema. | BEP-20 de oferta fija con una preventa on-chain pagada en cUSD. No respalda los saldos en dólares de los usuarios. |
+| Brasil | Pix, el sistema de pagos instantáneos del banco central: llaves, códigos QR y códigos para copiar y pegar. <sup>[7]</sup> | Interpretar y validar el código Pix y pagar su monto exacto. |
+| México | Transferencias SPEI a una CLABE de 18 dígitos; muchas tiendas en línea muestran datos bancarios y una referencia en la página de pago en lugar de un formulario de tarjeta. | Leer la CLABE, el monto y la referencia de la página de pago y pagar exactamente eso. |
+| Colombia | Llaves y códigos QR de Bre-B, el nuevo sistema instantáneo interoperable. <sup>[8]</sup> | Resolver la llave y pagar en pesos. |
+| Venezuela | Pago Móvil: número de teléfono, banco y cédula de identidad; luego quien paga le reporta la referencia al vendedor. | Pagar primero y luego entregarle la referencia a la tienda. |
+| Bolivia | Códigos QR bancarios. | Pagar el monto del QR en bolivianos. |
+| Perú | Yape, PLIN y QR interoperable. <sup>[9]</sup> | — (Confío todavía no lo admite). |
+| Argentina | Transferencias por alias/CVU y QR interoperable. | — (pagos de Confío pendientes de que el proveedor esté listo). |
 
-Al 25 de noviembre de 2026, Confío registra 10,886 usuarios que completaron el registro (14,440 cuentas registradas) y 3,407 dispositivos alcanzables mediante notificaciones push, de los cuales 3,402 se utilizaron en los últimos 30 días. Al 23 de julio de 2026 (la instantánea más reciente disponible con la misma definición), 177 usuarios habían completado la verificación de identidad de Didit presentando un documento de identidad oficial y tomando una selfie en vivo, con una tasa de finalización del 61.5% entre quienes la iniciaron. Son métricas operativas internas, no cifras auditadas independientemente, y no deben interpretarse como número de usuarios con fondos ni de usuarios activos mensuales. <sup>[14]</sup>
+Un agente basado en tarjetas no puede completar una compra que pide una transferencia SPEI, un código Pix o una referencia de Pago Móvil, y muchos pagos cotidianos —un vendedor en WhatsApp, un trabajador al que se le paga por QR— ocurren por completo fuera de las redes de tarjetas. Para una persona, cada canal significa otra app, otro formulario y otro identificador. Para un asistente, es una oportunidad: el código puede elegir el canal según el país del beneficiario mientras la persona solo dice lo que quiere. Como el canal sigue al beneficiario y no al banco de quien paga, el mismo diseño puede, donde los proveedores lo permitan, dejar que una persona en un país le pague a una tienda o a su familia en otro.
 
-Los vaults de cUSD y cUSD+, los routers de Ondo Stocks y de swaps, el delegado de transacciones patrocinadas, la factory y las implementaciones de cuenta de Cuenta inteligente, el spender de compras, el escrow de Comprar, el token $CONFIO y sus vaults de preventa, recompensas y vesting, el contrato de pagos a comercios y el vault de nóminas están desplegados y tienen su código fuente verificado en BNB Smart Chain. <sup>[8, 9, 17, 27]</sup>
+### 2.3 Por qué el saldo está en dólares
 
-## 2. Tesis de mercado
+Las personas de toda la región tienen y reciben dólares: mediante remesas, estimadas en US$173.7 mil millones hacia América Latina y el Caribe en 2025, y mediante stablecoins que ya tienen un uso amplio. <sup>[10, 11]</sup> Un saldo en dólares que se puede pagar en pesos, reales o bolívares permite que un solo asistente pague en cualquier país admitido sin que la persona tenga que convertir primero.
 
-### 2.1 Un problema de acceso al dólar, no de conocimiento de cripto
+### 2.4 La confianza decide a quién se le deja pagar
 
-América Latina no atraviesa una única crisis monetaria homogénea. Algunos usuarios necesitan protección frente a la volatilidad de su moneda local; otros necesitan liquidación transfronteriza asequible, un lugar seguro para ahorrar en dólares o una forma práctica de pagar y cobrar. Lo que conecta estos mercados es la demanda de una unidad confiable en dólares y el descontento con las fricciones que la rodean. La adopción de stablecoins en la región muestra que este comportamiento ya existe on-chain y no es meramente teórico. <sup>[2]</sup>
+Darle dinero a una IA plantea la pregunta que todo usuario latinoamericano ya le hace a una app financiera: ¿qué le impide hacer algo indebido? La respuesta de Confío tiene tres capas: **control verificable** (la clave de la billetera se genera en el dispositivo de la persona y Confío no la conserva), **autonomía acotada** (el asistente no puede inventar montos ni beneficiarios; cada pago es una confirmación exacta o cae dentro de un límite firmado on-chain) y **confianza humana** (explicaciones primero en español, precios claros, un liderazgo visible y un asistente que dice con claridad lo que no puede hacer). *Lo tuyo, tuyo* es a la vez una promesa de marca y una restricción de arquitectura.
 
-| Mercado | Necesidad de dólares observada | Implicación para el producto |
-| --- | --- | --- |
-| Argentina | La inflación y los controles de capital recurrentes, junto con la memoria institucional del *corralito* de 2001 y la conversión forzosa de depósitos en dólares, enseñaron a los hogares a valorar el acceso y el control tanto como el rendimiento nominal. La mayoría de las restricciones cambiarias recientes se flexibilizaron, pero el déficit histórico de confianza sigue siendo relevante. <sup>[19]</sup> | Un producto en dólares debe dejar especialmente claros los límites de custodia, los derechos de retiro, los precios y los cambios de reglas. |
-| Venezuela | La inflación extrema llevó al dólar estadounidense a cumplir funciones de reserva de valor y de pago cotidiano, creando una economía muy dolarizada pero operativamente fragmentada. <sup>[20]</sup> | El acceso al dólar y la utilidad de Pago Móvil son necesidades inmediatas, mientras que las sanciones, la disponibilidad de proveedores y el cumplimiento exigen controles más estrictos. |
-| Bolivia | La evaluación del FMI de 2025 describió reservas de divisas utilizables cercanas a cero, una brecha creciente con el tipo de cambio paralelo y fuertes límites al acceso del sector privado a dólares al tipo oficial. <sup>[21]</sup> | Un acceso confiable, precios locales transparentes y canales QR interoperables pueden resolver un problema diario de liquidez, no un caso de uso especulativo. |
-| Perú | Los hogares ya mantienen decenas de miles de millones de dólares en depósitos en moneda extranjera, mientras que Yape, PLIN y los sistemas QR interoperables han normalizado los pagos móviles. <sup>[22]</sup> | La oportunidad no es enseñar a los usuarios a querer dólares, sino ofrecer ahorro y pagos en dólares portátiles con puntos de entrada locales familiares. |
-| México | Los depósitos bancarios en moneda extranjera y aproximadamente US$62.5 mil millones en remesas anuales demuestran demanda tanto de ahorro en dólares como de transferencias transfronterizas. <sup>[23]</sup> | El acceso a SPEI, los saldos en dólares, el rendimiento y las transferencias familiares pueden convivir en un solo producto de consumo. |
-| Colombia | Estados Unidos origina más de la mitad de las remesas entrantes, mientras que Colombia acoge a aproximadamente 2.8 millones de venezolanos. <sup>[24, 25]</sup> | El acceso bancario local puede conectar las remesas internacionales con el corredor de transferencias familiares Colombia–Venezuela. |
-| Estados Unidos y España | Son dos de los mercados de origen más importantes de las remesas latinoamericanas. Estados Unidos representa el 35.7% de las entradas a Sudamérica; Europa, el 36.2%, incluidos 19.7 puntos porcentuales de España. <sup>[24]</sup> | Los ingresos de la diáspora deberían llegar a los saldos en dólares de los destinatarios sin obligar a ambas partes a usar un producto de trading. |
+## 3. Panorama competitivo
 
-El resultado es un **reflejo regional hacia el dólar**: las personas buscan exposición al USD incluso cuando el acceso es caro, informal u operativamente frágil.
+| Categoría | Ejemplos (fuentes públicas) | Qué hacen | Qué les falta para esta tarea |
+| --- | --- | --- | --- |
+| Asistentes personales de IA | Muse, dots, Pickle, Zapia, Luzia <sup>[1–6]</sup> | Encargos, mensajes, búsqueda, agenda; Muse y dots compran con tarjetas tokenizadas en Estados Unidos. | No le pagan a comercios desde el saldo de la persona por Pix, SPEI, Pago Móvil ni QR bancario. |
+| IA dentro de apps de bancos y billeteras | El Pix por voz, texto o imagen de Nubank en su app y en WhatsApp (Brasil, desde diciembre de 2024); Mago de Mercado Pago, que prepara transferencias a partir de una conversación para que la persona las confirme (Argentina). <sup>[12, 13]</sup> | Ejecutan pagos por el canal de su propio país para sus propios clientes. | Solo finanzas y un solo país; no son asistentes personales para encargos fuera de la app. |
+| Infraestructura de pagos para agentes | El conjunto de herramientas de pagos con agentes de Iniciador permite que los agentes de bancos y fintechs propongan pagos Pix que el usuario aprueba con biometría mediante Open Finance (Brasil, mayo de 2026). <sup>[14]</sup> | Componentes para instituciones reguladas. | No es un producto de consumo; posibles proveedores más que competidores. |
 
-### 2.2 Las remesas como oportunidad de balance
+La posición de Confío es la intersección: un asistente de consumo para encargos, acceso para pagar y cobrar por los canales de varios países, y un saldo en dólares en autocustodia con límites on-chain. Es una afirmación acotada, no la de ser “el primero en combinar IA y pagos”. En Brasil, una persona ya puede pedirle al asistente de su banco que envíe un Pix. El espacio es más claro en la América Latina de habla hispana, donde Confío no tiene a su alcance una infraestructura comparable de iniciación de pagos para agentes, y en los pagos entre países, adonde no llega ningún asistente de un banco nacional.
 
-América Latina y el Caribe recibieron aproximadamente US$173.7 mil millones en remesas en 2025. <sup>[1]</sup> La mayoría de los productos trata una remesa como una transferencia aislada. Confío la trata como el inicio de una relación financiera: el destinatario puede conservar dólares, generar rendimiento variable mediante cUSD+, enviar a contactos, pagarle a un comercio o a una tienda en línea, o retirar por un canal local, simplemente pidiéndolo.
+## 4. Confío IA: el asistente que hace encargos y paga
 
-### 2.3 Por qué importa un enfoque centrado en la IA en América Latina
+### 4.1 El chat es el producto
 
-Cada país tiene su propio sistema de pagos. Brasil paga con Pix, el sistema de pagos instantáneos del banco central; México con transferencias SPEI a una CLABE de 18 dígitos; Colombia está pasando a las llaves y el QR de Bre-B; Perú con Yape, PLIN y QR interoperables; Venezuela con Pago Móvil; Bolivia con códigos QR bancarios. <sup>[22, 28, 29]</sup> Un checkout en un país rara vez acepta el canal de otro, y muchos pagos cotidianos —un vendedor por WhatsApp, un trabajador al que se le paga por QR, una tienda en línea que muestra datos bancarios en lugar de un formulario de tarjeta— ocurren fuera de las redes de tarjetas.
+En las versiones actuales, Inicio es la conversación con Confío IA. Un usuario nuevo conoce a su asistente y se le pregunta, en palabras, para qué quiere Confío; la respuesta define los siguientes pasos. Cada tarea que ofrece el menú —recarga, retiro, Cobrar, invitaciones, historial, inversiones, Comprar, Cuenta inteligente, herramientas para negocios y nóminas— tiene una puerta desde el chat. El asistente lee los movimientos y el resumen mensual de la propia persona, acepta fotos y notas de voz, y busca en la web para preguntas generales. <sup>[15, 16]</sup>
 
-Para la persona, esto significa aprender una app, un formulario y un conjunto de identificadores distintos para cada tarea. Para un asistente es la oportunidad opuesta: el código puede elegir el canal a partir del país del beneficiario, mientras la persona solo dice lo que quiere. Los pagos de agentes basados en tarjetas, comunes en mercados donde todos tienen una tarjeta, no llegan a estos canales. Un asistente que mantiene un saldo en dólares en autocustodia y tiene acceso de pago a los canales nacionales puede pagar donde un asistente basado en tarjetas no puede seguirlo.
+Se están habilitando conexiones que amplían los encargos: vincular el propio WhatsApp de la persona como dispositivo para que el asistente le diga qué requiere atención y la ayude a responder; Gmail, abierto a un número limitado de personas mientras la verificación de Google está pendiente; y el calendario del teléfono. Están desplegadas en el servidor y llegan a las personas a medida que se publican nuevas versiones de la app. Confío IA explica instrumentos y riesgos, pero no le dice a una persona que compre, venda o mantenga un ticker concreto, ni predice precios.
 
-Los propios registros del asistente de Confío apuntan en la misma dirección: las personas ya le piden, con sus propias palabras, enviar dinero al exterior y pagar por QR. Confío informa esto de forma cualitativa; no publica el contenido de los chats.
-
-### 2.4 El problema más profundo: *falta de confianza*
-
-Los usuarios latinoamericanos han vivido congelamientos bancarios, controles cambiarios, fintechs fallidas, intermediarios informales, diferenciales ocultos y plataformas cripto diseñadas en torno a la especulación. Darle dinero a una IA plantea la misma pregunta con más fuerza: ¿qué le impide hacer algo indebido?
-
-La respuesta de Confío tiene tres capas:
-
-1. **Control verificable:** la clave de la billetera del usuario se genera en su dispositivo y Confío no la conserva.
-2. **Autonomía acotada:** el asistente no puede inventar montos ni beneficiarios; cada pago es una confirmación exacta o cae dentro de un límite que la persona firmó on-chain.
-3. **Confianza humana:** educación primero en español, precios claros, métodos de pago locales, liderazgo visible y un asistente que dice con claridad lo que no puede hacer.
-
-*Lo tuyo, tuyo* es, por tanto, una promesa de marca y a la vez una restricción de arquitectura.
-
-## 3. Confío IA: el asistente que paga
-
-### 3.1 El chat es el producto
-
-En las versiones actuales, Inicio es la conversación con Confío IA. Un usuario nuevo conoce a su asistente y se le pregunta, en palabras, para qué quiere Confío; la respuesta define los siguientes pasos. Cada pantalla que ofrece el menú —recarga, retiro, Cobrar, invitaciones, historial, inversiones, Comprar, Cuenta inteligente, herramientas para negocios y nóminas— tiene una puerta desde el chat, de modo que una persona que nunca abre un menú puede hacerlo todo igualmente. El asistente responde preguntas, lee los movimientos y el resumen mensual de la propia persona, acepta fotos y notas de voz, y puede buscar en la web para preguntas generales. <sup>[3, 26]</sup>
-
-Confío IA responde y orienta a todos. Explica instrumentos, riesgos y los números de la propia persona, pero no le dice que compre, venda o mantenga un ticker concreto, ni predice precios.
-
-### 3.2 Cómo una solicitud se convierte en un pago
+### 4.2 Cómo una solicitud se convierte en un pago
 
 | Paso | Quién lo hace | Qué se verifica |
 | --- | --- | --- |
-| 1. Entender | El modelo lee la solicitud y decide de qué tarea se trata. | La salida de herramientas y el texto de terceros se tratan como datos, nunca como instrucciones; después de una búsqueda web, ese turno pierde sus herramientas de dinero. |
-| 2. Preguntar el monto | El código, no el modelo, escribe la pregunta (“¿Cuántos dólares? Escribe solo el número”). | Nunca se extrae un monto de una frase; el número escrito solo como siguiente mensaje es a la vez el monto y el sí. Un “no” retira las tarjetas pendientes. |
-| 3. Resolver el beneficiario | El código interpreta y valida el destino: llaves Pix y códigos QR con su suma de verificación, dígitos de control de la CLABE, datos de Pago Móvil, contactos de Confío. | La tarjeta muestra solo lo que el código resolvió y el canal validó; un nombre que nadie verificó nunca se marca como verificado. |
-| 4. Cotizar | El código calcula el precio del pago: monto local, total en dólares, tipo de cambio, comisión de Confío, vencimiento. | Un cobro con un monto local fijo se paga exactamente; la persona ve el total antes de confirmar. |
-| 5. Confirmar | La persona revisa la tarjeta y firma en su propio dispositivo (o, para una acción automática de un suscriptor, la cuenta comprueba on-chain el tope que se firmó). | El modelo no puede dibujar la hoja de confirmación ni puede firmar. |
-| 6. Liquidar e informar | El pago se ejecuta en el canal local; la tarjeta sigue el estado que reporta el proveedor. | Una tarjeta nunca dice “pagado” antes de que el canal reporte que se completó. |
+| 1. Entender | El modelo lee la solicitud, escrita o dicha en una nota de voz, y decide de qué tarea se trata. | La salida de herramientas y el texto de terceros son datos, nunca instrucciones; después de una búsqueda web, ese turno pierde sus herramientas de dinero. Una nota de voz puede nombrar qué comprar, vender o pagar; nunca fija un monto ni confirma. |
+| 2. Preguntar el monto | El código, no el modelo, escribe la pregunta (“¿Cuántos dólares? Escribe solo el número”). | Nunca se extrae un monto de una frase; el número escrito solo como siguiente mensaje es a la vez el monto y el sí, y solo cuenta una respuesta escrita. Un “no” retira las tarjetas pendientes. |
+| 3. Resolver el beneficiario | El código interpreta y valida el destino: llaves y códigos Pix con su suma de verificación, dígitos de control de la CLABE, datos de Pago Móvil, contactos de Confío. | La tarjeta muestra solo lo que el código resolvió; un nombre no verificado nunca se marca como verificado. |
+| 4. Cotizar | El código calcula el precio: monto local, total en dólares, tipo de cambio, comisión de Confío, vencimiento. | Un cobro con un monto local fijo se paga exactamente. |
+| 5. Confirmar | La persona revisa la tarjeta y firma en su propio dispositivo o, para una acción automática de un suscriptor, la cuenta comprueba on-chain su tope firmado. | El modelo no puede dibujar la hoja de confirmación ni puede firmar. |
+| 6. Liquidar | El pago se ejecuta en el canal local; la tarjeta sigue el estado del proveedor. | Una tarjeta nunca dice “pagado” antes de que el canal informe que se completó. |
 
 Qué canales se ofrecen lo deciden interruptores en vivo por país y por proveedor, no el modelo. Cuando un corredor está pausado, el asistente lo dice en lugar de improvisar una ruta.
 
-### 3.3 El agente de compras
+### 4.3 El agente de compras
 
-Confío IA puede comprar en tiendas en línea. La persona nombra un producto (y, si quiere, una tienda); cuando no se nombra ninguna tienda, una sola búsqueda en varias tiendas devuelve una lista breve de ofertas. Luego, un agente de compras trabaja en un navegador en la nube que la persona puede ver en vivo: abre la tienda, agrega los artículos elegidos, llega al checkout y lee el total real con envío. <sup>[3]</sup>
+La persona nombra un producto y, si quiere, una tienda; cuando no se nombra ninguna tienda, una sola búsqueda en varias tiendas devuelve una lista breve de ofertas. Luego el agente trabaja en un navegador en la nube que la persona puede ver en vivo: abre la tienda, agrega los artículos, llega a la página de pago y lee el total real con envío. <sup>[15]</sup>
 
-- **Elegir es consentir.** Cada producto ofrecido muestra un total máximo (“hasta $X con envío”). Elegirlo aprueba ese artículo, esa cantidad y ese total máximo. Un total real más alto, un precio ilegible o un pagador distinto hacen que vuelva a aparecer una tarjeta de pedido ordinaria con el desglose real.
-- **Los modelos deciden, el código verifica hechos.** Un modelo maneja el navegador y un juez separado —de una familia de modelos distinta— revisa cada clic; una revisión final lee la última página antes de hacer el pedido. El código verifica solo hechos: una aprobación genera un solo pedido; ambos modelos deben leer el mismo total, y ese total debe aparecer en la página; un identificador de pago debe ser uno válido que se muestre junto al monto aprobado en una página que apareció después del pedido, nunca uno tomado del título de un artículo ni visto antes del pedido.
-- **Límites en el código.** Cada tarea tiene límites de pasos, tiempo y costo de modelo que aplica el servidor, nunca el modelo.
-- **Canales locales según el país de la tienda.** El canal sigue al país de la tienda: datos bancarios SPEI leídos del propio checkout de la tienda en México (se paga el monto exacto en pesos; cualquier excedente de conversión queda en la cuenta local de la persona), QR Pix en Brasil y Pago Móvil en Venezuela, donde el pago se hace antes del pedido y la referencia se ingresa en el formulario de la tienda. En Bolivia, mientras los pagos QR mediante Confío estén desactivados, el agente hace el pedido y la persona paga el QR de la tienda desde su banco. Los demás países se rechazan en lugar de pagarse con una transferencia aproximada.
-- **Quién paga.** La búsqueda, el carrito y la revisión con precio son gratuitos para todos. Comprar y pagarle a la tienda es un beneficio de Cuenta inteligente: la cuenta paga mediante una regla “Compras con Confío IA” firmada una sola vez con Confío Face (por defecto US$200 por período de 28 días, editable). Una compra nunca se paga directamente desde la billetera personal.
+- **Elegir es consentir.** Cada oferta muestra un total máximo (“hasta $X con envío”); elegirla aprueba ese artículo, esa cantidad y ese total. Un total real más alto, un precio ilegible o un pagador distinto hacen que vuelva una tarjeta de pedido con el desglose real.
+- **Los modelos deciden, el código verifica hechos.** Un modelo conduce; un juez de otra familia de modelos revisa cada clic; una revisión final lee la última página antes de hacer el pedido. El código verifica solo hechos: una aprobación genera un solo pedido; ambos modelos deben leer el mismo total, que debe aparecer en la página; un identificador de pago debe ser válido y mostrarse junto al monto aprobado, en una página que apareció después del pedido.
+- **Límites en el código.** El servidor limita los pasos, el tiempo y el costo de modelo de cada tarea.
+- **Canal según el país de la tienda.** Datos bancarios SPEI leídos de la propia página de pago de la tienda en México (se paga el monto exacto en pesos; cualquier excedente de la conversión queda en la cuenta local de la persona), QR Pix en Brasil y Pago Móvil en Venezuela, que se paga antes del pedido ingresando la referencia en el formulario de la tienda. En Bolivia, mientras los pagos QR de Confío estén desactivados, el agente hace el pedido y la persona paga el QR de la tienda. Los demás países se rechazan en lugar de pagarse con una transferencia aproximada.
+- **Quién paga.** La búsqueda, el carrito y la revisión con precio son gratuitos. Comprar y pagar es un beneficio de Cuenta inteligente: la cuenta paga mediante una regla “Compras con Confío IA” firmada una sola vez con Confío Face (por defecto US$200 cada 28 días, editable), nunca directamente desde la billetera personal.
 
-El agente de compras está en una etapa temprana. Las páginas de las tiendas cambian, algunos checkouts no ofrecen un canal local pagable a cuentas ordinarias y Confío todavía no ha demostrado que las compras se completen de forma confiable en muchas tiendas. Confío lo presenta como una capacidad que funciona, con límites honestos, no como un problema resuelto.
+El agente de compras está en una etapa temprana. Las páginas de las tiendas cambian, algunos procesos de pago no ofrecen a las cuentas ordinarias un canal local con el que se pueda pagar y Confío todavía no ha demostrado que las compras se completen de forma confiable en muchas tiendas.
 
-### 3.4 Ejecución automática dentro de límites firmados
+### 4.4 Lo que Confío IA no hará
 
-Para los suscriptores de Cuenta inteligente, desde el 25 de noviembre de 2026, las operaciones desde el chat en Ondo Stocks, oro y bitcoin, las compras en Comprar y las compras en tiendas pueden ejecutarse por la cuenta de la persona sin una firma por acción, dentro de límites que el titular firmó:
-
-- **Tope de operaciones.** Se elige en la primera operación automática y se firma una sola vez con Face (por ejemplo US$250, 1,000 o 2,500 por semana, u otro monto). Cuentan tanto las compras como las ventas. El tope funciona como un balde con fugas (*leaky bucket*): como máximo un tope en cualquier instante y un tope por semana en promedio (poco menos de dos topes dentro de una misma semana).
-- **Los fondos se quedan en la cuenta.** Lo que el chat compra se mantiene en la cuenta. El relayer solo puede activar acciones con la forma de una regla: los swaps deben mantenerse dentro del 1.5% de un feed de precios de Chainlink, la comisión de acciones está acotada en 90 puntos básicos y las ventas deben devolver su valor a la cuenta dentro de esa banda.
-- **Notificación e interruptor de emergencia.** Cada operación automática notifica al titular; una que no tenga detrás una propuesta del chat genera una alerta de seguridad. El Safe puede detener todas las vías automáticas a la vez (`tradePaused`).
-- **Las pantallas de uso propio siguen siendo gratuitas.** Las pantallas Acciones, Oro y Bitcoin y Comprar siguen disponibles desde la billetera personal, firmadas por la persona.
-
-### 3.5 Lo que Confío IA no hará
-
-- Extraer un monto de una frase, o mover dinero ante un “sí” a una pregunta que el propio modelo escribió sin condiciones verificadas por el código.
+- Extraer un monto de una frase, o pagar ante un “sí” sin condiciones verificadas por el código.
 - Pagarle a un beneficiario cuyos datos el código no pudo validar, o presentar como verificado un nombre no verificado.
-- Pagar por encima de un total que la persona aprobó, o por encima de un tope que la persona firmó.
-- Pagarle a una tienda en un país sin un canal que pague el monto local exacto de la tienda.
+- Pagar por encima de un total que la persona aprobó o de un tope que la persona firmó.
+- Pagarle a una tienda en un país sin un canal que pague el monto local exacto.
 - Recomendar un ticker concreto o predecir precios.
 - Ofrecer Oro y Bitcoin o Futuros a usuarios de iOS, ni ningún producto del que la persona quede excluida por su país o su elegibilidad.
-- Traspasar la conversación en silencio: cuando no puede hacer algo, lo dice y, cuando es posible, abre la pantalla donde la persona puede hacerlo por sí misma.
+- Quedarse en silencio: cuando no puede hacer algo, lo dice y, cuando es posible, abre la pantalla donde la persona puede hacerlo.
 
-### 3.6 Límites actuales por país
+### 4.5 Canales por país
 
-Las capacidades siguen los interruptores en vivo de los proveedores y cambian; este es el estado al 25 de noviembre de 2026. <sup>[13]</sup>
+Las capacidades siguen los interruptores en vivo de los proveedores y cambian; este es el estado al 25 de noviembre de 2026. <sup>[17]</sup>
 
 | País | Disponible hoy | No disponible o pausado |
 | --- | --- | --- |
-| México | Recarga y retiro; CLABE propia para recibir pesos; pagos SPEI a cualquier CLABE; pagos programados a CLABE con Cuenta inteligente; pagos SPEI del agente de compras. | — |
-| Brasil | Pagos Pix por llave, QR o código; recepción por QR Pix; pagos programados por Pix con Cuenta inteligente; pagos Pix del agente de compras. | — |
-| Venezuela | Recarga por Pago Móvil y envíos por Pago Móvil; pagos por Pago Móvil con Cuenta inteligente; agente de compras para tiendas que solo piden la referencia del pago. | Tiendas que requieren otros datos de pago. |
-| Bolivia | Recarga y retiro bancario; marketplace Comprar; agente de compras con la persona pagando el QR de la tienda. | Pagar y recibir códigos QR bancarios mediante Confío (desactivado). |
-| Argentina, Chile, Perú | Canales locales de recarga; retiros donde el proveedor los ofrece. | Pagos a CVU y QR argentinos desde una cuenta local de Confío (pendiente de que el proveedor esté listo). |
+| México | Recarga y retiro; CLABE propia para recibir pesos; pagos SPEI a cualquier CLABE; pagos programados a CLABE; pagos SPEI del agente de compras. | — |
+| Brasil | Pagos Pix por llave, QR o código; recepción por QR Pix; pagos Pix programados; pagos Pix del agente de compras. | — |
+| Venezuela | Recarga y envíos por Pago Móvil; pagos programados por Pago Móvil; agente de compras para tiendas que solo piden la referencia. | Tiendas que requieren otros datos de pago. |
+| Bolivia | Recarga y retiro bancario; Comprar; agente de compras con la persona pagando el QR de la tienda. | Pagar y recibir QR bancarios mediante Confío (desactivado). |
+| Argentina, Chile, Perú | Canales locales de recarga; retiros donde el proveedor los ofrece. | Pagos a CVU y QR argentinos (pendientes de que el proveedor esté listo). |
 | Colombia | Retiros mediante la rampa existente. | Recarga, y conversión y pagos por Bre-B (pausados). |
 
-## 4. Cuenta inteligente: una cuenta que el asistente puede operar
+## 5. Cuenta inteligente: ejecución pagada dentro de límites firmados
 
-### 4.1 Qué es
+### 5.1 Qué es
 
-Cuenta inteligente es una cuenta de pago dentro de Confío. Técnicamente es un contrato inteligente separado, uno por usuario, cuya propietaria es la billetera personal del usuario. El usuario mueve activos a ella; los activos que contiene pueden moverse según reglas que el usuario define y pueden pasar a un beneficiario designado. Los activos de la billetera personal no se ven afectados. <sup>[27]</sup>
+Cuenta inteligente es la forma en que funciona la ejecución pagada del asistente. Es un contrato inteligente separado, uno por usuario, cuya propietaria es la billetera personal del usuario. El usuario mueve dinero a ella; dentro de ella, el asistente puede actuar según reglas y topes que el titular firmó, y la cuenta puede pasar a un beneficiario designado. La billetera personal no se ve afectada. <sup>[18]</sup>
 
 | Incluye | Lo que obtiene el usuario |
 | --- | --- |
-| Pagos y transferencias automáticos | Envíos diarios, semanales, quincenales o mensuales a usuarios de Confío y pagos a un destino bancario guardado (CLABE, Pix, Pago Móvil; los pagos por Bre-B en Colombia están pausados). |
+| Confío IA+ | El asistente ejecuta sobre la cuenta: compras en tiendas dentro del tope de compras, operaciones automáticas dentro del tope semanal, los cambios de reglas que pide el titular, una distribución objetivo de la inversión que se mantiene con nuevas compras, alertas y una revisión mensual. |
+| Pagos automáticos | Envíos diarios, semanales, quincenales o mensuales a usuarios de Confío y pagos a un destino CLABE, Pix o Pago Móvil guardado. |
 | Inversión automática | Compras periódicas de acciones, bitcoin y oro. |
-| Confío IA+ | El asistente ejecuta sobre la cuenta del titular: propone los cambios de reglas que el titular pide, mantiene una distribución objetivo con nuevas compras, configura alertas, redacta una revisión mensual, hace operaciones automáticas dentro del tope semanal y compra en tiendas dentro del tope de compras. |
-| Beneficiario (*Herencia Digital*) | Un beneficiario verificado por Didit puede tomar la titularidad tras un período de impugnación (por defecto 180 días, seleccionable entre 90 y 1,825) durante el cual cualquier acción firmada por el titular cancela el reclamo. |
+| Beneficiario (*Herencia Digital*) | Un beneficiario verificado por Didit puede tomar la titularidad tras un período de impugnación (por defecto 180 días, entre 90 y 1,825) durante el cual cualquier acción firmada por el titular cancela el reclamo. |
 
-**Precio:** US$149.99 al año (preseleccionado) o US$14.99 al mes, un solo nivel, sin reembolsos. La tarifa se cobra desde dentro de la cuenta: primero de los dólares y luego, tras los avisos, mediante la venta forzosa de otros activos por el monto de la tarifa de un período. La comisión de conversión del 0.9% no cambia y no se exime para los suscriptores. <sup>[27]</sup>
+**Precio:** US$149.99 al año (preseleccionado) o US$14.99 al mes, un solo nivel, sin reembolsos, cobrado desde dentro de la cuenta (primero de los dólares y luego, tras los avisos, mediante una venta forzosa por el monto de la tarifa de un período). La comisión de conversión del 0.9% no se exime. <sup>[18]</sup>
 
-### 4.2 Diseño del contrato
+### 5.2 Ejecución automática (activa desde el 25 de noviembre de 2026)
 
-- **Las cuentas son inmutables.** Cada cuenta es un clon EIP-1167 sin función de actualización, sin `DELEGATECALL` y sin `SELFDESTRUCT`. Cada límite del que depende la cuenta (tarifa máxima, mínimos de aviso, márgenes del período de impugnación) es una constante de la cuenta, y los valores leídos de la factory se acotan, de modo que una actualización de la factory no puede ampliarlos. `withdraw`, `withdrawAll`, `cancelClaim` y las funciones de reclamo funcionan aunque fallen todas las llamadas a la factory.
-- **Factory por generación.** La factory UUPS, cuyo propietario es el Safe de 3 de 5, guarda la configuración global y crea una cuenta vigente por titular. Desde el 25 de noviembre de 2026 registra una implementación por generación: las cuentas v1 existentes conservan su bytecode, las cuentas nuevas usan `ConfioSmartAccountV2`, y pasar a v2 es un `migrate()` opcional que el titular firma en un solo lote.
-- **Novedades de v2.** Tipos de regla Trade y Purchase, `relayTrade` y `relayPurchase` exclusivos del relayer, un balde con fugas por regla, un intervalo mínimo entre operaciones retransmitidas, bandas de feed de precios y el límite de comisión descrito en la sección 3.4.
-- **Compras.** Una compra en tienda la retira `ConfioPurchaseSpender`: la propia verificación de reglas de la cuenta envía exactamente el USDT aprobado por la salida normal del 0.9%, y la misma transacción lo reenvía íntegro al depósito puente de ese pago; nada queda en el spender. Las compras en Comprar desde el chat entran al escrow de Comprar mediante `depositFrom`, que registra al titular como comprador y reembolsa a la cuenta que pagó.
+Las operaciones desde el chat en acciones, oro y bitcoin, las compras en Comprar y las compras en tiendas pueden ejecutarse desde la cuenta sin una firma por acción:
 
-### 4.3 El supuesto de confianza, dicho con claridad
+- **Topes firmados una sola vez con Face.** Un tope semanal de operaciones (por ejemplo US$250, 1,000 o 2,500) en el que cuentan tanto las compras como las ventas, que funciona como un balde con fugas (*leaky bucket*): como máximo un tope en cualquier instante y uno por semana en promedio (poco menos de dos dentro de una misma semana). Las compras en tiendas tienen su propio tope.
+- **Los fondos se quedan en la cuenta.** Los intercambios deben mantenerse dentro del 1.5% de una fuente de precios de Chainlink, la comisión de acciones está acotada en 90 puntos básicos y las ventas deben devolver su valor a la cuenta dentro de esa banda.
+- **Alertas e interruptor de emergencia.** Cada operación automática notifica al titular; una que no tenga detrás una propuesta del chat genera una alerta de seguridad. El Safe puede detener todas las vías automáticas a la vez (`tradePaused`).
+- **Resultados en el chat.** El resultado (qué se compró o vendió y por cuánto) se publica en la conversación en el idioma de la persona y se muestra en la tarjeta de la operación. La operación cuenta en el portafolio de la persona junto con las tenencias de la billetera personal, y se puede compartir en Comunidad como cualquier operación firmada, con su resultado frente al costo propio de la cuenta.
 
-Las operaciones y compras automáticas confían en `ConfioStockRouter`, `ConfioSwapRouter` y `ConfioMarketEscrow`, que el Safe puede actualizar, del mismo modo que las reglas de compra v1 ya confían en los routers. Una clave de relayer comprometida, por sí sola, no puede sacar valor de una cuenta. Una clave de relayer comprometida junto con una actualización maliciosa del router de acciones por parte del Safe sí podría vender acciones a un precio falsificado, porque la cuenta no puede verificar por sí misma la firma de cotización de Ondo. Una clave de operador de compras comprometida queda acotada por el tope de compras firmado por cada titular (en el peor caso, cerca del doble del tope alrededor del cambio de período), la lista de spenders permitidos del Safe y su pausa de tarjeta. El firmante de pedidos del escrow de Comprar tiene su propia clave, separada de la del árbitro y la del relayer.
+### 5.3 Diseño del contrato y supuesto de confianza
 
-Los cambios de v2 recibieron una revisión independiente interna el 25 de noviembre de 2026, antes de su puesta en marcha. Sus hallazgos se corrigieron y cada prueba de concepto se conserva como prueba de regresión en Foundry que comprueba que el ataque ya falla; entre ellas, las ventas ahora cuentan en el tope al valor del feed, y los dólares recibidos por una venta de acciones se ajustan al valor de la cotización incluso si se reemplazara el router. No fue una auditoría externa realizada por una firma de seguridad. <sup>[27]</sup>
+- **Cuentas inmutables.** Cada cuenta es un clon EIP-1167 sin función de actualización, sin `DELEGATECALL` y sin `SELFDESTRUCT`. Sus límites son constantes; los valores leídos de la factory se acotan; `withdraw`, `withdrawAll`, `cancelClaim` y las funciones de reclamo funcionan aunque fallen todas las llamadas a la factory.
+- **Factory por generación.** La factory UUPS, cuyo propietario es el Safe de 3 de 5, crea una cuenta vigente por titular. Desde el 25 de noviembre de 2026 registra una implementación por generación: las cuentas v1 conservan su bytecode, las cuentas nuevas usan `ConfioSmartAccountV2` (reglas Trade y Purchase, `relayTrade` y `relayPurchase` exclusivos del relayer, baldes por regla, bandas de precio), y pasar a v2 es un `migrate()` opcional firmado por el titular.
+- **Compras.** `ConfioPurchaseSpender` retira exactamente el USDT aprobado por la salida normal del 0.9% y, en la misma transacción, lo reenvía íntegro al depósito puente de ese pago; nada queda en él. Las compras en Comprar entran al escrow mediante `depositFrom`, que registra al titular como comprador y reembolsa a la cuenta que pagó.
 
-## 5. Por qué se puede confiar en que una IA pague: la base de BNB Smart Chain
+Las acciones automáticas confían en `ConfioStockRouter`, `ConfioSwapRouter` y `ConfioMarketEscrow`, que el Safe puede actualizar. Una clave de relayer comprometida, por sí sola, no puede sacar valor de una cuenta. Una clave de relayer comprometida junto con una actualización maliciosa del router de acciones por parte del Safe sí podría vender acciones a un precio falsificado, porque la cuenta no puede verificar por sí misma la firma de cotización de Ondo. Una clave de operador de compras comprometida queda acotada por el tope de compras de cada titular (en el peor caso, cerca del doble del tope alrededor del cambio de período), la lista de spenders permitidos del Safe y su pausa de tarjeta. El firmante de pedidos del escrow tiene su propia clave, separada de la del árbitro y la del relayer.
 
-Un asistente es tan confiable como el sistema de dinero que tiene debajo. La base de Confío se construyó para que el asistente nunca necesite custodia: la clave del usuario permanece en su dispositivo, los activos viven en contratos con reglas públicas y el servidor solo puede preparar llamadas que el usuario —o la propia cuenta del usuario, dentro de límites firmados— ejecuta.
+Los cambios de v2 recibieron una revisión independiente interna el 25 de noviembre de 2026, antes de su puesta en marcha; sus hallazgos se corrigieron y cada prueba de concepto se conserva como prueba de regresión en Foundry que comprueba que el ataque ya falla; por ejemplo, las ventas ahora cuentan en el tope al valor de la fuente de precios, y lo obtenido por una venta de acciones debe corresponder al valor de la cotización incluso si se reemplazara el router. No fue una auditoría externa realizada por una firma de seguridad. <sup>[18]</sup>
 
-| Acción del usuario | Activo o contrato | Qué ocurre on-chain |
-| --- | --- | --- |
-| Agregar dólares | cUSD o cUSD+ | Un proveedor fiat o una billetera externa entrega BSC-USDT. La app lo convierte automáticamente en cUSD para un usuario no elegible según Ondo o en cUSD+ para un usuario elegible, cobrando la comisión de conversión de Confío del 0.9%. |
-| Ahorrar | Frontera del wrapper cUSD↔cUSD+ | Los usuarios elegibles pueden pasar cUSD a cUSD+ respaldado por USDY sin comisión de conversión; la conversión interna inversa también es gratuita. Ambas rutas requieren una transacción patrocinada por Confío. |
-| Enviar | cUSD o cUSD+ | Las transferencias entre el mismo activo se mantienen en el activo del remitente; las transferencias entre amigos con distinta elegibilidad se convierten internamente sin comisión. |
-| Pagar por un canal local | cUSD o cUSD+ → USDT → moneda local | El dólar sale por la salida del 0.9% de cUSD y un proveedor paga el monto local exacto. |
-| Pagar a un comercio | cUSD+, cUSD o $CONFIO | El contrato de pagos le paga al comercio, aplica la comisión independiente de Pay del 0.9% y registra on-chain las comisiones acumuladas. |
-| Pagar nóminas | cUSD+ o cUSD | Las empresas fondean un escrow separado por activo; delegados autorizados firman los pagos. |
-| Operar acciones, oro o bitcoin | Router de acciones o router de swaps | Una transacción patrocinada liquida y entrega el activo directamente a la billetera del usuario o a su Cuenta inteligente; las ventas vuelven al dólar del usuario. |
-| Comprar en Comprar | Escrow de Comprar | Los dólares del comprador se retienen por pedido hasta que se confirma la entrega o se resuelve una disputa. |
-| Automatizar o delegar | Cuenta inteligente | El contrato de la cuenta aplica las reglas y los topes que el titular firmó. |
+## 6. Por qué se puede confiar en que una IA pague: la base
 
-### 5.1 Despliegues públicos en BNB Smart Chain
+Un asistente es tan confiable como el sistema de dinero que tiene debajo. El de Confío se construyó para que el asistente nunca necesite custodia: la clave se queda en el dispositivo de la persona, los saldos viven en contratos con reglas públicas en BNB Smart Chain, las comisiones de red están patrocinadas y el servidor solo puede preparar llamadas que la persona —o la propia cuenta de la persona, dentro de límites firmados— ejecuta.
 
-Todos los contratos que se listan abajo están activos en la red principal de BNB Smart Chain y tienen su código fuente verificado en BscScan (los proxies están vinculados a sus implementaciones verificadas). Los contratos actualizables son propiedad del Safe de 3 de 5 `0xF29A418744E793973BF4eEc676F8a30B2793b623`.
+### 6.1 Despliegues públicos en BNB Smart Chain
+
+Todos los contratos que se listan abajo están activos en la red principal de BNB Smart Chain y tienen su código fuente verificado en BscScan (los proxies están vinculados a sus implementaciones verificadas). Los contratos actualizables son propiedad del Safe de 3 de 5 `0xF29A418744E793973BF4eEc676F8a30B2793b623`. <sup>[19, 20]</sup>
 
 | Contrato | Dirección |
 | --- | --- |
@@ -248,340 +219,241 @@ Todos los contratos que se listan abajo están activos en la red principal de BN
 | Contrato de pagos a comercios | [`0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA`](https://bscscan.com/address/0x942BF5F3C9079Ab29492324B9F1E501Db5B830bA#code) |
 | Vault de nóminas | [`0x851e1a56De5c0ADBB75e904B2E7325e132692027`](https://bscscan.com/address/0x851e1a56De5c0ADBB75e904B2E7325e132692027#code) |
 
-**Cambios desde la versión 4.4.** Todos realizados a través del Safe y registrados en los registros públicos de despliegue: <sup>[8, 27]</sup>
+**Cambios desde la versión 4.4**, todos realizados a través del Safe y anotados en los registros públicos de despliegue: <sup>[18, 19]</sup>
 
-- 9 de noviembre de 2026: el router v3 de Ondo Stocks eliminó la vía transitoria de comisión del 0.30% (sección 7.4).
+- 9 de noviembre de 2026: el router v3 de Ondo Stocks eliminó la vía transitoria de comisión del 0.30%.
 - 21–22 de noviembre de 2026: se desplegaron la factory de Cuenta inteligente, la implementación de cuenta v1 y el recaudador de tarifas; se actualizó cUSD para que las cuentas de la factory puedan activar la comisión por referido; se habilitó la herencia (en un solo sentido).
-- 25 de noviembre de 2026: se desplegó `ConfioSmartAccountV2`; se actualizó el proxy de la factory (implementación por generación, `migrate()`, `tradePaused`); se actualizó el proxy del escrow de Comprar (`depositFrom` con una firma vinculada al pagador, reembolsos a la cuenta que pagó; el firmante de pedidos pasó a tener su propia clave, mientras que el árbitro sigue siendo el patrocinador); se desplegó `ConfioPurchaseSpender` y se agregó a la lista permitida; se reanudaron las operaciones automáticas tras una migración canario de una cuenta del fundador.
+- 25 de noviembre de 2026: se desplegó `ConfioSmartAccountV2`; se actualizó el proxy de la factory (implementación por generación, `migrate()`, `tradePaused`); se actualizó el proxy del escrow de Comprar (`depositFrom` con una firma vinculada al pagador, reembolsos a la cuenta que pagó; el firmante de pedidos pasó a tener su propia clave, y el árbitro sigue siendo el patrocinador); se desplegó `ConfioPurchaseSpender` y se agregó a la lista permitida; se reanudaron las operaciones automáticas tras una migración de prueba (canario) de una cuenta del fundador.
 
-### 5.2 Por qué importa una sola red
+### 6.2 El saldo en dólares: cUSD y cUSD+
 
-- no se necesita ningún puente entre el saldo principal en dólares, el ahorro, los pagos, las nóminas, Cuenta inteligente, la inversión y $CONFIO;
-- una sola dirección EVM puede recibir el fondeo del usuario, los saldos de los productos y el token del ecosistema; y
-- un solo sistema de transacciones patrocinadas puede pagar las comisiones de red en todo el producto, de modo que el asistente nunca tiene que pedirle a una persona que compre gas.
+Una persona tiene un solo dólar Confío, que se muestra como un solo saldo. **cUSD** es el dólar universal para pagos, respaldado 1:1 por USDT en un vault actualizable y único perímetro externo de comisión de conversión. **cUSD+** es una participación acumulativa en dólares respaldada por USDY, para usuarios elegibles según Ondo. <sup>[22, 24]</sup>
 
-Los usuarios siguen sujetos a la elegibilidad de cada producto y a las reglas de cada proveedor. Una cadena unificada no hace que todos los activos sean económica o jurídicamente idénticos.
+- **Entrada y salida.** El USDT que llega desde una rampa o una billetera externa se convierte en cUSD o cUSD+ con una comisión del 0.9%; salir a USDT —incluido todo pago por canal local— paga 0.9%. La comisión está limitada en el código a 90 puntos básicos. La acuñación requiere un patrocinador autorizado; la redención con comisión no requiere permisos, de modo que un titular puede salir sin el patrocinador de Confío. La conversión interna cUSD↔cUSD+ no tiene comisión porque el valor permanece dentro del sistema.
+- **Participación en el rendimiento.** El 85% de la apreciación positiva del precio de referencia de USDY se acumula para los titulares de cUSD+ y el 15% para Confío como excedente del vault. El rendimiento es variable y no está garantizado.
+- **Respaldo y oráculo.** Las consultas públicas muestran las obligaciones, el ratio de respaldo y el excedente; la contabilidad redondea a favor del respaldo; el USDY de respaldo no se puede retirar. Si el oráculo de USDY se mueve más allá de un umbral de protección, las rutas que mueven valor se detienen hasta que la gobernanza multiparte registre una decisión vinculada a evidencia.
+- **Permisos.** El comprador autorizado de USDY es el vault cUSD+, no el usuario; la acuñación está sujeta a la elegibilidad de Ondo. <sup>[21, 23]</sup>
 
-### 5.3 Por qué BNB Smart Chain
+### 6.3 Pagos, nóminas y Comprar
 
-**El producto siguió la infraestructura de Ondo.** cUSD+ se diseñó en torno a USDY, y Ondo desplegó en BNB Smart Chain el token USDY de producción, InstantManager, el oráculo de precios, la ruta de suscripción y redención en USDT y la infraestructura de liquidación de Global Markets. Mantener el sistema de productos de Confío junto a esa infraestructura ofrece rutas directas al ahorro respaldado por USDY y al acceso elegible a Ondo Stocks. <sup>[7, 8, 10, 18]</sup>
+- **Transferencias.** El servidor prepara las llamadas exactas, el usuario firma y Confío patrocina el gas; no hay comisión de plataforma, y una conversión interna sin comisión conecta a destinatarios de cUSD y de cUSD+.
+- **Pagos a comercios.** El contrato de pagos le paga al comercio el neto de la comisión de Pay del 0.9%; una autorización del backend de corta vigencia fija las condiciones exactas; exactamente un pago puede liquidar una factura, en una sola red. El USDT sin convertir no está autorizado, así que Pay no puede eludir la comisión de conversión.
+- **Nóminas.** Las empresas fondean un escrow separado por activo y autorizan a delegados para firmar pagos; la contabilidad de comisiones se mantiene separada del principal.
+- **Comprar.** Un mercado dentro de la app para bienes físicos, en piloto en Bolivia, donde compradores y vendedores pasan la verificación de Didit. El `ConfioMarketEscrow` compartido retiene los dólares del comprador por pedido; el comprador puede confirmar la entrega, abrir una disputa o recuperar los fondos tras un plazo; un árbitro resuelve las disputas; los vendedores pagan una comisión del 8%. El piloto tiene muy pocas tiendas y pedidos.
 
-**Economía y liquidez a escala de consumo.** BNB Smart Chain aporta amplia liquidez de USDT, bajos costos de transacción adecuados para actividad de consumo patrocinada, billeteras, proveedores RPC, exploradores y herramientas de desarrollo maduros, y un mismo entorno para todos los contratos de Confío. <sup>[5, 6, 12]</sup> El tamaño del ecosistema de una cadena no crea demanda de producto por sí solo.
+### 6.4 Inversión
 
-**Contrapartidas.** BNB Smart Chain tiene características de descentralización y operación diferentes de las de otras redes. Siguen siendo posibles interrupciones de la red, coordinación de validadores, congestión, cambios en el precio del gas, fallas de RPC o cambios de políticas a nivel del ecosistema. Confío mitiga estos riesgos con transacciones patrocinadas, múltiples rutas RPC, salidas de emergencia explícitas, propiedad no custodial y estado público de los contratos, pero no puede eliminar el riesgo de la red base.
+- **Ondo Stocks.** Mediante Ondo Global Markets, a través del `ConfioStockRouter` UUPS (propiedad del Safe). Una compra sale de cUSD+ por la salida ordinaria del 0.9% y entrega el token de la acción a la billetera o a la Cuenta inteligente; una venta devuelve lo obtenido por la entrada del 0.9%. El router no cobra comisión propia; desde la v3 no tiene ninguna otra vía de comisión y devuelve el excedente de la liquidación. Sujeto a la elegibilidad de Ondo y a la disponibilidad de mercados. <sup>[20, 25]</sup>
+- **Oro y Bitcoin.** `ConfioSwapRouter` compra y vende tokens del catálogo como BTCB y XAUt en PancakeSwap con la misma salida y entrada del 0.9%, sin comisión propia, sin guardar nada en reposo, con un destinatario fijo y solo con operaciones del relay dentro de un límite de deslizamiento. No se ofrece en iOS; está bloqueado en algunos países. <sup>[26]</sup>
+- **Futuros.** Futuros perpetuos en Hyperliquid para usuarios elegibles de Android, conectados mediante el puente de Relay, con la comisión del 0.9% en cada apertura, cierre o aporte de margen y sin comisión de builder; la app verifica cada orden de puente y cada firma. No se ofrece en iOS; está bloqueado en Estados Unidos, Canadá, el Reino Unido y Bélgica. Con apalancamiento se puede perder todo el margen. <sup>[15]</sup>
 
-## 6. cUSD y cUSD+: dinero y ahorro
+### 6.5 $CONFIO
 
-cUSD es el dólar universal para pagos, respaldado 1:1 por USDT en su vault UUPS desplegado. cUSD+ es una participación de ahorro acumulativa denominada en dólares, respaldada por USDY en el proxy cUSD+ existente y actualizado. La app selecciona cUSD para los usuarios que no son elegibles para exposición a USDY y cUSD+ para los usuarios elegibles, y cada usuario tiene uno u otro, nunca ambos, presentado como un único saldo en dólares.
+$CONFIO es el token comunitario. No es una stablecoin y no respalda ningún saldo en dólares. El contrato BEP-20 tiene una oferta fija de 1,000,000,000 CONFIO, sin acuñación posterior al despliegue, sin pausa global y sin vía de actualización; la oferta solo puede disminuir mediante quemas voluntarias. La tesorería multiparte puede congelar una dirección durante un incidente de seguridad grave y, tras una espera pública de 7 días, devolver un saldo congelado a la parte a la que se le robó. El nombre on-chain es el ASCII “Confio”; usa únicamente la dirección canónica indicada arriba. <sup>[20]</sup>
 
-### 6.1 Flujo de depósito y redención
+El vault de preventa de reemplazo acepta cUSD con una curva lineal por tramos e inmutable: US$0.20→0.30 para los primeros 4 millones de CONFIO, US$0.30→0.70 hasta 24 millones y US$0.70→1.30 hasta 74 millones. Cobra la integral bajo la curva, se inicializó con el historial de compras previo, está fondeado para los reclamos migrados y no tiene ninguna función para cambiar precios. Las recompensas se acumulan en la base de datos de Confío al precio vigente de la curva y se pueden reclamar mediante firmas EIP-712 acumulativas después de la llamada irreversible a `unlockClaims()` en el lanzamiento en el DEX. El RewardVault está controlado por la tesorería: su propietario puede rotar el firmante, pausar los reclamos y retirar fondos. La asignación, el vesting y la concentración se divulgan en el documento de tokenomics separado.
 
-| Entrada | Salida |
-| --- | --- |
-| 1. El USDT llega a la dirección BSC del usuario desde una rampa o una billetera externa. | 1. El usuario solicita un retiro en moneda local, un pago por canal local o un envío de USDT al exterior. |
-| 2. Un lote patrocinado autorizado por el usuario llama a la ruta de acuñación con comisión que corresponda. | 2. Se quema cUSD directamente, o se quema cUSD+ y se redime USDY mediante InstantManager. |
-| 3. El perímetro de comisiones de cUSD retiene el 0.9% y acuña cUSD, o devuelve el USDT neto a cUSD+ para suscribir USDY. | 3. El perímetro de comisiones de cUSD retiene el 0.9% del valor bruto de salida. |
-| 4. El usuario recibe cUSD si no es elegible según Ondo, o cUSD+ si lo es. | 4. El USDT neto va a la billetera externa o a la dirección de la rampa designada. |
+### 6.6 Por qué BNB Smart Chain
 
-El vault cUSD es el único perímetro externo de comisión de conversión. Su comisión está limitada en el código a 90 puntos básicos. La acuñación siempre requiere un patrocinador autorizado; la redención sin comisión está restringida a la frontera de ahorro de cUSD+; la redención ordinaria con comisión sigue sin requerir permisos, para que un titular pueda salir sin el patrocinador de Confío. cUSD+ sigue el mismo principio de salida.
+El producto siguió a Ondo: USDY, InstantManager, el oráculo de precios y la liquidación de Global Markets están desplegados en BNB Smart Chain, y mantener todos los contratos de Confío junto a ellos significa que no hay ningún puente entre el saldo, los pagos, Cuenta inteligente, la inversión y $CONFIO; que hay una sola dirección para todo; y que hay un solo sistema de transacciones patrocinadas, de modo que el asistente nunca tiene que pedirle a nadie que compre gas. BNB Smart Chain también ofrece amplia liquidez de USDT y comisiones bajas para la actividad de consumo patrocinada. <sup>[21, 25, 27–29]</sup> Tiene sus propias contrapartidas en materia de descentralización: una interrupción de la red, congestión, fallas de RPC o cambios de políticas del ecosistema podrían afectar a todo el producto, riesgos que mitigan, sin eliminarlos, múltiples rutas RPC y una salida de emergencia.
 
-El comprador autorizado de USDY es el vault cUSD+, no el usuario final. Los usuarios tienen cUSD+, no USDY directamente. La conversión interna cUSD↔cUSD+ no tiene comisión solo porque el valor permanece dentro del sistema de dólares de Confío; no crea una ruta externa gratuita hacia USDT.
+## 7. Billetera, seguridad y gobernanza
 
-### 6.2 Valor acumulativo y participación en el rendimiento
+### 7.1 Billetera no custodial
 
-El precio de referencia de USDY está diseñado para apreciarse a medida que se acumula el rendimiento subyacente. En cada interacción pertinente, el vault actualiza el valor de referencia de cUSD+: el 85% de la apreciación positiva del precio de referencia de USDY incrementa el valor de referencia para el titular de cUSD+, y el 15% se convierte en excedente del vault disponible para Confío. El número de participaciones no aumenta; lo que sube es el valor de referencia en dólares por participación. El rendimiento es variable, puede cambiar y no está garantizado. <sup>[7, 11]</sup>
-
-### 6.3 Respaldo y controles del oráculo
-
-El vault expone consultas públicas de obligaciones totales, ratio de respaldo y excedente. Su contabilidad redondea a favor del respaldo y restringe el cobro de comisiones al excedente demostrable. El propietario no puede retirar el USDY de respaldo. Si el oráculo de USDY baja o se mueve más allá de un umbral de protección configurado, las rutas que mueven valor se detienen, y la gobernanza multiparte debe registrar una decisión vinculada a evidencia antes de que se reanuden. Esto reduce el riesgo de precios erróneos automáticos, pero no puede eliminar los riesgos de oráculo, emisor o gobernanza.
-
-## 7. Pagos, nóminas, inversión y Comprar
-
-### 7.1 Transferencias entre personas
-
-El servidor prepara las llamadas exactas, el usuario las firma y Confío patrocina el gas de la red. cUSD+ se transfiere directamente a un destinatario elegible, cUSD a un destinatario que debe tener cUSD, y una conversión sin comisión autorizada por el patrocinador cruza la frontera de elegibilidad. Confío no cobra comisión de plataforma en las transferencias entre personas; la comisión de conversión del 0.9% solo se aplica cuando el valor entra desde USDT o sale hacia USDT.
-
-### 7.2 Pagos a comercios
-
-Un comercio cobra en **dólares Confío** o en **$CONFIO**. El contrato de pagos calcula la comisión comercial del 0.9%, le paga directamente al comercio el monto neto y acumula solo las comisiones devengadas. El backend de Confío firma una autorización de corta vigencia sobre las condiciones exactas del pago; exactamente un pago puede liquidar una factura, y cada factura registra la única red permitida para liquidarla. El USDT sin convertir sigue siendo un token heredado de la lista permitida que el backend de producción no autoriza, de modo que Pay no puede convertirse en una ruta para eludir la comisión de conversión.
-
-### 7.3 Nóminas y pagos masivos
-
-Las empresas pueden mantener capital de trabajo en cUSD+ o cUSD en un escrow separado por activo y autorizar delegados para firmar pagos específicos. Los destinatarios elegibles pueden recibir cUSD+; los no elegibles reciben cUSD mediante la frontera de conversión interna sin comisión. La contabilidad de comisiones de nómina se mantiene separada del principal de la empresa.
-
-### 7.4 Ondo Stocks
-
-Confío integra el acceso elegible a Ondo Stocks mediante Ondo Global Markets en BNB Smart Chain a través del proxy UUPS `ConfioStockRouter`, cuya autoridad de actualización la tiene el Safe de 3 de 5 que es su propietario. Una compra redime el cUSD+ autorizado a USDT por la salida ordinaria de cUSD+ (donde cUSD cobra la comisión del 0.9%), liquida la compra certificada y entrega el token de la acción directamente a la billetera del usuario o a su Cuenta inteligente; una venta devuelve los ingresos efectivos en USDT al dólar del usuario por su entrada ordinaria. El router no cobra comisión propia. Desde el router v3 (9 de noviembre de 2026) no tiene ninguna otra vía de comisión, una intención firmada con una comisión menor que la vigente de cUSD se revierte, y cualquier exceso de USDT de la liquidación se devuelve en lugar de retenerse. El acceso sigue sujeto a la elegibilidad de Ondo, la jurisdicción, la disponibilidad de mercados y los términos del proveedor. <sup>[17, 18]</sup>
-
-### 7.5 Oro y Bitcoin
-
-`ConfioSwapRouter` permite a un usuario comprar y vender tokens del catálogo —incluidos bitcoin (BTCB) y oro (XAUt)— con cualquiera de los dos dólares Confío dentro de un lote patrocinado. Las compras salen por la salida del 0.9% de cUSD e intercambian todo el USDT neto en PancakeSwap; las ventas vuelven a intercambiar a USDT y reingresan por la entrada del 0.9%, y el resultado se acuña directamente al usuario. El router no tiene comisión propia, no guarda nada en reposo, construye él mismo la llamada de swap con un destinatario fijo y solo acepta operaciones originadas por el relay de Confío dentro de un deslizamiento máximo respecto de una recotización en vivo. Oro y Bitcoin no se ofrece en la versión para iOS y está bloqueado en ciertos países. <sup>[30]</sup>
-
-### 7.6 Futuros
-
-Futuros da a los usuarios elegibles de Android acceso a futuros perpetuos en Hyperliquid. El dinero se mueve entre el dólar del usuario y Hyperliquid mediante el puente de Relay; la comisión de perímetro del 0.9% se aplica en cada apertura, cierre o aporte de margen, y Confío no cobra una comisión de builder aparte. La app verifica cada orden de puente y cada firma que se le pide hacer, en lugar de confiar en el servidor. Futuros no se ofrece en la versión para iOS, está bloqueado en Estados Unidos, Canadá, el Reino Unido y Bélgica, y conlleva los altos riesgos del trading apalancado, incluida la pérdida rápida y total del margen. <sup>[3]</sup>
-
-### 7.7 Marketplace Comprar
-
-Comprar es un marketplace dentro de la app para bienes físicos, que empieza por Bolivia, en el que tanto compradores como vendedores pasan la verificación de identidad de Didit. Las compras se liquidan mediante el `ConfioMarketEscrow` compartido: los dólares del comprador se retienen por pedido; el vendedor tiene un plazo para enviar; el comprador puede confirmar la entrega, abrir una disputa o recuperar los fondos cuando vence un plazo; las disputas las resuelve un árbitro. Los vendedores pagan una comisión de marketplace del 8%. Comprar está en un piloto temprano con muy pocas tiendas y pedidos. <sup>[3]</sup>
-
-## 8. $CONFIO en BNB Smart Chain
-
-$CONFIO es el token comunitario y del ecosistema de Confío. No es una stablecoin, no representa un depósito bancario y no respalda USDT, cUSD+ ni USDY.
-
-### 8.1 Token de oferta fija
-
-El contrato actual del token en BNB Smart Chain tiene una oferta inicial fija de 1,000,000,000 CONFIO. El contrato no tiene función de acuñación posterior al despliegue, ni pausa global, ni vía de actualización; toda la oferta inicial se creó una sola vez en el despliegue, a favor de la tesorería multiparte. La oferta total puede disminuir mediante quema voluntaria, pero no puede aumentar. La tesorería multiparte puede congelar una dirección durante un incidente de seguridad grave y, tras una espera pública de 7 días, devolver un saldo congelado a la parte a la que se le robó; esto no crea tokens. <sup>[17]</sup>
-
-**Contrato BSC canónico:** [`0xF5765933764562A51e179F6AF2b19b7a3d506101`](https://bscscan.com/token/0xF5765933764562A51e179F6AF2b19b7a3d506101)
-
-El nombre on-chain del token es deliberadamente el ASCII **“Confio”**, mientras que **“Confío”**, con tilde, sigue siendo el nombre del producto y de la marca. Los lectores deben usar únicamente la dirección canónica anterior. La asignación, la propiedad del fundador, el vesting, los derechos de preventa y los riesgos de concentración se divulgan en el documento autoritativo de tokenomics en inglés, que es independiente.
-
-### 8.2 Preventa on-chain
-
-El vault BSC de preventa de reemplazo acepta cUSD y calcula el precio de las compras con una curva lineal por tramos, inmutable y vinculada a los tokens vendidos acumulados:
-
-| Asignación acumulada de preventa | Precio de la curva |
-| --- | --- |
-| 0–4 millones de CONFIO | US$0.20 → US$0.30 |
-| 4–24 millones de CONFIO | US$0.30 → US$0.70 |
-| 24–74 millones de CONFIO | US$0.70 → US$1.30 |
-
-Los tramos de la curva no tienen ninguna función administrativa para cambiar precios. El contrato cobra la integral bajo la curva, registra la asignación, impide descuentos por dividir compras mediante su matemática de precios y abre los reclamos solo cuando hay suficiente fondeo de CONFIO. Se inicializó con el historial exacto de compras previo al despliegue y está fondeado para la obligación de reclamos migrada; el vault reemplazado está pausado. La participación sigue sujeta a elegibilidad, controles geográficos y los términos de la preventa. Los CONFIO de la preventa no pueden mantenerse en una Cuenta inteligente. <sup>[17]</sup>
-
-### 8.3 Recompensas y reclamos bloqueados hasta el DEX
-
-La acumulación de recompensas se registra en la base de datos de Confío y se convierte a CONFIO al precio vigente de la curva de preventa. Al reclamar, el firmante del backend emite una autorización EIP-712 de corta vigencia por el monto acumulado ganado por el usuario; el RewardVault paga solo la diferencia respecto de lo ya reclamado. Los reclamos están bloqueados hasta que la gobernanza llame a la función irreversible `unlockClaims()` en el lanzamiento en el DEX.
-
-> **Pool de recompensas controlado por la tesorería**
->
-> El RewardVault no es un escrow sin necesidad de confianza. Su propietario de gobernanza puede rotar el firmante, pausar los reclamos y retirar fondos, incluso después del desbloqueo en el DEX. Los usuarios dependen de que la tesorería concilie las obligaciones de la base de datos, fondee el pool y mantenga disponibles los reclamos válidos. Los plazos cortos de las firmas y un tope diario de reclamos limitan la exposición del firmante, pero no eliminan la confianza en la tesorería.
-
-## 9. Billetera, seguridad y arquitectura de código abierto
-
-### 9.1 Modelo de billetera no custodial
-
-Confío genera la clave EVM del usuario en su dispositivo. El servidor de Confío no conserva esa clave privada. El material de recuperación cifrado está diseñado para la cuenta personal en la nube del usuario, de modo que la recuperación no requiere que Confío mantenga un repositorio central de claves de usuarios. <sup>[3, 4]</sup>
+Confío genera la clave EVM del usuario en su dispositivo; el servidor nunca la conserva. El material de recuperación cifrado está diseñado para la cuenta personal en la nube del usuario, de modo que no existe un repositorio central de claves de usuarios. <sup>[15, 30]</sup>
 
 > **Ni siquiera nosotros**
 >
-> Confío nunca conserva la clave de la billetera del usuario, así que ni Confío ni su asistente pueden firmar una transacción ordinaria de la billetera como si fueran ese usuario. Lo que el asistente puede hacer sin una firma por acción se limita a una Cuenta inteligente que el usuario fondeó, bajo reglas y topes que el usuario firmó. Los contratos de producto y los activos emitidos siguen teniendo sus propios controles divulgados de elegibilidad, pausa, congelamiento, actualización o gobernanza. Claves no custodiales no significan productos financieros sin controles.
+> Confío nunca conserva la clave de la billetera del usuario, así que ni Confío ni su asistente pueden firmar una transacción ordinaria de la billetera como si fueran ese usuario. Lo que el asistente puede hacer sin una firma por acción se limita a una Cuenta inteligente que el usuario fondeó, bajo reglas y topes que el usuario firmó. Los contratos de producto siguen teniendo sus propios controles divulgados de elegibilidad, pausa, congelamiento, actualización o gobernanza.
 
-### 9.2 Transacciones patrocinadas
+### 7.2 Transacciones patrocinadas
 
-Los usuarios no necesitan adquirir BNB. Confío utiliza autorizaciones de usuario EIP-7702 y un delegado de lotes desplegado y sin propietario, de modo que el usuario firma las llamadas previstas mientras el patrocinador de Confío paga el gas. Las aprobaciones y las acciones se ejecutan de forma atómica, lo que reduce el riesgo de autorizaciones de gasto permanentes. La política del servidor restringe destinos, selectores, montos, destinatarios, vencimientos y límites diarios antes de transmitir. Las vías alternativas de emergencia y las salidas directas siguen siendo importantes porque el patrocinio es un servicio de la aplicación, no una garantía de la blockchain. <sup>[8, 17]</sup>
+Los usuarios nunca necesitan BNB. Las autorizaciones EIP-7702 y un delegado de lotes sin propietario permiten que el usuario firme las llamadas previstas mientras el patrocinador de Confío paga el gas; las aprobaciones y las acciones se ejecutan de forma atómica. La política del servidor restringe destinos, selectores, montos, destinatarios, vencimientos y límites diarios. Se mantienen las vías alternativas de emergencia y las salidas directas porque el patrocinio es un servicio, no una garantía de la blockchain.
 
-### 9.3 Salvaguardas del asistente en el código
+### 7.3 Salvaguardas del asistente en el código
 
-La seguridad del asistente no descansa en un prompt. Las herramientas de dinero se delimitan por la sesión autenticada, nunca por un identificador de cuenta que aporte el modelo; los empleados de negocios no reciben herramientas de dinero; los montos provienen solo de una pregunta escrita por el código; los beneficiarios se validan con intérpretes específicos de cada canal; las confirmaciones las dibuja la app, no el modelo; la salida de herramientas y el contenido de las páginas se tratan como datos; el gasto, los pasos y el costo de modelo del agente de compras están limitados por el servidor; y los canales de cada país se activan o desactivan con interruptores que el modelo no puede cambiar. Los cambios en el asistente y en el agente de compras se prueban con conversaciones grabadas de varios turnos y con páginas reales de tiendas grabadas.
+La seguridad del asistente no depende de las instrucciones que se le dan al modelo. Las herramientas de dinero se delimitan por la sesión autenticada, nunca por un identificador que aporte el modelo; los empleados de negocios no reciben herramientas de dinero; los montos provienen solo de una pregunta escrita por el código; los beneficiarios se validan con intérpretes específicos de cada canal; las confirmaciones las dibuja la app; la salida de herramientas y el contenido de las páginas son datos; el servidor limita el gasto, los pasos y el costo de modelo del agente de compras; y los canales se activan por país con ajustes que el modelo no puede cambiar. Los cambios se prueban con conversaciones grabadas de varios turnos y con páginas reales de tiendas grabadas.
 
-### 9.4 Código abierto y verificabilidad pública
+### 7.4 Código abierto y capacidad de actualización
 
-La aplicación móvil, el backend, el asistente, el agente de compras, los contratos inteligentes, los registros de despliegue y las pruebas están disponibles públicamente. Los contratos desplegados tienen su código fuente verificado, lo que permite a los revisores comparar el código público con el bytecode activo. La seguridad se busca mediante pruebas unitarias, de fork, de invariantes/fuzz, adversariales y ensayos de actualización; registros públicos de despliegue; gobernanza multiparte; cobro acotado de comisiones y respaldo que no puede retirarse; protecciones de oráculo, pausas, protección contra reutilización y límites de deslizamiento; e indicadores de funcionalidad para el despliegue en producción. Ningún método de revisión elimina el riesgo de los contratos inteligentes ni el riesgo operativo. <sup>[3, 8, 9, 17, 27]</sup>
-
-### 9.5 Actualización y gobernanza
+La app, el backend, el asistente, el agente de compras, los contratos, los registros de despliegue y las pruebas son públicos, y los contratos desplegados tienen su código fuente verificado. La seguridad se apoya en pruebas unitarias, de fork, de invariantes, adversariales y ensayos de actualización; gobernanza multiparte; comisiones acotadas; respaldo que no se puede retirar; protecciones del oráculo; pausas; protección contra reutilización; y despliegue escalonado. Ningún método de revisión elimina el riesgo de los contratos inteligentes ni el riesgo operativo. <sup>[15, 19, 20]</sup>
 
 | Componente | ¿Actualizable? | Por quién |
 | --- | --- | --- |
 | Vaults cUSD y cUSD+ | Sí (UUPS) | Safe de 3 de 5, con implementaciones públicas y verificaciones de disposición de almacenamiento |
-| Router de acciones, router de swaps | Sí (proxies) | Safe de 3 de 5 |
-| Factory de Cuenta inteligente | Sí (UUPS) | Safe de 3 de 5; puede agregar una nueva implementación de cuenta para cuentas nuevas o que migran y pausar las vías automáticas o de tarjeta, pero no puede cambiar una cuenta existente |
-| Cuentas de Cuenta inteligente | No (clones inmutables) | Pasar a una nueva versión es un `migrate()` firmado por el titular |
-| Escrow de Comprar, heartbeat | Sí (UUPS / proxy) | Safe de 3 de 5 |
-| Spender de compras, recaudador de tarifas, delegado de lotes | No | Un nuevo operador implica un nuevo despliegue agregado a la lista permitida por el Safe |
-| Token $CONFIO, curva de precios de la preventa | No | — |
+| Router de acciones, router de swaps, escrow de Comprar, heartbeat | Sí (proxies) | Safe de 3 de 5 |
+| Factory de Cuenta inteligente | Sí (UUPS) | Safe de 3 de 5; puede agregar una implementación para cuentas nuevas o que migran y pausar las vías automáticas o de tarjeta, pero no puede cambiar una cuenta existente |
+| Cuentas de Cuenta inteligente | No (clones inmutables) | Cambiar de versión es un `migrate()` firmado por el titular |
+| Spender de compras, recaudador de tarifas, delegado de lotes, token $CONFIO, curva de la preventa | No | — |
 
-Los vaults siguen siendo actualizables porque cUSD+ depende permanentemente de contratos externos de Ondo que pueden migrar o cambiar, y cUSD es el perímetro de comisiones compartido entre los contratos de producto. La consecuencia aceptada es el supuesto de confianza de la sección 4.3: las acciones automáticas confían en que el Safe no instale un router ni un escrow maliciosos.
+Los vaults siguen siendo actualizables porque cUSD+ depende de contratos externos de Ondo que pueden cambiar y cUSD es el perímetro de comisiones compartido. La consecuencia aceptada es el supuesto de confianza de la sección 5.3.
 
-## 10. Usuarios, distribución y entrada al mercado
-
-### 10.1 Métricas operativas actuales
+## 8. Usuarios y distribución
 
 | Métrica | Instantánea | Fecha | Definición |
 | --- | ---: | --- | --- |
 | Usuarios que completaron el registro | 10,886 | 25 nov 2026 | Cuentas activas, salvo las cuentas de prueba de la plataforma, que terminaron la incorporación con cualquier método de registro (14,440 cuentas registradas). |
 | Dispositivos alcanzables por push | 3,407 | 25 nov 2026 | Dispositivos actualmente accesibles mediante notificaciones push. |
-| Utilizados en los últimos 30 días | 3,402 | 25 nov 2026 | Dispositivos alcanzables por push registrados como usados en los 30 días previos; no se presenta como una cifra estandarizada de MAU. |
+| Usados en los últimos 30 días | 3,402 | 25 nov 2026 | Dispositivos alcanzables por push registrados como usados en los 30 días previos; no es una cifra estandarizada de usuarios activos mensuales. |
 | Usuarios verificados por Didit | 177 | 23 jul 2026 | Usuarios que presentaron un documento de identidad oficial y completaron la prueba de presencia real con selfie en vivo y la coincidencia facial. |
 | Finalización de la verificación de identidad | 61.5% | 23 jul 2026 | Proporción de usuarios que completaron el flujo de Didit entre quienes lo iniciaron. |
 
-Estas métricas internas no están auditadas. Desde finales de octubre de 2026, el registro ya no requiere un número de teléfono, por lo que los usuarios se cuentan por incorporación completada y no por verificación telefónica; la cifra del 23 de julio de 2026 (8,004) se contó por verificación telefónica y no es directamente comparable. Las métricas no implican que todos los usuarios tengan fondos, estén activos, sean elegibles para todos los productos o sean únicos entre todas las mediciones de dispositivos. <sup>[14]</sup>
+Estas métricas internas no están auditadas. Desde finales de octubre de 2026, el registro ya no requiere un número de teléfono, por lo que los usuarios se cuentan por incorporación completada; la cifra del 23 de julio de 2026 (8,004) se contó por verificación telefónica y no es directamente comparable. Las métricas no implican que los usuarios tengan fondos, estén activos o sean elegibles para todos los productos. <sup>[31]</sup>
 
-### 10.2 La confianza es el canal de distribución
+La audiencia en español liderada por el fundador de Confío suma aproximadamente 480,000 personas entre plataformas sociales, con un gasto en medios pagados prácticamente nulo hasta la fecha. <sup>[32]</sup> Ese canal es la forma de explicar un comportamiento nuevo —dejar que un asistente pague— de manera reiterada y pública, en el idioma del usuario. La medida de éxito acordada es la proporción de personas que dejan que Confío IA pague una vez y lo vuelven a dejar pagar dentro de 30 días. El despliegue es país por país y sigue las capacidades verificadas de los proveedores, no una bandera de país en una página promocional.
 
-La audiencia en español liderada por el fundador de Confío suma aproximadamente 480,000 personas entre plataformas sociales. La ventaja estratégica no es solo la cifra de seguidores; es la capacidad de explicar productos financieros —y ahora un asistente que paga— de forma reiterada, pública y en el lenguaje cultural del usuario objetivo. <sup>[15]</sup>
+## 9. Modelo de negocio
 
-> **Distribución + confianza + adaptación local**
->
-> Confío no planea ganar superando permanentemente a sus competidores en cashback. Busca convertir una audiencia que confía en personas que dejan que el asistente pague por ellas una vez, y luego otra vez. La medida de éxito acordada para el asistente es la proporción de personas que le dejan pagar una vez y le dejan volver a pagar dentro de 30 días.
-
-### 10.3 Despliegue país por país
-
-Confío no ofrece todas las funciones en todos los países. Los métodos fiat, los requisitos de identidad, la elegibilidad para USDY, los controles de sanciones, las opciones de retiro, los canales del agente de compras y los procedimientos de soporte varían según el mercado, y los corredores se pausan cuando un proveedor o una señal de fraude lo exigen. El despliegue sigue las capacidades verificadas de los proveedores y la preparación jurídica y operativa, no una bandera de país en una página promocional.
-
-## 11. Modelo de negocio
-
-Confío vincula sus ingresos con actividad financiera útil, no con trading especulativo. El asistente que actúa por una persona se paga con Cuenta inteligente; mover dinero hacia dentro y hacia fuera del sistema de dólares se paga con la comisión de perímetro del 0.9%.
+La ejecución pagada del asistente y la red de canales son las fuentes de ingresos. Hablar con Confío IA, buscar, armar carritos y las revisiones con precio son gratuitos; ejecutar en nombre de la persona se paga con Cuenta inteligente; mover dinero a través del perímetro del dólar hacia un canal local paga la comisión del 0.9%.
 
 | Fuente de ingresos | Política actual |
 | --- | --- |
-| Cuenta inteligente | US$149.99 al año (predeterminado) o US$14.99 al mes, cobrados desde dentro de la cuenta; sin reembolsos. Incluye la automatización, el beneficiario y Confío IA+ (el asistente ejecutando sobre la cuenta, operaciones automáticas dentro del tope semanal y compras en tiendas dentro del tope de compras). |
-| Entrada al sistema de dólares Confío | 0.9% cuando el USDT se convierte en cUSD o cUSD+, desde una rampa fiat o una transferencia on-chain. |
-| Salida del sistema de dólares Confío | 0.9% cuando cUSD o cUSD+ se convierte en USDT externo, incluidos los pagos por canal local y las compras del asistente pagadas desde una Cuenta inteligente. |
-| Transferencias y conversión interna de ahorro | 0% de comisión de Confío; las comisiones de red están patrocinadas. |
-| Pagos a comercios y nóminas | Comisión plana de plataforma de Confío del 0.9%, aplicada on-chain. |
-| Comprar | Comisión de marketplace del 8% pagada por el vendedor. |
-| Participación en el rendimiento de cUSD+ | 15% de la apreciación positiva del precio de referencia de USDY para Confío y 85% para los titulares. Variable y no garantizada. |
-| Ondo Stocks, Oro y Bitcoin, Futuros | La comisión uniforme de perímetro del 0.9% cuando el valor sale del dólar o vuelve a entrar; sin comisión aparte de trading ni de builder. Pueden aplicarse por separado diferenciales de terceros y costos de puente, de la plataforma de ejecución y de la red. |
+| Cuenta inteligente | US$149.99 al año (predeterminado) o US$14.99 al mes, cobrados desde dentro de la cuenta; sin reembolsos. Incluye Confío IA+ (compras en tiendas, operaciones automáticas, cambios de reglas por chat), la automatización y el beneficiario. |
+| Salida del sistema de dólares Confío | 0.9% cuando cUSD o cUSD+ se convierte en USDT externo, incluidos todos los pagos por canal local y todas las compras del asistente. |
+| Entrada al sistema de dólares Confío | 0.9% cuando el USDT se convierte en cUSD o cUSD+, desde una rampa o una transferencia on-chain. |
+| Transferencias y conversión interna | 0%; las comisiones de red están patrocinadas. |
+| Pagos a comercios y nóminas | Comisión plana de plataforma del 0.9%, aplicada on-chain. |
+| Comprar | Comisión del 8% del mercado, pagada por el vendedor. |
+| Participación en el rendimiento de cUSD+ | 15% de la apreciación positiva de USDY; variable, no garantizada. |
+| Acciones, Oro y Bitcoin, Futuros | La misma comisión de perímetro del 0.9%; sin comisión aparte de negociación ni de builder. Pueden aplicarse diferenciales de terceros y costos de la plataforma de ejecución. |
 | Economía de los canales fiat | Los precios del proveedor y cualquier tarifa de cuenta local se muestran en la cotización en vivo. |
 
-La regla de precios es la misma que se muestra en el sitio web público: **0.9% para entrar, 0% para moverse dentro y 0.9% para salir**. Confío Pay tiene una comisión de servicio independiente del 0.9%. Cuenta inteligente no exime ni descuenta la comisión del 0.9%. La búsqueda, los carritos y las revisiones con precio del agente de compras, así como las respuestas de Confío IA, son gratuitos. El patrocinio de la red y el uso de modelos son costos del producto, no prueba de que toda acción sea económicamente gratuita.
+La regla pública es **0.9% para entrar, 0% para moverse dentro, 0.9% para salir**; Cuenta inteligente no la exime. El patrocinio de la red y el uso de modelos son costos del producto.
 
-## 12. Cumplimiento y modelo operativo
+## 10. Cumplimiento y modelo operativo
 
-La arquitectura de Confío separa la custodia de las claves de la billetera de las obligaciones de producto y de proveedor. Una billetera no custodial puede igualmente integrar activos con permisos, verificación de identidad, controles de sanciones, proveedores fiat y controles contractuales.
+Confío separa la custodia de la clave de la billetera de las obligaciones de producto y de proveedor. La custodia fiat, la conversión de moneda, la verificación de identidad y el acceso a activos con permisos los realizan los proveedores correspondientes; esto describe el diseño operativo y no es una afirmación de que Confío carezca de obligaciones legales o de cumplimiento.
 
-**Conoce a tu cliente (KYC, Know Your Customer)** comprende las verificaciones utilizadas para establecer quién es un usuario y, cuando se requiere, dónde reside. **Prevención del lavado de dinero (AML, Anti-Money Laundering)** comprende los controles de proveedores y de transacciones destinados a detectar o prevenir infracciones de sanciones, fraude, lavado de dinero, financiamiento del terrorismo y otras actividades prohibidas.
-
-> **Arquitectura integrada con proveedores**
->
-> La custodia fiat, la conversión de moneda, la verificación de identidad y el acceso a activos con permisos los realizan los proveedores correspondientes, no el software de billetera de Confío. Esto describe el diseño operativo; no afirma que Confío carezca de obligaciones legales o de cumplimiento.
-
-- Didit respalda el flujo de verificación de identidad: un documento oficial y una selfie en vivo, con comprobaciones del documento, de presencia real y de coincidencia facial. Los usuarios menores de 18 años son rechazados.
-- Los proveedores fiat aplican sus propios controles de identidad, domicilio, elegibilidad, sanciones y transacciones; completar la verificación de Didit no garantiza por sí solo la aprobación de un proveedor.
-- La acuñación de USDY y el acceso a Ondo Stocks están limitados por los requisitos de elegibilidad, geográficos y de cumplimiento de Ondo. <sup>[7, 10, 18]</sup>
+- Didit realiza la verificación de identidad (documento oficial, selfie en vivo, prueba de presencia real, coincidencia facial). Los usuarios menores de 18 años son rechazados.
+- Los proveedores fiat aplican sus propios controles de identidad, domicilio, elegibilidad, sanciones y transacciones; la verificación de Didit por sí sola no garantiza la aprobación de un proveedor.
+- La acuñación de USDY y el acceso a Ondo Stocks siguen los requisitos de elegibilidad y geográficos de Ondo. <sup>[21, 23, 25]</sup>
 - El beneficiario de una Cuenta inteligente debe ser un usuario de Confío verificado por Didit, designado solo a través del control del patrocinador de Confío, y debe aceptar; los beneficiarios residentes en Estados Unidos están bloqueados.
-- Comprar requiere la verificación de Didit tanto para compradores como para vendedores.
+- Comprar requiere la verificación de Didit para compradores y vendedores.
 - El agente de compras nunca elude un bloqueo de un sitio y rechaza los países sin un canal que pague el monto exacto del pedido.
-- Los países y canales adicionales se lanzan solo después de las verificaciones legales, operativas y de proveedor correspondientes.
+- Los nuevos países y canales se lanzan solo después de las verificaciones legales, operativas y de proveedor.
 
-## 13. Riesgos y mitigaciones
+## 11. Riesgos y mitigaciones
 
-Ningún producto financiero blockchain, y ningún agente de IA, está libre de riesgos. Esta tabla no es exhaustiva.
+Ningún producto financiero, y ningún agente de IA, está libre de riesgos. Esta tabla no es exhaustiva.
 
 | Riesgo | Mitigación actual | Exposición residual |
 | --- | --- | --- |
-| **Malentendido o error del modelo de IA** | Los modelos proponen; el código pregunta los montos, valida a los beneficiarios, calcula precios y dibuja la confirmación; el texto de herramientas y páginas son datos, no instrucciones; el comportamiento se prueba con conversaciones grabadas. | Un modelo todavía puede interpretar mal una solicitud, elegir el producto equivocado o dar una respuesta incorrecta; una persona puede confirmar una tarjeta sin leerla. |
-| **Compra en tienda equivocada o fallida** | Elegir aprueba un total máximo; un total real más alto hace volver la tarjeta de pedido; dos modelos deben leer el mismo total, que debe aparecer en la página; una aprobación genera un solo pedido; límites del servidor en pasos, tiempo y costo; compras pagadas desde una regla de cuenta con tope. | Las tiendas cambian sus páginas, cancelan pedidos, envían mal o retrasan reembolsos; una falla del lado de la tienda puede obligar a la persona a tratar con la tienda. El agente está en una etapa temprana y todavía no está probado en muchas tiendas. |
-| **Errores en pagos por canal local** | Identificadores validados con suma de verificación, cotizaciones por monto exacto, seguimiento del estado del proveedor, ningún “pagado” antes de que el canal lo confirme. | Los proveedores pueden fallar, retrasarse, revertir o pausar; un beneficiario de tienda no verificado leído de un checkout todavía puede ser incorrecto. |
-| **Confianza en la ejecución automática y en la cuenta inteligente** | Cuentas inmutables; topes firmados por el titular aplicados on-chain; compras y ventas contabilizadas; bandas de feed de precios; límite de comisión; notificaciones y alertas; interruptores de emergencia del Safe; clave separada para el firmante de pedidos del escrow; revisión independiente interna con pruebas de regresión. | Las acciones automáticas confían en routers y en un escrow actualizables por el Safe; un relayer comprometido junto con una actualización maliciosa del Safe podría vender acciones a un precio falsificado; un operador de compras comprometido queda acotado por el tope de cada titular. Las reglas se ejecutan tal como se firmaron, aunque el titular después se arrepienta. |
-| **Activos subyacentes y emisores** | cUSD está respaldado por USDT; cUSD+ mantiene USDY; divulgación de estructura, contabilidad y elegibilidad. | Persisten riesgos de pérdida de paridad, emisor, custodia, legales, de reservas y de redención para USDY y USDT. |
-| **Contratos inteligentes** | Código abierto, despliegues verificados, pruebas por capas, controles acotados y estado público. | Siguen siendo posibles defectos, fallas de integración y errores de actualización. |
-| **Oráculo** | La protección por umbral detiene las rutas de valor a la espera de una respuesta de gobernanza vinculada a evidencia. | Datos incorrectos o no disponibles pueden retrasar depósitos y redenciones. |
-| **Liquidez y redención** | Redención a USDT con comisión y sin permisos; Emergency Exit puede transmitir directamente a través de nodos BSC públicos. | La liquidez de InstantManager, la disponibilidad de proveedores, las condiciones de la red o medidas de cumplimiento pueden retrasar las salidas. |
-| **Inversión y apalancamiento** | Routers con código fuente verificado, entrega directa al usuario, límites de comisión, límites de deslizamiento, filtros de elegibilidad y de país; Futuros no se ofrece en iOS y está bloqueado en varios países. | Persisten riesgos de mercado, deslizamiento, emisor, plataforma de ejecución, puente, liquidación y pérdida total, especialmente en Futuros apalancados. |
-| **Recuperación de claves** | Las claves generadas en el dispositivo y la recuperación en la nube personal evitan un repositorio central de claves. | La pérdida de acceso al dispositivo o a la nube, cambios de plataforma o defectos de recuperación pueden afectar el acceso. |
-| **Gobernanza de actualizaciones** | Control multiparte mediante el Safe, registros públicos de actualizaciones, verificación de código fuente, verificaciones de disposición de almacenamiento. | Los firmantes autorizados podrían hacer un cambio perjudicial o no responder durante un incidente. |
-| **Dependencia de BNB Smart Chain** | La arquitectura de una sola red elimina el riesgo de puente dentro del producto principal; múltiples rutas RPC y de salida de emergencia. | Interrupciones de la red, congestión, fallas de RPC, cambios de gas o cambios de políticas del ecosistema pueden afectar a todo el producto. |
-| **Canales fiat y corredores pausados** | Interruptores en vivo por país y por proveedor; corredores pausados ante incidentes del proveedor o señales de fraude (la recarga en Colombia y Bre-B están pausados a la fecha de esta versión). | La cobertura, los métodos de pago, las dependencias bancarias, los precios y la disponibilidad de proveedores pueden cambiar sin previo aviso. |
-| **Regulación y delitos financieros** | Verificaciones con documento oficial y selfie en vivo, controles de los proveedores, restricciones geográficas de productos, revisión jurídica y bloqueo de cuentas abusivas. | Los proveedores o las autoridades pueden rechazar, retrasar, reportar o restringir actividad; las reglas para agentes de IA que actúan sobre pagos todavía están en desarrollo. |
-| **Concentración del token y recompensas** | Oferta fija, contratos públicos, curva de preventa inmutable, tokenomics separado; reclamos de recompensas EIP-712 acumulativos con bloqueo hasta el DEX. | Concentración del fundador, vesting, liquidez y volatilidad del precio del token; las recompensas dependen del fondeo de la tesorería. |
-| **Métricas y concentración** | Se divulgan definiciones, fechas de las instantáneas y su carácter no auditado. | El uso y los ingresos iniciales pueden estar concentrados y no predecir una adopción amplia. |
+| **Malentendido o error del modelo de IA** | Los modelos proponen; el código pregunta los montos, valida a los beneficiarios, calcula precios y dibuja la confirmación; el texto de herramientas y páginas son datos; pruebas con conversaciones grabadas. | Un modelo puede interpretar mal una solicitud, elegir el producto equivocado o responder de forma incorrecta; una persona puede confirmar sin leer. |
+| **Compra en tienda equivocada o fallida** | Elegir aprueba un total máximo; un total más alto hace volver la tarjeta de pedido; dos modelos deben leer el mismo total, que debe aparecer en la página; una aprobación, un pedido; límites del servidor; pago desde una regla de cuenta con tope. | Las tiendas cambian sus páginas, cancelan, envían mal o retrasan reembolsos; la persona puede tener que tratar con la tienda. El agente todavía no está probado en muchas tiendas. |
+| **Errores en pagos por canal local** | Identificadores validados con suma de verificación, cotizaciones por monto exacto, seguimiento del estado del proveedor, ningún “pagado” antes de que el canal lo confirme. | Los proveedores pueden fallar, retrasarse, revertir o pausar; un beneficiario de tienda leído de una página de pago todavía puede ser incorrecto. |
+| **Confianza en la ejecución automática y en la cuenta inteligente** | Cuentas inmutables; topes on-chain; compras y ventas contabilizadas; bandas de precio; límite de comisión; alertas; interruptores de emergencia del Safe; clave separada para el firmante de pedidos; revisión interna con pruebas de regresión. | Las acciones automáticas confían en routers y en un escrow actualizables por el Safe; un relayer comprometido junto con una actualización maliciosa podría vender acciones a un precio falsificado; un operador comprometido queda acotado por cada tope. Las reglas se ejecutan tal como se firmaron. |
+| **Competencia** | La combinación de encargos, canales de varios países y límites en autocustodia; código abierto. | Asistentes globales o bancos regionales pueden agregar pagos por canales locales; los bancos brasileños ya ofrecen Pix mediante agentes a sus propios clientes. |
+| **Canales fiat y corredores pausados** | Interruptores en vivo por país y por proveedor; pausas ante incidentes o señales de fraude (recarga y Bre-B en Colombia pausados). | La cobertura, los precios y la disponibilidad de proveedores pueden cambiar sin previo aviso. |
+| **Activos subyacentes** | cUSD respaldado por USDT; cUSD+ mantiene USDY con contabilidad pública. | Riesgos de pérdida de paridad, emisor, custodia, reservas y redención de USDT y USDY. |
+| **Contratos inteligentes y oráculo** | Código abierto, despliegues verificados, pruebas por capas, controles acotados, protección del oráculo. | Defectos, errores de integración o de actualización; datos incorrectos del oráculo pueden retrasar depósitos y redenciones. |
+| **Liquidez y redención** | Redención con comisión y sin permisos; Emergency Exit transmite a través de nodos BSC públicos. | La liquidez de InstantManager, los proveedores, las condiciones de la red o medidas de cumplimiento pueden retrasar las salidas. |
+| **Inversión y apalancamiento** | Routers verificados, entrega directa, límites de comisión y de deslizamiento, filtros de elegibilidad y de país. | Riesgos de mercado, emisor, plataforma de ejecución, puente, liquidación y pérdida total, especialmente en Futuros. |
+| **Recuperación de claves** | Claves en el dispositivo y recuperación en la nube personal. | La pérdida del dispositivo o del acceso a la nube, o defectos de recuperación, pueden afectar el acceso. |
+| **Gobernanza y BNB Smart Chain** | Safe de 3 de 5, registros públicos de actualizaciones, verificaciones de almacenamiento; múltiples rutas RPC. | Los firmantes podrían hacer un cambio perjudicial; una interrupción de la red o cambios de políticas afectan a todo el producto. |
+| **Regulación y delitos financieros** | Verificaciones de identidad, controles de los proveedores, restricciones geográficas, revisión jurídica, bloqueo de cuentas abusivas. | Los proveedores o las autoridades pueden restringir actividad; las reglas para agentes de IA que pagan todavía están en desarrollo. |
+| **Token y recompensas** | Oferta fija, curva inmutable, contratos públicos, tokenomics separado. | Concentración del fundador, liquidez, volatilidad; las recompensas dependen del fondeo de la tesorería. |
+| **Métricas** | Se divulgan definiciones, fechas y su carácter no auditado. | El uso inicial puede estar concentrado y no predecir la adopción. |
 
-## 14. Hoja de ruta y estado actual
+## 12. Hoja de ruta y estado actual
 
 | Área de trabajo | Completado / actual | Próximo hito verificable |
 | --- | --- | --- |
-| Confío IA | Inicio y alta centrados en el chat; tarjetas de pago, operación y recarga en el chat con montos preguntados por el código; puertas a cada tarea de la app; memoria y compactación de conversaciones. | Medir quiénes repiten pagos con el asistente; completar la revisión independiente pendiente de los pagos por chat. |
-| Agente de compras | Compras desde navegador en la nube con modelos jueces y hechos verificados por el código; búsqueda en varias tiendas; pagos por SPEI, Pix y Pago Móvil; Bolivia con la persona pagando el QR de la tienda. | Compras completadas de forma confiable en más tiendas; pagos por monto exacto para el QR fijo de Argentina. |
-| Cuenta inteligente | Factory, cuentas v1 y v2, recaudador de tarifas y spender de compras desplegados y verificados; herencia habilitada; operaciones automáticas, Comprar y compras en tiendas activas desde el 25 de noviembre de 2026. | Trasladar las reglas de envío, de pago y de tarjeta a través de la migración; aumentar los suscriptores de pago. |
-| Sistema de comisiones cUSD/cUSD+ | Perímetro externo de 90 puntos básicos y frontera interna sin comisión activos. | Supervisar la conciliación de comisiones, el respaldo, el enrutamiento por elegibilidad y las salidas sin permisos. |
-| Transacciones patrocinadas | Delegado de lotes EIP-7702 sin propietario, política del servidor y registros contables activos. | Supervisar la fiabilidad, el costo del patrocinador y las alternativas de emergencia. |
-| Pagos y nóminas | Transferencias, pagos a comercios, escrow de invitaciones y vault de nóminas activos. | Medir el uso repetido de pagos a comercios y nóminas. |
-| Inversión | Router v3 de Ondo Stocks, router de swaps para oro y bitcoin, Futuros en Android. | Se necesita revisión jurídica para ofrecer Oro y Bitcoin y Futuros en una versión para iOS. |
-| Comprar | Escrow actualizado para compras desde la cuenta; piloto abierto. | Vendedores y compradores recurrentes en las ciudades del piloto. |
-| Acceso fiat | Canales locales activos en México, Brasil, Venezuela, Bolivia, Argentina, Chile y Perú según se describe en la sección 3.6; Colombia pausada. | Reabrir Colombia cuando los proveedores lo permitan; pagos QR en Bolivia; proveedores verificados adicionales. |
-| $CONFIO | Token de oferta fija, preventa de reemplazo y vaults de recompensas y vesting activos. | Mantener el tokenomics sincronizado con el estado on-chain; abrir los reclamos solo bajo los controles divulgados. |
-| Distribución | 10,886 usuarios que completaron el registro; audiencia del fundador de aproximadamente 480,000 personas; gasto en medios pagados prácticamente nulo hasta la fecha. | Convertir la distribución en usuarios con fondos, pagos repetidos con el asistente y cohortes por país. |
+| Confío IA | Inicio y alta centrados en el chat; tarjetas de pago, operación y recarga con montos preguntados por el código; puertas a cada tarea; memoria. | Personas que repiten pagos con el asistente; la revisión independiente pendiente de los pagos por chat. |
+| Conexiones para encargos | WhatsApp, Gmail y calendario del teléfono desplegados en el servidor. | Publicación en versiones de la app; verificación de Google para Gmail más allá del grupo limitado. |
+| Agente de compras | Compras desde navegador en la nube con modelos jueces y hechos verificados por el código; búsqueda en varias tiendas; SPEI, Pix y Pago Móvil; Bolivia con la persona pagando el QR. | Compras completadas de forma confiable en más tiendas; pagos por monto exacto para el QR fijo de Argentina. |
+| Cuenta inteligente | Factory, cuentas v1 y v2, recaudador de tarifas y spender de compras verificados; herencia habilitada; operaciones automáticas, Comprar y compras en tiendas activas desde el 25 de noviembre de 2026. | Trasladar las reglas de envío, de pago y de tarjeta a través de la migración; suscriptores de pago. |
+| Canales | Activos en México, Brasil, Venezuela, Bolivia, Argentina, Chile y Perú según la sección 4.5; Colombia pausada. | Reabrir Colombia; pagos QR en Bolivia; proveedores verificados adicionales. |
+| Base | Perímetro cUSD/cUSD+, transacciones patrocinadas, pagos, nóminas, escrow de invitaciones, routers de acciones y de swaps, Futuros en Android, vaults de $CONFIO. | Supervisión de la conciliación y de las salidas; revisión jurídica para Oro y Bitcoin y Futuros en iOS. |
+| Comprar | Escrow actualizado para compras desde la cuenta; piloto en Bolivia. | Vendedores y compradores recurrentes. |
+| Distribución | 10,886 usuarios que completaron el registro; audiencia del fundador de ~480,000 personas; sin medios pagados. | Usuarios con fondos, pagos repetidos con el asistente, cohortes por país. |
 
-### 14.1 Principios de medición
+Confío mide por separado registros, usuarios verificados, usuarios con fondos y usuarios activos, junto con las personas que repiten pagos con el asistente, las compras del agente completadas y fallidas, los suscriptores de Cuenta inteligente, las comisiones de conversión, la entrada neta y las cohortes por país; los ingresos se reportan excluyendo las cuentas bloqueadas y las del fundador.
 
-Confío distingue registros, usuarios que completaron el alta, usuarios verificados, usuarios con fondos, dispositivos alcanzables, usuarios activos y saldos retenidos. Las medidas operativas centrales incluyen usuarios con fondos, personas que repiten pagos con el asistente, compras del agente completadas y fallidas, suscriptores de Cuenta inteligente, obligaciones de cUSD y cUSD+, respaldo, comisiones de conversión, entrada neta, retención de saldos, volumen de pagos a comercios y de nóminas, y cohortes por país. La adquisición orgánica se separa de las campañas pagadas, y los ingresos se reportan excluyendo las cuentas bloqueadas y las del fundador.
-
-### 14.2 La siguiente prueba
-
-> **De un asistente que puede pagar a uno en el que la gente confía para volver a pagar**
+> **La siguiente prueba**
 >
-> La siguiente prueba es el uso repetido: personas que dejan que Confío IA le pague a una persona, un QR o una tienda una vez y lo vuelven a hacer dentro de 30 días, con saldos fondeados y suscriptores de pago de Cuenta inteligente en varios mercados latinoamericanos.
+> Personas que dejan que Confío IA haga un encargo y lo pague una vez, y lo vuelven a hacer dentro de 30 días, en varios países de América Latina.
 
-## 15. Aviso legal
+## 13. Aviso legal
 
-Este documento se ofrece únicamente con fines informativos y de referencia técnica. No constituye asesoría de inversión, jurídica, fiscal, contable ni financiera; no es un prospecto, una oferta, una solicitud, una recomendación ni una promesa de rendimientos. Las descripciones de los productos reflejan el diseño y el estado actuales al 25 de noviembre de 2026 y pueden cambiar.
+Este documento se ofrece únicamente con fines informativos y de referencia técnica. No constituye asesoría de inversión, jurídica, fiscal, contable ni financiera; no es un prospecto, una oferta, una solicitud, una recomendación ni una promesa de rendimientos. Las descripciones de los productos reflejan el estado al 25 de noviembre de 2026 y pueden cambiar. Las descripciones de productos de terceros se basan en las fuentes públicas citadas, a sus fechas de consulta, y pueden estar incompletas o desactualizadas.
 
 Confío IA es un asistente automatizado. Sus respuestas pueden ser incompletas o incorrectas y no constituyen asesoría financiera personalizada. Las compras realizadas por el agente de compras son contratos entre la persona y la tienda; Confío no garantiza los productos, la entrega, las devoluciones ni los reembolsos de una tienda. Las acciones ejecutadas por una Cuenta inteligente siguen las reglas y los topes que firmó su titular.
 
-USDT, cUSD y cUSD+ no son depósitos bancarios y no están cubiertos por un seguro de depósitos. Las stablecoins, los títulos tokenizados, los contratos inteligentes, las blockchains, los oráculos, los proveedores fiat, los creadores de mercado, los custodios y otras infraestructuras pueden fallar, suspenderse, perder valor o quedar sujetos a nuevas reglas.
+USDT, cUSD y cUSD+ no son depósitos bancarios y no están cubiertos por un sistema de seguro de depósitos. Las stablecoins, los títulos tokenizados, los contratos inteligentes, las blockchains, los oráculos, los proveedores fiat, los creadores de mercado, los custodios y otras infraestructuras pueden fallar, suspenderse, perder valor o quedar sujetos a nuevas reglas. Cualquier rendimiento de cUSD+ es variable y no está garantizado; el acceso a USDY está sujeto a la elegibilidad de Ondo y a la ley aplicable.
 
-Cualquier rendimiento de cUSD+ es variable, depende de USDY y del vault, y no está garantizado. El acceso a USDY y la acuñación de cUSD+ están sujetos a la elegibilidad de Ondo, a condiciones de cumplimiento, a la disponibilidad de proveedores y a la ley aplicable.
-
-Ondo Stocks son instrumentos financieros tokenizados y no son depósitos bancarios ni productos de ahorro asegurados. Los tokens de oro y bitcoin y los futuros perpetuos apalancados pueden perder valor rápidamente, y en Futuros se puede perder todo el margen. El acceso y la negociación dependen de la elegibilidad, la jurisdicción, la disponibilidad de mercados, plataformas de terceros y los términos y leyes aplicables.
-
-$CONFIO es independiente de USDT, cUSD, cUSD+ y USDY. No otorga ningún derecho sobre el respaldo, los ingresos, el capital social, los activos o los beneficios de Confío, salvo que términos definitivos dispongan expresamente lo contrario.
+Ondo Stocks son instrumentos financieros tokenizados, no depósitos bancarios. Los tokens de oro y bitcoin y los futuros perpetuos apalancados pueden perder valor rápidamente, y en Futuros se puede perder todo el margen. $CONFIO es independiente de USDT, cUSD, cUSD+ y USDY y no otorga ningún derecho sobre el respaldo, los ingresos, el capital social, los activos o los beneficios de Confío, salvo que términos definitivos dispongan expresamente lo contrario.
 
 Antes de usar cualquier servicio, los lectores deben revisar los términos definitivos de los productos, las divulgaciones de riesgos, los contratos inteligentes, los términos de los proveedores y la legislación local.
 
 ## Notas
 
-1. Banco Interamericano de Desarrollo, “Remittances to Latin America and the Caribbean Ease After 2025 Surge”, 16 de junio de 2026: remesas regionales estimadas en US$173.7 mil millones en 2025, 7.3% más que en 2024. https://www.iadb.org/en/blog/migration/remittances-latin-america-and-caribbean-ease-after-2025-surge
+Fuentes de terceros consultadas el 25 de noviembre de 2026.
 
-2. Chainalysis, “Latin America Emerges as Crypto Powerhouse Amid Volatile Growth”, 2 de octubre de 2025. https://www.chainalysis.com/blog/latin-america-crypto-adoption-2025/
+1. Meta, “Introducing Muse: The World’s First Personal AI Agent Built for Everyone”, 8 de septiembre de 2026: lanzamiento en Estados Unidos; correo, viajes, formularios; pago mediante Link de Stripe con tarjetas de un solo uso; aprobación antes de las compras. https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/
 
-3. Repositorio público de Confío en GitHub: aplicación móvil, backend, asistente (`assistant/`), agente de compras (`agent_tasks/`), marketplace, contratos BSC, modelo de billetera, pagos, nóminas, token y preventa. https://github.com/caesar4321/Confio
+2. OpenAI, “Introducing ChatGPT Wallet”, 13 de noviembre de 2026: compras de agentes con tokens de pago de las redes, desarrollado con American Express, Chase, Mastercard y Visa; inicialmente a través de dots, solo tarjetas emitidas en Estados Unidos. https://openai.com/index/introducing-chatgpt-wallet/
 
-4. Confío, “Por qué Confío no guarda tu dinero - y por qué eso importa”, fuente del proyecto, consultada en julio de 2026.
+3. Al Jazeera, “OpenAI launches ‘dots,’ personal AI assistant ‘built to handle everything’”, 30 de septiembre de 2026. https://www.aljazeera.com/economy/2026/9/30/openai-launches-dots-personal-ai-assistant-built-to-handle-everything
 
-5. Documentación para desarrolladores de BNB Chain: introducción a BNB Smart Chain y finalidad. https://docs.bnbchain.org/bnb-smart-chain/introduction/
+4. Asia Economy, “Privacy Control Concerns Become Reality Amid Craze for ‘Pickle,’ the AI That Acts on Its Own”, 9 de noviembre de 2026: agente coreano que se encarga de tareas cotidianas en KakaoTalk, Coupang, Government24 y Google; llamadas telefónicas reportadas. https://view.asiae.co.kr/en/article/2026110909414917294
 
-6. Documentación para desarrolladores de BNB Chain: comisiones de transacción y conceptos de red. https://docs.bnbchain.org/bnb-smart-chain/
+5. Zapia, “Zapia: the AI agent built for Latin American life”, 18 de mayo de 2026: WhatsApp, app y web; contacto con negocios, agenda, respuestas, seguimiento de precios. https://zapia.com/blog/zapia-ai-agent-built-for-latin-american-life?lang=en
 
-7. Documentación de Ondo Finance, “USDY Basics”, consultada en julio de 2026. https://docs.ondo.finance/general-access-products/usdy/basics
+6. Xataka Colombia, “Luzia quiere ser la inteligencia artificial que todo el mundo sabe usar… y que te contesta por WhatsApp”, 10 de octubre de 2023. https://www.xataka.com.co/robotica-e-ia/luzia-quiere-ser-inteligencia-artificial-que-todo-mundo-sabe-usar-que-te-contesta-whatsapp
 
-8. Confío, “cUSD+ deployment record - BSC mainnet”, actualizado en noviembre de 2026: despliegues de cUSD, cUSD+, el router de acciones, Cuenta inteligente, el heartbeat y el escrow de Comprar. https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/DEPLOYMENT.md
+7. Banco Central do Brasil, “Pix”. https://www.bcb.gov.br/en/financialstability/pix_en
 
-9. BscScan, proxy ERC1967 de Confío Dollar+, dirección `0x3C29417eb4314155e63d4C7D4507852b87763Ed1`. https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code
+8. Banco de la República (Colombia), “Bre-B”. https://www.banrep.gov.co/es/bre-b
 
-10. Documentación para desarrolladores de Ondo Finance, “Integrating with the USDY InstantManager contract”. https://docs.ondo.finance/developer-guides/usdy-instant-manager-integration
+9. Superintendencia de Banca, Seguros y AFP del Perú, *Carpeta de Información del Sistema Financiero*, febrero de 2026. https://intranet2.sbs.gob.pe/estadistica/financiera/2026/Febrero/SF-2102-fe2026.PDF
 
-11. Confío, `CusdPlusVault.sol`: contabilidad desplegada, redención, protección del oráculo y lógica de participación de Confío del 15% en el rendimiento. https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/CusdPlusVault.sol
+10. Banco Interamericano de Desarrollo, “Remittances to Latin America and the Caribbean Ease After 2025 Surge”, 16 de junio de 2026: US$173.7 mil millones en 2025. https://www.iadb.org/en/blog/migration/remittances-latin-america-and-caribbean-ease-after-2025-surge
 
-12. Documentación del ecosistema y para desarrolladores de BNB Chain, consultada en julio de 2026. https://www.bnbchain.org/en/developers
+11. Chainalysis, “Latin America Emerges as Crypto Powerhouse Amid Volatile Growth”, 2 de octubre de 2025. https://www.chainalysis.com/blog/latin-america-crypto-adoption-2025/
 
-13. Registros de socios y configuración de producción de Confío, 25 de noviembre de 2026: canales locales de recarga, retiro y pago a través de Koywe, Infinia, Pago ASAP y VEXPay, con interruptores y pausas por país. Las condiciones comerciales se rigen por los respectivos acuerdos.
+12. Nubank, “Nubank leverages AI to scale Pix operations”, 10 de diciembre de 2024: Pix por voz, texto o imagen en la app y en WhatsApp. https://nu.com/en/newsroom/consumers/nubank-leverages-ai-to-scale-pix-operations
 
-14. Instantáneas de analítica interna de producto de Confío: 25 de noviembre de 2026 para usuarios que completaron el registro (incorporación terminada con cualquier método; se excluyen las cuentas de prueba de la plataforma), cuentas registradas y dispositivos alcanzables por push mediante FCM (tokens de dispositivo activos; usados dentro de 30 días según el último uso registrado); 23 de julio de 2026 para la verificación de identidad de Didit con documento oficial y selfie en vivo y su tasa de finalización. No auditadas.
+13. iProfesional, “Mercado Pago relanza Mago con IA para gestionar las finanzas”, 30 de septiembre de 2026: transferencias preparadas a partir de una conversación y confirmadas por el usuario (Argentina). https://www.iprofesional.com/finanzas/465587-mercado-pago-relanza-mago-con-ia-para-gestionar-las-finanzas
 
-15. Instantánea de analítica interna del canal del fundador de Confío, 23 de julio de 2026. La cifra de audiencia es aproximada y cambia con el tiempo.
+14. Iniciador, “Iniciador launches Brazil’s first agentic payments MCP on Pix”, 19 de mayo de 2026: para instituciones reguladas y fintechs; el agente propone y el usuario aprueba con biometría. https://iniciador.com.br/en/conteudos/iniciador-anuncia-pagamentos-agenticos-full-stack-ai-toolkit
 
-16. Benedetto Biondi, “The New Face Of Global Payments: Onchain Consumer Finance Apps”, *Forbes Technology Council*, 6 de julio de 2026. https://www.forbes.com/councils/forbestechcouncil/2026/07/06/the-new-face-of-global-payments-onchain-consumer-finance-apps/
+15. Repositorio público de Confío en GitHub: app, backend, asistente (`assistant/`), agente de compras (`agent_tasks/`), vinculación de WhatsApp (`whatsapp_link/`), mercado, futuros perpetuos, contratos. https://github.com/caesar4321/Confio
 
-17. Contratos BSC y registros de despliegue de Confío: `ConfioToken.sol`, `ConfioPresaleVault.sol`, `ConfioRewardVault.sol`, `ConfioVestingVault.sol`, `ConfioInviteEscrow.sol`, `ConfioBatchDelegate.sol`, `ConfioStockRouter.sol` y direcciones de despliegue verificadas. https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus y https://github.com/caesar4321/Confio/tree/main/contracts/ondo_stocks
+16. Confío, registros de diseño del asistente: `docs/designs/confio-assistant.md`, `assistant-first-steps-guide.md`, `assistant-mail-calendar.md`. https://github.com/caesar4321/Confio/tree/main/docs/designs
 
-18. Ondo Finance, “Ondo Stocks” y documentación de la API de Global Markets, consultadas en julio de 2026. https://ondo.finance/ondo-stocks y https://docs.ondo.finance/api-reference/quickstart
+17. Registros de socios y configuración de producción de Confío, 25 de noviembre de 2026: canales locales de recarga, retiro y pago a través de Koywe, Infinia, Pago ASAP y VEXPay, con interruptores y pausas por país.
 
-19. Oficina de Evaluación Independiente del Fondo Monetario Internacional: documentación histórica del congelamiento parcial de depósitos, los controles de capital y la conversión forzosa en Argentina en 2001; y revisión del FMI sobre la flexibilización de la mayoría de las restricciones cambiarias bajo el programa de estabilización de 2025. https://www.imf.org/External/NP/ieo/2003/arg/ y https://www.imf.org/es/news/articles/2025/07/31/pr25272-argentina-imf-completes-first-review-of-the-extended-arrangement-under-the-eff
+18. Confío, especificación de Cuenta inteligente, diseño de la cuenta automática y registro de despliegue de la v2 automática (direcciones, lotes del Safe, hashes de transacciones, pruebas de regresión de la revisión): `docs/designs/cuenta-inteligente-spec.md`, `docs/designs/hands-off-account.md`, `docs/deploy/hands-off-v2-deploy.md`, `contracts/smart_account/`. https://github.com/caesar4321/Confio/tree/main/contracts/smart_account
 
-20. Fondo Monetario Internacional, “Digital Money and Central Banks Balance Sheet”, documento de trabajo n.º 2022/206: Venezuela como caso de dolarización real. https://www.elibrary.imf.org/view/journals/001/2022/206/article-A001-en.xml
+19. Confío, “cUSD+ deployment record - BSC mainnet”, actualizado en noviembre de 2026. https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/DEPLOYMENT.md
 
-21. Fondo Monetario Internacional, “Bolivia: 2025 Article IV Consultation”, informe de país n.º 2025/116. https://www.imf.org/en/publications/cr/issues/2025/06/02/bolivia-2025-article-iv-consultation-press-release-staff-report-and-statement-by-the-567384
+20. Contratos BSC de Confío: `ConfioToken.sol`, `ConfioPresaleVault.sol`, `ConfioRewardVault.sol`, `ConfioVestingVault.sol`, `ConfioInviteEscrow.sol`, `ConfioBatchDelegate.sol`, `ConfioStockRouter.sol`. https://github.com/caesar4321/Confio/tree/main/contracts/cusd_plus y https://github.com/caesar4321/Confio/tree/main/contracts/ondo_stocks
 
-22. Superintendencia de Banca, Seguros y AFP del Perú, *Carpeta de Información del Sistema Financiero*, febrero de 2026, depósitos por moneda. https://intranet2.sbs.gob.pe/estadistica/financiera/2026/Febrero/SF-2102-fe2026.PDF
+21. Ondo Finance, “USDY Basics”. https://docs.ondo.finance/general-access-products/usdy/basics
 
-23. Banco de México, agregados monetarios de 2024; y Banco Interamericano de Desarrollo, estimación de remesas de México para 2025. https://www.banxico.org.mx/TablasWeb/informe-anual/compilacion-2024/7EF1402E-1443-4070-9C0A-6B352272C3B9.html y https://publications.iadb.org/publications/english/document/Remittances-to-Latin-America-and-the-Caribbean-in-2025-Adaptations-in-a-Context-of-Uncertainty.pdf
+22. BscScan, proxy de Confío Dollar+ `0x3C29417eb4314155e63d4C7D4507852b87763Ed1`. https://bscscan.com/address/0x3C29417eb4314155e63d4C7D4507852b87763Ed1#code
 
-24. Banco Interamericano de Desarrollo, *Remittances to Latin America and the Caribbean in 2025: Adaptations in a Context of Uncertainty*. https://publications.iadb.org/publications/english/document/Remittances-to-Latin-America-and-the-Caribbean-in-2025-Adaptations-in-a-Context-of-Uncertainty.pdf
+23. Ondo Finance, “Integrating with the USDY InstantManager contract”. https://docs.ondo.finance/developer-guides/usdy-instant-manager-integration
 
-25. ACNUR, *Global Report 2025 — Situation Overview: Colombia*: Colombia acogía aproximadamente 2.8 millones de venezolanos en 2025. https://www.unhcr.org/sites/default/files/2026-06/global-report-2025-situation-overview-colombia.pdf
+24. Confío, `CusdPlusVault.sol`: contabilidad, redención, protección del oráculo y participación del 15% en el rendimiento. https://github.com/caesar4321/Confio/blob/main/contracts/cusd_plus/CusdPlusVault.sol
 
-26. Confío, registros de diseño del asistente: `docs/designs/ai-assistant-first-redesign.md`, `docs/designs/confio-assistant.md` y `docs/designs/confio-assistant-three-jobs.md`. https://github.com/caesar4321/Confio/tree/main/docs/designs
+25. Ondo Finance, “Ondo Stocks” y documentación de la API de Global Markets. https://ondo.finance/ondo-stocks y https://docs.ondo.finance/api-reference/quickstart
 
-27. Confío, especificación de Cuenta inteligente, diseño de la cuenta automática y registro de despliegue de la v2 automática (direcciones de contratos, lotes del Safe, hashes de transacciones y las pruebas de regresión de la revisión de v2): `docs/designs/cuenta-inteligente-spec.md`, `docs/designs/hands-off-account.md`, `docs/deploy/hands-off-v2-deploy.md` y `contracts/smart_account/`. https://github.com/caesar4321/Confio/tree/main/contracts/smart_account
+26. Confío, código fuente y notas de `ConfioSwapRouter`. https://github.com/caesar4321/Confio/tree/main/contracts/crypto_swap
 
-28. Banco Central do Brasil, “Pix”. https://www.bcb.gov.br/en/financialstability/pix_en
+27. BNB Chain, introducción a BNB Smart Chain y finalidad. https://docs.bnbchain.org/bnb-smart-chain/introduction/
 
-29. Banco de la República (Colombia), “Bre-B”. https://www.banrep.gov.co/es/bre-b
+28. BNB Chain, comisiones de transacción y conceptos de red. https://docs.bnbchain.org/bnb-smart-chain/
 
-30. Confío, código fuente y notas de `ConfioSwapRouter`. https://github.com/caesar4321/Confio/tree/main/contracts/crypto_swap
+29. BNB Chain, documentación del ecosistema y para desarrolladores. https://www.bnbchain.org/en/developers
+
+30. Confío, “Por qué Confío no guarda tu dinero - y por qué eso importa”, fuente del proyecto.
+
+31. Analítica interna de producto de Confío: 25 de noviembre de 2026 para usuarios que completaron el registro (incorporación terminada, con cualquier método; se excluyen las cuentas de prueba de la plataforma), cuentas registradas y dispositivos alcanzables por push mediante FCM (tokens de dispositivo activos; usados dentro de 30 días según el último uso registrado); 23 de julio de 2026 para la verificación de Didit y su tasa de finalización. No auditada.
+
+32. Analítica interna del canal del fundador de Confío, 23 de julio de 2026. Aproximada; cambia con el tiempo.
 
 ### Procedencia del documento
 
-La versión 4.5 (25 de noviembre de 2026) reestructura el documento en torno a Confío IA como un asistente centrado en la IA que paga; agrega Cuenta inteligente, el agente de compras, Oro y Bitcoin, Futuros y Comprar; actualiza la tabla de contratos según la verificación de código fuente en BscScan y el estado on-chain; y actualiza las métricas operativas a partir de consultas de solo lectura en producción con las definiciones de la versión 4.4. Se preparó a partir del whitepaper anterior en inglés, los registros de diseño y despliegue de Confío en el repositorio público, la configuración de producción, los registros de socios, la documentación oficial de BNB Chain, Ondo y bancos centrales, y la literatura de mercado citada.
+La versión 4.5 (25 de noviembre de 2026; revisada el mismo día para incluir los resultados de las operaciones automáticas en el chat, la posibilidad de compartirlas en Comunidad y las solicitudes por voz) replantea Confío en torno a una sola tesis: un asistente personal para América Latina que termina los encargos pagando por canales locales, desde dólares en autocustodia y dentro de límites que se hacen cumplir. Agrega un panorama competitivo basado solo en fuentes públicas citadas, Cuenta inteligente, el agente de compras, Oro y Bitcoin, Futuros y Comprar; condensa la infraestructura del dólar, de inversión y del token en subsecciones de la base; actualiza la tabla de contratos según la verificación en BscScan y el estado on-chain; y actualiza las métricas operativas a partir de consultas de solo lectura en producción. Se eliminó el material anterior de la tesis de mercado sobre la dolarización, junto con sus notas.
