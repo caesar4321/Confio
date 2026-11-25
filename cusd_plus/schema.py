@@ -2090,6 +2090,18 @@ class SponsorBscBatch(graphene.Mutation):
 
     def mutate(self, info, calls, nonce, deadline, intent_signature,
                authorization=None, request_id=None):
+        # Every refusal is logged (code, size, request kind): a refusal the app shows as "No pudimos completar la
+        # operación" was otherwise invisible on the server (hands-off v2 canary, 2026-11-25).
+        result = SponsorBscBatch._mutate(self, info, calls, nonce, deadline, intent_signature,
+                                         authorization=authorization, request_id=request_id)
+        if result is not None and getattr(result, 'success', None) is False:
+            user = getattr(info.context, 'user', None)
+            logger.info('[sponsor] refused %s user=%s calls=%s request=%s', getattr(result, 'error', ''),
+                        getattr(user, 'pk', None), len(calls or []), str(request_id or '')[:3] or '-')
+        return result
+
+    def _mutate(self, info, calls, nonce, deadline, intent_signature,
+                authorization=None, request_id=None):
         import time as _time
 
         from django.conf import settings
