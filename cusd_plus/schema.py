@@ -2166,7 +2166,9 @@ class SponsorBscBatch(graphene.Mutation):
         from smart_account.abi import SEL_CANCEL_CLAIM as _SEL_CANCEL_CLAIM
         _max_calls = 5 + (1 if calls and (calls[-1].data or '').lower()[2:10] == _SEL_CANCEL_CLAIM else 0)
         from smart_account import abi as _smart_abi
-        if _smart_early is not None and getattr(_smart_early, 'kind', '') == _smart_abi.MIGRATE_KIND:
+        _is_migration = bool(_smart_early is not None
+                             and getattr(_smart_early, 'kind', '') == _smart_abi.MIGRATE_KIND)
+        if _is_migration:
             # A migration the server prepared for this user (old account → v2): relay_policy._check_migration
             # matches every call against it, in order.
             _max_calls = _smart_abi.MIGRATION_MAX_CALLS
@@ -2270,7 +2272,7 @@ class SponsorBscBatch(graphene.Mutation):
             if _smart_early is None and not smart_context:
                 base_calls, _personal_cancel = _smart_policy.split_personal_cancel_claim(
                     base_calls, user, user_addr)
-            if len(base_calls) > 4:
+            if len(base_calls) > (_smart_abi.MIGRATION_MAX_CALLS if _is_migration else 4):
                 raise sponsor_7702.PolicyError('bad_batch_size')
             policy_calls = mint_policy_calls(base_calls, user, user_addr, request_id)
             _checked_calls = policy_calls + ([_personal_cancel] if _personal_cancel else [])
