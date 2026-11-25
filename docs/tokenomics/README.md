@@ -6,7 +6,7 @@
 
 This document describes the canonical $CONFIO token on BNB Smart Chain, its fixed supply and allocation, the continuous presale curve, reward distribution, vesting commitments, governance controls, and material risks.
 
-The English edition is the authoritative source. [Spanish](README.es.md) and [Korean](README.ko.md) editions are convenience translations and may temporarily lag behind this document. If a translation conflicts with the English edition, the English edition controls.
+The English edition is the authoritative source. The [Spanish](README.es.md) edition is a convenience translation and may temporarily lag behind this document. If it conflicts with the English edition, the English edition controls.
 
 $CONFIO is separate from USDT, cUSD, cUSD+, USDY, Ondo Stocks, and the operating company. It does not back user dollar balances and does not by itself represent equity, debt, revenue share, or a claim on Confío’s assets or profits.
 

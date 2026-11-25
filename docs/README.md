@@ -11,8 +11,6 @@ operational documentation for the Confío repository.
   allocation, vesting, presale, and token-risk reference.
 - [$CONFIO tokenomics — Español](tokenomics/README.es.md) - Convenience
   translation.
-- [$CONFIO tokenomics — 한국어](tokenomics/README.ko.md) - Convenience
-  translation.
 - [Chain decision note](CHAIN_DECISION_NOTE.md) - Role-based chain selection
   for cUSD, cUSD+, and $CONFIO.
 - [Project structure](PROJECT_STRUCTURE.md) - Repository and service map.

@@ -6,7 +6,7 @@
 
 Este documento describe el token $CONFIO canónico en BNB Smart Chain, su oferta fija y asignación, la curva continua de preventa, la distribución de recompensas, los compromisos de vesting, los controles de gobernanza y los riesgos materiales.
 
-**[La edición en inglés](README.md) es la única fuente oficial y autoritativa.** Las versiones en español y [coreano](README.ko.md) son traducciones de cortesía y pueden quedar temporalmente desactualizadas. Si existe cualquier diferencia, prevalece la edición en inglés. Esta traducción se sincronizó con la versión 3.2 en inglés el 30 de octubre de 2026.
+**[La edición en inglés](README.md) es la única fuente oficial y autoritativa.** La versión en español es una traducción de cortesía y puede quedar temporalmente desactualizada. Si existe cualquier diferencia, prevalece la edición en inglés. Esta traducción se sincronizó con la versión 3.2 en inglés el 30 de octubre de 2026.
 
 $CONFIO es independiente de USDT, cUSD, cUSD+, USDY, Ondo Stocks y de la empresa operadora. No respalda los saldos en dólares de los usuarios y, por sí solo, no representa acciones, deuda, participación en ingresos ni un derecho sobre los activos o utilidades de Confío.
 
