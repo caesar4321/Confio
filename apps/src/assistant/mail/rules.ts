@@ -34,8 +34,10 @@ export function consentText(): string[] {
       + 'escribió, el asunto y un resumen de una línea, sin enlaces, direcciones ni números largos. Esos mensajes '
       + 'quedan en tu conversación, que el equipo de Confío puede leer si pides ayuda, hasta que desconectes. Si ya '
       + 'respondiste o se resolvió en el mismo hilo, no te aviso.',
-    'Te llega como máximo una notificación al día, y una más si después aparece algo que vence hoy. Solo dice '
-      + 'cuántas cosas hay de cada tipo y cuántos eventos tienes hoy: nunca de quién son, montos ni títulos.',
+    'Una vez al día te llega una notificación con cuántas cosas hay de cada tipo y cuántos eventos tienes hoy, y una '
+      + 'más si después aparece algo que vence hoy. Cuando te cuento un correo entre las 7 y las 22 h, te aviso como '
+      + 'máximo una vez por hora, solo con el tipo (por ejemplo, «Tu Gmail trae un pago pendiente»). Las '
+      + 'notificaciones nunca dicen de quién son, montos ni títulos.',
     'Con cada correo importante te propongo 2 o 3 respuestas cortas pensadas para esa conversación. En nuestra '
       + 'conversación me puedes pedir que responda un correo o escriba uno nuevo. Lo que me pides y el hilo se envían a '
       + 'OpenAI para redactarlo, y el correo queda en una tarjeta con el destinatario, el asunto y el texto exactos. '
@@ -55,5 +57,5 @@ export function consentText(): string[] {
 export const LINKED_POINTS: { icon: string; text: string }[] = [
   { icon: 'message-circle', text: 'Te aviso de lo importante en nuestra conversación.' },
   { icon: 'corner-up-left', text: 'Ahí mismo me pides responder o escribir: nada sale sin tu OK.' },
-  { icon: 'bell', text: 'Una notificación al día, solo con cuántas cosas tienes por atender.' },
+  { icon: 'bell', text: 'Notificaciones sin remitentes, montos ni títulos: solo qué tipo de cosa llegó.' },
 ];

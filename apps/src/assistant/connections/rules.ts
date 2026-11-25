@@ -50,7 +50,7 @@ export function gmailView(data: Connections, build: Build): GmailView {
         : { badge: 'Conectado', body: 'Actualiza la app para ver tu correo aquí.' };
     case 'reconnect':
       return build.mail
-        ? { badge: 'Reconectar', body: 'Durante la prueba Google pide reconectar cada 7 días.', action: 'open' }
+        ? { badge: 'Reconectar', body: 'Google cortó el acceso. Vuelve a conectar tu Gmail para seguir.', action: 'open' }
         : { badge: 'Reconectar', body: 'Actualiza la app para reconectar tu Gmail.' };
     case 'paused':
       return {
