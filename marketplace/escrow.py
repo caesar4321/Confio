@@ -278,12 +278,29 @@ def deposit_from_enabled() -> bool:
     return int(raw or '0x0', 16) != 0
 
 
+def order_signer():
+    """The escrow's orderSigner key: its own KMS key (audit M2, 2026-11-25: never the sponsor that relays and
+    arbitrates), checked against the configured address. None while it is not configured (the sponsor signs)."""
+    alias = str(getattr(settings, 'MARKETPLACE_ORDER_SIGNER_KMS_ALIAS', '') or '').strip()
+    if not alias:
+        return None
+    from blockchain.evm_kms_signer import EVMKMSSigner
+    signer = EVMKMSSigner(alias, region_name=getattr(settings, 'BSC_KMS_REGION', None) or 'eu-central-2')
+    signer.assert_matches_address(getattr(settings, 'MARKETPLACE_ORDER_SIGNER_ADDRESS', None))
+    return signer
+
+
 def sign_deposit(digest: bytes) -> tuple[str, str]:
-    """(signature_hex, signer_address). The KMS sponsor is the orderSigner,
-    the same key that authorizes Pay invoices."""
-    from payments.bsc_flow import _sign_pay_authorization
-    sig, signer = _sign_pay_authorization(digest)
-    return sig, signer.lower()
+    """(signature_hex, signer_address) by the escrow's orderSigner: its own KMS key once configured, else the
+    KMS sponsor (the same key that authorizes Pay invoices)."""
+    signer = order_signer()
+    if signer is None:
+        from payments.bsc_flow import _sign_pay_authorization
+        sig, address = _sign_pay_authorization(digest)
+        return sig, address.lower()
+    v, r, s = signer.sign_digest(digest)  # v in {0,1}
+    sig = r.to_bytes(32, 'big') + s.to_bytes(32, 'big') + bytes([27 + int(v)])
+    return '0x' + sig.hex(), signer.address.lower()
 
 
 def recover_signer(digest: bytes, sig_hex: str) -> str:
