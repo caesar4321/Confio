@@ -298,5 +298,9 @@ Comprar; canary migration of a founder account; then Safe nonce 33 `setTradePaus
   `isCardSpender(spender)` true, `cardPaused` false, Safe nonce 34.
 - Server: `SMART_ACCOUNT_PURCHASE_SPENDER_ADDRESS` and `SMART_ACCOUNT_CARD_RULES_ENABLED=True` set; hands-off trades,
   hands-off Comprar and account-paid store purchases are live; the offer shows the hands-off wording.
-- Still open: a separate KMS key for the escrow's order signer (audit M2: today the sponsor is order signer, arbiter
-  and relayer); BscScan verification of the four contracts and the proxy re-link.
+- Escrow orderSigner moved to its own KMS key (audit M2): `alias/confio-mainnet-escrow-order-signer-evm-secp256k1`
+  (eu-central-2; only the prod role ConfioS3PresignRole may sign; Julian's user may not sign, delete or disable),
+  address `0x6D611FDD68290f68F7e7089F5c68f607304E9F3C`. Safe nonce 34 `escrow.setOrderSigner` (SafeTxHash
+  `0xcd79b864b3566133365148edc948f6c2c6e1227ba48271e0b683e86c9d3cc9ea`); server `MARKETPLACE_ORDER_SIGNER_*` set
+  (748a06c71). The arbiter and Pay invoices stay on the sponsor. Safe nonce now 35.
+- Still open: BscScan verification of the four contracts and the proxy re-link.
