@@ -162,10 +162,12 @@ class PageTests(SimpleTestCase):
 class RoundThreeTests(SimpleTestCase):
     def test_products_named_like_acts_are_opened(self):
         for path in ('/fone-jbl-noise-cancel/p/1', '/s?keywords=fone+noise+cancel', '/s?k=samsung+pay',
+                     '/search_result.html?search_key=baby+girl+buy',
                      '/livro-como-pagar-dividas/p/2', '/maquina-de-pagamento/p/3', '/balcao-checkout-caixa/p/4',
                      '/caneta-assinatura/p/5', '/cafeteira-one-click/p/6', '/best-buy-tv/p/7'):
             with self.subTest(path=path):
                 self.assertEqual(guard.link_refusal(link('Produto', path), SITE), '')
+        self.assertEqual(guard.link_refusal(link('Ver', '/search_result.html?search_key=/order/confirm'), SITE), 'acts')
         self.assertEqual(guard.link_refusal(link('Produto com um texto longo', cut=True), SITE), '')
 
     def test_acts_in_any_spelling(self):

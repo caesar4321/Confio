@@ -13,9 +13,10 @@ from .. import conf
 class BrowserUnavailable(Exception):
     """The vendor could not do it. `code`: quota | busy | unavailable."""
 
-    def __init__(self, message, code='unavailable'):
+    def __init__(self, message, code='unavailable', status=None):
         super().__init__(message)
         self.code = code
+        self.status = status
 
 
 @dataclass(frozen=True)

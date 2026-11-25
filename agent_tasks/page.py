@@ -33,7 +33,7 @@ _READ = r'''(() => {
     return el.checkVisibility ? el.checkVisibility({opacityProperty: true, visibilityProperty: true}) : true;
   };
   const buttonInput = el => el.tagName === 'INPUT' && ['button', 'submit', 'reset', 'image'].includes(el.type);
-  const searchNames = ['q', 'as_word', 'search', 'query', 'busca', 'k', 'field-keywords', 's', 'term'];
+  const searchNames = ['q', 'as_word', 'search', 'query', 'busca', 'buscar', 'k', 'field-keywords', 's', 'term', 'search_key', 'keyword', 'keywords'];
   const address = v => {
     try { return new URL(v, document.baseURI).href; } catch (e) { return 'invalid:'; }
   };
@@ -118,8 +118,10 @@ _READ = r'''(() => {
       checked: !!el.checked || ['aria-checked', 'aria-selected'].some(a => el.getAttribute(a) === 'true') ||
         (tag === 'label' && !!(el.control && el.control.checked)),
       maxlength: Number(el.getAttribute('maxlength')) || 0,
-      search: tag === 'input' && (el.type === 'search' || el.getAttribute('role') === 'searchbox' ||
-        !!el.closest('[role=search]') || searchNames.includes(el.getAttribute('name') || '')),
+      search: tag === 'input' && ['', 'text', 'search'].includes(type) && (
+        type === 'search' || el.getAttribute('role') === 'searchbox' ||
+        !!el.closest('[role=search]') || searchNames.includes((el.getAttribute('name') || '').toLowerCase()) ||
+        /^(search[-_]?input|searchbox|search[-_]?bar|search[-_]?field)$/i.test(el.id || '')),
     };
   };
   const found = [...document.querySelectorAll('a[href],button,input:not([type=hidden]),div[role=button],span[role=button],' +

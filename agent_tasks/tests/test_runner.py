@@ -99,6 +99,22 @@ class LoopTests(StepBase):
         self.browser.goto.assert_called_once_with(f'https://{SITE}/')
         self.decide.assert_not_called()
 
+    def test_a_countryless_store_uses_the_persons_country_for_the_proxy_only(self):
+        self.vendor.create_profile.return_value = 'profile-temu'
+        self.vendor.open.return_value = browsers.Session('s-temu', 'wss://b', timezone.now() + timedelta(minutes=20))
+        with mock.patch('ramps.rail_country.primary_rail_country', return_value='BO'):
+            task = self.step(self.make_task(site='temu.com', country='', state='queued', session_id='',
+                                            connect_url='', session_expires_at=None))
+        self.assertEqual(task.country, '')
+        self.assertEqual(self.vendor.open.call_args.kwargs['country'], 'BO')
+        self.browser.goto.assert_called_once_with('https://temu.com/')
+        # A store with its own country keeps it without looking up the person's; an unreadable hint becomes ''.
+        with mock.patch('ramps.rail_country.primary_rail_country', side_effect=RuntimeError('boom')):
+            self.assertEqual(runner._proxy_country(SimpleNamespace(country='MX', user=self.user)), 'MX')
+            self.assertEqual(runner._proxy_country(SimpleNamespace(country='', user=self.user)), '')
+        with mock.patch('ramps.rail_country.primary_rail_country', return_value='XX'):
+            self.assertEqual(runner._proxy_country(SimpleNamespace(country='', user=self.user)), '')
+
     def test_a_step_that_comes_after_ten_minutes_never_opens_the_browser(self):
         task = self.make_task(state='queued', provider='', session_id='', connect_url='', session_expires_at=None)
         AgentTask.objects.filter(pk=task.pk).update(created_at=timezone.now() - timedelta(minutes=11))
@@ -394,6 +410,10 @@ class HandOverTests(StepBase):
         said = notes.stopped_text(task, 'no_rail')
         self.assertIn('todavía no puedo pagar tiendas de Perú', said)
         self.assertIn('no lo compré', said)
+        com = self.make_task(site='temu.com', country='', state='stopped', reason='no_rail')
+        said_com = notes.stopped_text(com, 'no_rail')
+        self.assertIn('todavía no puedo pagar en esta tienda', said_com)
+        self.assertNotIn('ese país', said_com)
 
     def test_a_give_up_says_why_without_links_phones_or_handles(self):
         from agent_tasks import notes

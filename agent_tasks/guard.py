@@ -101,7 +101,7 @@ _ACT_WITH = (
     (re.compile(r'identificacao'), re.compile(r'carrinho')),
 )
 # What someone searched is words, unless it is written as a path.
-_SEARCH_KEYS = frozenset('q k s query search keywords keyword busca term asword'.split())
+_SEARCH_KEYS = frozenset('q k s query search searchkey keywords keyword busca buscar term asword'.split())
 _CHECKOUT_HOST = re.compile(r'(checkout|seguro|payment|payments|pagamento|pay)\.')
 # A link whose words are an act, not a place.
 _ACT_WORDS = re.compile(

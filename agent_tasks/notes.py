@@ -93,6 +93,8 @@ STOPPED = {
     # Any store may be searched (founder, 2026-11-25); paying it is what depends on the country.
     'no_rail': ('Encontré lo que elegiste en {site}, pero todavía no puedo pagar tiendas de {{country}}, así que no '
                 'lo compré. Puedes comprarlo tú directamente en {site}.'),
+    'no_rail_store': ('Encontré lo que elegiste en {site}, pero todavía no puedo pagar en esta tienda, así que no '
+                      'lo compré. Puedes comprarlo tú directamente en {site}.'),
     # Venezuela (pagomovil.py): a store that matches its Pago Móvil by the payer cannot be paid from Confío.
     'payer_data': ('{site} pide, para confirmar un pago por Pago Móvil, datos de quien paga (su teléfono, banco o '
                    'cédula) u otros que no sean la referencia, y Confío todavía no puede dárselos. No pagué nada ni '
@@ -160,7 +162,8 @@ def stopped_text(task, reason):
         # The final button was pressed: whatever ended it, an order may exist. Never "compra tú".
         text = STOPPED['cancelled_ordered' if reason in ('cancelled', 'replaced') else 'unpaid']
     else:
-        text = STOPPED.get(reason, STOPPED['error'])
+        key = 'no_rail_store' if reason == 'no_rail' and not task.country else reason
+        text = STOPPED.get(key, STOPPED['error'])
         why = str((task.order or {}).get('why') or '') if reason in WHY_REASONS else ''
         if why:
             text = text.rstrip() + ' Motivo: ' + why.replace('{', '(').replace('}', ')') + '.'

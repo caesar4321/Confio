@@ -37,7 +37,8 @@ class Browserbase(BrowserProvider):
         if response.status_code not in ok:
             code = {402: 'quota', 429: 'busy'}.get(response.status_code, 'unavailable')
             # Status only: a response body can echo a session's connect URL.
-            raise BrowserUnavailable(f'Browserbase {method} answered {response.status_code}', code)
+            raise BrowserUnavailable(f'Browserbase {method} answered {response.status_code}', code,
+                                     status=response.status_code)
         if response.status_code == 204 or not response.content:
             return {}
         try:
@@ -55,6 +56,8 @@ class Browserbase(BrowserProvider):
         self._call('DELETE', f'/contexts/{profile_id}', ok=(200, 204, 404))
 
     def open(self, *, profile_id, country, seconds, viewport=None, region=None, solve_captchas=True):
+        geo = str(country or '').strip().upper()
+        geo = geo if len(geo) == 2 and geo.isascii() and geo.isalpha() and geo not in ('XX', 'T1') else ''
         body = {
             'keepAlive': True,  # each step reconnects, so no worker waits on a person
             'timeout': max(MIN_SECONDS, min(int(seconds), MAX_SECONDS)),
@@ -67,18 +70,35 @@ class Browserbase(BrowserProvider):
                 'context': {'id': profile_id, 'persist': True},
             },
         }
-        if country and conf.get('AGENT_TASKS_GEO_PROXY'):
-            body['proxies'] = [{'type': 'browserbase', 'geolocation': {'country': country}}]
+        if conf.get('AGENT_TASKS_GEO_PROXY'):
+            body['proxies'] = ([{'type': 'browserbase', 'geolocation': {'country': geo}}]
+                               if geo else True)
         try:
             data = self._call('POST', '/sessions', body=body)
         except BrowserUnavailable as exc:
-            if exc.code != 'quota' or 'proxies' not in body:
+            if 'proxies' not in body:
                 raise
-            # The plan has no proxies (Browserbase's free plan answers 402): the store's own country
-            # is a nicety, a browser is not. Opened from Browserbase's own address instead.
-            logger.warning('Browserbase refused the %s proxy (plan): opening without it', country)
-            body = {key: value for key, value in body.items() if key != 'proxies'}
-            data = self._call('POST', '/sessions', body=body)
+            if exc.code == 'quota':
+                # The plan has no proxies (Browserbase's free plan answers 402): the store's own country
+                # is a nicety, a browser is not. Opened from Browserbase's own address instead.
+                logger.warning('Browserbase refused the %s proxy (plan): opening without it', geo or 'default')
+                body = {key: value for key, value in body.items() if key != 'proxies'}
+                data = self._call('POST', '/sessions', body=body)
+            elif isinstance(body['proxies'], list) and exc.status in (400, 422):
+                # An unsupported geolocation country (400/422): fall back to Browserbase's default managed proxy.
+                logger.warning('Browserbase refused the %s geolocation (%s): opening with default proxy',
+                               geo, exc.status)
+                body = {**body, 'proxies': True}
+                try:
+                    data = self._call('POST', '/sessions', body=body)
+                except BrowserUnavailable as inner:
+                    if inner.code != 'quota':
+                        raise
+                    logger.warning('Browserbase refused the default proxy (plan): opening without it')
+                    body = {key: value for key, value in body.items() if key != 'proxies'}
+                    data = self._call('POST', '/sessions', body=body)
+            else:
+                raise
         expires = parse_datetime(str(data.get('expiresAt') or ''))
         url = str(data.get('connectUrl') or '')
         if not data.get('id') or not url.startswith('wss://') or expires is None:

@@ -47,6 +47,43 @@ class BrowserbaseTests(SimpleTestCase):
                 Browserbase().open(profile_id='p', country='MX', seconds=900)
         self.assertEqual(sent.call_count, 1)
 
+    @override_settings(AGENT_TASKS_GEO_PROXY=True)
+    def test_a_store_without_a_country_still_uses_a_managed_proxy(self):
+        made = {'id': 's', 'connectUrl': 'wss://x', 'expiresAt': '2026-11-22T12:00:00Z'}
+        for bad in ('', 'XX', 'T1', 'BOL', '12'):
+            with self.subTest(country=bad), self.answer(made) as sent:
+                Browserbase().open(profile_id='p', country=bad, seconds=900)
+            self.assertIs(sent.call_args.kwargs['json']['proxies'], True)
+        with self.answer(made) as sent:
+            Browserbase().open(profile_id='p', country=' bo ', seconds=900)
+        self.assertEqual(sent.call_args.kwargs['json']['proxies'][0]['geolocation'], {'country': 'BO'})
+        # And still falls back cleanly when the plan refuses proxies (402).
+        refused = mock.Mock(status_code=402, content=b'{}')
+        ok = mock.Mock(status_code=201, content=b'{}')
+        ok.json.return_value = made
+        with mock.patch('agent_tasks.browsers.browserbase.requests.request', side_effect=[refused, ok]) as sent:
+            Browserbase().open(profile_id='p', country='', seconds=900)
+        self.assertIs(sent.call_args_list[0].kwargs['json']['proxies'], True)
+        self.assertNotIn('proxies', sent.call_args_list[1].kwargs['json'])
+        # An unsupported geolocation country (400/422) falls back to the default managed proxy (and on 402, none).
+        for status in (400, 422):
+            bad_geo = mock.Mock(status_code=status, content=b'{}')
+            with self.subTest(status=status), mock.patch(
+                    'agent_tasks.browsers.browserbase.requests.request', side_effect=[bad_geo, ok]) as sent:
+                Browserbase().open(profile_id='p', country='BO', seconds=900)
+            self.assertEqual(sent.call_args_list[0].kwargs['json']['proxies'][0]['geolocation'], {'country': 'BO'})
+            self.assertIs(sent.call_args_list[1].kwargs['json']['proxies'], True)
+        bad_geo = mock.Mock(status_code=400, content=b'{}')
+        with mock.patch('agent_tasks.browsers.browserbase.requests.request',
+                        side_effect=[bad_geo, refused, ok]) as sent:
+            Browserbase().open(profile_id='p', country='BO', seconds=900)
+        self.assertNotIn('proxies', sent.call_args_list[2].kwargs['json'])
+        # A 400 when already using default proxies (not a geo list) is not retried.
+        with mock.patch('agent_tasks.browsers.browserbase.requests.request', return_value=bad_geo) as sent:
+            with self.assertRaises(browsers.BrowserUnavailable):
+                Browserbase().open(profile_id='p', country='', seconds=900)
+        self.assertEqual(sent.call_count, 1)
+
     def test_an_error_carries_a_code_and_never_the_body(self):
         for status, code in ((402, 'quota'), (429, 'busy'), (500, 'unavailable')):
             with self.subTest(status=status), self.answer({'connectUrl': 'wss://secret'}, status):

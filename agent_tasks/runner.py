@@ -208,6 +208,20 @@ def run_step(task_id, turn=None):
         step.finish()
 
 
+def _proxy_country(task):
+    """The country for the browser's geo proxy: the store's own country, else the person's (so a .com
+    store still sees their region and currency, without binding task.country to a payment rail)."""
+    code = str(task.country or '').strip().upper()
+    if re.fullmatch(r'[A-Z]{2}', code) and code not in ('XX', 'T1'):
+        return code
+    try:
+        from ramps.rail_country import primary_rail_country
+        code = str(primary_rail_country(task.user) or '').strip().upper()
+        return code if re.fullmatch(r'[A-Z]{2}', code) and code not in ('XX', 'T1') else ''
+    except Exception:  # noqa: BLE001 - no hint is only no hint
+        return ''
+
+
 class Step:
     ASKED, GIVE_UP, HISTORY_KEPT = ASKED, GIVE_UP, HISTORY_KEPT
     fingerprint = staticmethod(fingerprint)
@@ -314,7 +328,7 @@ class Step:
                 vendor.delete_profile(external)
                 profile = AgentProfile.objects.get(user=task.user, site=task.site, provider=vendor.name)
         profile.save(update_fields=['last_used_at'])
-        session = vendor.open(profile_id=profile.external_id, country=task.country,
+        session = vendor.open(profile_id=profile.external_id, country=_proxy_country(task),
                               seconds=conf.get('AGENT_TASKS_SESSION_SECONDS'))
         try:
             self.save(provider=vendor.name, session_id=session.id, connect_url=session.connect_url,
