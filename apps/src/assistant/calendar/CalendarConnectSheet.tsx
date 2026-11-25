@@ -7,7 +7,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import CalendarMark from '../../components/svg/CalendarMark';
 import { Text } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
-import SetupScreen, { Action, Danger, Details, Fine, Notes, Points, Secondary, setupStyles, type Hero } from '../connections/SetupScreen';
+import SetupScreen, { Action, Alert, Danger, Details, Fine, Notes, Points, Secondary, setupStyles, type Hero } from '../connections/SetupScreen';
 import { ANALYZE_ASSISTANT_CALENDAR, KIND_LABELS, type CalendarKind } from './api';
 import { CALENDAR_CONSENT_VERSION, clearCalendarConsent, readCalendarConsent, saveCalendarConsent } from './consent';
 import { forgetCalendar } from './forgetCalendar';
@@ -79,6 +79,7 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
   const [connected, setConnected] = useState(false);
   // no-cache: titles and answers never land in the Apollo store.
   const [analyze] = useMutation(ANALYZE_ASSISTANT_CALENDAR, { fetchPolicy: 'no-cache' });
+  const [reviewed, setReviewed] = useState<{ count: number; found: { id: string; title: string; label: string }[] } | null>(null);
   // Closing or revoking drops whatever was still on its way.
   const generation = useRef(0);
   const closed = useRef(false);
@@ -196,6 +197,7 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
   }, 'No pude completar la desconexión. Inténtalo de nuevo.');
 
   const review = () => attempt(async () => {
+    setReviewed(null);
     const sent = events.filter((event) => picked.includes(event.id));
     const run = generation.current;
     const { data } = await analyze({
@@ -213,10 +215,14 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
     sent.forEach((event, index) => {
       next[event.id] = result.kinds[index];
     });
-    setKinds(next);
-    if (!sent.some((event) => KIND_LABELS[next[event.id]])) {
-      setMessage('No encontré nada que atender en lo que elegiste.');
-    }
+    setKinds((all) => ({ ...all, ...next }));
+    // The answer shows at the top, where it is seen, and the ticks clear: the footer is free again.
+    setReviewed({
+      count: sent.length,
+      found: sent.filter((event) => KIND_LABELS[next[event.id]])
+        .map((event) => ({ id: event.id, title: cleanTitle(event.title), label: String(KIND_LABELS[next[event.id]]) })),
+    });
+    setPicked([]);
   }, 'No pude revisar tu agenda ahora. Inténtalo de nuevo.');
 
   const toggleReminder = (event: DeviceEvent) => attempt(async () => {
@@ -335,6 +341,22 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
     const byId = new Map(calendars.map((calendar) => [calendar.id, calendar]));
     content = (
       <>
+        {reviewed ? (
+          <View style={styles.result} accessibilityLiveRegion="polite">
+            <View style={styles.resultHead}>
+              <Icon name="zap" size={16} color={colors.successText} />
+              <Text style={styles.resultTitle}>
+                {reviewed.found.length
+                  ? `Confío IA revisó ${reviewed.count} y encontró ${reviewed.found.length} por atender`
+                  : `Confío IA revisó ${reviewed.count}: nada por atender`}
+              </Text>
+            </View>
+            {reviewed.found.map((item) => (
+              <Text key={item.id} style={styles.resultLine}>{`${item.label}: ${item.title}`}</Text>
+            ))}
+            {reviewed.found.length ? <Text style={setupStyles.hint}>Toca «Avísame» en cada uno para que te recuerde. Puede equivocarse.</Text> : null}
+          </View>
+        ) : null}
         <Text style={setupStyles.text}>
           {`Tus próximos ${WINDOW_DAYS} días, con números y enlaces ocultos. Marca hasta ${MAX_SENT} títulos si quieres que los revise Confío IA.`}
         </Text>
@@ -395,16 +417,23 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
         {disconnect}
       </>
     );
-    footer = picked.length ? (
+    footer = (
       <>
-        <Fine text={SEND_DISCLOSURE} />
-        <Action label={`Enviar y revisar (${picked.length}/${MAX_SENT})`} onPress={review} busy={busy} />
+        {/* By the button: an answer at the end of a long list is never seen. */}
+        {message ? <Alert text={message} /> : null}
+        {picked.length ? (
+          <>
+            <Fine text={SEND_DISCLOSURE} />
+            <Action label={busy ? 'Revisando…' : `Enviar y revisar (${picked.length}/${MAX_SENT})`} onPress={review} busy={busy} />
+          </>
+        ) : <Action label="Ir a mi conversación" onPress={onClose} />}
       </>
-    ) : <Action label="Ir a mi conversación" onPress={onClose} />;
+    );
   }
 
   return (
-    <SetupScreen logo={<CalendarMark size={36} />} hero={hero} onClose={onClose} footer={footer} message={message}>
+    <SetupScreen logo={<CalendarMark size={36} />} hero={hero} onClose={onClose} footer={footer}
+      message={step === 'events' ? null : message}>
       {content}
     </SetupScreen>
   );
@@ -412,6 +441,10 @@ export default function CalendarConnectSheet({ userId, onClose }: Props) {
 
 const styles = StyleSheet.create({
   loading: { marginTop: 24 },
+  result: { borderRadius: 16, backgroundColor: colors.mint, padding: 14, gap: 6 },
+  resultHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  resultTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.primaryDeep },
+  resultLine: { fontSize: 14, color: colors.textFlat },
   allRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, minHeight: 64 },
   allIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center' },
   allTitle: { fontSize: 16, fontWeight: '800', color: colors.textFlat },

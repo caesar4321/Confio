@@ -97,6 +97,22 @@ it('sends only the ticked titles, cleaned, after the tap', async () => {
   await press('Enviar y revisar (1/12)');
   expect(mockAnalyze).toHaveBeenCalledWith({ variables: { titles: ['Pagar luz #'], consentVersion: 1 } });
   expect(text()).toContain('Parece un pago');
+  // The answer is at the top, the ticks clear, and the footer goes back to the conversation.
+  expect(text()).toContain('Confío IA revisó 1 y encontró 1 por atender');
+  expect(text()).toContain('Parece un pago: Pagar luz #');
+  expect(text()).toContain('Ir a mi conversación');
+});
+
+it('says so, by the button, when nothing was found or it failed', async () => {
+  mockAnalyze.mockResolvedValueOnce({ data: { analyzeAssistantCalendar: { success: true, kinds: ['none'] } } });
+  await open(['c']);
+  await press('Médico');
+  await press('Enviar y revisar (1/12)');
+  expect(text()).toContain('Confío IA revisó 1: nada por atender');
+  mockAnalyze.mockResolvedValueOnce({ data: { analyzeAssistantCalendar: { success: false, error: 'Llegaste al límite de hoy.' } } });
+  await press('Médico');
+  await press('Enviar y revisar (1/12)');
+  expect(text()).toContain('Llegaste al límite de hoy.');
 });
 
 it('disconnect clears the choice and the nudges', async () => {
