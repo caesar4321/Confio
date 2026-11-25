@@ -330,9 +330,18 @@ def apply_pending(limit: int = 500, max_batches: int = 20) -> dict:
         pending = list(_pending_events(blocked | ignored, skipped)[:limit])
         if not pending:
             break
+        factory = chain.factory_address()
+        mirrored = set(SmartAccount.all_objects.filter(
+            contract_address__in={e.address for e in pending}).values_list('contract_address', flat=True))
         for event in pending:
             key = _block_key(event)
             if event.address in blocked or key in blocked or event.address in ignored:
+                continue
+            if event.address != factory and event.address not in mirrored:
+                # Its AccountCreated is still pending. factory.migrate() initialises the new account (Subscribed,
+                # earlier log) before the factory logs AccountCreated in the same transaction: wait for it this
+                # run, never fail and block that very AccountCreated (founder's v2 canary, 2026-11-25).
+                skipped.add(event.pk)
                 continue
             try:
                 with transaction.atomic():
@@ -343,6 +352,8 @@ def apply_pending(limit: int = 500, max_batches: int = 20) -> dict:
                     locked.applied_at = timezone.now()
                     locked.save(update_fields=['applied_at', 'smart_account'])
                 applied += 1
+                if locked.smart_account_id is not None:
+                    mirrored.add(locked.smart_account.contract_address)
                 if key != event.address and locked.smart_account_id is None:
                     ignored.add(key)   # created by someone else: no row, nothing to apply
                 elif key != event.address and backfill_pending({key}):

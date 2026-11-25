@@ -521,6 +521,39 @@ class MigrationTests(HandsOffBase):
         self.assertEqual(own_account(self.user).account.account_index, 0)
         note.assert_called_once()
 
+    def test_the_reconciler_applies_a_migration_in_chain_order(self):
+        """factory.migrate() initialises the new account (its Subscribed, an earlier log) before the factory logs
+        AccountCreated and AccountMigrated in the same transaction. The real apply loop must not let that
+        Subscribed fail and block the AccountCreated it waits for (founder's v2 canary, 2026-11-25)."""
+        from django.utils import timezone
+        from smart_account import reconcile
+        from smart_account.context import own_account
+        from smart_account.models import SmartAccountEvent
+        signer = self.user.wallet
+        new = self.chain.predict_address_at(signer, 1).lower()
+        tx = '0x' + 'ce' * 32
+        factory = SETTINGS['SMART_ACCOUNT_FACTORY_ADDRESS']
+        base = dict(block_number=10, block_hash='0x' + '00' * 32, tx_hash=tx, block_time=timezone.now())
+        subscribed = SmartAccountEvent.objects.create(address=new, name='Subscribed', log_index=0,
+                                                      args={'plan': 1, 'paidUntil': '1797903006'}, **base)
+        SmartAccountEvent.objects.create(address=factory, name='AccountCreated', log_index=1,
+                                         args={'owner': signer, 'account': new}, **base)
+        SmartAccountEvent.objects.create(
+            address=factory, name='AccountMigrated', log_index=2,
+            args={'owner': signer, 'from': self.own.contract_address.lower(), 'to': new, 'generation': '1'}, **base)
+        with mock.patch('smart_account.reconcile.backfill_pending', return_value=set()), \
+                mock.patch('assistant.service.post_system_note', return_value=(None, True)), \
+                mock.patch('smart_account.reconcile._HANDLERS', {}):
+            first = reconcile.apply_pending()
+            self.assertEqual(first['failed'], 0, 'nothing fails: the early Subscribed waits for its AccountCreated')
+            self.assertEqual(own_account(self.user).contract_address.lower(), new)
+            subscribed.refresh_from_db()
+            self.assertIsNone(subscribed.applied_at, 'it waited this run')
+            second = reconcile.apply_pending()
+        subscribed.refresh_from_db()
+        self.assertIsNotNone(subscribed.applied_at, 'and applied on the next one')
+        self.assertEqual(second['failed'], 0)
+
     def test_a_tampered_migration_is_refused(self):
         from cusd_plus.sponsor_7702 import PolicyError
         from smart_account import relay_policy
