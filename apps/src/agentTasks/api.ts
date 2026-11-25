@@ -22,6 +22,7 @@ const TASK_FIELDS = `
   payQr
   payDetails { label value }
   openAccountMethod
+  notify
   options { title price image cap unit rating reviews }
   capRule { margin minExtra commaDecimals maxQuantity }
   order { item items { title quantity image } total image address breakdown { label value } }
@@ -44,6 +45,13 @@ const RESULT = `success errors errorCode task { ${TASK_FIELDS} }`;
 export const ANSWER_AGENT_REQUEST = gql`
   mutation AnswerAgentRequest($id: UUID!, $yes: Boolean!, $what: String) {
     answerAgentRequest(id: $id, yes: $yes, what: $what) { ${RESULT} }
+  }
+`;
+
+// Sí, avísame / Solo miraba on a purchase stopped because its country's stores cannot be paid yet (no_rail).
+export const ANSWER_AGENT_NOTIFY = gql`
+  mutation AnswerAgentNotify($id: UUID!, $yes: Boolean!) {
+    answerAgentNotify(id: $id, yes: $yes) { ${RESULT} }
   }
 `;
 
@@ -162,6 +170,8 @@ export type AgentTask = {
   payDetails?: { label: string; value: string }[];
   // The local account (LocalAccountApplication methodId) that lets Confío pay the next one.
   openAccountMethod?: string | null;
+  // With reason 'no_rail': '' unanswered, 'yes' (Sí, avísame) or 'no' (Solo miraba).
+  notify?: string | null;
   options: AgentOption[];
   // How the top total of the chosen products is worked out (while choosing).
   capRule?: CapRule | null;

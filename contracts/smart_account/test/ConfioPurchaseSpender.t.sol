@@ -170,8 +170,7 @@ contract ConfioPurchaseSpenderTest is SmartAccountBase {
         uint256 id = _purchaseRule(address(plus), 200e18);
         uint256 net = 57.123456789e18;
         uint256 cusdBefore = cusd.balanceOf(address(acct));
-        // The spender's transaction has no sponsor as origin (it is Confío's
-        // operator, not a sponsor): cUSD+ exits through redeemToUsdt.
+        // cUSD+ exits through redeemToUsdt (never unwrapToCusd), whoever the operator is.
         _pullTo(id, net, deposit);
         assertEq(usdt.balanceOf(deposit), net);
         assertEq(usdt.balanceOf(address(spender)), 0);
@@ -348,6 +347,20 @@ contract ConfioPurchaseSpenderTest is SmartAccountBase {
         assertEq(usdt.balanceOf(address(spender)), 0);
     }
 
+    /// Code running as the operator for someone else (an EIP-7702 delegation
+    /// that others can drive) is refused: only the operator's own transaction pulls.
+    function test_pullTo_operatorCodeDrivenByOthers_refused() public {
+        uint256 id = _purchaseRule(address(cusd), 200e18);
+        vm.etch(operator, address(new OpenExecutor()).code);
+        address eve_ = makeAddr("eve7702");
+        vm.prank(eve_, eve_);
+        vm.expectRevert(ConfioPurchaseSpender.NotOperator.selector);
+        OpenExecutor(operator).execute(
+            address(spender), abi.encodeCall(spender.pullTo, (address(acct), id, 198.2e18, eve_, bytes32("x")))
+        );
+        assertEq(usdt.balanceOf(eve_), 0);
+    }
+
     /// The operator called back while the payment is delivered (a token with
     /// a hook) tries a second pull: refused, and the first counts once.
     function test_pullTo_reentry_refused_outerCountsOnce() public {
@@ -364,6 +377,8 @@ contract ConfioPurchaseSpenderTest is SmartAccountBase {
         BouncingDeposit bouncer = new BouncingDeposit(evil);
         usdt.setCallsBack(address(bouncer), true);
 
+        // The operator signs (tx.origin) as a 7702-delegated EOA would: the reentrancy flag is what refuses.
+        vm.prank(address(this), address(evil));
         evil.pull(address(acct), id, 9.91e18, address(bouncer));
         assertTrue(evil.reentered(), "the callback ran");
         assertFalse(evil.reentrySucceeded(), "re-entry got through");
@@ -372,8 +387,22 @@ contract ConfioPurchaseSpenderTest is SmartAccountBase {
         assertEq(usdt.balanceOf(address(guarded)), 0);
         assertEq(acct.cardSpentUsd(id), 10e18);
         // The guard is released after a pull: the next one goes through.
+        vm.prank(address(this), address(evil));
         evil.pull(address(acct), id, 9.91e18, address(0xBEEF));
         assertEq(usdt.balanceOf(address(0xBEEF)), 9.91e18);
         assertEq(acct.cardSpentUsd(id), 20e18);
+    }
+}
+
+/// Stand-in for a careless EIP-7702 delegate: anyone may make it call anything.
+contract OpenExecutor {
+    function execute(address target, bytes calldata data) external returns (bytes memory) {
+        (bool ok, bytes memory ret) = target.call(data);
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+        return ret;
     }
 }

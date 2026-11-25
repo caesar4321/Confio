@@ -437,6 +437,19 @@ def answer_step(account, user, task_id, yes):
                      history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
 
 
+def answer_notify(account, user, task_id, yes):
+    """Sí, avísame / Solo miraba on a purchase stopped because its store's country cannot be paid yet (stop
+    'no_rail'): the fake-door probe for store payments there. Kept on the task, whose country is the store's;
+    the last answer counts."""
+    task = get(account, user, task_id)
+    if task.state != 'stopped' or task.reason != 'no_rail':
+        raise TaskRefused('not_open')
+    task.order = {**(task.order or {}), 'notify': 'yes' if yes else 'no',
+                  'notify_at': timezone.now().isoformat()}
+    task.save(update_fields=['order', 'updated_at'])
+    return task
+
+
 def choose(account, user, task_id, index, cap=None):
     """The person picked one of the products offered in the chat: the agent goes on with it."""
     from . import operate

@@ -449,7 +449,8 @@ def pull_problem(receipt, bridge, bound) -> tuple[dict | None, str]:
     if int(receipt.get('status', '0x0'), 16) != 1:
         return None, 'pull_reverted'
     spender, contract = address(bound['spender']), address(bound['contract'])
-    if address(receipt.get('to') or '0x' + '00' * 20) != spender:
+    to = str(receipt.get('to') or '').lower()   # a contract creation has none: never a pull
+    if not to or address(to) != spender:
         return None, 'not_a_spender_call'
     units, rule_id = int(bound['units']), int(bound['rule_id'])
     ref = '0x' + purchases.ref_for(bound['request_id']).hex()
@@ -476,7 +477,9 @@ def pull_problem(receipt, bridge, bound) -> tuple[dict | None, str]:
     if (event['account'] != contract or int(event['ruleId']) != rule_id or event['to'] != deposit
             or int(event['usdtOut']) != units or event['ref'] != ref):
         return None, 'forwarded_mismatch'
-    if int(card['id']) != rule_id or card['spender'] != spender or int(card['usdtOut']) != units:
+    # usdSpent is the gross the owner's cap counted: never less than what went out.
+    if (int(card['id']) != rule_id or card['spender'] != spender or int(card['usdtOut']) != units
+            or int(card.get('usdSpent') or 0) < units):
         return None, 'card_pull_mismatch'
     if chain.received_units(receipt, cf.SOURCE, deposit, spender) != units:
         return None, 'transfer_mismatch'

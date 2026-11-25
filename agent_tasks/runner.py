@@ -513,7 +513,9 @@ class Step:
                 return self.await_captcha()
             if kind == 'login':
                 return self.remember('ask_person', 'refused: there is no sign-in form here; open the sign-in page')
-            return self.stop('cannot_do')   # nobody is sent to the store: what only they can give ends it
+            # The person is not at the store: what to buy is chosen from what is offered (offer_products).
+            return self.remember('ask_person', 'refused: the person picks from what you offer; call offer_products '
+                                               'with the closest products on this or a search page')
         if name == 'ready_for_checkout':
             return self.hand_checkout()
         if name == 'offer_products':

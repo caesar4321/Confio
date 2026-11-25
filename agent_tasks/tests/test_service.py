@@ -583,3 +583,25 @@ class AccountWaitTests(ServiceBase):
         task.refresh_from_db()
         self.assertEqual((task.state, task.reason), ('stopped', 'account_timeout'))
         self.assertIn('sin pagar', self.post.call_args.args[1])
+
+
+class NotifyProbeTests(ServiceBase):
+    """Sí, avísame / Solo miraba on a purchase its country's stores cannot be paid for yet."""
+
+    def test_the_answer_is_kept_on_the_stopped_purchase_and_shown(self):
+        from agent_tasks.schema import task_type
+        task = self.make_task(state='stopped', reason='no_rail', order={'why': 'x'})
+        self.assertEqual(task_type(task).notify, '')
+        service.answer_notify(self.account, self.user, task.internal_id, True)
+        task.refresh_from_db()
+        self.assertEqual((task.order['notify'], task.order['why']), ('yes', 'x'))
+        self.assertEqual(task_type(task).notify, 'yes')
+        service.answer_notify(self.account, self.user, task.internal_id, False)   # the last answer counts
+        task.refresh_from_db()
+        self.assertEqual(task.order['notify'], 'no')
+
+    def test_only_on_a_purchase_stopped_for_its_country(self):
+        for fields in ({'state': 'stopped', 'reason': 'cannot_do'}, {'state': 'working', 'reason': ''}):
+            with self.subTest(**fields):
+                task = self.make_task(**fields)
+                self.refused('not_open', service.answer_notify, self.account, self.user, task.internal_id, True)

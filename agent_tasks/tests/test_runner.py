@@ -689,12 +689,15 @@ class RoundThreeStepTests(StepBase):
         history = [{'did': 'left the store', 'result': 'x'}] * runner.MAX_LEFT_STORE
         self.assertEqual(self.step(self.make_task(history=history), snap(url='https://evil.com/')).reason, 'cannot_do')
 
-    def test_what_only_the_person_could_give_ends_it_nobody_is_sent_to_the_store(self):
+    def test_asking_the_person_what_to_buy_is_refused_and_the_search_goes_on(self):
+        # Farmatodo, goal "algo" (2026-11-25): asking what to buy ended the task before any option was shown.
+        task = self.make_task()
         for kind in ('choice', 'details', 'consent'):
             with self.subTest(kind=kind):
                 self.decide.return_value = ('ask_person', {'kind': kind})
-                task = self.step(self.make_task(), snap())
-                self.assertEqual((task.state, task.reason), ('stopped', 'cannot_do'))
+                task = self.step(task, snap())
+                self.assertEqual(task.state, 'working')
+                self.assertIn('offer_products', task.history[-1]['result'])
 
     def test_documents_are_checked_while_the_agent_works(self):
         self.decide.return_value = ('wait', {})

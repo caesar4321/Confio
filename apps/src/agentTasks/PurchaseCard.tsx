@@ -18,7 +18,7 @@ import { saveImageToGallery } from '../utils/saveImageToGallery';
 import { PurchaseDone } from './PurchaseDone';
 import { PurchaseJourney } from './PurchaseJourney';
 import {
-  ACTIVE, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
+  ACTIVE, ANSWER_AGENT_NOTIFY, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
   CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, RESUME_AGENT_PAYMENT, SIGN_IN_AGENT_STORE,
 } from './api';
 import { CapRule, cartTop } from './helpers';
@@ -235,6 +235,24 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
             <Text style={styles.linkText}>No, déjalo así</Text>
           </Pressable>
         </View>
+      ) : null}
+      {/* Found and picked, but this country's stores cannot be paid yet: the intent probe for paying them. */}
+      {task.status === 'stopped' && task.reason === 'no_rail' ? (
+        task.notify === 'yes' ? (
+          <Text style={styles.message}>¡Anotado! Te aviso apenas pueda pagar tiendas de aquí.</Text>
+        ) : task.notify === 'no' ? null : (
+          <View>
+            <Text style={styles.message}>¿Te aviso cuando pueda pagar tiendas de aquí?</Text>
+            <View style={styles.stepRow}>
+              <Button title="Sí, avísame" loading={tapping === 'notify:yes'}
+                onPress={() => act('notify:yes', ANSWER_AGENT_NOTIFY, { yes: true }, 'answerAgentNotify')} />
+              <Pressable onPress={() => act('notify:no', ANSWER_AGENT_NOTIFY, { yes: false }, 'answerAgentNotify')}
+                accessibilityRole="button" style={styles.link} disabled={tapping !== null}>
+                <Text style={styles.linkText}>Solo miraba</Text>
+              </Pressable>
+            </View>
+          </View>
+        )
       ) : null}
       {waiting && task.reason === 'step' ? (
         <View style={styles.stepRow}>

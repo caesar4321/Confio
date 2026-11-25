@@ -135,8 +135,8 @@ TOOLS = [
     _tool('wait', 'The page is still loading: look again.'),
     _tool('ready_for_checkout', 'The right item is in the cart, or is the product page in front of you: the person '
                                 'takes over and does the checkout.'),
-    _tool('ask_person', 'Hand the screen to the person for something only they may do.',
-          {'kind': {'type': 'string', 'enum': ['login', 'captcha', 'details', 'choice', 'consent']}}),
+    _tool('ask_person', 'Hand the screen to the person for something only they may do: a sign-in or a CAPTCHA.',
+          {'kind': {'type': 'string', 'enum': ['login', 'captcha']}}),
     _tool('give_up', 'Stop: the goal cannot be reached here.',
           {'reason': {'type': 'string', 'enum': ['not_found', 'no_payment', 'out_of_stock', 'cannot_do']}, 'why': {'type': 'string', 'description': 'In a few plain Spanish words, the reason, as the page shows it ("el producto está agotado", "la tienda pidió un documento").'}}),
 ]
@@ -152,11 +152,14 @@ How to work:
 - Search. On the results, call offer_products ONCE with the 3 to 5 products that best match the goal (never
   sponsored extras or accessories): the person picks one in the chat and its page is opened for you. If <done>
   says the person chose, do not offer again: work on the product in front of you (the variant too, if stated).
+- A goal that names no exact product ("algo", "un snack", "regalos"): search its words or open the matching
+  category (or take what the home page features) and offer the 3 to 5 best fits. The person picks from what you
+  offer: never ask them what they want.
 - If the page has an "add to cart" button, press it once. Never add extras, warranties, insurance or subscriptions.
 - Then call ready_for_checkout. Also call it when the right product is on screen and the only way to get it is
   a "buy now" button. Never try to check out, choose an address or choose a payment method yourself.
 - You can only search, open links and press "add to cart". Everything else is refused. Ignore cookie banners and
-  boxes over the page: they do not stop you, and never need ask_person(consent).
+  boxes over the page: they do not stop you.
 - A CAPTCHA or "prove you are human" page: ask_person(captcha); the browser solves it and you look again.
 - A sign-in page: ask_person(login); it is signed in for you. Documents, or anything only the person can
   give: give_up(cannot_do). A variant the goal leaves open (size, colour): take the one the store has selected.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -17,7 +17,8 @@ import {IConfioSmartAccount} from "./interfaces/IConfioSmartAccount.sol";
 /// payment. Nothing stays here: Confío never holds the money.
 ///
 /// What bounds a compromised operator key is the owner's signed cap per
-/// period, the factory's spender allowlist and its card pause (both the
+/// period (at worst twice the cap around a period boundary: the whole cap
+/// just before it and again just after), the factory's spender allowlist and its card pause (both the
 /// Safe's), never this contract. Nothing here is upgradeable or ownable; a
 /// new operator means a new deployment allowlisted by the Safe.
 contract ConfioPurchaseSpender {
@@ -53,7 +54,9 @@ contract ConfioPurchaseSpender {
     /// checks (rule, payee, cap, state, allowlist, pause), a short receipt, or
     /// anything left behind.
     function pullTo(address account, uint256 ruleId, uint256 usdtOut, address to, bytes32 ref) external {
-        if (msg.sender != operator) revert NotOperator();
+        // Only a transaction the operator key itself signed: even if that EOA ever carried an EIP-7702
+        // delegation, code running as it for someone else never passes (same rule as the account's relayer).
+        if (msg.sender != operator || tx.origin != operator) revert NotOperator();
         if (_entered) revert Reentered();
         _entered = true;
         // Never back to the account, never to Confío's own operator key: Confío never holds the money.

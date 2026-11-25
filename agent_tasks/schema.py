@@ -120,6 +120,9 @@ class AgentTaskType(graphene.ObjectType):
     open_account_method = graphene.String(
         description='The local account (LocalAccountApplication methodId) that would let Confío pay it next time.')
     created_at = graphene.DateTime(required=True)
+    notify = graphene.String(required=True, description="With reason `no_rail` (this country's stores cannot be paid "
+                                                        "yet): '' unanswered, 'yes' (Sí, avísame) or 'no' (Solo "
+                                                        "miraba), answered with answerAgentNotify")
     order = graphene.Field(AgentOrderType, description='With reason `approve`: confirm with approveAgentOrder. With `subscribe`, approveAgentOrder only resumes once subscribed')
     options = graphene.List(graphene.NonNull(AgentOptionType), required=True,
                             description='With reason `choose`: pick one or more, each with a quantity, with '
@@ -206,6 +209,7 @@ def task_type(task):
         if task.state == 'payment_ready' else [],
         open_account_method=str((task.order or {}).get('offer') or '') or None,
         created_at=task.created_at, stage=stage, kind=getattr(task, 'kind', 'buy') or 'buy',
+        notify=str((task.order or {}).get('notify') or '') if task.reason == 'no_rail' else '',
         request=str(((task.order or {}).get('request') or {}).get('what') or '') or None
         if task.state == 'needs_person' and task.reason == 'act' else None,
         request_button=str(((task.order or {}).get('request') or {}).get('button') or '') or None
@@ -485,6 +489,21 @@ class AnswerAgentStep(_Result):
             return _failure(cls, exc)
 
 
+class AnswerAgentNotify(_Result):
+    """Sí, avísame or Solo miraba on a purchase stopped because its country's stores cannot be paid yet: the
+    intent probe for store payments there (the task keeps its store's country)."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        yes = graphene.Boolean(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, yes):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.answer_notify(*_owner(info), id, bool(yes))))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
 class CancelAgentTask(_ById):
     class Arguments:
         id = graphene.UUID(required=True)
@@ -551,5 +570,6 @@ class Mutation(graphene.ObjectType):
     approve_agent_order = ApproveAgentOrder.Field()
     answer_agent_step = AnswerAgentStep.Field()
     answer_agent_request = AnswerAgentRequest.Field()
+    answer_agent_notify = AnswerAgentNotify.Field()
     open_agent_live_view = OpenAgentLiveView.Field()
     forget_agent_store = ForgetAgentStore.Field()

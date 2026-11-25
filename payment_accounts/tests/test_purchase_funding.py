@@ -596,6 +596,109 @@ class PurchasePaidByTheAccountTests(InfiniaPayoutSteps, TestCase):
         self.assertFalse(PaymentBridgeTransfer.objects.exists())
 
 
+class PullProblemTests(TestCase):
+    """purchase_funding.pull_problem on one final receipt: every fact of the pull
+    is the chain's, and each wrong one is named."""
+
+    CONTRACT = '0x' + '22' * 20
+    DEPOSIT = '0x' + '33' * 20
+    OTHER = '0x' + '0d' * 20
+    RULE_ID = 2
+    UNITS = int(TOTAL_USD * WAD)
+    GROSS = 52_480_000_000_000_000_000
+
+    def setUp(self):
+        self.request_id = uuid.uuid4()
+        self.ref = purchases.ref_for(self.request_id)
+        self.bound = {'spender': SPENDER, 'contract': self.CONTRACT, 'units': str(self.UNITS),
+                      'rule_id': self.RULE_ID, 'request_id': str(self.request_id)}
+        self.bridge = mock.Mock(deposit_address=self.DEPOSIT)
+
+    def card_pulled(self, *, emitter=None, rule_id=None, spender=SPENDER, out=None, gross=None):
+        return event(emitter or self.CONTRACT, 'CardPulled', abi.ACCOUNT_EVENTS['CardPulled'],
+                     [self.RULE_ID if rule_id is None else rule_id, spender,
+                      self.UNITS if out is None else out, self.GROSS if gross is None else gross])
+
+    def forwarded(self):
+        return event(SPENDER, 'Forwarded', abi.FORWARDED_FIELDS,
+                     [self.CONTRACT, self.RULE_ID, self.DEPOSIT, self.UNITS, self.ref])
+
+    def logs(self):
+        """The mined logs of exactly this purchase's pull, as PurchaseWorld mines them."""
+        return [w.transfer_log(w.USDT, w.CUSD, self.CONTRACT, self.UNITS),
+                w.transfer_log(w.USDT, self.CONTRACT, SPENDER, self.UNITS),
+                self.card_pulled(),
+                w.transfer_log(w.USDT, SPENDER, self.DEPOSIT, self.UNITS),
+                self.forwarded()]
+
+    def receipt(self, logs=None, **fields):
+        return dict({'status': '0x1', 'to': SPENDER, 'transactionHash': '0x' + 'ab' * 32,
+                     'logs': self.logs() if logs is None else logs}, **fields)
+
+    def problem(self, receipt):
+        return purchase_funding.pull_problem(receipt, self.bridge, self.bound)
+
+    def assert_problem(self, receipt, code):
+        proof, problem = self.problem(receipt)
+        self.assertEqual((proof, problem), (None, code))
+
+    def test_the_exact_pull_is_proven(self):
+        proof, problem = self.problem(self.receipt())
+        self.assertEqual(problem, '')
+        self.assertEqual((proof['units'], proof['account'], proof['rule_id'], proof['to'], proof['ref']),
+                         (str(self.UNITS), self.CONTRACT, self.RULE_ID, self.DEPOSIT, '0x' + self.ref.hex()))
+
+    def test_a_card_pull_with_any_wrong_field_is_a_mismatch(self):
+        for wrong in ({'rule_id': self.RULE_ID + 1}, {'spender': self.OTHER}, {'out': self.UNITS - 1},
+                      {'out': self.UNITS + 1}, {'gross': 0}, {'gross': self.UNITS - 1}):
+            with self.subTest(**wrong):
+                logs = self.logs()
+                logs[2] = self.card_pulled(**wrong)
+                self.assert_problem(self.receipt(logs), 'card_pull_mismatch')
+
+    def test_a_card_pull_emitted_by_another_address_is_not_the_accounts(self):
+        logs = self.logs()
+        logs[2] = self.card_pulled(emitter=self.OTHER)
+        self.assert_problem(self.receipt(logs), 'events_missing')
+
+    def test_a_receipt_of_a_call_to_anything_but_the_spender(self):
+        self.assert_problem(self.receipt(to=self.OTHER), 'not_a_spender_call')
+        self.assert_problem(self.receipt(to=self.CONTRACT), 'not_a_spender_call')
+        self.assert_problem(self.receipt(to=None), 'not_a_spender_call')   # a contract creation
+
+    def test_two_forwarded_events_are_never_one_pull(self):
+        self.assert_problem(self.receipt(self.logs() + [self.forwarded()]), 'events_missing')
+
+    def test_two_card_pulls_are_never_one_pull(self):
+        self.assert_problem(self.receipt(self.logs() + [self.card_pulled()]), 'events_missing')
+
+    def test_a_failed_receipt_is_a_reverted_pull(self):
+        self.assert_problem(self.receipt(status='0x0'), 'pull_reverted')
+        self.assert_problem(self.receipt(logs=[], status='0x0'), 'pull_reverted')
+
+    def test_no_usdt_transfer_to_the_deposit(self):
+        logs = self.logs()
+        del logs[3]
+        self.assert_problem(self.receipt(logs), 'transfer_mismatch')
+
+    def test_a_short_usdt_transfer(self):
+        logs = self.logs()
+        logs[3] = w.transfer_log(w.USDT, SPENDER, self.DEPOSIT, self.UNITS - 1)
+        self.assert_problem(self.receipt(logs), 'transfer_mismatch')
+
+    def test_a_usdt_transfer_from_anyone_but_the_spender(self):
+        logs = self.logs()
+        logs[3] = w.transfer_log(w.USDT, self.CONTRACT, self.DEPOSIT, self.UNITS)
+        self.assert_problem(self.receipt(logs), 'transfer_mismatch')
+
+    def test_a_transfer_of_the_right_shape_from_another_token_is_not_usdt(self):
+        for token in (w.CUSD, w.USDC, self.OTHER):
+            with self.subTest(token=token):
+                logs = self.logs()
+                logs[3] = w.transfer_log(token, SPENDER, self.DEPOSIT, self.UNITS)
+                self.assert_problem(self.receipt(logs), 'transfer_mismatch')
+
+
 class PurchaseAbiTests(TestCase):
     def test_pull_to_round_trips_and_only_for_its_own_account(self):
         account, deposit = '0x' + '22' * 20, '0x' + '33' * 20
