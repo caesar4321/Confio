@@ -1176,7 +1176,9 @@ export const NotificationScreen = () => {
       const orderData = item.notificationType === 'MARKETPLACE_ORDER_UPDATED'
         ? parseNotificationData(item.data)
         : null;
-      const visual = notificationVisual(item.notificationType, localData ? {
+      // Cuenta inteligente notices say their event in the data (each its own icon, not the SYSTEM default).
+      const smartEvent = localData || orderData ? undefined : parseNotificationData(item.data)?.smart_account_event;
+      const visual = notificationVisual(item.notificationType, smartEvent ? { smartEvent } : localData ? {
         stage: localData.stage,
         // Notices stored before the payload carried a direction still have the
         // title the server built from that same direction.

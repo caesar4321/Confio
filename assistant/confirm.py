@@ -240,19 +240,24 @@ def served_codes(belt, open_only=False):
             | {by_message[m] for _i, m in rows if m in by_message})
 
 
-def recent_texts(belt, until_card=True):
+def recent_texts(belt, until_card=True, spoken=False):
     """What the person typed in the last few minutes, newest first: where a
     proposal finds who and what (never how much: code asks that). Never a
-    tapped suggestion, a voice note, a client-reported line or anyone else's
-    words. `until_card`: True, a card or a "no" ends it; 'untagged', only a
-    "no" or a card that does not say its code; False, only a "no"."""
+    tapped suggestion, a client-reported line or anyone else's words.
+    `spoken`: a voice note's transcript too, only where what it names is
+    then asked as a question answered in writing (a stock trade: the amount
+    and the "sí" stay typed, answer() below). `until_card`: True, a card or a
+    "no" ends it; 'untagged', only a "no" or a card that does not say its
+    code; False, only a "no"."""
     from .engine import is_tapped_text
-    if not belt.payment_texts:
-        return []  # the newest message is not typed: nothing is asked from it
+    own = (getattr(belt, 'store_texts', None) or belt.payment_texts) if spoken else belt.payment_texts
+    if not own:
+        return []  # the newest message is not typed (nor said): nothing is asked from it
+    modalities = ('TEXT', 'VOICE_NOTE') if spoken else ('TEXT',)
     history = list(getattr(belt, 'turn_history', ()) or ())
     mine = [m for m in history if m.sender_type == 'USER' and (m.body or '').strip()]
     if not mine:
-        return list(belt.payment_texts)
+        return list(own)
     latest, texts = getattr(mine[-1], 'created_at', None), []
     for message in reversed(history):
         metadata, sent = message.metadata or {}, getattr(message, 'created_at', None)
@@ -263,7 +268,7 @@ def recent_texts(belt, until_card=True):
         if message is not mine[-1] and not (latest and sent and timedelta(0) <= latest - sent <= WINDOW):
             break
         if (metadata.get('client_reported') or metadata.get('handoff_note')
-                or str(metadata.get('modality') or 'TEXT').upper() != 'TEXT' or is_tapped_text(message.body)):
+                or str(metadata.get('modality') or 'TEXT').upper() not in modalities or is_tapped_text(message.body)):
             continue
         texts.append(message.body.strip())
         if len(texts) >= MAX_TEXTS:

@@ -250,11 +250,26 @@ def _held(viewer):
         if account and isinstance(rows, list):
             # Hands-off sells are the account's first: what it holds can be sold from the chat too.
             more = _holdings(account, limit=None)
-            rows = rows + (more if isinstance(more, list) else [])
+            rows = _one_row_each(rows + (more if isinstance(more, list) else []))
     except Exception:  # noqa: BLE001 - unknown: the phone checks the real balance
         logger.warning('Confio Assistant: holdings unavailable for a trade card', exc_info=True)
         return 'desconocido'
     return rows if isinstance(rows, list) else 'desconocido'
+
+
+def _one_row_each(rows):
+    """One row per ticker, the values of both wallets added (the same stock held personally and in the account
+    was listed twice, 2026-11-25). What was paid is dropped from a joined row: each wallet's book is its own."""
+    joined = {}
+    for row in rows:
+        seen = joined.get(row['ticker'])
+        if seen is None:
+            joined[row['ticker']] = dict(row)
+            continue
+        from .engine import _usd
+        total = Decimal(seen['valor_usd'].replace(',', '')) + Decimal(row['valor_usd'].replace(',', ''))
+        joined[row['ticker']] = {'ticker': row['ticker'], 'nombre': seen['nombre'], 'valor_usd': _usd(total)}
+    return sorted(joined.values(), key=lambda r: Decimal(r['valor_usd'].replace(',', '')), reverse=True)
 
 
 def _account_address(viewer):
@@ -309,10 +324,13 @@ def propose(belt, side, asset, amount_usd=None, sell_all=False):
 
     if confirm.busy(belt.result):
         return _refuse('Ya hay una pregunta o una propuesta en esta respuesta: una cosa por respuesta.')
-    texts = confirm.recent_texts(belt)
+    # A voice note may name the asset (founder, 2026-11-25: "sell all Apple" said aloud was refused); how much
+    # and the "sí" are asked by code and answered in writing (confirm.answer).
+    texts = confirm.recent_texts(belt, spoken=True)
     if not texts:
-        # A call or a tapped suggestion: nothing the person typed to read from.
-        return _refuse('Para comprar o vender desde el chat, la persona debe escribir en un mensaje qué acción.')
+        # A call or a tapped suggestion: nothing the person typed or said to read from.
+        return _refuse('Para comprar o vender desde el chat, la persona debe escribir o decir en una nota de voz '
+                       'qué acción.')
     if belt.saw_web:
         return _refuse('No preparo una compra o venta en el mismo mensaje en que busqué en internet: que lo pida en '
                        'un mensaje aparte.')
@@ -553,7 +571,7 @@ def _hands_off(belt, data, lang, *, signed_card, diy):
         return None
     nonce = str(data.get('nonce') or '') or _nonce()
     common = dict(nonce=nonce, side=side, asset_kind=kind, ticker=ticker, amount=amount, sell_all=sell_all,
-                  meta=viewer.request_meta, conversation_id=_conversation_id(viewer.user))
+                  meta=viewer.request_meta, conversation_id=_conversation_id(viewer.user), lang=lang)
     if code == 'go':
         row, _created = relay_trades.create(viewer.user, **common)
         return True, HANDS_OFF_REPLIES['go'][lang], {'actions': [relay_trades.card(row)]}

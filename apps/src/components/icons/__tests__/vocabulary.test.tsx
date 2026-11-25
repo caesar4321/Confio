@@ -199,3 +199,22 @@ describe('Comprar order notices', () => {
     }
   });
 });
+
+describe('Cuenta inteligente notices', () => {
+  const { notificationVisual, SMART_ACCOUNT_VISUALS } = require('../vocabulary');
+  it('show what happened, not the SYSTEM info circle', () => {
+    const system = notificationVisual('SYSTEM');
+    for (const event of Object.keys(SMART_ACCOUNT_VISUALS)) {
+      const shown = notificationVisual('SYSTEM', { smartEvent: event });
+      expect(shown.glyph).not.toBe(system.glyph);
+      expect(shown.glyph in FeatherGlyphs || Boolean(CUSTOM_GLYPHS[shown.glyph])).toBe(true);
+    }
+    expect(notificationVisual('SYSTEM', { smartEvent: 'relay_traded' }).glyph).toBe('trending-up');
+    expect(notificationVisual('SECURITY_ALERT', { smartEvent: 'claim_initiated' }).glyph).toBe('key');
+  });
+  it("keep the type's own icon for an unknown event", () => {
+    for (const smartEvent of ['whatever', 'constructor', '__proto__', 7, undefined]) {
+      expect(notificationVisual('SYSTEM', { smartEvent })).toEqual(notificationVisual('SYSTEM'));
+    }
+  });
+});

@@ -4479,6 +4479,35 @@ class StockTradeCardTests(TestCase):
             self.assertEqual(belt.result.pending_action['data']['sell_all'], sell_all, lines)
             self.assertEqual(belt.result.actions, [], lines)
 
+    def test_a_voice_note_names_the_asset_and_the_answer_stays_typed(self):
+        # Founder, 2026-11-25: "sell all my Apple" said in a voice note was refused as "Apple not named".
+        belt = self._belt()
+        belt.store_texts = ['vende todas mis acciones de Apple']
+        with patch('assistant.trades._held', return_value=[{'ticker': 'AAPL', 'nombre': 'Apple', 'valor_usd': '5.00'}]):
+            out = self._propose(belt, side='sell', sell_all=True)
+        self.assertTrue(out['ok'], out)
+        self.assertTrue(belt.result.pending_action['data']['sell_all'])
+        # Nothing typed and nothing said: still refused.
+        belt = self._belt()
+        belt.store_texts = []
+        self.assertFalse(self._propose(belt, side='sell', sell_all=True)['ok'])
+        # The voice answer to code's question is not an answer (only a typed "sí" is).
+        from . import confirm
+        voiced = SimpleNamespace(metadata={'modality': 'VOICE_NOTE'})
+        pending = {'user_id': self.user.pk, 'account_id': None, 'kind': 'trade', 'data': {}}
+        viewer = SimpleNamespace(user=self.user, account=None)
+        self.assertIsNone(confirm.answer(None, viewer, 'sí', pending, voiced))
+
+    def test_a_stock_in_both_wallets_is_one_row(self):
+        from . import trades
+        rows = trades._one_row_each([
+            {'ticker': 'AAPL', 'nombre': 'Apple', 'valor_usd': '5.00', 'invertido_usd': '4.00'},
+            {'ticker': 'TSLA', 'nombre': 'Tesla', 'valor_usd': '3.00'},
+            {'ticker': 'AAPL', 'nombre': 'Apple', 'valor_usd': '1.03'},
+        ])
+        self.assertEqual(rows, [{'ticker': 'AAPL', 'nombre': 'Apple', 'valor_usd': '6.03'},
+                                {'ticker': 'TSLA', 'nombre': 'Tesla', 'valor_usd': '3.00'}])
+
     def test_the_question_is_in_their_language(self):
         for said, start in (('I want to sell my Apple', 'Do you want to sell your whole position in'),
                             ('quero vender minha Apple', 'Você quer vender toda a sua posição em'),

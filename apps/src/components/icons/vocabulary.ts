@@ -87,6 +87,51 @@ export const comprarOrderVisual = (status?: unknown, role?: unknown): IconVisual
   return role === 'merchant' ? entry.merchant : entry.buyer;
 };
 
+// Cuenta inteligente notices are all SYSTEM (or SECURITY_ALERT) on the server, which drew every one of them as
+// the same gray "info" circle (founder, 2026-11-25: "all exclamation marks"). The event in their data says what
+// happened: smart_account/notifications.py, relay_trades.py, watches.
+export const SMART_ACCOUNT_VISUALS: Record<string, IconVisual> = {
+  relay_traded: visual('trending-up', 'invest', 'done'),
+  rule_ok: visual('zap', 'info', 'done'),
+  rule_skipped: visual('zap', 'pending', 'pending'),
+  rule_failed: visual('zap', 'failure', 'failed'),
+  rule_deactivated: visual('zap', 'neutral'),
+  card_pulled: visual('credit-card', 'moneyOut'),
+  watch_triggered: visual('bell', 'info'),
+  payout_delivered: visual('bank', 'info', 'done'),
+  payout_resumed: visual('bank', 'info', 'pending'),
+  payout_rate_held: visual('bank', 'pending', 'pending'),
+  payout_unconfirmed: visual('bank', 'pending', 'review'),
+  payout_review: visual('bank', 'pending', 'review'),
+  payout_refunded: visual('bank', 'moneyIn', 'returned'),
+  fee_collected: visual('file-text', 'info', 'done'),
+  fee_due: visual('file-text', 'pending', 'review'),
+  payment_notice: visual('file-text', 'pending', 'review'),
+  price_change: visual('file-text', 'info'),
+  forced_sale_eve: visual('file-text', 'pending', 'review'),
+  forced_sale_done: visual('file-text', 'neutral', 'done'),
+  forced_sale_failed: visual('file-text', 'failure', 'failed'),
+  cancelled: visual('x-circle', 'neutral'),
+  assets_returned: visual('wallet', 'moneyIn', 'returned'),
+  beneficiary_named: visual('heart', 'care'),
+  beneficiary_accepted: visual('heart', 'care', 'done'),
+  beneficiary_declined: visual('heart', 'neutral', 'failed'),
+  beneficiary_removed: visual('heart', 'neutral'),
+  beneficiary_stale_address: visual('heart', 'pending', 'review'),
+  claim_initiated: visual('key', 'failure', 'review'),
+  claim_initiated_beneficiary: visual('key', 'care', 'pending'),
+  claim_cancelled: visual('key', 'neutral', 'failed'),
+  claim_cancelled_beneficiary: visual('key', 'neutral', 'failed'),
+  claim_executable: visual('key', 'care', 'review'),
+  claim_executed_previous_owner: visual('key', 'neutral', 'done'),
+  claim_executed_new_owner: visual('key', 'moneyIn', 'done'),
+};
+
+export const smartAccountVisual = (event?: unknown): IconVisual | undefined =>
+  typeof event === 'string' && Object.prototype.hasOwnProperty.call(SMART_ACCOUNT_VISUALS, event)
+    ? SMART_ACCOUNT_VISUALS[event]
+    : undefined;
+
 const NOTIFICATIONS: Record<string, IconVisual> = {
   // Sends between people
   SEND_RECEIVED: visual('arrow-down', 'moneyIn'),
@@ -181,9 +226,11 @@ const NOTIFICATIONS: Record<string, IconVisual> = {
 
 export const notificationVisual = (
   type: string,
-  data?: { stage?: string | null; incoming?: boolean; status?: unknown; role?: unknown },
+  data?: { stage?: string | null; incoming?: boolean; status?: unknown; role?: unknown; smartEvent?: unknown },
 ): IconVisual => {
   if (type === 'LOCAL_TRANSFER_UPDATED') return localTransferVisual(data?.stage, data?.incoming);
+  const smart = smartAccountVisual(data?.smartEvent);
+  if (smart) return smart;
   if (type === 'MARKETPLACE_ORDER_UPDATED') return comprarOrderVisual(data?.status, data?.role);
   return NOTIFICATIONS[type] || visual('bell', 'neutral');
 };
