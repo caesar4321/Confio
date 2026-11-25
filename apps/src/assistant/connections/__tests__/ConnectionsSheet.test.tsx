@@ -24,6 +24,13 @@ jest.mock('../useConnections', () => ({ useConnections: jest.fn() }));
 let mockLink: any = null;
 jest.mock('../../whatsapp/useWhatsApp', () => ({ useWhatsApp: () => ({ link: mockLink, refetch: jest.fn(async () => ({})) }) }));
 jest.mock('../../whatsapp/WhatsAppSheet', () => 'WhatsAppSheet');
+const mockWhatsAppSession = { open: false };
+jest.mock('../../whatsapp/session', () => ({
+  whatsAppSession: () => mockWhatsAppSession,
+  closeWhatsAppSession: () => { mockWhatsAppSession.open = false; },
+}));
+jest.mock('../../calendar/consent', () => ({ readCalendarConsent: jest.fn(async () => null) }));
+jest.mock('../../calendar/deviceCalendar', () => ({ hasCalendarAccess: jest.fn(async () => true), calendarSupported: () => true }));
 
 function show(gmail: GmailState, mail = false) {
   const data: Connections = {
@@ -43,13 +50,26 @@ function show(gmail: GmailState, mail = false) {
         && node.findAll((child: any) => child === other).length > 0)).props.onPress();
     });
   };
-  return { words, press };
+  return { words, press, root: () => tree.root };
 }
 
 beforeEach(() => {
   mockAnswer.mockClear();
   mockTyped = undefined;
   mockLink = null;
+});
+
+beforeEach(() => {
+  mockWhatsAppSession.open = false;
+});
+
+it('one full-screen sheet at a time: the list hides while a sheet is open', async () => {
+  mockLink = { state: 'none', phoneHint: null, consentOutdated: false, consentVersion: 1, reasonMessage: null } as any;
+  const { words, press, root } = show('soon');
+  await press('Vincular WhatsApp');
+  const modal = root().findAll((node: any) => node.props && node.props.onRequestClose && 'visible' in node.props)[0];
+  expect(modal.props.visible).toBe(false);
+  expect(words()).toContain('WhatsAppSheet');
 });
 
 it('an older server without WhatsApp shows no WhatsApp row', () => {

@@ -9,6 +9,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Text, TextInput } from '../../components/common/AppText';
 import { colors } from '../../config/theme';
 import CalendarConnectSheet from '../calendar/CalendarConnectSheet';
+import { readCalendarConsent } from '../calendar/consent';
+import { hasCalendarAccess } from '../calendar/deviceCalendar';
 import MailSheet from '../mail/MailSheet';
 import { closeMailSession, mailSession } from '../mail/session';
 import WhatsAppLogo from '../../assets/svg/WhatsApp.svg';
@@ -35,7 +37,40 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
   // The mail sheet's own open state survives the lock (mail/session.ts).
   const [mailOpen, setMailOpen] = useState(() => build.mail && mailSession(userId).open);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  // WhatsApp's sheet is opened from its row; its open state survives the lock (whatsapp/session.ts).
+  const [whatsAppOpen, setWhatsAppOpenState] = useState(() => whatsAppSession(userId).open);
+  const setWhatsAppOpen = (value: boolean) => {
+    if (value) {
+      whatsAppSession(userId).open = true;
+    } else {
+      closeWhatsAppSession(userId);
+    }
+    setWhatsAppOpenState(value);
+  };
+  // How many calendars this phone lets Confío read (null: not read yet, 0: not connected). On this phone only.
+  const [calendars, setCalendars] = useState<number | null>(null);
   const [answer] = useMutation(ANSWER_CONNECTION);
+
+  useEffect(() => {
+    if (!build.calendar || calendarOpen) {
+      return undefined;
+    }
+    let current = true;
+    (async () => {
+      try {
+        const ids = await readCalendarConsent(userId);
+        const access = ids?.length ? await hasCalendarAccess() : false;
+        if (current) {
+          setCalendars(access && ids ? ids.length : 0);
+        }
+      } catch {
+        if (current) {
+          setCalendars(0);
+        }
+      }
+    })();
+    return () => { current = false; };
+  }, [build.calendar, calendarOpen, userId]);
 
   useEffect(refresh, [refresh]);
   // Only when a place can be given: until then it is a plain yes or no.
@@ -103,8 +138,12 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
     refresh();
   };
 
+  // One full-screen modal at a time: a sheet stacked inside this one could leave it deaf to touches after closing
+  // (seen on Android). The list hides while a sheet is open and comes back when it closes.
+  const sheetOpen = mailOpen || calendarOpen || whatsAppOpen;
   return (
-    <Modal visible animationType="slide" onRequestClose={closeConnections}>
+    <>
+    <Modal visible={!sheetOpen} animationType="slide" onRequestClose={closeConnections}>
       <SafeAreaProvider>
         <SafeAreaView style={styles.screen}>
           <View style={styles.header}>
@@ -122,7 +161,7 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator
             >
-              <WhatsAppRow userId={userId} />
+              <WhatsAppRow userId={userId} onOpen={() => setWhatsAppOpen(true)} />
               <View style={styles.source}>
                 <View style={styles.sourceTitle}>
                   <View style={styles.logoSmall}><GmailLogo size={24} /></View>
@@ -176,14 +215,21 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
                 <View style={styles.sourceTitle}>
                   <View style={styles.logoSmall}><CalendarMark size={28} /></View>
                   <Text style={styles.name}>Calendario</Text>
-                  {badge(build.calendar ? undefined : data.calendar === 'waiting' ? 'En la lista' : 'Próximamente')}
+                  {badge(build.calendar ? (calendars ? 'Conectado' : undefined) : data.calendar === 'waiting' ? 'En la lista' : 'Próximamente')}
                 </View>
                 <Text style={styles.text}>
                   Los calendarios que elijas de tu teléfono (Apple, Google u otros), para que actives avisos de los
                   pagos y viajes que elijas.
                 </Text>
                 {build.calendar ? (
-                  button('Calendario', 'Conectar calendario', () => setCalendarOpen(true))
+                  <>
+                    {calendars ? (
+                      <Text style={styles.text}>
+                        {calendars === 1 ? 'Confío lee 1 calendario de este teléfono.' : `Confío lee ${calendars} calendarios de este teléfono.`}
+                      </Text>
+                    ) : null}
+                    {button('Calendario', calendars ? 'Ver mi calendario' : 'Conectar calendario', () => setCalendarOpen(true))}
+                  </>
                 ) : data.calendar === 'waiting' ? (
                   <>
                     <Text style={styles.text}>Te avisamos si puedes conectarlo.</Text>
@@ -201,11 +247,13 @@ export function ConnectionsSheet({ userId, data, build, refresh }: SheetProps) {
               <Text style={styles.detail}>El correo de iCloud (iMail) todavía no se puede conectar.</Text>
             </ScrollView>
           </KeyboardAvoidingView>
-          {mailOpen ? <MailSheet key={userId} userId={userId} onClose={closeMail} /> : null}
-          {calendarOpen ? <CalendarConnectSheet key={userId} userId={userId} onClose={() => setCalendarOpen(false)} /> : null}
         </SafeAreaView>
       </SafeAreaProvider>
     </Modal>
+    {mailOpen ? <MailSheet key={userId} userId={userId} onClose={closeMail} /> : null}
+    {calendarOpen ? <CalendarConnectSheet key={userId} userId={userId} onClose={() => setCalendarOpen(false)} /> : null}
+    {whatsAppOpen ? <WhatsAppSheet userId={userId} onClose={() => setWhatsAppOpen(false)} /> : null}
+    </>
   );
 }
 
@@ -224,8 +272,9 @@ const WHATSAPP_TONES: Record<string, { background: string; dot: string; text: st
   failed: { background: colors.error.background, dot: colors.error.icon, text: colors.error.text },
 };
 
-function WhatsAppRow({ userId }: { userId: string }) {
-  const { link: fresh, refetch } = useWhatsApp(userId, 'cache-and-network');
+function WhatsAppRow({ userId, onOpen }: { userId: string; onOpen: () => void }) {
+  // Remounted when the list comes back after its sheet closes: that read is the refresh.
+  const { link: fresh } = useWhatsApp(userId, 'cache-and-network');
   // A failed read must not pull the sheet from under them; the open state survives the lock (session.ts).
   const [last, setLast] = useState(fresh);
   useEffect(() => {
@@ -234,15 +283,6 @@ function WhatsAppRow({ userId }: { userId: string }) {
     }
   }, [fresh]);
   const link = fresh ?? last;
-  const [open, setOpenState] = useState(() => whatsAppSession(userId).open);
-  const setOpen = (value: boolean) => {
-    if (value) {
-      whatsAppSession(userId).open = true;
-    } else {
-      closeWhatsAppSession(userId);
-    }
-    setOpenState(value);
-  };
   if (!link) {
     return null;
   }
@@ -282,22 +322,13 @@ function WhatsAppRow({ userId }: { userId: string }) {
       {view.action ? (
         <Pressable
           style={({ pressed }) => [styles.button, styles.whatsAppButton, pressed && styles.pressed]}
-          onPress={() => setOpen(true)}
+          onPress={onOpen}
           accessibilityRole="button"
           accessibilityLabel={`${view.actionLabel}: WhatsApp`}
         >
           <Text style={styles.buttonText}>{view.actionLabel}</Text>
           <Icon name="arrow-right" size={18} color={colors.white} />
         </Pressable>
-      ) : null}
-      {open ? (
-        <WhatsAppSheet
-          userId={userId}
-          onClose={() => {
-            setOpen(false);
-            refetch().catch(() => undefined);
-          }}
-        />
       ) : null}
     </View>
   );
