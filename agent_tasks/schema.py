@@ -273,12 +273,48 @@ def _account_wait(found):
                                 or None, until=task.wait_until)
 
 
+class AgentOfferType(graphene.ObjectType):
+    """One store's offer from a search across stores (offers.py): its words and picture are the web's."""
+    title = graphene.String(required=True)
+    price = graphene.String(required=True, description='As the store writes it')
+    image = graphene.String(required=True)
+    rating = graphene.String(required=True, description='Stars out of 5, or empty')
+    reviews = graphene.String(required=True, description='How many reviews, or empty')
+    store = graphene.String(required=True, description="The store's name as Google writes it")
+    site = graphene.String(required=True, description="The store's own address, where the purchase runs")
+    pay = graphene.String(required=True, description='confio | manual | reference | none')
+    pay_text = graphene.String(required=True, description='Whether Confío can pay this store, in words')
+
+
+class AgentOffersType(graphene.ObjectType):
+    query = graphene.String(required=True)
+    offers = graphene.List(graphene.NonNull(AgentOfferType), required=True)
+    picked = graphene.Int(description='The offer whose purchase was started, if any')
+
+
+def _offers_type(found):
+    if not found:
+        return None
+    return AgentOffersType(
+        query=str(found.get('query') or ''), picked=found.get('picked'),
+        offers=[AgentOfferType(**{name: str(offer.get(name) or '') for name in (
+            'title', 'price', 'image', 'rating', 'reviews', 'store', 'site', 'pay', 'pay_text')})
+            for offer in (found.get('offers') or []) if isinstance(offer, dict)])
+
+
 class Query(graphene.ObjectType):
+    # Kept apart from agentTask: a search across stores, read only by its own card (a server without it
+    # fails that card alone).
+    agent_offers = graphene.Field(AgentOffersType, id=graphene.UUID(required=True))
     agent_account_wait = graphene.Field(AgentAccountWaitType, id=graphene.UUID(required=True))
     agent_task = graphene.Field(AgentTaskType, id=graphene.UUID(required=True))
     agent_active_task = graphene.Field(AgentTaskType)
     agent_stores = graphene.List(graphene.NonNull(graphene.String),
                                  description="Stores that keep the person's sign-in, each deletable")
+
+    def resolve_agent_offers(self, info, id):
+        from . import offers
+        return _read(lambda: _offers_type(offers.load(_owner(info)[1], id)))
 
     def resolve_agent_account_wait(self, info, id):
         return _read(lambda: _account_wait(service.account_wait(*_owner(info), id)))
@@ -312,6 +348,22 @@ class StartAgentTask(_Result):
     def mutate(cls, root, info, goal, site):
         try:
             task = service.start(*_owner(info), goal=goal, site=site, meta=getattr(info.context, 'META', None))
+            return cls(success=True, errors=[], task=task_type(task))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
+class BuyAgentOffer(_Result):
+    """"Comprar aquí" on an offer from a search across stores: the purchase starts at that store."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        index = graphene.Int(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, index):
+        from . import offers
+        try:
+            task = offers.buy(*_owner(info), id, index, meta=getattr(info.context, 'META', None))
             return cls(success=True, errors=[], task=task_type(task))
         except Exception as exc:  # noqa: BLE001
             return _failure(cls, exc)
@@ -565,6 +617,7 @@ class ForgetAgentStore(graphene.Mutation):
 
 class Mutation(graphene.ObjectType):
     start_agent_task = StartAgentTask.Field()
+    buy_agent_offer = BuyAgentOffer.Field()
     resume_agent_task = ResumeAgentTask.Field()
     resume_agent_payment = ResumeAgentPayment.Field()
     prepare_agent_account_wait = PrepareAgentAccountWait.Field()

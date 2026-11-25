@@ -46,7 +46,7 @@ def snap(text='Loja', url=f'{BASE}/', elements=(), **over):
     return pages.Snapshot(url=url, text=text, elements=list(elements), **over)
 
 
-@override_settings(BROWSERBASE_API_KEY='test-key', AGENT_TASKS_ENABLED=True, AGENT_TASKS_HOLD_SECONDS=0)
+@override_settings(BROWSERBASE_API_KEY='test-key', SERPER_API_KEY='', AGENT_TASKS_ENABLED=True, AGENT_TASKS_HOLD_SECONDS=0)
 class RowsBase(TestCase):
     """Rows, with every way out of the process stubbed."""
 

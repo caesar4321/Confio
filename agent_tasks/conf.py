@@ -26,6 +26,14 @@ DEFAULTS = {
     # seller writes on the order page too): countries.ManualRail.
     'AGENT_TASKS_MANUAL_COUNTRIES': (),
 
+    # One Google Shopping search across stores when no store is named (offers.py). Its cost guard: a few
+    # searches per person per hour; the same search within the cache window is not searched again.
+    'AGENT_OFFERS_ENABLED': True,
+    'AGENT_OFFERS_PER_HOUR': 4,
+    'AGENT_OFFERS_CACHE_SECONDS': 600,
+    'AGENT_OFFERS_MAX': 5,
+    'AGENT_OFFERS_TIMEOUT_SECONDS': 10,
+
     'AGENT_TASKS_BROWSER': 'browserbase',
     'BROWSERBASE_API_URL': 'https://api.browserbase.com/v1',
     'BROWSERBASE_REGION': 'us-east-1',
@@ -102,6 +110,35 @@ def _stored_key():
     if not isinstance(value, str) or not value.strip():
         raise ValueError('browserbase-api-key is empty')
     return value.strip()
+
+
+_serper_failed_until = 0.0
+
+
+@functools.lru_cache(maxsize=1)
+def _stored_serper_key():
+    from config.secrets import get_secret
+    value = get_secret('prod/serper-api-key')
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('serper-api-key is empty')
+    return value.strip()
+
+
+def serper_api_key():
+    """/confio/secrets/prod/serper-api-key, or '' (then no search across stores). Never logged; a failed
+    read is remembered for a minute only."""
+    configured = getattr(settings, 'SERPER_API_KEY', None)
+    if configured is not None:
+        return configured
+    global _serper_failed_until
+    if time.monotonic() < _serper_failed_until:
+        return ''
+    try:
+        return _stored_serper_key()
+    except Exception as exc:  # noqa: BLE001 - no key means no search across stores
+        _serper_failed_until = time.monotonic() + 60
+        logger.warning('Serper key unavailable: %s', type(exc).__name__)
+        return ''
 
 
 def browserbase_api_key():

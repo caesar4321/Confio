@@ -167,10 +167,13 @@ def worker_alive():
         return False
 
 
-def start(account, user, *, goal, site, meta=None, kind='buy'):
+def start(account, user, *, goal, site, meta=None, kind='buy', first_page='', chosen='', country=''):
     """A new purchase, or ('manage') help with an order already placed: its state, cancelling it,
     returning it, a refund. `goal` is the person's own words, stored verbatim. An earlier one still
-    going is set aside for it: the person never manages them."""
+    going is set aside for it: the person never manages them. `first_page`: a product's own page at
+    this store, opened right after its home (an offer picked across stores, offers.py), and `chosen`
+    the product's name as that offer wrote it; a page outside the store or one that acts is dropped.
+    `country`: only for a store whose address does not say it (offers.country_of), never over its own."""
     kind = 'manage' if kind == 'manage' else 'buy'
     if (not conf.get('AGENT_TASKS_ENABLED') or not qr.available() or not conf.browserbase_api_key()
             or not worker_alive()):
@@ -185,7 +188,11 @@ def start(account, user, *, goal, site, meta=None, kind='buy'):
     if store is None or store_names.imitates(store):
         raise TaskRefused('store')
     # The store's country decides how its checkout is paid, not the person's.
-    country = countries.country_of(store, user)
+    country = countries.country_of(store, user) or (str(country or '').upper() if kind == 'buy' else '')
+    from . import guard
+    first_page = str(first_page or '').strip()
+    if kind != 'buy' or (first_page and guard.address_refusal(first_page, store)):
+        first_page = ''
     mine = AgentTask.objects.filter(user=user)
     # An order they may have confirmed at the store is never set aside by a new request.
     open_order = mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=False).first()
@@ -224,7 +231,9 @@ def start(account, user, *, goal, site, meta=None, kind='buy'):
                            .values_list('pk', flat=True))
             task = AgentTask.objects.create(account=account, user=user, goal=goal, site=store, country=country,
                                             app_version=str((meta or {}).get('HTTP_X_CONFIO_VERSION') or '')[:20],
-                                            kind=kind)
+                                            kind=kind, pending_url=first_page,
+                                            history=([{'did': runner.CHOSEN, 'result': str(chosen)[:120]}]
+                                                     if first_page and chosen else []))
             runner.kick(task.pk)
     except IntegrityError as exc:
         # The earlier one reached the checkout as this one started: that order stays, said as such.

@@ -125,6 +125,29 @@ export const PREPARE_AGENT_ACCOUNT_WAIT = gql`
 // code: no_rule | move | cap | topup | renew. amountUsd: what the one action is for ("200.00" cap, "65.00" to move).
 export type AgentAccountWait = { code: string; amountUsd?: string | null; until?: string | null };
 
+// A search across stores (server: agent_tasks/offers.py), read only by its own card: a server without it
+// fails that card alone, never agentTask.
+export const GET_AGENT_OFFERS = gql`
+  query GetAgentOffers($id: UUID!) {
+    agentOffers(id: $id) { query picked offers { title price image rating reviews store site pay payText } }
+  }
+`;
+
+// "Comprar aquí": the purchase starts at that offer's store; its own card follows in the chat.
+export const BUY_AGENT_OFFER = gql`
+  mutation BuyAgentOffer($id: UUID!, $index: Int!) {
+    buyAgentOffer(id: $id, index: $index) { success errors errorCode task { id site } }
+  }
+`;
+
+// `pay`: confio (Confío pays it) | manual (the person pays the store's data) | reference (Venezuela: only when
+// the store asks just the reference) | none (Confío does not pay this store yet). `payText` says it in words.
+export type AgentOffer = {
+  title: string; price: string; image: string; rating: string; reviews: string; store: string; site: string;
+  pay: string; payText: string;
+};
+export type AgentOffers = { query: string; picked?: number | null; offers: AgentOffer[] };
+
 export const FORGET_AGENT_STORE = gql`
   mutation ForgetAgentStore($site: String!) {
     forgetAgentStore(site: $site) { success errors errorCode }

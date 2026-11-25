@@ -105,6 +105,18 @@ export function taskActions(actions: Action[]): string[] {
   return found;
 }
 
+/** The searches across stores a message carries ({type: 'offers', target: <id>}), once each. */
+export function offersActions(actions: Action[]): string[] {
+  const found: string[] = [];
+  for (const a of actions) {
+    const id = a.type === 'offers' ? taskIdOf(a.target) : null;
+    if (id && !found.includes(id)) {
+      found.push(id);
+    }
+  }
+  return found;
+}
+
 // A purchase posts several notes; its card is drawn once, under the newest of
 // them, and updates in place. Each mounted note says "I carry this purchase".
 const carriers = new Map<string, Map<string, number>>();
