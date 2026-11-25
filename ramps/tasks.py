@@ -244,6 +244,12 @@ def poll_ve_pagomovil():
             continue
         if (ramp_tx.status, ramp_tx.status_detail) != before:
             changed += 1
+    try:
+        # Store purchases that ended without their task being told (payment_accounts.purchase_funding_ve).
+        from payment_accounts import purchase_funding_ve
+        purchase_funding_ve.sweep()
+    except Exception:
+        logger.exception('VE purchase sweep failed')
     return f'Polled {checked} VE Pago Móvil orders, updated {changed}'
 
 

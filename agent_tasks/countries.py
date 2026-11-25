@@ -8,11 +8,11 @@ rail that pays a store's EXACT local amount is not offered: a dollar transfer
 to an account number is never the store's charge, and the order is unpaid or
 paid twice.
 
-Today: Brazil (Pix QR, Infinia), Mexico (SPEI, Infinia) and Bolivia (bank
+Today: Brazil (Pix QR, Infinia), Mexico (SPEI, Infinia), Bolivia (bank
 QR, paid by the provider that decodes it; while QR Bolivia is off the order is
-still placed and the person pays the store's QR from their bank: `manual`).
-Argentina's fixed-amount QR and Venezuela's Pago Móvil need exact-amount
-payouts first (docs/designs/ai-assistant-server-architecture.md, section 5.6).
+still placed and the person pays the store's QR from their bank: `manual`) and
+Venezuela (Pago Móvil, paid by the Cuenta inteligente before the order exists:
+pagomovil.py). Argentina's fixed-amount QR needs exact-amount payouts first.
 """
 from dataclasses import dataclass
 import re
@@ -44,6 +44,9 @@ class Rail:
 
     kind = 'qr'            # read as one QR on screen (runner.code_on_screen)
     can_go_manual = True   # when Confío cannot pay it, the person pays the store's own code
+    # Paid BEFORE the order exists (Venezuela's Pago Móvil): the store shows its data at the checkout, Confío
+    # pays, and the reference typed into the store's form places the order (pagomovil.py).
+    pay_before_order = False
     opens = ''             # the local account (LocalAccountApplication) that lets Confío pay it
     numeric = ''           # ISO 4217 numeric, as an EMV code carries it (tag 53)
 
@@ -159,6 +162,42 @@ class SpeiRail(Rail):
 
 
 @dataclass(frozen=True)
+class PagoMovilRail(Rail):
+    """Venezuela: the store's checkout shows its Pago Móvil data (bank, phone, cédula or RIF, the bolívares)
+    before the order exists. Confío's account pays exactly those bolívares (account_pay), and the reference
+    that comes back is typed into the store's form, which places the order (pagomovil.py). Never the person's
+    card and never the person's own bank: without the purchase spender it is not ordered at all."""
+    kind = 'pagomovil'
+    can_go_manual = False
+    pay_before_order = True
+    numeric = '928'
+
+    def codes(self, texts):
+        return set()
+
+    def written(self, words):
+        return set()
+
+    def ready(self, account, identity, meta):
+        from payment_accounts.services import PaymentAccountError
+        from ramps import ve_pagomovil
+        from smart_account import purchases
+        from . import account_pay
+        if not (ve_pagomovil.enabled(ve_pagomovil.SEND) and ve_pagomovil.client_supports(ve_pagomovil.SEND, meta)):
+            raise PaymentAccountError('Pago Móvil no está disponible ahora.')
+        # Only the Cuenta inteligente pays a store before its order exists: no spender, no purchase.
+        if self.method_id not in account_pay.PAYABLE_RAILS or not purchases.spender_address():
+            raise PaymentAccountError('Todavía no puedo pagar tiendas por Pago Móvil.')
+
+    def pay_mode(self, account, identity, meta):
+        try:
+            self.ready(account, identity, meta)
+        except Exception:  # noqa: BLE001 - never 'the person pays': the purchase stops (service.require_payable)
+            return 'manual', ''
+        return 'confio', ''
+
+
+@dataclass(frozen=True)
 class ManualRail(Rail):
     """A country where Confío pays no store yet: the agent still buys, with a way to pay
     that is never a card (a transfer, a deposit, cash at a shop, a bank QR), and the
@@ -238,9 +277,18 @@ RAILS = {
         vouches=('La CLABE, el monto y la referencia son los que mostró la tienda; nadie verificó a quién pertenece '
                  'la CLABE. Pagas exactamente el monto del pedido y lo que sobre del cambio queda en tu cuenta en '
                  'pesos.')),
+    'VE': PagoMovilRail(
+        country='VE', method_id='ve_pagomovil_send', currency='VES', name='Pago Móvil',
+        qr='los datos de Pago Móvil de la tienda',
+        # Pago Móvil has no payee lookup: intent_rails.read_pagomovil names it 'unverified' (or 'saved_payee'
+        # when the person kept that very payee). The store's data as its own checkout showed it.
+        payees=frozenset({'unverified', 'saved_payee'}),
+        paste='paga el pedido desde tu banco con los datos de Pago Móvil que muestra la tienda',
+        vouches=('El banco, el teléfono y la cédula o RIF son los que mostró la tienda; nadie verificó a quién '
+                 'pertenecen. Se paga exactamente el monto en bolívares del pedido.')),
 }
 # Store addresses that say their country.
-_TLD = {'br': 'BR', 'bo': 'BO', 'mx': 'MX'}
+_TLD = {'br': 'BR', 'bo': 'BO', 'mx': 'MX', 've': 'VE'}
 
 
 def rail(country):

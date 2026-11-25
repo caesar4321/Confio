@@ -93,6 +93,12 @@ STOPPED = {
     # Any store may be searched (founder, 2026-11-25); paying it is what depends on the country.
     'no_rail': ('Encontré lo que elegiste en {site}, pero todavía no puedo pagar tiendas de {{country}}, así que no '
                 'lo compré. Puedes comprarlo tú directamente en {site}.'),
+    # Venezuela (pagomovil.py): a store that matches its Pago Móvil by the payer cannot be paid from Confío.
+    'payer_data': ('{site} pide, para confirmar un pago por Pago Móvil, datos de quien paga (su teléfono, banco o '
+                   'cédula) u otros que no sean la referencia, y Confío todavía no puede dárselos. No pagué nada ni '
+                   'hice el pedido. Puedes comprarlo tú directamente en {site}.'),
+    'pay_unread': ('No pude leer con seguridad los datos de Pago Móvil de {site} para tu pedido, así que no pagué '
+                   'nada ni hice el pedido.'),
 }
 COUNTRY_NAMES = {'AR': 'Argentina', 'BO': 'Bolivia', 'BR': 'Brasil', 'CL': 'Chile', 'CO': 'Colombia', 'CR': 'Costa Rica',
                  'EC': 'Ecuador', 'ES': 'España', 'GT': 'Guatemala', 'MX': 'México', 'PA': 'Panamá', 'PE': 'Perú',
@@ -143,6 +149,13 @@ def stopped_text(task, reason):
         if (task.order or {}).get('submitted') and reason not in ('answered', 'declined'):
             text = STOPPED['request_unclear']   # sent: never "nothing happened"
         return say(text, task).replace('{text}', str((task.order or {}).get('answer') or ''))
+    order = task.order or {}
+    if task.phase == 'report':
+        # Paid at the store and not reported: the person gets what reports it (pagomovil.py).
+        return paid_words(task, REPORT_UNCLEAR if (order.get('report') or {}).get('pressed') else REPORT_FAILED)
+    if order.get('pay_first') and task.phase == 'paying':
+        # Venezuela: the order is placed only after it is paid, so none exists.
+        return say(STORE_UNPAID if order.get('unpaid_why') else PAY_FIRST_NOT_PAID, task)
     if task.checkout_at:
         # The final button was pressed: whatever ended it, an order may exist. Never "compra tú".
         text = STOPPED['cancelled_ordered' if reason in ('cancelled', 'replaced') else 'unpaid']
@@ -210,6 +223,56 @@ ACCOUNT_WAIT_EXPIRED = ('Dejé de esperar a tu Cuenta inteligente para pagar tu 
 ACCOUNT_UNREAD = ('No pude confirmar que tu Cuenta inteligente pudiera pagar tu pedido en {site}, así que no lo pagué '
                   'y no salió dinero. Puede que el pedido esté hecho y esperando el pago: revísalo en tus compras de '
                   '{site}.')
+# Venezuela: paid by Pago Móvil BEFORE the order exists (pagomovil.py). {{reference}}, {{amount}} (bolívares),
+# {{date}} and {{payee}} (the store's bank, phone and cédula or RIF) are the payment's.
+PAY_FIRST_NOT_PAID = 'No pagué tu pedido en {site} por Pago Móvil y no lo hice en la tienda: no salió dinero de tu cuenta.'
+STORE_UNPAID = ('El pago por Pago Móvil a {site} no se completó, así que no hice el pedido en la tienda. Lo que se '
+                'haya tomado de tu Cuenta inteligente para pagarlo vuelve a ella: revísalo en tu actividad.')
+PAID_REPORTING = ('Pagué {{amount}} por Pago Móvil a {site} (referencia {{reference}}). Ahora le paso la referencia '
+                  'a la tienda para que haga tu pedido.')
+REPORTED = 'Tu pedido en {site} está hecho: la tienda recibió la referencia {{reference}} de tu pago por Pago Móvil.'
+REPORTED_PUSH = 'Tu pedido en {site} está hecho.'
+REPORT_FAILED = ('Pagué tu pedido en {site} por Pago Móvil, pero no pude pasarle la referencia a la tienda. '
+                 'Repórtalo tú en {site} con estos datos: referencia {{reference}}, {{amount}} pagados el {{date}} '
+                 'a {{payee}}. El equipo de Confío ya está al tanto.')
+REPORT_UNCLEAR = ('Pagué tu pedido en {site} por Pago Móvil y le envié la referencia, pero no vi que la tienda lo '
+                  'confirmara. Revisa tus pedidos en {site}; si no aparece, repórtalo con estos datos: referencia '
+                  '{{reference}}, {{amount}} pagados el {{date}} a {{payee}}. El equipo de Confío ya está al tanto.')
+
+
+def _ves(value):
+    try:
+        from decimal import Decimal
+        figure = f'{Decimal(str(value)):,.2f}'
+    except Exception:  # noqa: BLE001
+        return f'Bs. {value}'
+    return 'Bs. ' + figure.replace(',', '_').replace('.', ',').replace('_', '.')
+
+
+def paid_words(task, text):
+    """A Venezuelan purchase's note with its payment's figures (order['paid'], order['pagomovil'])."""
+    from datetime import datetime
+    order = task.order or {}
+    paid, store = order.get('paid') or {}, order.get('pagomovil') or {}
+    try:
+        day = datetime.fromisoformat(str(paid.get('paid_at'))).strftime('%d/%m/%Y')
+    except ValueError:
+        day = ''
+    try:
+        from ramps.ve_pagomovil import BANK_NAMES
+        bank = BANK_NAMES.get(store.get('bank_code'), store.get('bank_code') or '')
+    except Exception:  # noqa: BLE001
+        bank = store.get('bank_code') or ''
+    payee = ' · '.join(part for part in (bank, store.get('phone'), store.get('cedula')) if part)
+    return (say(text, task).replace('{reference}', str(paid.get('reference') or ''))
+            .replace('{amount}', _ves(paid.get('paid_ves') or store.get('amount_ves') or ''))
+            .replace(' el {date}', f' el {day}' if day else '').replace('{date}', day).replace('{payee}', payee))
+
+
+def reported_text(task):
+    return paid_words(task, REPORTED)
+
+
 # How a purchase the account was to pay ended, by its stop reason (schema.task_type).
 ACCOUNT_STOPPED = {'account_timeout': ACCOUNT_WAIT_EXPIRED}
 

@@ -121,7 +121,8 @@ class AgentTaskType(graphene.ObjectType):
         description='The local account (LocalAccountApplication methodId) that would let Confío pay it next time.')
     created_at = graphene.DateTime(required=True)
     notify = graphene.String(required=True, description="With reason `no_rail` (this country's stores cannot be paid "
-                                                        "yet): '' unanswered, 'yes' (Sí, avísame) or 'no' (Solo "
+                                                        "yet) or `payer_data` (a Venezuelan store that asks the payer's "
+                                                        "own data): '' unanswered, 'yes' (Sí, avísame) or 'no' (Solo "
                                                         "miraba), answered with answerAgentNotify")
     order = graphene.Field(AgentOrderType, description='With reason `approve`: confirm with approveAgentOrder. With `subscribe`, approveAgentOrder only resumes once subscribed')
     options = graphene.List(graphene.NonNull(AgentOptionType), required=True,
@@ -144,6 +145,7 @@ WORKING_AT = {
     'pay': 'Preparando el pago de tu pedido…',
     'manage': 'Revisando tu pedido en {site}…',
 }
+REPORTING = 'Pasándole a {site} la referencia de tu pago…'
 STAGES = ('search', 'cart', 'checkout', 'pay', 'done', 'manage')
 
 
@@ -168,7 +170,9 @@ def task_type(task):
         return None
     from . import notes
     stage = stage_of(task)
-    if task.state == 'working':
+    if task.state in ('queued', 'working') and task.phase == 'report':
+        message = REPORTING.format(site=task.site)   # paid by Pago Móvil: the reference goes to the store
+    elif task.state == 'working':
         message = WORKING_AT.get(stage, WORKING['working']).format(site=task.site)
     elif task.state in WORKING:
         message = WORKING[task.state].format(site=task.site)
@@ -189,6 +193,8 @@ def task_type(task):
             message += notes.breakdown_text(task.order)   # what the total is made of: today's app shows this text
     elif task.state == 'payment_ready' and task.reason == 'manual':
         message = notes.manual_text(task)
+    elif task.state == 'payment_ready' and task.reason == 'reported':
+        message = notes.reported_text(task)
     elif task.state == 'payment_ready' and task.reason == 'account':
         from . import account_pay
         message = account_pay.paid_text(task)   # paid by the account: there is no card to review
@@ -209,7 +215,7 @@ def task_type(task):
         if task.state == 'payment_ready' else [],
         open_account_method=str((task.order or {}).get('offer') or '') or None,
         created_at=task.created_at, stage=stage, kind=getattr(task, 'kind', 'buy') or 'buy',
-        notify=str((task.order or {}).get('notify') or '') if task.reason == 'no_rail' else '',
+        notify=str((task.order or {}).get('notify') or '') if task.reason in ('no_rail', 'payer_data') else '',
         request=str(((task.order or {}).get('request') or {}).get('what') or '') or None
         if task.state == 'needs_person' and task.reason == 'act' else None,
         request_button=str(((task.order or {}).get('request') or {}).get('button') or '') or None

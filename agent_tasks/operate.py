@@ -95,7 +95,7 @@ def amount_of(text):
 # A price in dollars on a local store (US$, $us, USD): no top total is set from it, nor used against it.
 FOREIGN_MONEY = re.compile(r'(us\s?\$|\$\s?us|\busd\b|u\$s|\bdolar)')
 _NOT_ONE_PRICE = re.compile(r'\b(antes|ahora|desde|de|hasta|x|c/u|cada|por|unidades|und)\b|/|-|%')
-COMMA_DECIMALS = frozenset({'BR', 'BO'})
+COMMA_DECIMALS = frozenset({'BR', 'BO', 'VE'})
 
 
 def unit_price(price_text, country):
@@ -330,7 +330,7 @@ def checkout(step, browser, reader, seen):
     step.operating = True
     after = ordered(task)
     seen.look = reader.picture   # what the second readers see: the page, with the control boxed
-    if not ordering(task):
+    if not ordering(task) and task.phase != 'paying':   # a Venezuelan store being paid keeps its phase
         try:
             # Nobody is asked to approve an order they could not pay here.
             service.require_payable(task.account, task.user, task.country, step.app_meta())
@@ -338,7 +338,9 @@ def checkout(step, browser, reader, seen):
             return step.stop('no_rail' if exc.code == 'country' else 'cannot_pay')
         step.save(phase='ordering')
     _trace(step, seen)
-    if not after:
+    from . import countries
+    rail = countries.rail(task.country)
+    if not after and rail is not None and rail.method_id == 'mx_clabe':
         # Accounts written on pages before the order exists are never the order's own (spei._by_facts).
         from . import spei
         known = (task.order or {}).get('seen_clabes') or []
@@ -573,6 +575,11 @@ def _order(step, browser, reader, seen, element, label, args):
                                                    'image': entry.get('image') or ''} for entry in cart]}
     # Who pays it is part of what they approve: said before they confirm, and asked again if it changed.
     mode, offer = service.pay_mode(task, step.app_meta())
+    from . import countries
+    rail = countries.rail(task.country)
+    if rail is not None and rail.pay_before_order and mode == 'manual':
+        # Paid before the order exists, by the account only: never handed to the person's own bank.
+        return step.stop('no_rail')
     order = {**order, 'manual': mode == 'manual', 'offer': offer}
     cap = (task.order or {}).get('cap') or {}
     if cap:
@@ -595,6 +602,11 @@ def _order(step, browser, reader, seen, element, label, args):
         # what the store wrote is shown only on the card.
         return step.hand_over('approve', order=order, body=notes.say(
             notes.NEEDS_PERSON['approve_manual' if mode == 'manual' else 'approve'], task) + notes.breakdown_text(order))
+    if rail is not None and rail.pay_before_order:
+        # Venezuela: nothing is pressed now. The step's Pago Móvil data is read and paid; the reference then
+        # places the order (pagomovil.py).
+        from . import pagomovil
+        return pagomovil.pay_first(step, browser, seen, order, approved, amount)
     # Used once, and written down first: an answer lost on the way is never a second order.
     step.save(order={**order, 'pressed': True, 'pressed_at': [step.same_page(seen.url)]}, phase='ordered',
               checkout_at=timezone.now(),

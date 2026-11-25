@@ -22,8 +22,8 @@ MESSAGES = {
     'unavailable': 'Todavía no puedo comprar por ti desde aquí.',
     'update_app': 'Actualiza la app para que pueda hacer compras por ti.',
     'not_personal': 'Las compras por ti funcionan solo en tu cuenta personal.',
-    'country': ('Por ahora compro en tiendas de Brasil (.br), México (.mx) y Bolivia (.bo). Escríbeme la dirección '
-                'de la tienda.'),
+    'country': ('Por ahora compro en tiendas de Brasil (.br), México (.mx), Bolivia (.bo) y Venezuela (.ve). '
+                'Escríbeme la dirección de la tienda.'),
     'store': 'No puedo trabajar en ese sitio.',
     'goal': 'Dime en una frase qué quieres comprar.',
     'active_task': 'Acabo de empezar esa compra hace un momento.',
@@ -92,16 +92,24 @@ def require_payable(account, user, country, meta, *, rail_needed=True):
     minor = minor_refusal(user)
     if minor:
         raise TaskRefused('unavailable', minor)
-    if rail_needed and countries.rail(country) is None:
+    rail = countries.rail(country)
+    if rail_needed and rail is None:
         raise TaskRefused('country')
     # A verified identity, whoever pays it: the buying agent is not open to accounts nobody verified.
     # (Where Confío's own rail cannot serve them, pay_mode hands them the store's data instead.)
     from payment_accounts.schema import _verified_identity
     from payment_accounts.services import PaymentAccountError
     try:
-        _verified_identity(account)
+        identity = _verified_identity(account)
     except PaymentAccountError as exc:
         raise TaskRefused('unavailable', 'Verifica tu identidad en Confío para que pueda comprar por ti.') from exc
+    if rail_needed and rail.pay_before_order:
+        # Paid before its order exists, by the Cuenta inteligente only: when it cannot, nothing is ordered
+        # (stop 'no_rail'), never the person's card nor their own bank.
+        try:
+            rail.ready(account, identity, meta)
+        except PaymentAccountError as exc:
+            raise TaskRefused('country') from exc
     # Whether Confío pays it or the person does from their bank is pay_mode's, at the order.
 
 
@@ -181,6 +189,9 @@ def start(account, user, *, goal, site, meta=None, kind='buy'):
     mine = AgentTask.objects.filter(user=user)
     # An order they may have confirmed at the store is never set aside by a new request.
     open_order = mine.filter(state__in=AgentTask.ACTIVE, checkout_at__isnull=False).first()
+    # A Venezuelan store being paid before its order (pagomovil.py): its reference still goes to the store.
+    open_order = open_order or mine.filter(state='payment_ready', phase='paying',
+                                           updated_at__gte=timezone.now() - timedelta(hours=6)).first()
     if open_order is not None:
         raise TaskRefused('checkout_open', MESSAGES['checkout_open'].format(site=open_order.site))
     # Cancelled before its browser ever opened (no provider yet) costs nothing.
@@ -266,7 +277,9 @@ def resume(account, user, task_id, view=None):
     history = [*(task.history or []), {'did': runner.RESUMED, 'result': 'they say it is done'}]
     with transaction.atomic():
         if not AgentTask.objects.filter(pk=task.pk, state='needs_person', steps=task.steps).update(
-                state='awaiting_code' if task.checkout_at else 'working', reason='', wait_until=None,
+                # Reporting a paid Venezuelan order goes on in the browser, never back to the payment.
+                state='awaiting_code' if task.checkout_at and task.phase != 'report' else 'working',
+                reason='', wait_until=None,
                 history=history[-runner.HISTORY_KEPT:], updated_at=timezone.now(), **shown):
             raise TaskRefused('not_open')
         runner.kick(task.pk)
@@ -437,12 +450,91 @@ def answer_step(account, user, task_id, yes):
                      history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
 
 
+NOTIFY_REASONS = ('no_rail', 'payer_data')
+
+
+def store_paid(task_pk, *, reference, paid_ves, origin_bank='', paid_at=''):
+    """The funding leg paid a Venezuelan store's Pago Móvil (pagomovil.py): the reference goes to the store in
+    a fresh browser session (phase 'report'). Idempotent: the same values again are a no-op. True when kept."""
+    from decimal import Decimal, InvalidOperation
+    from . import pagomovil
+    try:
+        paid = {'reference': str(reference or '').strip()[:40], 'paid_ves': format(Decimal(str(paid_ves)), 'f'),
+                'origin_bank': str(origin_bank or '')[:4], 'paid_at': str(paid_at or timezone.now().isoformat())}
+    except (InvalidOperation, TypeError, ValueError):
+        paid = None
+    task = AgentTask.objects.filter(pk=task_pk).first()
+    if task is None:
+        logger.error('agent task store_paid: no task %s', task_pk)
+        return False
+    order = task.order or {}
+    if order.get('paid'):
+        same = paid is not None and {k: order['paid'].get(k) for k in ('reference', 'paid_ves')} == {
+            k: paid[k] for k in ('reference', 'paid_ves')}
+        if not same:
+            logger.error('agent task %s: store_paid again with other values', task.internal_id)
+        return same
+    if paid is None or not paid['reference'] or task.phase != 'paying' or not order.get('pay_first'):
+        logger.error('agent task %s: store_paid refused (phase %s)', task.internal_id, task.phase)
+        try:
+            from config.ops_alerts import send_ops_alert
+            send_ops_alert(f'Compra VE {task.internal_id}: Pago Móvil pagado a {task.site} sin tarea que lo reporte '
+                           f"(ref {str(reference or '?')[:40]}, Bs {paid_ves}).",
+                           dedupe_key=f'agent_store_paid:{task.pk}', dedupe_seconds=86400)
+        except Exception:  # noqa: BLE001
+            logger.exception('agent store_paid alert failed')
+        return False
+    runner.close_session(task)
+    counts = {**(task.counts or {}), 'report_tries': 0, 'report_steps': 0}
+    try:
+        with transaction.atomic():
+            moved = AgentTask.objects.filter(pk=task.pk, phase='paying', state__in=('payment_ready', 'stopped')).update(
+                order={**{key: value for key, value in order.items() if key != 'pay_hold'}, 'paid': paid},
+                phase='report', state='queued', reason='', wait_until=None,
+                session_id='', connect_url='', session_expires_at=None, lease=None, lease_until=None, failures=0,
+                counts=counts, updated_at=timezone.now())
+            if moved:
+                runner.kick(task.pk)
+    except IntegrityError:
+        # Another purchase of theirs is open (start refuses this; a race): the person reports it themselves.
+        AgentTask.objects.filter(pk=task.pk).update(order={**order, 'paid': paid}, phase='report', state='stopped',
+                                                    reason='report_failed', updated_at=timezone.now())
+        task.refresh_from_db()
+        notes.post(task, notes.stopped_text(task, 'report_failed'), 'end', push='check')
+        pagomovil.alert(task, 'another purchase open')
+        return True
+    if not moved:
+        return False
+    task.refresh_from_db()
+    notes.post(task, notes.paid_words(task, notes.PAID_REPORTING), 'paid')
+    return True
+
+
+def store_unpaid(task_pk, *, why=''):
+    """The funding leg could not pay a Venezuelan store's Pago Móvil: no order is placed. Idempotent."""
+    task = AgentTask.objects.filter(pk=task_pk).first()
+    if task is None or task.phase != 'paying' or not (task.order or {}).get('pay_first'):
+        return False
+    if task.state == 'stopped' and task.reason == 'unpaid':
+        return True
+    order = {**(task.order or {}), 'unpaid_why': str(why or 'unpaid')[:40]}
+    if not AgentTask.objects.filter(pk=task.pk, phase='paying').exclude(state__in=('stopped', 'cancelled')).update(
+            state='stopped', reason='unpaid', order=order, wait_until=None, lease=None, lease_until=None,
+            updated_at=timezone.now()):
+        return False
+    task.refresh_from_db()
+    runner.close_session(task)
+    notes.post(task, notes.stopped_text(task, 'unpaid'), 'end', push='check')
+    return True
+
+
 def answer_notify(account, user, task_id, yes):
     """Sí, avísame / Solo miraba on a purchase stopped because its store's country cannot be paid yet (stop
     'no_rail'): the fake-door probe for store payments there. Kept on the task, whose country is the store's;
     the last answer counts."""
     task = get(account, user, task_id)
-    if task.state != 'stopped' or task.reason != 'no_rail':
+    # Also a Venezuelan store that matches its Pago Móvil by the payer (stop 'payer_data').
+    if task.state != 'stopped' or task.reason not in NOTIFY_REASONS:
         raise TaskRefused('not_open')
     task.order = {**(task.order or {}), 'notify': 'yes' if yes else 'no',
                   'notify_at': timezone.now().isoformat()}
@@ -734,7 +826,7 @@ def _sweep():
     # A purchase the account pays (reason 'account') has no card: its note is account_pay's.
     _each(AgentTask.objects.filter(state='payment_ready', payment_intent__isnull=False,
                                    updated_at__gt=now - timedelta(minutes=10),
-                                   updated_at__lt=now - timedelta(seconds=90)).exclude(reason='account')
+                                   updated_at__lt=now - timedelta(seconds=90)).exclude(reason__in=('account', 'reported'))
           .order_by('?'),
           lambda task: runner.post_payment(task, task.payment_intent), 'payment cards')
 
@@ -762,6 +854,6 @@ def _sweep():
     # A purchase a worker left behind after its browser closed is ended and said, never left in the way.
     # A held purchase (order['pay_hold']) needs no browser: its payment is read from what was kept.
     _each(active.filter(state__in=AgentTask.RUNNING, session_expires_at__lt=now).exclude(lease_until__gt=now)
-          .exclude(order__has_key='pay_hold'),
+          .exclude(order__has_key='pay_hold').exclude(phase='report'),
           lambda task: runner.end(task, 'stopped', 'session_expired', only={'state__in': AgentTask.RUNNING}),
           'expired sessions')

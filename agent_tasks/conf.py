@@ -20,7 +20,7 @@ DEFAULTS = {
     # X-Confio-Face-Capable pattern), because a version number alone cannot.
     'AGENT_TASKS_CAPABLE_HEADER': 'HTTP_X_CONFIO_BROWSER_TASKS',
     # Where a checkout may be paid today: the country's code rail.
-    'AGENT_TASKS_COUNTRIES': ('BR', 'BO', 'MX'),
+    'AGENT_TASKS_COUNTRIES': ('BR', 'BO', 'MX', 'VE'),
     # Stores where Confío pays nothing yet: the agent buys and the person pays it from their bank.
     # None until its reading of the order's data is bound to the store's own labels (a marketplace's
     # seller writes on the order page too): countries.ManualRail.
@@ -66,7 +66,11 @@ DEFAULTS = {
     # "Elegir" approves a purchase up to a top total (spec decision 42): the price plus this share for shipping
     # and taxes, and at least the country's floor in its own currency (Amazon México: $44 shipping on $85).
     'AGENT_TASKS_CAP_MARGIN': '0.6',
-    'AGENT_TASKS_CAP_MIN_EXTRA': {'MX': '80', 'BR': '30', 'BO': '50'},
+    'AGENT_TASKS_CAP_MIN_EXTRA': {'MX': '80', 'BR': '30', 'BO': '50', 'VE': '1000'},
+    # A Venezuelan purchase paid before its order exists (pagomovil.py): fresh browser sessions to type the
+    # reference into the store's form, and the steps each may take, before the person is given it to report.
+    'AGENT_TASKS_MAX_REPORT_TRIES': 3,
+    'AGENT_TASKS_REPORT_STEPS': 30,
     # Cuenta inteligente / IA+ (assistant.billing.has_plus): the shopping assistant is part of what they pay for.
     'AGENT_TASKS_PER_DAY_PLUS': 20,
     # A purchase the Cuenta inteligente cannot pay yet waits this long for the person (account_pay.wait), and is
@@ -74,6 +78,8 @@ DEFAULTS = {
     'AGENT_TASKS_ACCOUNT_WAIT_HOURS': 48,
     # A one-time CLABE (a store's or Mercado Pago's order account) may lapse: its hold is never longer than this.
     'AGENT_TASKS_ACCOUNT_WAIT_CLABE_HOURS': 24,
+    # A Venezuelan store is paid before its order exists: its checkout waits minutes, not a day.
+    'AGENT_TASKS_ACCOUNT_WAIT_PAY_FIRST_MINUTES': 15,
     'AGENT_TASKS_ACCOUNT_RECHECK_SECONDS': 300,
     'AGENT_TASKS_MAX_CONCURRENT': 3,
     'AGENT_TASKS_ALL_PER_DAY': 300,

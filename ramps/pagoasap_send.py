@@ -597,6 +597,25 @@ def dispatch(ramp, claim: dict) -> Outcome:
     return Outcome('pending', operation_id=intent_id)
 
 
+# Where GET /payments/pago-movil/{id} may name the bank a payout left from (seen from state 'reserved').
+# The field's name is not documented: only a 4-digit bank code under one of these is taken, else ''.
+ORIGIN_BANK_KEYS = ('originBankCode', 'originBank', 'originBankId', 'bankOrigin', 'sourceBankCode')
+
+
+def origin_bank_of(intent: dict) -> str:
+    candidates = [intent.get(key) for key in ORIGIN_BANK_KEYS]
+    nested = intent.get('origin')
+    if isinstance(nested, dict):
+        candidates += [nested.get('bankCode'), nested.get('bank')]
+    for value in candidates:
+        if isinstance(value, dict):
+            value = value.get('code')
+        text = str(value or '').strip()
+        if len(text) == 4 and text.isdigit():
+            return text
+    return ''
+
+
 def poll(ramp) -> Outcome:
     section = ve_send._section(ramp)
     try:
@@ -606,9 +625,11 @@ def poll(ramp) -> Outcome:
             return Outcome('pending')  # not visible yet; stale -> review
         raise
     state = str(intent.get('state') or '').lower()
+    origin = origin_bank_of(intent)
     if state == 'completed':
         return Outcome('paid', reference=str(intent.get('reference') or ''),
-                       operation_id=section['operation_id'], ves_amount=str(intent.get('amountVES') or ''))
+                       operation_id=section['operation_id'], ves_amount=str(intent.get('amountVES') or ''),
+                       origin_bank=origin)
     if state == 'failed':
         reason = str(intent.get('reason') or 'failed')
         if reason == 'not_enough_funds':
@@ -616,7 +637,7 @@ def poll(ramp) -> Outcome:
             return Outcome('retry', reason=reason)
         return Outcome('failed', reason=reason)
     if state in ('pending', 'processing', 'reserved'):
-        return Outcome('pending', operation_id=section['operation_id'])
+        return Outcome('pending', operation_id=section['operation_id'], origin_bank=origin)
     return Outcome('unknown', reason=f'state:{state or "none"}')
 
 

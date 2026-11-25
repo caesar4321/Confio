@@ -118,7 +118,9 @@ MAX_AMOUNT_TAG = 9999
 CONTRACT_FUNDING = True
 # Closed without any funding having been possible to see: the late-funding
 # watch keeps these (wallet sends by scan, contract-funded by reported hash).
-CLOSED_UNFUNDED = ('expired_unfunded', 'cancelled_by_user', 'payout_not_sent')
+CLOSED_UNFUNDED = ('expired_unfunded', 'cancelled_by_user', 'payout_not_sent',
+                   # A store purchase whose spender pull can never land (payment_accounts.purchase_funding_ve).
+                   'pull_not_landed')
 # executeRule pays the rule as stored when it is mined: a contract-funded
 # order is paid only while that is what the owner signed for it (amount,
 # payoutRef, authorization: smart_account.payouts.ramp_funding_problem).
@@ -172,6 +174,8 @@ class Outcome:
     operation_id: str = ''
     reason: str = ''
     ves_amount: str = ''
+    # The 4-digit bank the payout left from, when the provider names it.
+    origin_bank: str = ''
 
 
 @dataclass(frozen=True)
@@ -565,10 +569,18 @@ def fail_unfunded(ramp: RampTransaction, detail: str) -> RampTransaction:
     return updated or RampTransaction.objects.get(pk=ramp.pk)
 
 
+def _purchase(ramp: RampTransaction) -> bool:
+    """A store purchase paid by the account's purchase spender (payment_accounts.purchase_funding_ve)."""
+    return (_section(ramp).get('funding_terms') or {}).get('purpose') == 'purchase'
+
+
 def _may_land(ramp: RampTransaction) -> bool:
     """A relayer transaction of this contract-funded order's slot may land."""
     if not _contract_funded(ramp):
         return False
+    if _purchase(ramp):
+        from payment_accounts.purchase_funding_ve import may_land
+        return may_land(ramp)
     from smart_account.payouts import ramp_may_land
     return ramp_may_land(ramp)
 
@@ -948,6 +960,10 @@ def _terms_problem(ramp: RampTransaction, tx_hash, funded_wei) -> str:
             return 'amount_above_signed'
     except (InvalidOperation, TypeError, ValueError):
         return 'amount_unknown'
+    if _purchase(ramp):
+        # The spender's pull, proven by its own events (never a payout rule's run).
+        from payment_accounts.purchase_funding_ve import funding_problem
+        return funding_problem(ramp, str(tx_hash or ''), funded_wei)
     from smart_account.payouts import ramp_funding_problem
     return ramp_funding_problem(ramp, str(tx_hash or ''), funded_wei)
 
@@ -1059,6 +1075,9 @@ def retry_payout(ramp: RampTransaction, *, operator: str, reviewed_key: str, rev
             raise VeSendError('Este envío cambió o no se puede reintentar. Recarga la página.')
         if _contract_funded(current) and current.status_detail == LATE_FUNDING:
             raise VeSendError('Llegó para un pago automático ya cerrado: solo se devuelve a mano.')
+        if _purchase(current) and (section.get('store_told') or section.get('refund_owed')):
+            # The task was told it is unpaid: its dollars are an owed refund, never a late store payment.
+            raise VeSendError('Esta compra ya se dio por no pagada: el dinero se devuelve a mano.')
         metadata = dict(current.metadata or {})
         # Delivery never proven (e.g. reviewed during settlement): settle again
         # before any payout; otherwise pay from what was credited.
@@ -1277,7 +1296,8 @@ def apply_outcome(ramp: RampTransaction, outcome: Outcome, key: str) -> RampTran
         updated = _update(ramp.pk, require=_same_attempt(key), status='COMPLETED', detail='delivered', phase='paid',
                           dispatch_lease_until=None, bank_reference=outcome.reference,
                           operation_id=outcome.operation_id or section.get('operation_id'),
-                          delivered_ves=outcome.ves_amount or section.get('payout_ves'))
+                          delivered_ves=outcome.ves_amount or section.get('payout_ves'),
+                          origin_bank=outcome.origin_bank or section.get('origin_bank') or None)
         if updated is not None:
             delivered = outcome.ves_amount or section.get('payout_ves')
             values = {'completed_at': timezone.now(),
@@ -1292,9 +1312,10 @@ def apply_outcome(ramp: RampTransaction, outcome: Outcome, key: str) -> RampTran
         operation_id = outcome.operation_id or section.get('operation_id')
         if not operation_id:
             return _set_payout(ramp, key, 'payout_review', 'needs_review:payout_unknown:pending_without_id')
+        extra = {'origin_bank': outcome.origin_bank} if outcome.origin_bank else {}
         updated = _update(ramp.pk, require=_same_attempt(key), phase='payout_pending', detail='bank_processing',
                           dispatch_lease_until=None, operation_id=operation_id,
-                          pending_since=section.get('pending_since') or _now_iso())
+                          pending_since=section.get('pending_since') or _now_iso(), **extra)
         return updated or RampTransaction.objects.get(pk=ramp.pk)
     if outcome.kind == 'retry' and outcome.reason == NOT_SENT and earlier_unknown:
         # Nothing new left and nothing was refused: replayed under its key.
@@ -1448,7 +1469,20 @@ def _settle(ramp: RampTransaction) -> RampTransaction:
 # ------------------------------------------------------------------ reconciliation
 
 def sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
-    """One reconciliation step for a send. Idempotent."""
+    """One reconciliation step for a send. Idempotent. A store purchase is then followed by its own
+    module (an unlanded pull, a payout that cannot be made in time, telling the task once)."""
+    ramp = _sync(ramp, rpc)
+    if _purchase(ramp):
+        try:
+            from payment_accounts.purchase_funding_ve import follow
+            ramp = follow(ramp)
+        except Exception:  # noqa: BLE001 - the next poll follows it again
+            logger.exception('VE purchase follow failed for %s', ramp.pk)
+            ramp = RampTransaction.objects.get(pk=ramp.pk)
+    return ramp
+
+
+def _sync(ramp: RampTransaction, rpc=None) -> RampTransaction:
     ramp = RampTransaction.objects.get(pk=ramp.pk)
     phase = _phase(ramp)
     now = timezone.now()

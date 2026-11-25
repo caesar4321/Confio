@@ -237,12 +237,12 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
         </View>
       ) : null}
       {/* Found and picked, but this country's stores cannot be paid yet: the intent probe for paying them. */}
-      {task.status === 'stopped' && task.reason === 'no_rail' ? (
+      {task.status === 'stopped' && (task.reason === 'no_rail' || task.reason === 'payer_data') ? (
         task.notify === 'yes' ? (
-          <Text style={styles.message}>¡Anotado! Te aviso apenas pueda pagar tiendas de aquí.</Text>
+          <Text style={styles.message}>¡Anotado! Te aviso apenas pueda pagar {task.reason === 'payer_data' ? 'esta tienda' : 'tiendas de aquí'}.</Text>
         ) : task.notify === 'no' ? null : (
           <View>
-            <Text style={styles.message}>¿Te aviso cuando pueda pagar tiendas de aquí?</Text>
+            <Text style={styles.message}>¿Te aviso cuando pueda pagar {task.reason === 'payer_data' ? 'esta tienda' : 'tiendas de aquí'}?</Text>
             <View style={styles.stepRow}>
               <Button title="Sí, avísame" loading={tapping === 'notify:yes'}
                 onPress={() => act('notify:yes', ANSWER_AGENT_NOTIFY, { yes: true }, 'answerAgentNotify')} />

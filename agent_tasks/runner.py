@@ -110,6 +110,10 @@ def end(task, state, reason, *, lease=None, body=None, only=None, **fields):
     close_session(task)
     notes.post(task, body or notes.stopped_text(task, reason), 'end',
                push='check' if task.checkout_at and state == 'stopped' else None)
+    if task.phase == 'report':
+        # Paid at a Venezuelan store and not reported (pagomovil.py): whatever ended it, ops are told.
+        from . import pagomovil
+        pagomovil.alert(task, reason)
     return True
 
 
@@ -234,6 +238,10 @@ class Step:
         self.save(history=history, steps=self.task.steps + 1, failures=0, **fields)
 
     def stop(self, reason, **fields):
+        if self.task.phase == 'report' and reason != 'report_failed':
+            # Paid already: a session that cannot report it is followed by a fresh one (pagomovil.retry).
+            from . import pagomovil
+            return pagomovil.retry(self, reason)
         # Where it stopped, without any query (a store's sign-in carries tokens there): the next
         # failure is read off the log, not guessed.
         where = urlsplit(getattr(self, 'seen_url', '') or '')
@@ -272,7 +280,7 @@ class Step:
         if not conf.get('AGENT_TASKS_ENABLED'):
             return self.stop('busy')
         # The ceilings are the agent's. After the hand-over reading a code costs no model.
-        if not task.checkout_at and (task.steps >= max_steps(task)
+        if not task.checkout_at and task.phase != 'report' and (task.steps >= max_steps(task)
                                      or task.cost_usd >= Decimal(str(conf.get('AGENT_TASKS_MAX_COST_USD')))):
             return self.stop('too_long')
         if task.state == 'awaiting_code' and (task.order or {}).get('pay_hold'):
@@ -281,7 +289,7 @@ class Step:
         if not task.session_id:
             if task.state != 'queued':
                 return self.stop('session_expired')
-            if task.created_at < timezone.now() - NEVER_STARTED_AFTER:
+            if task.phase != 'report' and task.created_at < timezone.now() - NEVER_STARTED_AFTER:
                 return self.stop('unavailable')   # the person has moved on: never started late
             self.open_browser()
         elif task.session_expires_at <= timezone.now() + SESSION_MARGIN:
@@ -349,15 +357,16 @@ class Step:
             # From the cart on, the store's own redirects (to its checkout, its payment house) are its own.
             # An order already placed is worked with real clicks, under the same lines (manage.py).
             self.only_get, self.delay = False, 0
-            self.operating = operate.ordering(task) or getattr(task, 'kind', 'buy') == 'manage'
+            self.operating = (operate.ordering(task) or task.phase == 'report'
+                              or getattr(task, 'kind', 'buy') == 'manage')
             browser.refused_document = browser.refused_send = False
             self.before_checkout(browser)
             if task.state != 'working' or time.monotonic() >= until:
                 return
             if not conf.get('AGENT_TASKS_ENABLED'):
                 return self.stop('busy')
-            if task.steps >= max_steps(task) or task.cost_usd + self.meter.usd >= Decimal(
-                    str(conf.get('AGENT_TASKS_MAX_COST_USD'))):
+            if task.phase != 'report' and (task.steps >= max_steps(task) or task.cost_usd + self.meter.usd >= Decimal(
+                    str(conf.get('AGENT_TASKS_MAX_COST_USD')))):
                 return self.stop('too_long')
             if task.session_expires_at <= timezone.now() + SESSION_MARGIN:
                 return
@@ -417,6 +426,9 @@ class Step:
                 and len(task.visited_pages or []) < MAX_VISITED:
             self.save(visited_pages=[*(task.visited_pages or []), page])
         if not inside:
+            if sites.within(seen.url, task.site, house=True) and task.phase == 'report':
+                from . import pagomovil
+                return pagomovil.report_step(self, browser, reader, seen)
             if sites.within(seen.url, task.site, house=True) and operate.ordering(task):
                 return operate.checkout(self, browser, reader, seen)  # the store's payment house
             if sum(entry.get('did') == 'left the store' for entry in task.history or []) >= MAX_LEFT_STORE:
@@ -431,6 +443,10 @@ class Step:
             done = operate.sign_in(self, browser, reader, seen)
             if done is not operate.NOT_A_FORM:
                 return done
+        if task.phase == 'report':
+            # Paid by Pago Móvil before the order: back to its step, to type the reference (pagomovil.py).
+            from . import pagomovil
+            return pagomovil.report_step(self, browser, reader, seen)
         from . import manage
         if manage.managing(task):
             return manage.step(self, browser, reader, seen)   # an order already placed
@@ -598,8 +614,8 @@ class Step:
         if same_page(shots[0].url) in ((task.order or {}).get('pressed_at') or []):
             return self.unread('code')  # the checkout the order was pressed on: its payment page is new since
         rail = countries.rail(task.country)
-        if rail is None:
-            return self.stop('unpaid')
+        if rail is None or rail.pay_before_order:
+            return self.stop('unpaid')   # a Pago Móvil step is read before the order (pagomovil.pay_first)
         if rail.kind == 'manual':
             return self.read_manual(shots, rail)
         if rail.kind == 'qr':
@@ -613,7 +629,7 @@ class Step:
             expected = placed.get('amount') if placed.get('pressed') and not placed.get('unapproved') else None
             code, extra, why = rail.read(shots, reference_optional=True, expected=expected,
                                          item=placed.get('item') or '', before=placed.get('seen_clabes') or ())
-            if code and not extra.get('reference'):
+            if code and not extra.get('reference') and rail.method_id == 'mx_clabe':
                 from . import spei
                 if ticket:
                     # Mercado Pago's own payment number, from its ticket's address: the transfer's concept.
@@ -650,15 +666,21 @@ class Step:
         from . import service
         # Asked again now: an account opened since the order card pays it.
         mode, offer = service.pay_mode(task, app_meta(task))
+        first = rail.pay_before_order
+        if mode == 'manual' and first:
+            # Never the person's own bank nor their card for a store paid before its order: nothing moved.
+            return self.stop('unpaid', body=notes.say(notes.PAY_FIRST_NOT_PAID, task))
         if mode == 'manual':
             return self.hand_manual(rail, code=code, extra=extra, offer=offer)
         placed = task.order or {}
-        if not placed.get('amount') or not placed.get('pressed') or placed.get('unapproved'):
+        # Venezuela pays before the order exists: what the person approved is the order at its final button.
+        ordered = placed.get('pay_first') if first else placed.get('pressed')
+        if not placed.get('amount') or not ordered or placed.get('unapproved'):
             # No order the person approved (the store shows one nobody named): nothing is prepared.
             return self.stop('unpaid')
         self.save()
         try:
-            intent = payment_intents.prepare(task.account, task.user, code, created_by='assistant',
+            intent = payment_intents.prepare(task.account, task.user, None if first else code, created_by='assistant',
                                              source='agent_checkout',
                                              request={**rail.request(app_meta(task)), **extra})
         except PaymentAccountError as exc:
@@ -672,16 +694,18 @@ class Step:
             # The screen stays: many refusals pass, and it may be the only place that code is.
             # A balance or what is missing stays in the chat, off the lock screen.
             return self.stop('unpaid', body=f"{notes.stopped_text(task, 'unpaid')} {why}".strip())
+        # An exact bolívar card prices an estimate (amount_local); what it pays exactly is minimum_local.
+        local = getattr(intent, 'minimum_local', None) if first else intent.amount_local
         if (intent.currency != rail.currency or not intent.amount_exact or intent.rail_method_id != rail.method_id
-                or ('amount_local' in extra and intent.amount_local != Decimal(extra['amount_local']))):
+                or local is None or ('amount_local' in extra and local != Decimal(extra['amount_local']))):
             payment_intents.cancel(task.account, intent.internal_id)
             return self.stop('unpaid')
         order = task.order or {}
         # Only the order the agent placed carries an amount to pay: `pressed` is written only when the
         # person's approval matched (operate._order), and the approval itself is then used up.
-        approved = order.get('amount') if order.get('pressed') and not order.get('unapproved') else None
+        approved = order.get('amount') if ordered and not order.get('unapproved') else None
         # No amount the person approved (an order the store shows as placed without them): no card.
-        if not approved or intent.amount_local != Decimal(approved):
+        if not approved or local != Decimal(approved):
             # Not the order the person approved (another order's page, or a seller's): never offered.
             payment_intents.cancel(task.account, intent.internal_id)
             return self.stop('unpaid')
@@ -692,6 +716,10 @@ class Step:
         from . import account_pay
         if account_pay.pay(self, intent, code=code, extra=extra, held=held):
             return   # the person's Cuenta inteligente pays it, or the purchase waits for it: never a card then
+        if first:
+            # Only the account pays a store before its order exists (countries.PagoMovilRail.ready).
+            payment_intents.cancel(task.account, intent.internal_id)
+            return self.stop('unpaid', body=notes.say(notes.PAY_FIRST_NOT_PAID, task))
         if held:
             # A held purchase is never handed to the personal wallet's card.
             payment_intents.cancel(task.account, intent.internal_id)
