@@ -281,3 +281,22 @@ Server: `SMART_ACCOUNT_V2_IMPLEMENTATION_ADDRESS` set in `.env.mainnet` (hands-o
 a v2 account falls back to the signed card, v1 subscribers get the migration offer). Still to do: BscScan
 verification and proxy re-link; a separate KMS key for the escrow's order signer (audit M2) before hands-off
 Comprar; canary migration of a founder account; then Safe nonce 33 `setTradePaused(false)`.
+
+## Live (2026-11-25)
+
+- Canary: the founder's account migrated v1 `0x3df1…e7d8` → v2 `0x59bDD1dC51DCb229fCc96fe1950DB8C8Bfc63e9c`
+  (tx `0x8c14e7c1c58ae7204ce8d1dbe8731fd89bb75fdc7ffc62ccb497bce1c4a285fb`, block 135687314, 588,332 gas): every
+  token moved, paidUntil carried, buy rule re-created, Trade rule US$250/week. It exposed two server bugs, fixed
+  before go-live: the sponsor's second (policy) 4-call cap (a3b0c9bb7) and a reconcile ordering deadlock — the new
+  account's Subscribed is logged before AccountCreated (a72052016).
+- ConfioPurchaseSpender `0xD0ea8Ec3a6F3AD49f13a18Ce801C9594311A32Ca` (operator = KMS sponsor, EOA, sponsor on both
+  vaults; tx `0x35d51c06887514d357127ea2fd6bc252019520317411c3d06e0a596ab68729a0`, block 135691060,
+  `manage.py deploy_purchase_spender`).
+- Safe nonce 33 (founder's decision: unpause and go live with everything): one MultiSend with
+  `setTradePaused(false)` + `setCardSpender(0xD0ea…32Ca, true)`, SafeTxHash
+  `0xc9405595b6c9221bc4fa0fbe51ed78780da06e6b722992e8df9c55db498b54f3`. After: `tradePaused` false,
+  `isCardSpender(spender)` true, `cardPaused` false, Safe nonce 34.
+- Server: `SMART_ACCOUNT_PURCHASE_SPENDER_ADDRESS` and `SMART_ACCOUNT_CARD_RULES_ENABLED=True` set; hands-off trades,
+  hands-off Comprar and account-paid store purchases are live; the offer shows the hands-off wording.
+- Still open: a separate KMS key for the escrow's order signer (audit M2: today the sponsor is order signer, arbiter
+  and relayer); BscScan verification of the four contracts and the proxy re-link.
