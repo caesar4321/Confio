@@ -67,7 +67,7 @@ La base es lo que hace seguro darle a un asistente acceso al dinero. La clave de
 | Ondo Stocks, oro, bitcoin, Futuros | Inversión. | Routers con código fuente verificado liquidan las operaciones directamente al usuario; Oro y Bitcoin y Futuros no se ofrecen en la versión para iOS. |
 | $CONFIO | Token comunitario y del ecosistema. | BEP-20 de oferta fija con una preventa on-chain pagada en cUSD. No respalda los saldos en dólares de los usuarios. |
 
-Al 25 de noviembre de 2026, Confío registra 10,233 usuarios que completaron la verificación telefónica y 3,407 dispositivos alcanzables mediante notificaciones push, de los cuales 3,402 se utilizaron en los últimos 30 días. Al 23 de julio de 2026 (la instantánea más reciente disponible con la misma definición), 177 usuarios habían completado la verificación de identidad de Didit presentando un documento de identidad oficial y tomando una selfie en vivo, con una tasa de finalización del 61.5% entre quienes la iniciaron. Son métricas operativas internas, no cifras auditadas independientemente, y no deben interpretarse como número de usuarios con fondos ni de usuarios activos mensuales. <sup>[14]</sup>
+Al 25 de noviembre de 2026, Confío registra 10,886 usuarios que completaron el registro (14,440 cuentas registradas) y 3,407 dispositivos alcanzables mediante notificaciones push, de los cuales 3,402 se utilizaron en los últimos 30 días. Al 23 de julio de 2026 (la instantánea más reciente disponible con la misma definición), 177 usuarios habían completado la verificación de identidad de Didit presentando un documento de identidad oficial y tomando una selfie en vivo, con una tasa de finalización del 61.5% entre quienes la iniciaron. Son métricas operativas internas, no cifras auditadas independientemente, y no deben interpretarse como número de usuarios con fondos ni de usuarios activos mensuales. <sup>[14]</sup>
 
 Los vaults de cUSD y cUSD+, los routers de Ondo Stocks y de swaps, el delegado de transacciones patrocinadas, la factory y las implementaciones de cuenta de Cuenta inteligente, el spender de compras, el escrow de Comprar, el token $CONFIO y sus vaults de preventa, recompensas y vesting, el contrato de pagos a comercios y el vault de nóminas están desplegados y tienen su código fuente verificado en BNB Smart Chain. <sup>[8, 9, 17, 27]</sup>
 
@@ -399,13 +399,13 @@ Los vaults siguen siendo actualizables porque cUSD+ depende permanentemente de c
 
 | Métrica | Instantánea | Fecha | Definición |
 | --- | ---: | --- | --- |
-| Usuarios con teléfono verificado | 10,233 | 25 nov 2026 | Usuarios que completaron la verificación telefónica. |
+| Usuarios que completaron el registro | 10,886 | 25 nov 2026 | Cuentas activas, salvo las cuentas de prueba de la plataforma, que terminaron la incorporación con cualquier método de registro (14,440 cuentas registradas). |
 | Dispositivos alcanzables por push | 3,407 | 25 nov 2026 | Dispositivos actualmente accesibles mediante notificaciones push. |
 | Utilizados en los últimos 30 días | 3,402 | 25 nov 2026 | Dispositivos alcanzables por push registrados como usados en los 30 días previos; no se presenta como una cifra estandarizada de MAU. |
 | Usuarios verificados por Didit | 177 | 23 jul 2026 | Usuarios que presentaron un documento de identidad oficial y completaron la prueba de presencia real con selfie en vivo y la coincidencia facial. |
 | Finalización de la verificación de identidad | 61.5% | 23 jul 2026 | Proporción de usuarios que completaron el flujo de Didit entre quienes lo iniciaron. |
 
-Estas métricas internas no están auditadas. Desde finales de octubre de 2026, el registro ya no requiere un número de teléfono, por lo que el conteo de usuarios con teléfono verificado no incluye a todos los usuarios que terminaron el registro. Las métricas no implican que todos los usuarios tengan fondos, estén activos, sean elegibles para todos los productos o sean únicos entre todas las mediciones de dispositivos. <sup>[14]</sup>
+Estas métricas internas no están auditadas. Desde finales de octubre de 2026, el registro ya no requiere un número de teléfono, por lo que los usuarios se cuentan por incorporación completada y no por verificación telefónica; la cifra del 23 de julio de 2026 (8,004) se contó por verificación telefónica y no es directamente comparable. Las métricas no implican que todos los usuarios tengan fondos, estén activos, sean elegibles para todos los productos o sean únicos entre todas las mediciones de dispositivos. <sup>[14]</sup>
 
 ### 10.2 La confianza es el canal de distribución
 
@@ -492,7 +492,7 @@ Ningún producto financiero blockchain, y ningún agente de IA, está libre de r
 | Comprar | Escrow actualizado para compras desde la cuenta; piloto abierto. | Vendedores y compradores recurrentes en las ciudades del piloto. |
 | Acceso fiat | Canales locales activos en México, Brasil, Venezuela, Bolivia, Argentina, Chile y Perú según se describe en la sección 3.6; Colombia pausada. | Reabrir Colombia cuando los proveedores lo permitan; pagos QR en Bolivia; proveedores verificados adicionales. |
 | $CONFIO | Token de oferta fija, preventa de reemplazo y vaults de recompensas y vesting activos. | Mantener el tokenomics sincronizado con el estado on-chain; abrir los reclamos solo bajo los controles divulgados. |
-| Distribución | 10,233 usuarios con teléfono verificado; audiencia del fundador de aproximadamente 480,000 personas; gasto en medios pagados prácticamente nulo hasta la fecha. | Convertir la distribución en usuarios con fondos, pagos repetidos con el asistente y cohortes por país. |
+| Distribución | 10,886 usuarios que completaron el registro; audiencia del fundador de aproximadamente 480,000 personas; gasto en medios pagados prácticamente nulo hasta la fecha. | Convertir la distribución en usuarios con fondos, pagos repetidos con el asistente y cohortes por país. |
 
 ### 14.1 Principios de medición
 
@@ -548,7 +548,7 @@ Antes de usar cualquier servicio, los lectores deben revisar los términos defin
 
 13. Registros de socios y configuración de producción de Confío, 25 de noviembre de 2026: canales locales de recarga, retiro y pago a través de Koywe, Infinia, Pago ASAP y VEXPay, con interruptores y pausas por país. Las condiciones comerciales se rigen por los respectivos acuerdos.
 
-14. Instantáneas de analítica interna de producto de Confío: 25 de noviembre de 2026 para usuarios con teléfono verificado y dispositivos alcanzables por push mediante FCM (tokens de dispositivo activos; usados dentro de 30 días según el último uso registrado); 23 de julio de 2026 para la verificación de identidad de Didit con documento oficial y selfie en vivo y su tasa de finalización. No auditadas.
+14. Instantáneas de analítica interna de producto de Confío: 25 de noviembre de 2026 para usuarios que completaron el registro (incorporación terminada con cualquier método; se excluyen las cuentas de prueba de la plataforma), cuentas registradas y dispositivos alcanzables por push mediante FCM (tokens de dispositivo activos; usados dentro de 30 días según el último uso registrado); 23 de julio de 2026 para la verificación de identidad de Didit con documento oficial y selfie en vivo y su tasa de finalización. No auditadas.
 
 15. Instantánea de analítica interna del canal del fundador de Confío, 23 de julio de 2026. La cifra de audiencia es aproximada y cambia con el tiempo.
 

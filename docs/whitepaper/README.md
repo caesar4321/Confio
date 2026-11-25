@@ -67,7 +67,7 @@ The foundation is what makes it safe to give an assistant access to money. The u
 | Ondo Stocks, gold, bitcoin, Futuros | Investing. | Source-verified routers settle trades directly to the user; Oro y Bitcoin and Futuros are not offered in the iOS build. |
 | $CONFIO | Community and ecosystem token. | Fixed-supply BEP-20 with a cUSD-funded on-chain presale. It does not back user dollar balances. |
 
-As of 25 November 2026, Confío records 10,233 users who completed phone verification and 3,407 push-reachable devices, 3,402 of them used within the last 30 days. As of 23 July 2026 (the latest snapshot available under the same definition), 177 users had completed Didit identity verification by submitting a government-issued identity document and capturing a live selfie, with a 61.5% completion rate among users who began it. These are internal operating metrics rather than independently audited figures and should not be read as funded-user or monthly-active-user counts. <sup>[14]</sup>
+As of 25 November 2026, Confío records 10,886 users who completed sign-up (14,440 registered accounts) and 3,407 push-reachable devices, 3,402 of them used within the last 30 days. As of 23 July 2026 (the latest snapshot available under the same definition), 177 users had completed Didit identity verification by submitting a government-issued identity document and capturing a live selfie, with a 61.5% completion rate among users who began it. These are internal operating metrics rather than independently audited figures and should not be read as funded-user or monthly-active-user counts. <sup>[14]</sup>
 
 The cUSD and cUSD+ vaults, the Ondo Stocks and swap routers, the sponsored-transaction delegate, the Cuenta inteligente factory and account implementations, the purchase spender, the Comprar escrow, the $CONFIO token and its presale, reward, and vesting vaults, the merchant-payment contract, and the payroll vault are deployed and source-verified on BNB Smart Chain. <sup>[8, 9, 17, 27]</sup>
 
@@ -399,13 +399,13 @@ The vaults remain upgradeable because cUSD+ permanently depends on external Ondo
 
 | Metric | Snapshot | Date | Definition |
 | --- | ---: | --- | --- |
-| Phone-complete users | 10,233 | 25 Nov 2026 | Users who completed phone verification. |
+| Users who completed sign-up | 10,886 | 25 Nov 2026 | Active accounts, other than platform test accounts, that finished onboarding by any sign-up method (14,440 registered accounts). |
 | Push-reachable devices | 3,407 | 25 Nov 2026 | Devices currently addressable through push notifications. |
 | Used in the last 30 days | 3,402 | 25 Nov 2026 | Push-reachable devices recorded as used within the preceding 30 days; not presented as a standardized MAU figure. |
 | Didit-verified users | 177 | 23 Jul 2026 | Users who submitted a government-issued identity document and completed live-selfie liveness and face matching. |
 | Identity-verification completion | 61.5% | 23 Jul 2026 | Share of users who completed the Didit flow among those who started it. |
 
-These internal metrics are unaudited. Since late October 2026, signup no longer requires a phone number, so the phone-complete count does not include every user who finished signup. The metrics do not imply that every user is funded, active, eligible for every product, or unique across all device measures. <sup>[14]</sup>
+These internal metrics are unaudited. Since late October 2026, sign-up no longer requires a phone number, so users are counted by completed onboarding rather than by phone verification; the 23 July 2026 figure (8,004) was counted by phone verification and is not directly comparable. The metrics do not imply that every user is funded, active, eligible for every product, or unique across all device measures. <sup>[14]</sup>
 
 ### 10.2 Trust is the distribution channel
 
@@ -492,7 +492,7 @@ No blockchain financial product, and no AI agent, is risk-free. This table is no
 | Comprar | Escrow upgraded for account purchases; pilot open. | Sellers and repeat buyers in the pilot cities. |
 | Fiat access | Local rails live in Mexico, Brazil, Venezuela, Bolivia, Argentina, Chile, and Peru as described in section 3.6; Colombia paused. | Re-open Colombia when providers allow; QR Bolivia payments; additional verified providers. |
 | $CONFIO | Fixed-supply token, replacement presale, reward and vesting vaults live. | Keep tokenomics synchronized with on-chain state; open claims only under the disclosed controls. |
-| Distribution | 10,233 phone-complete users; approximately 480,000 founder audience; effectively zero paid-media spend to date. | Convert distribution into funded users, repeat assistant payments, and country-level cohorts. |
+| Distribution | 10,886 users who completed sign-up; approximately 480,000 founder audience; effectively zero paid-media spend to date. | Convert distribution into funded users, repeat assistant payments, and country-level cohorts. |
 
 ### 14.1 Measurement principles
 
@@ -548,7 +548,7 @@ Readers should review definitive product terms, risk disclosures, smart contract
 
 13. Confío partner records and production configuration, 25 November 2026: local top-up, withdrawal, and payout rails through Koywe, Infinia, Pago ASAP, and VEXPay, with per-country switches and pauses. Commercial terms remain governed by the respective agreements.
 
-14. Confío internal product analytics snapshots: 25 November 2026 for phone-complete users and FCM push-reachable devices (active device tokens; used within 30 days by last recorded use); 23 July 2026 for Didit government-document and live-selfie identity verification and its completion rate. Unaudited.
+14. Confío internal product analytics snapshots: 25 November 2026 for users who completed sign-up (onboarding finished, any method; platform test accounts excluded), registered accounts, and FCM push-reachable devices (active device tokens; used within 30 days by last recorded use); 23 July 2026 for Didit government-document and live-selfie identity verification and its completion rate. Unaudited.
 
 15. Confío internal founder-channel analytics snapshot, 23 July 2026. Audience figure is approximate and changes over time.
 
