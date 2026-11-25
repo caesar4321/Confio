@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@apollo/client';
 import styles from '../../styles/FriendlyHeroSection.module.css';
-import confioHomeDemo from '../../images/screens/home.jpg';
+import confioHomeDemo from '../../images/screens/pedile.jpg';
 import { useLanguage } from '../../contexts/LanguageContext';
 import {
   FUND_FLOW_STATS, INVEST_TRADED_USD, LANDING_STATS, RESERVE_STATS, reserveTotal, toStatValue,
@@ -10,7 +10,9 @@ import {
 import TickerNumber from './TickerNumber';
 
 // «Radicalmente Normal» hero (DESIGN.md): calm declarative headline,
-// the real app as the only hero image, live traction with tick-settle.
+// the app as the only hero image, live traction with tick-settle. Since
+// 5.4.0 the app's Inicio is the conversation, so the claim is what you can
+// ask for, and the screen is the chat.
 const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) => {
   const { t } = useLanguage();
 
@@ -33,16 +35,16 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
 
   const defaultTitle = (
     <>
-      {t('Enviá, invertí y pagá', 'Send, invest and pay', '보내고, 투자하고, 결제하세요')}
+      {t('Pedíselo', 'Just ask.', '말만 하세요.')}
       <br />
-      <span className={styles.highlight}>{t('con dólares.', 'with dollars.', '달러로.')}</span>
+      <span className={styles.highlight}>{t('y listo.', 'It’s done.', '그럼 끝.')}</span>
     </>
   );
 
   const defaultSubtitle = t(
-    'Tus dólares digitales, siempre a tu nombre. Y desde ellos, acciones de EE.UU., oro, Bitcoin y futuros, en una sola app.',
-    'Your digital dollars, always in your name. And from them, U.S. stocks, gold, Bitcoin and futures, in one app.',
-    '디지털 달러는 언제나 당신 명의로. 그 달러로 미국 주식, 금, 비트코인, 선물까지 하나의 앱에서.'
+    'Escribile a Confío lo que necesitás, como a una persona: mandar plata a tu familia, comprar acciones de EE.UU., hacer una compra o responder tu WhatsApp. Vos aprobás cada paso.',
+    'Tell Confío what you need, the way you’d text a person: send money to your family, buy U.S. stocks, shop online or answer your WhatsApp. You approve every step.',
+    '사람에게 말하듯 Confío에게 필요한 것을 적어 보세요. 가족에게 송금, 미국 주식 매수, 온라인 쇼핑, WhatsApp 답장까지. 모든 단계는 당신이 승인합니다.'
   );
 
   return (
@@ -141,7 +143,7 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
                   <div className={styles.statBlock}>
                     <TickerNumber value={traded} className={styles.statValue} />
                     <span className={styles.statLabel}>
-                      {t('operados en acciones, oro, bitcoin y futuros', 'traded in stocks, gold, bitcoin and futures', '주식·금·비트코인·선물 거래액')}
+                      {t('operados en inversiones', 'traded in investments', '투자 거래액')}
                     </span>
                   </div>
                 )}
@@ -165,7 +167,7 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
             )}
           </div>
 
-          {/* Right — the real app, nothing else */}
+          {/* Right — the app's conversation, nothing else */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
@@ -177,13 +179,13 @@ const FriendlyHeroSection = ({ title, subtitle, showDownloadButtons = true }) =>
               <img
                 src={confioHomeDemo}
                 alt={t(
-                  'App Confío — pantalla de inicio',
-                  'Confío app — home screen',
-                  'Confío 앱 — 홈 화면'
+                  'App Confío — Inicio: la conversación, con ejemplos de lo que podés pedir',
+                  'Confío app — Home: the conversation, with examples of what you can ask for',
+                  'Confío 앱 — 홈: 대화 화면과 요청 예시'
                 )}
                 className={styles.phoneShot}
                 width={600}
-                height={1206}
+                height={1300}
                 fetchpriority="high"
               />
             </div>

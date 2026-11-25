@@ -107,7 +107,7 @@ describe('FriendlyHeroSection stats', () => {
     expect(await screen.findByText('US$8,257')).toBeInTheDocument();
     expect(screen.getByText('in reserves backing Confío dollars')).toBeInTheDocument();
     expect(screen.getByText('US$4,690')).toBeInTheDocument();
-    expect(screen.getByText('traded in stocks, gold, bitcoin and futures')).toBeInTheDocument();
+    expect(screen.getByText('traded in investments')).toBeInTheDocument();
   });
 
   it('never shows a partial reserve total or a private traded figure', async () => {
@@ -120,7 +120,7 @@ describe('FriendlyHeroSection stats', () => {
     await flushQuery();
 
     expect(screen.queryByText('in reserves backing Confío dollars')).not.toBeInTheDocument();
-    expect(screen.queryByText('traded in stocks, gold, bitcoin and futures')).not.toBeInTheDocument();
+    expect(screen.queryByText('traded in investments')).not.toBeInTheDocument();
   });
 
   it('hides reserves while the legacy figure is a database estimate', async () => {

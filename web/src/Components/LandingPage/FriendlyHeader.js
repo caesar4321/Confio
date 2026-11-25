@@ -19,13 +19,13 @@ const FriendlyHeader = () => {
 
         <nav className={styles.nav} aria-label={t('Secciones', 'Sections', '섹션')}>
           <a href="#productos" className={styles.navLink}>
-            {t('Productos', 'Products', '상품')}
+            {t('Qué hace', 'What it does', '기능')}
+          </a>
+          <a href="#asi-funciona" className={styles.navLink}>
+            {t('Cómo funciona', 'How it works', '작동 방식')}
           </a>
           <a href="#activos" className={styles.navLink}>
             {t('Activos', 'Assets', '자산')}
-          </a>
-          <a href="#tarifas" className={styles.navLink}>
-            {t('Tarifas', 'Fees', '수수료')}
           </a>
           <a
             href="https://github.com/caesar4321/Confio"

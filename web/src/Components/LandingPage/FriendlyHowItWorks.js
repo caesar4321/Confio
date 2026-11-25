@@ -19,13 +19,13 @@ const FriendlyHowItWorks = () => {
     },
     {
       number: '2',
-      title: t('Recargá tus dólares', 'Top up your dollars', '달러 충전'),
-      description: t('Desde tu banco o billetera, con el método de tu país. Antes de confirmar, ves cuánto recibís.', 'From your bank or wallet, with your country’s method. Before confirming, you see how much you receive.', '내 나라의 방법으로 은행이나 지갑에서 충전하세요. 확인 전에 받을 금액을 볼 수 있습니다.'),
+      title: t('Pedile lo que necesitás', 'Ask for what you need', '필요한 것을 요청하세요'),
+      description: t('Escribilo o decilo, como a una persona. Confío lo prepara y te muestra el monto, la comisión y el total.', 'Type it or say it, the way you would to a person. Confío prepares it and shows you the amount, the fee and the total.', '사람에게 하듯 글이나 말로 요청하세요. Confío가 준비하고 금액, 수수료, 합계를 보여 줍니다.'),
     },
     {
       number: '3',
-      title: t('Usalos como quieras', 'Use them your way', '원하는 대로 사용'),
-      description: t('Enviá gratis a otros usuarios con su número de teléfono, invertí o comprá. Siempre ves la comisión exacta antes de confirmar.', 'Send free to other users with their phone number, invest or shop. You always see the exact fee before confirming.', '전화번호로 다른 사용자에게 무료로 보내고, 투자하거나 구매하세요. 확인 전에 항상 정확한 수수료를 볼 수 있습니다.'),
+      title: t('Aprobalo con tu cara o tu huella', 'Approve it with your face or fingerprint', '얼굴이나 지문으로 승인하세요'),
+      description: t('Nada se mueve sin tu firma. Si decís «no», Confío cancela en ese momento lo que preparó.', 'Nothing moves without your signature. If you say “no”, Confío cancels what it prepared right then.', '당신의 서명 없이는 아무것도 움직이지 않습니다. “아니요”라고 하면 Confío가 준비한 것을 그 자리에서 취소합니다.'),
     }
   ];
 

@@ -5,10 +5,11 @@ design laws live in the app codebase and `apps/src/config/theme.ts`; this file
 ports that world to the web and governs every visual decision on the site.
 
 ## Product Context
-- **What this is:** Marketing landing for Confío — LATAM's open wallet for digital dollars (send/receive/save cUSD, cUSD+ savings, US stocks via Ondo, $CONFIO presale).
+- **What this is:** Marketing landing for Confío — an AI assistant for LATAM that does things for you from one chat (remittances, US stocks via Ondo, online shopping, QR payments, WhatsApp/email/calendar), working with your digital dollars in a wallet in your name (cUSD, cUSD+ savings, $CONFIO presale). You approve every step.
 - **Who it's for:** Spanish-first LATAM users (Venezuela, Argentina, Mexico) battered by inflation and wary of crypto scams; diaspora sending remittances. Mobile-heavy.
 - **Space/industry:** LATAM fintech/wallets. Peers: ARQ (ex-DolarApp), Lemon, Nubank, Mercado Pago.
 - **Project type:** Marketing site. Its job: trust + app downloads + presale interest.
+- **The line:** «Confío en vos.» is the brand; «Pedíselo y listo.» is what it does. Same pair as the store listing.
 
 ## The Memorable Thing
 "Revolutionary and frontier" — expressed as **radical normalcy**. Confío's
@@ -20,7 +21,7 @@ aesthetics (no dark-noir, no neon, no monospace money, no terminal vibes).
 ## Aesthetic Direction
 - **Direction:** Luminous calm — light, product-true, warm. App-token continuity, elevated craft.
 - **Decoration level:** Intentional — flat mint surfaces as soft rounded blocks (like app cards); the only "decoration" is real product UI. No gradients, no blobs, no floating emoji, no icon-in-circle grids.
-- **Mood:** A calm, finished, trustworthy money app; confident enough to state the revolution as plain fact («Dólares. Así de simple.»).
+- **Mood:** A calm, finished, trustworthy app that handles your money; confident enough to state the revolution as plain fact («Pedíselo y listo.»).
 - **Reference sites (researched 2026-07-07):** arq/dolarapp.com (went sober-editorial — category leaders abandoned pastel-friendly), lemon.me (acid brutalism — not us), phantom.com / family.co (soft-playful — not us), world.org (austere institutional). Confío's lane: product-true warmth.
 - **Anti-direction (explicitly rejected by founder):** dark ink/crypto-noir, neon signal green, monospaced money figures, manifesto-shouting headlines. It "looks so much crypto website" — the opposite of the product's premise.
 
@@ -59,8 +60,8 @@ aesthetics (no dark-noir, no neon, no monospace money, no terminal vibes).
 - **Approach:** Hybrid — disciplined grid, hero is product-forward (headline left, real app screenshot right in a device frame).
 - **Grid:** 12-col desktop, single column <760px. Max content width 1160px.
 - **Border radius:** app scale — sm 8, md 12, lg 16, xl 24, pill 999 (buttons are pills, like app quick actions). Phone frame 44/32.
-- **Sections mirror the app's IA:** Enviar · Recibir/Cobrar · Ahorrar (cUSD+) · Negocios — each shown with a real UI fragment or screenshot, never an icon in a colored circle.
-- **Hero rule:** the real app screenshot (current demo build) is the hero image. No illustrations, no stock photos, no 3D renders. Keep screenshots current with the shipped app.
+- **Sections mirror the app's IA:** since 5.4.0 the app's Inicio is the conversation, so each section is one thing you can ask for (Remesas · Acciones · Compras en línea · WhatsApp, correo y agenda · QR · Tu firma), shown with its chat and the request as the app's own outgoing bubble (`#047857`, white text). Never an icon in a colored circle.
+- **Hero rule:** the app's screen is the hero image. No illustrations, no stock photos, no 3D renders. Keep screens current with the shipped app. The chat screens are drawn from the app's own styles and the server's real wording (`~/Downloads/store_listing/v3/render.py`, the same source as the store screenshots), with example names and amounts.
 
 ## Motion
 - **Approach:** Intentional. One signature: **tick-settle** — money figures roll in softly (~1.2s ease-out cubic, IntersectionObserver-triggered once) and settle with a brief emerald pulse. It embodies the product promise (the visible daily savings tick).
@@ -68,7 +69,7 @@ aesthetics (no dark-noir, no neon, no monospace money, no terminal vibes).
 - **Easing:** enter ease-out, exit ease-in, move ease-in-out. **Duration:** micro 50–100ms, short 150–250ms, medium 250–400ms, tick-settle 1200ms.
 
 ## Voice & Copy Rules
-- Spanish-first; calm declarative confidence («Dólares. Así de simple.»), never manifesto-shouting, never crypto jargon on marketing surfaces.
+- Spanish-first, in voseo («Confío en vos»); calm declarative confidence («Pedíselo y listo.»), never manifesto-shouting, never crypto jargon on marketing surfaces. What the app says inside a screen stays in tú, as in the app.
 - **Money amounts display as `US$` (US$52,642), never bare `$`** — MXN, ARS, CLP, COP all write their own peso as "$", so a bare "$" is ambiguous for the LATAM audience. Token tickers ($cUSD, $CONFIO, $cUSD+) keep their `$` prefix — they are names, not amounts.
 - **Number separators: fixed `en-US` grouping (1,234,567), no geo-detection.** The website can't know the visitor's country reliably (unlike the app, which uses the phone country code), and IP-based locale adds infra for marginal gain. Mitigation: **marketing stats are whole dollars only** (no cents except the literal US$0.00) — without decimals, three-digit groups can't be misread as decimals in comma-decimal countries (AR/CL/CO/VE).
 - **No beta/waiting-list framing.** The app is live (2026): no "beta exclusiva", "acceso temprano", "lista de espera". The product speaks in the present tense.
@@ -87,5 +88,7 @@ aesthetics (no dark-noir, no neon, no monospace money, no terminal vibes).
 | 2026-10-04 | Instrument Sans adopted in the mobile app too (founder decision, "Tu mes" design review D20) | App and site share one typeface. App renders through `components/common/AppText` (React 19 has no global Text default); static Regular/Medium/SemiBold/Bold files, 800/900 → Bold, explicit families (monospace) kept |
 | 2026-10-04 | App hero field KEEPS the bright `#34D399 → #10B981`; new text on it is deep text-on-mint `#064E3B`, 19 bold (founder decision) | Design review D19/D23 darkened the field (`#047857 → #065F46`, then `#10B981 → #059669`) so white text would pass; on device the founder found both too dark. Dark-on-mint text gets the contrast without changing the brand look |
 | 2026-10-04 | Tu mes + Home month card refreshed (founder pick, design-shotgun variant A): white card on the mint hero, emerald in / sky-blue out | Dark-on-mint text and slate bars read heavy next to the bright hero; white card + mint/sky is the fresh young-fintech look and keeps full contrast |
+| 2026-11-25 | Assistant-first landing (founder decision, with the 5.4.0 store listing): «Pedíselo y listo.» leads; sections are things you can ask for; chat screens drawn from the app's styles | The app's Inicio became the conversation; site, store listing and the assistant's own description say the same thing. Oro y Bitcoin and Futuros are not on the landing, as in the unified store listing |
+| 2026-11-25 | Fee section («Tarifas») removed from the landing (founder decision: "People won't care") | The app shows the exact fee before every confirmation; the landing sells what you can ask for. The Business-card violet exception above no longer has a surface |
 
 Preview artifact: `~/.gstack/projects/caesar4321-Confio/designs/design-system-20260707/radicalmente-normal-preview.html`

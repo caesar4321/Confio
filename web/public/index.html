@@ -17,7 +17,7 @@
     <meta property="og:image" content="{{ ogImage }}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Confío en vos. Enviá, invertí y pagá con dólares." />
+    <meta property="og:image:alt" content="Confío en vos. Pedíselo y listo." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{{ title }}" />
     <meta name="twitter:description" content="{{ ogDescription }}" />
@@ -62,7 +62,7 @@
     <div id="root">
       <main style="max-width:640px;margin:0 auto;padding:48px 16px;font-family:'Instrument Sans',system-ui,sans-serif;color:#1F2937;line-height:1.55">
         <h1 style="font-family:'Bricolage Grotesque',system-ui,sans-serif;font-weight:800;font-size:32px;margin:0 0 12px">Confío</h1>
-        <p style="font-size:18px;margin:0 0 16px">Confío es una app de dólares digitales para Latinoamérica. Con ella podés enviar dinero a otras personas, pagar con QR en tu país, recargar y retirar en moneda local, e invertir en acciones de EE.UU. y oro.</p>
+        <p style="font-size:18px;margin:0 0 16px">Confío es un asistente con IA para Latinoamérica: le escribís lo que necesitás y lo prepara, y vos aprobás cada paso. Con tus dólares digitales, que están en una billetera a tu nombre, podés enviar dinero a otras personas, pagar con QR, recargar y retirar en moneda local, invertir en acciones de EE.UU. y hacer compras en línea.</p>
         <p style="margin:0 0 24px">Descargala en el <a href="https://apps.apple.com/app/id6472662314" style="color:#047857">App Store</a> o en <a href="https://play.google.com/store/apps/details?id=com.Confio.Confio" style="color:#047857">Google Play</a>.</p>
         <h2 style="font-size:18px;margin:0 0 8px">Empresa</h2>
         <p style="margin:0 0 24px">Confío es un servicio de {{ legal_entity.name }}, sociedad constituida en la {{ legal_entity.jurisdiction }}.{% if legal_entity.address %} Domicilio: {{ legal_entity.address }}.{% endif %}<br />Contacto: {{ email_off|safe }}<a href="mailto:{{ legal_entity.email }}" style="color:#047857">{{ legal_entity.email }}</a>{{ email_off_end|safe }}</p>

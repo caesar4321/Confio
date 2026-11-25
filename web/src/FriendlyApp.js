@@ -11,7 +11,6 @@ import FriendlyProducts from './Components/LandingPage/FriendlyProducts';
 import FriendlyHowItWorks from './Components/LandingPage/FriendlyHowItWorks';
 import FriendlyAssets from './Components/LandingPage/FriendlyAssets';
 import FriendlyVision from './Components/LandingPage/FriendlyVision';
-import FriendlyFeeStructure from './Components/LandingPage/FriendlyFeeStructure';
 import FriendlyFounder from './Components/LandingPage/FriendlyFounder';
 import FriendlyFooter from './Components/LandingPage/FriendlyFooter';
 
@@ -31,10 +30,10 @@ function FriendlyApp() {
   useEffect(() => {
     // Set page title based on user language
     const titles = {
-      es: 'Confío: enviá, invertí y pagá con dólares',
-      en: 'Confío: send, invest and pay with dollars',
-      ko: 'Confío: 달러로 보내고, 투자하고, 결제하세요',
-      default: 'Confío: enviá, invertí y pagá con dólares'
+      es: 'Confío: pedíselo y listo',
+      en: 'Confío: just ask, and it’s done',
+      ko: 'Confío: 말만 하면 끝',
+      default: 'Confío: pedíselo y listo'
     };
 
     const lang = (navigator.language || navigator.userLanguage).slice(0, 2);
@@ -92,7 +91,6 @@ function FriendlyApp() {
                     <FriendlyHowItWorks />
                     <FriendlyVision />
                     <FriendlyAssets />
-                    <FriendlyFeeStructure />
                     <FriendlyFounder />
                   </main>
                   <FriendlyFooter />

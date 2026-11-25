@@ -81,6 +81,20 @@
   margin-bottom: 16px;
 }
 
+/* What the person types, as the app's own outgoing bubble. */
+.ask {
+  display: inline-block;
+  background: #047857;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.45;
+  padding: 10px 16px;
+  border-radius: 18px 18px 4px 18px;
+  max-width: 40ch;
+  margin: 0 0 18px;
+}
+
 .rowBody {
   font-size: 1.0625rem;
   line-height: 1.6;
@@ -132,11 +146,6 @@
   margin: 0;
 }
 
-.noteRisk {
-  color: #92400e;
-  background: #fef3c7;
-}
-
 /* ---------- the real screen ---------- */
 .visual {
   position: relative;
@@ -168,6 +177,53 @@
   border-radius: 34px;
 }
 
+/* ---------- and also: three flat mint blocks, text only ---------- */
+.more {
+  margin-top: 96px;
+}
+
+.moreTitle {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2.4vw, 1.8rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+}
+
+.moreGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.moreCard {
+  background: var(--bg-mint);
+  border-radius: var(--radius-xl);
+  padding: 24px;
+}
+
+.moreCardTitle {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--primary-green-deep);
+  margin-bottom: 8px;
+}
+
+.moreCardBody {
+  font-size: 1rem;
+  line-height: 1.55;
+  color: #065f46;
+  margin: 0;
+}
+
+.availability {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 20px 0 0;
+}
+
 @media (max-width: 968px) {
   .products {
     padding: 64px 0 24px;
@@ -188,6 +244,15 @@
 
   .rowReversed .copy {
     order: 0;
+  }
+
+  .more {
+    margin-top: 72px;
+  }
+
+  .moreGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .visual {

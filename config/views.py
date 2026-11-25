@@ -74,7 +74,7 @@ JULIAN_MOON_PERSON = {
     'name': 'Julian Moon',
     'url': 'https://confio.lat/about/julian-moon',
     'job_title': 'Founder',
-    'description': 'Korean founder of Confío, a non-custodial digital dollar wallet for Latin America, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
+    'description': 'Korean founder of Confío, an AI assistant app for Latin America that works with the user’s digital dollars in a non-custodial wallet, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
     'image_url': 'https://confio.lat/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg',
     'image_caption': 'Julian Moon, founder of Confío.',
     'image_alt': 'Julian Moon, founder of Confío',
@@ -88,7 +88,8 @@ JULIAN_MOON_PERSON = {
         'Dollarization',
         'Latin American fintech',
         'Non-custodial wallets',
-        'Algorand',
+        'AI assistants',
+        'BNB Smart Chain',
     ],
     'same_as': [
         {
@@ -158,7 +159,7 @@ def llms_txt(request):
         '',
         '> Public site guidance for AI assistants and other machine readers.',
         '',
-        '> Last reviewed: 2026-04-14.',
+        '> Last reviewed: 2026-11-25.',
         '',
         '## Site',
         '- Canonical site: https://confio.lat/',
@@ -168,7 +169,8 @@ def llms_txt(request):
         '- XML sitemap: https://confio.lat/sitemap.xml',
         '',
         '## Entity Facts',
-        '- Confío is a non-custodial digital dollar wallet for Latin America built on the Algorand blockchain.',
+        '- Confío is an AI assistant app for Latin America: a person writes what they need in a chat (send money, buy U.S. stocks, shop online, pay a QR) and Confío prepares it; the person approves every payment before anything moves.',
+        '- It works with the person’s digital dollars, held in a non-custodial wallet in their own name on BNB Smart Chain. Confío is not a bank.',
         '- Julian Moon is the founder of Confío and publishes founder commentary separately from Confío News.',
         '- Confío News is the organization voice for company updates, product explainers, and institutional editorial content.',
         '',
@@ -356,17 +358,17 @@ def index(request):
 			lang = 'en'
 
 	titles = {
-		'es': 'Confío: enviá, invertí y pagá con dólares',
-		'en': 'Confío: send, invest and pay with dollars',
-		'ko': 'Confío: 달러로 보내고, 투자하고, 결제하세요',
+		'es': 'Confío: pedíselo y listo',
+		'en': 'Confío: just ask, and it’s done',
+		'ko': 'Confío: 말만 하면 끝',
 	}
 	og_description = {
-		'es': 'Tus dólares digitales, siempre a tu nombre. Y desde ellos, acciones de EE.UU., oro, Bitcoin y futuros, en una sola app. Confío en vos.',
-		'en': 'Your digital dollars, always in your name. And from them, U.S. stocks, gold, Bitcoin and futures, in one app.',
-		'ko': '디지털 달러는 언제나 당신 명의로. 그 달러로 미국 주식, 금, 비트코인, 선물까지 하나의 앱에서.',
+		'es': 'Escribile a Confío lo que necesitás: mandar plata a tu familia, comprar acciones de EE.UU., hacer una compra o responder tu WhatsApp. Vos aprobás cada paso. Confío en vos.',
+		'en': 'Tell Confío what you need: send money to your family, buy U.S. stocks, shop online or answer your WhatsApp. You approve every step.',
+		'ko': 'Confío에게 필요한 것을 말하세요. 가족에게 송금, 미국 주식 매수, 온라인 쇼핑, WhatsApp 답장까지. 모든 단계는 당신이 승인합니다.',
 	}
 	og_locale = {'es': 'es_LA', 'en': 'en_US', 'ko': 'ko_KR'}
-	og_image = "https://confio.lat/images/og_confio_2026_10.png"
+	og_image = "https://confio.lat/images/og_confio_2026_11.png"
 
 	main_js_url, main_css_url = _resolve_main_assets()
 
@@ -408,11 +410,11 @@ def entity_page(request, entity_slug):
             'faqs': [
                 {
                     'q': 'Who is Julian Moon?',
-                    'a': 'Julian Moon is a Korean founder building Confío, a non-custodial digital dollar wallet for Latin America, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
+                    'a': 'Julian Moon is a Korean founder building Confío, an AI assistant app for Latin America that works with the user’s digital dollars in a non-custodial wallet, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
                 },
                 {
                     'q': 'What company did Julian Moon found?',
-                    'a': 'Julian Moon is the founder of Confío (confio.lat), a non-custodial digital dollar wallet built on the Algorand blockchain, focused on stablecoin payments for users in Latin America.',
+                    'a': 'Julian Moon is the founder of Confío (confio.lat), an AI assistant app for Latin America. People ask it for what they need (send money, buy U.S. stocks, shop online, pay a QR) and approve each step; their digital dollars stay in a non-custodial wallet in their own name.',
                 },
                 {
                     'q': 'Why did Julian Moon build Confío?',
@@ -448,11 +450,11 @@ def entity_page(request, entity_slug):
                 },
                 {
                     'q': 'How is Confío connected to Algorand?',
-                    'a': 'Confío was selected for the 2025 Algorand Accelerator and is listed in the Algorand Foundation Q4 2025 Transparency Report as a P2P stablecoin payments app for Argentina. Julian Moon authored Confío’s xGov proposal on the Algorand community forum.',
+                    'a': 'Confío was selected for the 2025 Algorand Accelerator and is listed in the Algorand Foundation Q4 2025 Transparency Report as a P2P stablecoin payments app for Argentina. Julian Moon authored Confío’s xGov proposal on the Algorand community forum. Confío’s dollars have since moved to BNB Smart Chain.',
                 },
             ],
             'body': [
-                'Julian Moon is a Korean founder building Confío — a non-custodial digital dollar wallet for Latin America that treats trust as infrastructure, not marketing.',
+                'Julian Moon is a Korean founder building Confío — an AI assistant for Latin America, built on a non-custodial digital dollar wallet, that treats trust as infrastructure, not marketing.',
                 'He is the Spanish-speaking creator who does not just explain inflation, dollarization, and financial distrust — he builds the infrastructure to survive them.',
                 'While other commentators talk about Latin America’s problems from a distance, he lives inside them — building financial infrastructure with one hand and interpreting it with the other.',
                 'He built a 460K+ TikTok audience before launching the product, then used that audience as the product’s distribution engine. Distribution, trust, and product are the same weapon, not separate functions.',
@@ -498,11 +500,11 @@ def entity_page(request, entity_slug):
             'faqs': [
                 {
                     'q': 'What is Confío?',
-                    'a': 'Confío is a non-custodial digital dollar wallet for Latin America, built on the Algorand blockchain, that lets people hold and send US dollar stablecoins from their phone without a bank.',
+                    'a': 'Confío is an AI assistant app for Latin America. You write what you need, the way you would text a person (send money to your family, buy U.S. stocks, shop online, pay a QR), and Confío prepares it; you approve every step. It works with your digital dollars, held in a non-custodial wallet in your own name.',
                 },
                 {
                     'q': 'What does Confío do and how does it work?',
-                    'a': 'Confío lets users hold cUSD (Confío Dollar, a US dollar stablecoin) in a self-custodial wallet and send or receive payments instantly. Users sign in with Google or Apple — no 12/24-word seed phrase to memorize or store. They can top up and withdraw using familiar Latin American local payment methods (bank transfers, mobile payments, etc.) through a peer-to-peer network of other users. Sending and receiving cUSD is done by phone number — users just pick a contact, without ever seeing an Algorand address. Transactions are sponsored on Algorand, so users never pay or even need to understand gas fees. The wallet abstracts blockchain complexity so it feels like a normal money app.',
+                    'a': 'The home screen is a conversation. You ask for what you need and Confío prepares it: a transfer to another person, a top-up, a purchase of U.S. stocks, an order in an online store or a QR payment. Before anything moves you see the amount, the fee and the total, and you approve it with your fingerprint or face. Your balance is in Confío Dollar (cUSD, backed 1:1 by USDT) or Confío Dollar+ (backed by Ondo’s USDY), in a non-custodial wallet on BNB Smart Chain. You sign in with Google or Apple, with no seed phrase to memorize, and top up or withdraw with local payment methods where they are available. Confío pays the network fees, so the wallet feels like a normal money app.',
                 },
                 {
                     'q': 'Which countries does Confío focus on?',
@@ -510,11 +512,11 @@ def entity_page(request, entity_slug):
                 },
                 {
                     'q': 'Is Confío a custodial wallet?',
-                    'a': 'No. Confío is non-custodial. Users control their own keys; Confío does not hold, freeze, or move user funds on their behalf. The company cannot access customer balances.',
+                    'a': 'No. Confío is non-custodial: the keys to your wallet are on your phone and in the backup of your own Google or Apple account, and Confío cannot sign a movement from your wallet. The Confío Dollar and Confío Dollar+ contracts do have emergency controls held by Confío’s multisignature treasury: pausing a contract, freezing an address (for example after a hack or under a legal order) and upgrading the code of those contracts. Everything that multisignature does is public on BscScan.',
                 },
                 {
                     'q': 'What is cUSD?',
-                    'a': 'cUSD is the US dollar stablecoin used inside Confío. It is designed to give Latin American users a reliable digital dollar they can hold and spend on-chain, pegged 1:1 to the US dollar.',
+                    'a': 'cUSD (Confío Dollar) is the digital dollar used inside Confío, backed 1:1 by USDT. Confío Dollar+ (cUSD+) is the balance that earns a variable yield, backed by USDY from Ondo Finance, which is in turn backed by U.S. Treasury bonds.',
                 },
                 {
                     'q': 'Is Confío open source?',
@@ -522,7 +524,7 @@ def entity_page(request, entity_slug):
                 },
                 {
                     'q': 'Is Confío related to Duende or $DUENDE?',
-                    'a': 'Duende ($DUENDE) was an earlier project by the same founder, Julian Moon, and is considered a historical predecessor to Confío. Confío is a separate, current product focused specifically on non-custodial dollar payments for Latin America on Algorand. Older Medium posts referencing $DUENDE are not Confío’s current product.',
+                    'a': 'Duende ($DUENDE) was an earlier project by the same founder, Julian Moon, and is considered a historical predecessor to Confío. Confío is a separate, current product. Older Medium posts referencing $DUENDE are not Confío’s current product.',
                 },
                 {
                     'q': 'Does Confío report my transactions to tax authorities?',
@@ -538,9 +540,9 @@ def entity_page(request, entity_slug):
                 },
             ],
             'body': [
-                'Confío News is the institutional publishing layer of Confío, a non-custodial digital dollar wallet for Latin America built on the Algorand blockchain.',
+                'Confío News is the institutional publishing layer of Confío, an AI assistant app for Latin America built on a non-custodial digital dollar wallet.',
                 'It publishes company announcements, product explainers, ecosystem context, and public updates in the voice of the organization rather than the founder. Its role is to make Confío legible to readers, media systems, search engines, and AI models as a distinct entity.',
-                'Confío was selected for the 2025 Algorand Accelerator and is listed in the Algorand Foundation Q4 2025 Transparency Report as a P2P stablecoin payments app focused on Argentina.',
+                'Confío was selected for the 2025 Algorand Accelerator; its dollars have since moved to BNB Smart Chain.',
                 'Julian Moon speaks as the person building Confío. Confío News speaks as the infrastructure that will outlast him.',
                 'This page is the canonical public reference for Confío News on Confío.',
             ],

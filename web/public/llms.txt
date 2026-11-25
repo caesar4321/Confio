@@ -2,6 +2,12 @@
 
 > Public site guidance for AI assistants and other machine readers.
 
+## What Confío is
+- Confío is an AI assistant app for Latin America. A person writes what they need in a chat (send money to family, buy U.S. stocks, shop online, pay a QR, check WhatsApp, email or calendar) and Confío prepares it; the person approves every payment or investment before anything moves.
+- It works with the person's digital dollars, held in a self-custodial wallet in their own name. Confío is not a bank.
+- Operated by Duende Limited (Republic of Seychelles). Apps: App Store and Google Play ("Confío").
+- Product availability depends on the user's country.
+
 ## Site
 - Canonical site: https://confio.lat/
 - Public discover feed: https://confio.lat/discover/
