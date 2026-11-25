@@ -36,7 +36,7 @@ class VerificationCardGuidanceTests(TestCase):
         self.assertIn('deja en la misma respuesta la tarjeta de Verificación', prompt)
         self.assertIn('nunca le digas que cree una cuenta', prompt)
         self.assertIn('`start_store_task`, úsala', prompt)
-        self.assertIn('SPEI es transferir a una CLABE', prompt)
+        self.assertIn('sigue la sección «Pagar en moneda local»', prompt)
 
     def test_verification_note_guidance_points_to_the_card(self):
         from .verification_note import GUIDANCE
@@ -247,3 +247,49 @@ class LanguageNoteTests(TestCase):
         self.assertIn('contesta todo en portugués', language_note(belt))
         belt.last_user_message = 'quiero recibir dólares'
         self.assertEqual(language_note(belt), '')
+
+
+class RefusedPurchaseVerificationCardTests(TestCase):
+    """A purchase refused before anyone verified the person leaves the Verificación card."""
+
+    def _belt(self):
+        n = User.objects.count()
+        user = User.objects.create_user(username=f'refused-buy-{n}', email=f'rb{n}@example.com', password='x',
+                                        firebase_uid=f'fb-refused-buy-{n}')
+        belt = Toolbelt(_viewer(user), TurnResult(reply=''), analyses_left=0)
+        belt.destinations = ['verification', 'receive']
+        belt.store_tasks_ready = lambda: True
+        belt.payment_texts = ['quiero comprar algo en Amazon']
+        return belt
+
+    def _start(self, belt, identity, minor=None):
+        refused = ({'ok': False, 'motivo': 'Verifica tu identidad en Confío para que pueda comprar por ti.'}, None)
+        with patch('agent_tasks.assistant_tool.call', return_value=refused), \
+                patch('assistant.engine._identity_status', return_value=identity), \
+                patch('security.minors.minor_refusal', return_value=minor):
+            return belt.start_store_task(store='amazon.com.mx')
+
+    def test_unverified_gets_the_card(self):
+        belt = self._belt()
+        out = self._start(belt, 'unverified')
+        self.assertIn('tarjeta', out)
+        self.assertEqual(belt.result.actions, [{'type': 'card', 'destination': 'verification'}])
+
+    def test_verified_or_minor_gets_no_card(self):
+        for identity, minor in (('verified', None), ('in_review', None), ('unverified', 'Debes tener 18 años.')):
+            belt = self._belt()
+            out = self._start(belt, identity, minor)
+            self.assertNotIn('tarjeta', out)
+            self.assertEqual(belt.result.actions, [])
+
+
+class PaymentAnswersStayInTheChatTests(TestCase):
+    def test_prompt_keeps_payments_in_the_chat_and_gives_the_first_step(self):
+        from .prompts import GUIDE_CONVERSATION_NOTE, build_system_prompt
+        prompt = build_system_prompt(first_name='Ana', account_label='personal', country='MX', screen='Home',
+                                     local_now='now', destinations=['verification', 'send'], conversation=True,
+                                     identity='unverified')
+        self.assertIn('no lleva tarjeta de pantalla: ni Enviar ni Pagar', prompt)
+        self.assertIn('sigue la sección «Pagar en moneda local»', prompt)
+        self.assertIn('no le devuelvas la pregunta', prompt)
+        self.assertIn('no le devuelvas la pregunta', GUIDE_CONVERSATION_NOTE)

@@ -133,6 +133,8 @@ def third_party_text(value, limit=THIRD_PARTY_MAX_CHARS):
 # the card key on `target`; `destination` is only the key every build knows.
 # The top-up form left beside a payment the dollars held do not cover. `why`
 # marks it as that one: the only action allowed to stand beside a card.
+# Screens whose job prepare_payment does in the chat (a code pasted, or who to pay).
+PREPARED_HERE = ('send', 'pay_qr')
 LANGUAGE_NAMES = {'pt': 'portugués', 'en': 'inglés'}
 
 
@@ -1493,6 +1495,9 @@ class Toolbelt:
         if self.store_tasks_ready():
             from agent_tasks import assistant_tool
             specs.append(assistant_tool.spec())
+        if self._pay_rails_offered():
+            from . import pay_rails
+            specs.append(pay_rails.notify_spec())
         if self.whatsapp_ready():
             from whatsapp_link import assistant_tool as whatsapp_tool
             specs.append(whatsapp_tool.spec())
@@ -1722,6 +1727,11 @@ class Toolbelt:
             if self.waiting_for_team or not comprar.offered(self):
                 return {'error': f'herramienta desconocida: {name}'}
             return comprar.propose(self, **args)
+        if name == 'notify_rail':
+            from . import pay_rails
+            if self.waiting_for_team or not self._pay_rails_offered():
+                return {'error': f'herramienta desconocida: {name}'}
+            return pay_rails.notify(self, **args)
         if name == 'note_first_use':
             from . import first_use
             if self.waiting_for_team:
@@ -1821,6 +1831,11 @@ class Toolbelt:
         # A card stays in the conversation and opens on a tap; only builds
         # whose Inicio is the chat know it (others get the screen opened).
         as_card = open_now is False and conversation_home(self.viewer.request_meta)
+        if as_card and destination in PREPARED_HERE and self.payments_ready():
+            # A payment or a send is prepared in this chat: a card to the screen is a way out of it.
+            return {'ok': False, 'error': ('No dejes esa tarjeta: aquí mismo lo preparas con `prepare_payment` (que '
+                                           'pegue el código o escriba a quién). Solo si pide abrir esa pantalla, '
+                                           'ábrela con open_now true.')}
         if as_card and sum(1 for a in self.result.actions if a.get('type') == 'card') >= 3:
             return {'ok': False, 'error': 'Ya dejaste tres tarjetas en esta respuesta: no agregues más.'}
         # `destination` stays a key every build knows; newer builds open
@@ -1838,6 +1853,11 @@ class Toolbelt:
                      'nota': 'No se abrió nada: quedó una tarjeta bajo tu respuesta. Dile que la toque para abrirla.'}
         if destination in FALLBACKS:
             action['target'] = destination
+        if destination == 'pay_qr' and self._pay_rails_offered():
+            from . import pay_rails
+            note = pay_rails.scanner_note(self.viewer, self)
+            if note:
+                reply['qr_de_su_pais'] = note
         named = CARD_LABELS.get(self.language(), {}).get(destination)
         if named and destination != 'stock':
             # The app names a card in Spanish unless it carries its own label (with its target).
@@ -2087,7 +2107,31 @@ class Toolbelt:
         if not (isinstance(answer, dict) and answer.get('ok') is False):
             # A purchase started: no question or card of code's may join this reply (confirm.busy) and hide it.
             self.result.store_task_started = True
+        elif self._verification_card_for_refusal():
+            # Refused because nobody verified this person yet: the next step is right here (2026-11-25).
+            answer = {**answer, 'tarjeta': 'Quedó la tarjeta de Verificación bajo tu respuesta: dile que la toque.'}
         return answer
+
+    def _pay_rails_offered(self):
+        """The rails' states and their waitlists: the person's own personal account."""
+        viewer = self.viewer
+        return viewer.user is not None and not viewer.is_employee and viewer.account_type == 'personal'
+
+    def _verification_card_for_refusal(self):
+        """Leave the Verificación card when a purchase was refused and this person still has to verify
+        (not a minor: they cannot). True if it is there."""
+        if 'verification' not in self.destinations or not conversation_home(self.viewer.request_meta):
+            return False
+        try:
+            if _identity_status(self.viewer) not in ('unverified', 'pending', 'rejected'):
+                return False
+            from security.minors import minor_refusal
+            if minor_refusal(self.viewer.user):
+                return False
+        except Exception:  # noqa: BLE001 - the refusal's own words stand
+            logger.warning('Confio Assistant: verification card after a refused purchase failed', exc_info=True)
+            return False
+        return bool(self.navigate('verification', open_now=False).get('ok'))
 
     # ── WhatsApp replies: a card the owner sends with a tap, see whatsapp_link/ ──
 
@@ -2871,6 +2915,9 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
     from .verification_note import verification_note
     system += colombia_pause_note(country) + rejected_order_note(viewer) + verification_note(viewer)
     system += language_note(belt)
+    if belt._pay_rails_offered() and not belt.waiting_for_team:
+        from . import pay_rails
+        system += pay_rails.section(viewer, belt)
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
     system += getattr(belt, 'guide_note', '')
