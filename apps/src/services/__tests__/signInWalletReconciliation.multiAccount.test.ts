@@ -296,3 +296,98 @@ it('never reconciles a mismatching legacy-format backup', async () => {
   expect(args.beforeWalletChange).not.toHaveBeenCalled();
   expect(args.client.mutate).toHaveBeenCalledTimes(1);
 });
+
+const smartAccount = (): TestRegistration => ({
+  accountId: '9', accountType: 'smart', accountIndex: 0, businessId: null,
+  algorandAddress: null, bscAddress: '0xcontract', isKeylessMigrated: false });
+
+it('signs in past an account type this build does not know', async () => {
+  const { args, wallet, state } = fixture();
+  Object.assign(state.accounts[2], { algorandAddress: null, bscAddress: '0xbusiness', isKeylessMigrated: true });
+  state.accounts.push(smartAccount());
+  expect(await reconcileSignInWallet(args)).toBe(false);
+  expect(args.client.mutate).toHaveBeenCalledTimes(1);
+  expect(args.getGoogleDriveToken).not.toHaveBeenCalled();
+  // Nothing is derived, matched or published for the unknown row.
+  expect(wallet.forAccount.mock.calls.every(([row]: any[]) => row.accountType !== 'smart')).toBe(true);
+  expect(wallet.publish).toHaveBeenCalledTimes(1);
+  expect(args.authData.user.bscAddress).toBe('0xprimary');
+});
+
+it('revokes primary-only reenrollment when the only sibling is of an unknown type', async () => {
+  const { args, state } = fixture();
+  state.accounts = [state.accounts[0], smartAccount()];
+  (args.authData as any).walletReenrollmentAllowed = true;
+  expect(await reconcileSignInWallet(args)).toBe(false);
+  expect((args.authData as any).walletReenrollmentAllowed).toBe(false);
+});
+
+it('never replaces wallets while an account type is unknown to this build', async () => {
+  const { args, wallet, state } = fixture();
+  state.accounts.push(smartAccount());
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('RECONCILE-UPDATE');
+  expect(args.beforeWalletChange).not.toHaveBeenCalled();
+  expect(wallet.persist).not.toHaveBeenCalled();
+  expect(args.client.mutate.mock.calls.every(
+    ([call]: any[]) => 'firebaseIdToken' in call.variables)).toBe(true);
+});
+
+it.each([
+  ['a missing type', { accountType: undefined }],
+  ['an empty type', { accountType: '' }],
+  ['a non-text type', { accountType: 7 }],
+  ['a null row', null],
+])('still refuses an inventory with %s', async (_name, patch) => {
+  const { args, state } = fixture();
+  state.accounts.push(patch === null ? null as any : { ...smartAccount(), ...patch } as any);
+  args.client.mutate.mockImplementation(async () => ({ data: { prepareWalletReconciliation: {
+    success: true, grant: 'grant', challenge: 'challenge', accounts: state.accounts } } }));
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('RECONCILE-ACCOUNTS');
+});
+
+it('still requires personal/0 among the accounts this build knows', async () => {
+  const { args, state } = fixture();
+  state.accounts = [smartAccount()];
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('RECONCILE-ACCOUNTS');
+});
+
+it('provisions no new Google backup while an account type is unknown to this build', async () => {
+  const { args, wallet, state } = fixture();
+  state.accounts.push(smartAccount());
+  (getSignInWalletCandidate as jest.Mock).mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'))
+    .mockRejectedValueOnce(new WalletRecoveryError('missing'));
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('RECONCILE-UPDATE');
+  expect(createMissingSignInWalletCandidate).not.toHaveBeenCalled();
+  expect(wallet.persist).not.toHaveBeenCalled();
+  expect(args.beforeWalletChange).not.toHaveBeenCalled();
+  expect(args.client.mutate).toHaveBeenCalledTimes(1);
+});
+
+it('does not hand a blank inventory to wallet generation while a type is unknown', async () => {
+  const { args, state } = fixture();
+  state.accounts = [{ ...state.accounts[0], bscAddress: null }, smartAccount()];
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('RECONCILE-UPDATE');
+});
+
+it('names the update, not a retry, when the grant is also withheld', async () => {
+  const { args, state } = fixture();
+  state.accounts.push(smartAccount());
+  args.client.mutate.mockImplementation(async () => ({ data: { prepareWalletReconciliation: {
+    success: true, accounts: state.accounts.map(row => ({ ...row })) } } }));
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('RECONCILE-UPDATE');
+});
+
+it('does not let a blank primary generate a wallet beside a V1 sibling while a type is unknown', async () => {
+  const { args, state } = fixture('apple');
+  state.accounts = [
+    { ...state.accounts[0], bscAddress: null, isKeylessMigrated: false },
+    { ...state.accounts[1], bscAddress: null, algorandAddress: 'legacy-sibling', isKeylessMigrated: false },
+    smartAccount(),
+  ];
+  (getSignInWalletCandidate as jest.Mock).mockResolvedValue(null);
+  await expect(reconcileSignInWallet(args)).rejects.toThrow('RECONCILE-UPDATE');
+  // The same inventory without the unknown row still signs in as before.
+  state.accounts.pop();
+  expect(await reconcileSignInWallet(args)).toBe(false);
+});

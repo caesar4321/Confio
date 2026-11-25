@@ -32,13 +32,28 @@ type Registration = {
   isKeylessMigrated?: boolean;
 };
 
-function registrations(value: unknown): Registration[] {
+const KEYED_ACCOUNT_TYPES = ['personal', 'business'];
+
+/**
+ * The owned wallets the server reports, checked row by row.
+ *
+ * A row of a type this build does not know is left out, not refused: it is
+ * an account kind added after this build shipped (the Cuenta inteligente was
+ * the first), and refusing the whole inventory locked its owner out of
+ * sign-in. Such a row has no key this build could derive, so there is nothing
+ * to match or publish for it. `unknownTypes` tells the caller it happened,
+ * because a build that cannot see every account must not REPLACE wallets.
+ * Everything else about a row still fails closed.
+ */
+function registrations(value: unknown): { accounts: Registration[]; unknownTypes: boolean } {
   if (!Array.isArray(value) || !value.length) throw new Error('RECONCILE-ACCOUNTS');
+  const known = value.filter(row => !row || typeof row.accountType !== 'string'
+    || !row.accountType || KEYED_ACCOUNT_TYPES.includes(row.accountType));
   const ids = new Set<string>();
   const contexts = new Set<string>();
-  for (const row of value) {
+  for (const row of known) {
     if (!row || typeof row.accountId !== 'string' || !/^\d+$/.test(row.accountId)
-        || !['personal', 'business'].includes(row.accountType)
+        || !KEYED_ACCOUNT_TYPES.includes(row.accountType)
         || !Number.isSafeInteger(row.accountIndex) || row.accountIndex < 0
         || (row.accountType === 'business' && (typeof row.businessId !== 'string' || !/^\d+$/.test(row.businessId)))
         || (row.accountType === 'personal' && row.businessId != null)
@@ -50,10 +65,10 @@ function registrations(value: unknown): Registration[] {
     contexts.add(key);
     ids.add(row.accountId);
   }
-  if (!value.some(row => row.accountType === 'personal' && row.accountIndex === 0)) {
+  if (!known.some(row => row.accountType === 'personal' && row.accountIndex === 0)) {
     throw new Error('RECONCILE-ACCOUNTS');
   }
-  return value;
+  return { accounts: known, unknownTypes: known.length !== value.length };
 }
 
 export function walletAccountChallenge(challenge: string, accountId: string, address: string) {
@@ -171,7 +186,7 @@ async function reconcileSignInWalletInner(
     if (!proof?.success) {
       throw new Error('No pudimos autorizar tu billetera. Vuelve a iniciar sesión. Código: RECONCILE-AUTH.');
     }
-    return { ...proof, accounts: registrations(proof.accounts) };
+    return { ...proof, ...registrations(proof.accounts) };
   };
   // Server-owned inventory includes sibling-only mismatches and excludes
   // employee access. Never infer ownership from the active UI context.
@@ -179,13 +194,26 @@ async function reconcileSignInWalletInner(
   let accounts: Registration[] = proof.accounts;
   // Legacy primary-only reenrollment cannot replace a user-wide master when
   // siblings exist. Revoke even on empty/V1 early-return paths below.
-  if (accounts.length > 1) authData.walletReenrollmentAllowed = false;
+  if (accounts.length > 1 || proof.unknownTypes) authData.walletReenrollmentAllowed = false;
   const applyPrimaryRegistration = () => {
     const primary = accounts.find(row => row.accountType === 'personal' && row.accountIndex === 0)!;
     authData.user.algorandAddress = primary.algorandAddress || null;
     authData.user.bscAddress = primary.bscAddress || null;
     authData.isKeylessMigrated = !!primary.isKeylessMigrated;
   };
+  // This build cannot see every account the person owns. It may sign in a
+  // wallet that matches, but must never create or replace one: an account it
+  // cannot see may hold the wallet's only registered address.
+  const refuseWithUnknownTypes = () => {
+    if (proof.unknownTypes) {
+      throw new Error('Actualiza Confío e inicia sesión de nuevo para recuperar tu billetera. Código: RECONCILE-UPDATE.');
+    }
+  };
+  // A personal/0 with no address is what sign-in reads as "no wallet yet" and
+  // answers by generating one, whatever its siblings hold. matchesAll() never
+  // accepts it either; only the V1 shortcut below would have let it through.
+  if (!accounts.some(row => row.accountType === 'personal' && row.accountIndex === 0
+      && (row.algorandAddress || row.bscAddress))) refuseWithUnknownTypes();
   if (!accounts.some(row => row.algorandAddress || row.bscAddress)) return false;
   if (provider === 'google' && candidate === null && options.getLegacyV1Address
       && accounts.every(row => !row.isKeylessMigrated && !row.bscAddress)) {
@@ -297,6 +325,8 @@ async function reconcileSignInWalletInner(
                 && legacyError instanceof WalletRecoveryError && legacyError.code === 'missing') return false;
             if (!(legacyError instanceof WalletRecoveryError) || legacyError.code !== 'missing') throw legacyError;
             if (cloudKitUnknown) throw new WalletRecoveryError('unreadable');
+            // Before the reservation, the new secret and the Drive upload.
+            refuseWithUnknownTypes();
             candidate = await createMissingSignInWalletCandidate(subject, token, accounts, async proposed => {
               const response = await client.mutate({ mutation: RESERVE_RECOVERY, context,
                 variables: { firebaseIdToken: options.firebaseToken, recoveryFileIds: proposed } });
@@ -364,7 +394,10 @@ async function reconcileSignInWalletInner(
   // Refresh the bound inventory and grant before signing any replacement.
   proof = await prepare(candidate.bscAddress);
   accounts = proof.accounts;
-  if (accounts.length > 1) authData.walletReenrollmentAllowed = false;
+  if (accounts.length > 1 || proof.unknownTypes) authData.walletReenrollmentAllowed = false;
+  // Before the Keychain or the registration changes, and before the grant
+  // check so the person is told what actually helps.
+  refuseWithUnknownTypes();
   if (!proof?.success || !proof.grant || !proof.challenge) {
     throw new Error('No pudimos autorizar tu billetera. Vuelve a iniciar sesión. Código: RECONCILE-AUTH.');
   }
@@ -387,7 +420,7 @@ async function reconcileSignInWalletInner(
   if (!result?.success || result.bscAddress?.toLowerCase() !== candidate.bscAddress.toLowerCase()) {
     throw new Error('No pudimos registrar tu billetera recuperada. Vuelve a iniciar sesión. Código: RECONCILE-COMMIT.');
   }
-  const committed = registrations(result.accounts);
+  const { accounts: committed } = registrations(result.accounts);
   if (committed.length !== accounts.length || accounts.some(row => {
     const active = committed.find(item => item.accountId === row.accountId);
     return !active || active.accountType !== row.accountType || active.accountIndex !== row.accountIndex
