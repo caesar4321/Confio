@@ -218,13 +218,18 @@ def _asset_label(ticker, name):
     return f'{name} ({ticker})' if name and name != ticker else ticker
 
 
-def how_many(side, ticker, name, lang):
-    """Code's "how many dollars": the ticker is always in it."""
+def how_many(side, ticker, name, lang, floor=None):
+    """Code's "how many dollars": the ticker is always in it, and the minimum when there is one, so nobody has to
+    ask for it (founder's first hands-off buy, 2026-11-25)."""
     asset = _asset_label(ticker, name)
     verb = {'es': ('comprar', 'vender'), 'pt': ('comprar', 'vender'), 'en': ('buy', 'sell')}[lang][side == 'sell']
-    return {'es': f'¿Cuántos dólares de {asset} quieres {verb}?',
-            'pt': f'Quantos dólares de {asset} você quer {verb}?',
-            'en': f'How many dollars of {asset} do you want to {verb}?'}[lang]
+    question = {'es': f'¿Cuántos dólares de {asset} quieres {verb}?',
+                'pt': f'Quantos dólares de {asset} você quer {verb}?',
+                'en': f'How many dollars of {asset} do you want to {verb}?'}[lang]
+    if floor is None:
+        return question
+    return question + {'es': f' (mínimo {money(floor, lang)})', 'pt': f' (mínimo {money(floor, lang)})',
+                       'en': f' (minimum {money(floor, lang)})'}[lang]
 
 
 def sell_all_question(ticker, name, lang):
@@ -351,7 +356,9 @@ def propose(belt, side, asset, amount_usd=None, sell_all=False):
     if sell_all:
         return confirm.ask(belt.result, 'trade', sell_all_question(ticker, name, lang), data, lang)
     # How many dollars is never the model's nor read from their words: code asks, and the number is it.
-    return confirm.ask_amount(belt.result, 'trade', how_many(side, ticker, name, lang), data, lang,
+    return confirm.ask_amount(belt.result, 'trade',
+                              how_many(side, ticker, name, lang, floor=buy_floor() if side == 'buy' else None),
+                              data, lang,
                               extra=_OR_ALL[lang] if side == 'sell' else '')
 
 
@@ -395,6 +402,11 @@ def _to_them(why, lang, name):
                 'en': f"You don't hold {name}: there is nothing to sell."}[lang]
     if lang == 'es':
         return why
+    if why.startswith('El mínimo es '):
+        floor = why[len('El mínimo es '):].rstrip('.')
+        return {'pt': f'O mínimo é {floor}.', 'en': f'The minimum is {floor}.'}[lang]
+    if why.startswith('Ese monto supera el máximo'):
+        return {'pt': 'Esse valor supera o máximo por operação.', 'en': 'That amount is above the maximum per trade.'}[lang]
     return {'pt': 'Esse valor está fora do mínimo ou do máximo por operação.',
             'en': 'That amount is outside the minimum or maximum per trade.'}[lang]
 

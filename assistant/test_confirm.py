@@ -214,7 +214,7 @@ class ConfirmFlowTests(FlowBase):
         with mock.patch('cusd_plus.eligibility.check_stock_buy_eligibility', return_value=True):
             reply, _model = self.say('compra 50000 de Tesla', call_response('propose_stock_trade', args),
                                      text_response('Listo.'))
-            self.assertEqual(reply.body, '¿Cuántos dólares de Tesla (TSLA) quieres comprar? Escribe solo el número.')
+            self.assertEqual(reply.body, '¿Cuántos dólares de Tesla (TSLA) quieres comprar? (mínimo US$1,01) Escribe solo el número.')
             self.assertEqual(self.cards(reply), [])
             reply, _model = self.say('25')
         self.assertEqual(self.cards(reply)[0]['target'], 'buy:25.00')
@@ -320,3 +320,22 @@ class ConfirmFlowTests(FlowBase):
         from assistant import memory
         reply = self.remembered(memory.NOTE_FORGOT, text_response('Listo, ya no lo tomo en cuenta. ¿Qué más?'))
         self.assertEqual(reply.body, 'Listo, ya no lo tomo en cuenta. ¿Qué más?')
+
+
+class TradeMinimumWordingTests(SimpleTestCase):
+    """The amount question names the minimum, and a refusal says the real minimum in the person's language
+    (founder's first hands-off buy: "That amount is outside the minimum or maximum per trade", 2026-11-25)."""
+
+    def test_the_question_names_the_minimum(self):
+        from decimal import Decimal
+        from assistant import trades
+        self.assertIn('1.02', trades.how_many('buy', 'AAPL', 'Apple', 'en', floor=Decimal('1.02')))
+        self.assertIn('mínimo', trades.how_many('buy', 'AAPL', 'Apple', 'es', floor=Decimal('1.02')))
+        self.assertNotIn('mínimo', trades.how_many('sell', 'AAPL', 'Apple', 'es'))
+
+    def test_a_refusal_says_the_real_minimum(self):
+        from assistant import trades
+        self.assertEqual(trades._to_them('El mínimo es US$1.02.', 'en', 'Apple'), 'The minimum is US$1.02.')
+        self.assertEqual(trades._to_them('El mínimo es US$1.02.', 'pt', 'Apple'), 'O mínimo é US$1.02.')
+        self.assertEqual(trades._to_them('Ese monto supera el máximo por operación.', 'en', 'Apple'),
+                         'That amount is above the maximum per trade.')

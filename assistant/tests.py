@@ -4395,7 +4395,7 @@ class StockTradeCardTests(TestCase):
         self.assertEqual(belt.result.actions, [])
         # How many dollars is asked by code, whatever the model passed.
         self.assertEqual(belt.result.pending_action['question'],
-                         '¿Cuántos dólares de Apple Inc. (AAPL) quieres comprar? Escribe solo el número.')
+                         '¿Cuántos dólares de Apple Inc. (AAPL) quieres comprar? (mínimo US$1,01) Escribe solo el número.')
         self.assertEqual(belt.result.pending_action['step'], 'amount')
         data = dict(belt.result.pending_action['data'])
         # The question's own id: a second answer to it is the same hands-off trade (smart_account/relay_trades.py).
