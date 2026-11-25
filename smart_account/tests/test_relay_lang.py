@@ -81,3 +81,22 @@ class RelayLanguageTests(SmartAccountTestCase):
         with mock.patch('smart_account.relay_purchases.card', return_value={}):
             relay_purchases._post(row, 'done', what='Café', spent='US$12.50')
         self.assertTrue(self.said().startswith('Done: I bought Café for US$12.50 from your Cuenta inteligente.'))
+
+
+class RelayCardResultTests(SmartAccountTestCase):
+    """The finished card carries the result note itself (founder, 2026-11-25: "no detail" while the chat had it)."""
+
+    def test_a_done_card_is_titled_with_its_result_note(self):
+        user = self.make_user('rosa')
+        own = self.make_account(user)
+        row = SmartRelayTrade.objects.create(
+            user=user, smart_account=own, nonce='n1', side='sell', asset_kind='stock', ticker='AAPLon',
+            amount_usd=None, sell_all=True, meta={}, status='sent', tx_hash=TX)
+        self.assertEqual(relay_trades.status_of(user, row.internal_id)['label'], 'Vender todo AAPL')
+        relay_trades._end(row, 'done', '', note='done_sell', what='AAPL', got='US$1,00')
+        out = relay_trades.status_of(user, row.internal_id)
+        self.assertEqual(out['status'], 'done')
+        self.assertTrue(out['label'].startswith('Listo: vendí AAPL y recibiste US$1,00'), out['label'])
+        # Another person's note with the same tag never titles this card.
+        other = self.make_user('luis')
+        self.assertIsNone(relay_trades.status_of(other, row.internal_id))

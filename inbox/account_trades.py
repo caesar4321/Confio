@@ -6,8 +6,9 @@ happen inside the contract, so they come from its events, already stored by
 smart_account/reconcile.py (SmartAccountEvent):
 
 - Traded(venue, tokenIn, tokenOut, amountIn, amountOut): an owner trade.
-- RelayTraded(id, venue, tokenIn, tokenOut, spent, got, usdCounted): a
-  hands-off trade (v2); a buy's usdCounted is its dollars, exact.
+- RelayTraded(id, venue, tokenIn, tokenOut, amountIn, amountOut, usdCounted):
+  marks a hands-off trade (v2), indexed as no trade: relayTrade also emits
+  the Traded above with the same amounts, and that one is the trade.
 - RuleExecuted(id, tokenIn, tokenOut, amountIn, amountOut): a rule's run.
 - ForcedSale(tokenIn, amountIn, dollarsOut, forPeriod): a sale for the fee.
 
@@ -81,26 +82,74 @@ def _asset(token: str):
     return None
 
 
-def p_plus_at(block: int) -> int:
-    """The Confío Dollar+ share price (1e18 = US$1) in `block`."""
+def p_plus_at(block: int, tx_hash: str = '') -> int:
+    """The Confío Dollar+ share price (1e18 = US$1) in `block`. The node keeps state only for recent blocks
+    ("missing trie node" a few minutes later, 2026-11-25: every hands-off sell stayed unpriced): then the price
+    the vault itself logged in that transaction (Minted / Redeemed pPlusAt, Accrued newPPlus), exact, never a
+    guess. Raises when neither says it."""
     from cusd_plus import vault
 
     address = vault.vault_address()
     if not address:
         return 10 ** 18
-    result = vault._rpc('eth_call', [{'to': address, 'data': '0x' + vault.SEL_PPLUS}, hex(int(block))])
-    value = int(result, 16) if result and result != '0x' else 0
+    try:
+        result = vault._rpc('eth_call', [{'to': address, 'data': '0x' + vault.SEL_PPLUS}, hex(int(block))])
+        value = int(result, 16) if result and result != '0x' else 0
+    except Exception:  # noqa: BLE001 - state pruned: the receipt below
+        if not tx_hash:
+            raise
+        value = 0
+    if value <= 0 and tx_hash:
+        value = p_plus_logged(tx_hash, address)
     if value <= 0:
         raise RuntimeError(f'no share price in block {block}')
     return value
 
 
-def _usd(dollar: str, amount: int, block: int, allow_rpc: bool) -> Decimal:
+def _topic(signature: str) -> str:
+    from eth_utils import keccak
+    return '0x' + keccak(text=signature).hex()
+
+
+def p_plus_logged(tx_hash: str, vault_address: str) -> int:
+    """The share price the cUSD+ vault logged in `tx_hash` (0 when it logged none): receipts are never pruned."""
+    from cusd_plus import vault
+
+    words_at = {_topic('Minted(address,uint256,uint256,uint256)'): 2,            # shares, usdyIn, pPlusAt
+                _topic('Redeemed(address,address,uint256,uint256,uint256)'): 2,  # shares, usdyOut, pPlusAt
+                _topic('Accrued(uint256,uint256)'): 1}                            # oraclePrice, newPPlus
+    receipt = vault._rpc('eth_getTransactionReceipt', [tx_hash]) or {}
+    found = 0
+    for log in receipt.get('logs') or []:
+        topics = log.get('topics') or []
+        if (log.get('address') or '').lower() != vault_address.lower() or not topics:
+            continue
+        index = words_at.get(topics[0].lower())
+        data = (log.get('data') or '0x')[2:]
+        if index is None or len(data) < 64 * (index + 1):
+            continue
+        found = int(data[64 * index:64 * (index + 1)], 16) or found
+    return found
+
+
+def _usd(dollar: str, amount: int, block: int, allow_rpc: bool, tx_hash: str = '') -> Decimal:
     if dollar != 'cusd_plus':
         return Decimal(int(amount)) / WAD
     if not allow_rpc:
         raise _NeedsRpc()
-    return Decimal(int(amount)) * Decimal(p_plus_at(block)) / WAD / WAD
+    return Decimal(int(amount)) * Decimal(p_plus_at(block, tx_hash)) / WAD / WAD
+
+
+def _relay_counted(event) -> int:
+    """usdCounted of the RelayTraded that relayTrade logged with this Traded (same tx, same account), or 0."""
+    from smart_account.models import SmartAccountEvent
+
+    sibling = (SmartAccountEvent.objects.filter(tx_hash__iexact=event.tx_hash, address__iexact=event.address,
+                                                name='RelayTraded').values_list('args', flat=True).first())
+    try:
+        return int((sibling or {}).get('usdCounted') or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def decode(event, *, allow_rpc: bool = True) -> dict:
@@ -108,14 +157,16 @@ def decode(event, *, allow_rpc: bool = True) -> dict:
     when its dollars need the chain and that isn't allowed."""
     args = event.args or {}
     name = event.name
+    base = {'address': event.address.lower(), 'traded_at': event.block_time, 'block_number': event.block_number}
+    if name == 'RelayTraded':
+        # relayTrade emits Traded(venue, tokenIn, tokenOut, spent, got) too, the same amounts, just before it
+        # (ConfioSmartAccountV2.relayTrade): that one is the trade. Counting this as well counted every hands-off
+        # trade twice; and its stored args are amountIn/amountOut, so it read 0 units (2026-11-25).
+        return {**base, 'symbol': '', 'kind': '', 'units': Decimal('0'), 'usd': None}
     if name == 'ForcedSale':
         token_in, amount_in = args.get('tokenIn'), int(args.get('amountIn') or 0)
         token_out, amount_out = None, int(args.get('dollarsOut') or 0)
         dollar_out = 'cusd'             # dollarsOut is counted in US$ (1e18)
-    elif name == 'RelayTraded':
-        token_in, amount_in = args.get('tokenIn'), int(args.get('spent') or 0)
-        token_out, amount_out = args.get('tokenOut'), int(args.get('got') or 0)
-        dollar_out = _dollar(token_out)
     else:                                # Traded, RuleExecuted
         token_in, amount_in = args.get('tokenIn'), int(args.get('amountIn') or 0)
         token_out, amount_out = args.get('tokenOut'), int(args.get('amountOut') or 0)
@@ -126,19 +177,20 @@ def decode(event, *, allow_rpc: bool = True) -> dict:
     unknown_in = not dollar_in and asset_in is None and not _not_sleeve(token_in)
     unknown_out = (token_out is not None and not dollar_out and asset_out is None
                    and not _not_sleeve(token_out))
-    base = {'address': event.address.lower(), 'traded_at': event.block_time, 'block_number': event.block_number}
 
     if dollar_in and asset_out and not unknown_in:
         category, symbol, decimals = asset_out
-        counted = int(args.get('usdCounted') or 0) if name == 'RelayTraded' else 0
-        usd = Decimal(counted) / WAD if counted > 0 else _usd(dollar_in, amount_in, event.block_number, allow_rpc)
+        # A hands-off buy: its RelayTraded's usdCounted is its dollars, exact and without the chain.
+        counted = _relay_counted(event) if name == 'Traded' else 0
+        usd = (Decimal(counted) / WAD if counted > 0
+               else _usd(dollar_in, amount_in, event.block_number, allow_rpc, event.tx_hash))
         return {**base, 'symbol': symbol, 'kind': f'{category}_buy',
                 'units': Decimal(amount_out) / (Decimal(10) ** decimals), 'usd': usd}
     if asset_in and dollar_out:
         category, symbol, decimals = asset_in
         return {**base, 'symbol': symbol, 'kind': f'{category}_sell',
                 'units': Decimal(amount_in) / (Decimal(10) ** decimals),
-                'usd': _usd(dollar_out, amount_out, event.block_number, allow_rpc)}
+                'usd': _usd(dollar_out, amount_out, event.block_number, allow_rpc, event.tx_hash)}
     if not (asset_in or asset_out or unknown_in or unknown_out):
         return {**base, 'symbol': '', 'kind': '', 'units': Decimal('0'), 'usd': None}
     # An asset moved in a way the ledger can't price (asset for asset, or a

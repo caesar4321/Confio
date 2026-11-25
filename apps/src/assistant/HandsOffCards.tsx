@@ -133,7 +133,7 @@ export function RelayTradeCard({ action, onLeave }: { action: AssistantAction; o
   const share = () => {
     if (!group) return;
     onLeave?.();
-    setTimeout(() => requestActivityShare({ group, reference: txHash }), onLeave ? 250 : 0);
+    setTimeout(() => requestActivityShare({ group, reference: txHash, again: true }), onLeave ? 250 : 0);
   };
   return (
     <View style={styles.card} testID="relay-trade-card">

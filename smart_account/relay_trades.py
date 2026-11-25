@@ -582,6 +582,23 @@ def finish(row_id: int) -> None:
     _end(row, 'done', '', note='done_buy' if row.side == 'buy' else 'done_sell', **values)
 
 
+def result_text(row, prefix: str = 'relay_trade') -> str:
+    """The result note posted for this finished trade ("Listo: vendí AAPL y recibiste US$1…"), '' before it is.
+    The card's title becomes it: the detail is on the card itself, whether or not the open chat has reloaded
+    (founder, 2026-11-25: "Hecho. Te dejé el detalle en el chat." and no detail in sight)."""
+    if row.status not in ('done', 'failed'):
+        return ''
+    from inbox.models import SupportMessage
+    try:
+        note = (SupportMessage.objects.filter(conversation__user_id=row.user_id, sender_type='SYSTEM',
+                                              metadata__notice=f'{prefix}:{row.internal_id}:{row.status}')
+                .values_list('body', flat=True).first())
+    except Exception:  # noqa: BLE001 - the plain label then
+        logger.warning('relay trade %s result note unreadable', row.pk, exc_info=True)
+        return ''
+    return (note or '').strip()
+
+
 def status_of(user, internal_id) -> dict | None:
     """The card's view of one trade (assistantRelayTrade)."""
     from .models import SmartRelayTrade
@@ -594,7 +611,8 @@ def status_of(user, internal_id) -> dict | None:
     shown = {'waiting_rule': 'waiting_rule', 'waiting_move': 'waiting_move', 'pending': 'pending',
              'sent': 'pending', 'unknown': 'pending'}
     out = {'status': shown.get(row.status, row.status), 'tx_hash': row.tx_hash or '',
-           'label': label(row), 'error_code': row.error_code or '', 'asset_kind': row.asset_kind}
+           'label': result_text(row) or label(row), 'error_code': row.error_code or '',
+           'asset_kind': row.asset_kind}
     if row.status == 'waiting_rule':
         # The cap card's figures: the choices, the one preselected, the cap today (when raising).
         rule = hands_off.trade_rule(row.smart_account)

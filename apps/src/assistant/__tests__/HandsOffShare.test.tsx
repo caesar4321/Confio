@@ -123,7 +123,7 @@ it('in the floating box it is the button: the box closes first', async () => {
   await act(async () => { tree.root.findAllByProps({ testID: 'relay-trade-share' })[0].props.onPress(); });
   expect(onLeave).toHaveBeenCalledTimes(1);
   await act(async () => { jest.advanceTimersByTime(300); });
-  expect(mockShare).toHaveBeenCalledWith({ group: 'stock', reference: HASH });
+  expect(mockShare).toHaveBeenCalledWith({ group: 'stock', reference: HASH, again: true });
 });
 
 it('a failed trade offers nothing', async () => {

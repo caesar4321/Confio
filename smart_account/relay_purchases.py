@@ -625,7 +625,9 @@ def status_of(user, internal_id) -> dict | None:
     if row is None:
         return None
     shown = {'sent': 'pending', 'unknown': 'pending'}
-    out = {'status': shown.get(row.status, row.status), 'tx_hash': row.tx_hash or '', 'label': label(row),
+    from .relay_trades import result_text
+    out = {'status': shown.get(row.status, row.status), 'tx_hash': row.tx_hash or '',
+           'label': result_text(row, 'relay_purchase') or label(row),
            'error_code': row.error_code or '', 'amount': format(row.amount_usd, 'f'),
            'order': str(row.order.public_id) if row.order is not None and row.status == 'done' else None}
     if row.status == 'waiting_rule':

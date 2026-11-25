@@ -76,10 +76,15 @@ class AccountTradesTests(PersonBase):
         self.assertEqual(crypto, [])
 
     def test_a_hands_off_buy_counts_its_dollars_exactly_without_the_chain(self):
-        self.event(ACCT, 'RelayTraded', {'id': 1, 'venue': USDT, 'tokenIn': PLUS, 'tokenOut': NVDA,
-                                         'spent': 95 * WEI, 'got': WEI, 'usdCounted': 100 * WEI}, at(D20))
-        [t], _ = account_trades.trades_of(ACCT)
-        self.assertEqual((t.kind, t.usd), ('stock_buy', Decimal(100)))
+        # What relayTrade logs: Traded, then RelayTraded with the same amounts (as the reconciler stores them).
+        traded = self.buy(ACCT, 1, 95, at(D20), token_in=PLUS)
+        SmartAccountEvent.objects.create(
+            address=ACCT, tx_hash=traded.tx_hash, log_index=1, name='RelayTraded', block_number=traded.block_number,
+            block_time=traded.block_time, args={'id': '1', 'venue': USDT, 'tokenIn': PLUS, 'tokenOut': NVDA,
+                                                'amountIn': str(95 * WEI), 'amountOut': str(WEI),
+                                                'usdCounted': str(100 * WEI)})
+        [t], _ = account_trades.trades_of(ACCT)                  # one trade, not two
+        self.assertEqual((t.kind, t.units, t.usd), ('stock_buy', Decimal(1), Decimal(100)))
 
     def test_a_dollar_plus_leg_waits_for_its_block_price(self):
         self.buy(ACCT, 1, 95, at(D20), token_in=PLUS)

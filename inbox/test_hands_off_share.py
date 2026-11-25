@@ -10,7 +10,7 @@ from users.models import Account
 
 from . import account_trades, activity_share
 from .activity_share import ActivityShareError
-from .models import ActivityShareIntent, CommunityActivityShare
+from .models import ActivityShareIntent, CommunityActivityShare, SmartAccountTrade
 from .test_community import CommunityTestBase, make_user
 
 ACCT = '0x' + 'b2' * 20
@@ -54,14 +54,25 @@ class HandsOffShareTests(CommunityTestBase):
             asset_kind=kind, ticker='NVDA', amount_usd=Decimal('100'), status=status, tx_hash=tx,
             amount_in=str(100 * WEI), amount_out=str(2 * WEI), usd_counted=str(100 * WEI))
 
-    def settle(self, tx=HASH, address=ACCT):
+    def emitted(self, tx, token_in, token_out, amount_in, amount_out, address=ACCT):
+        """What relayTrade logs (ConfioSmartAccountV2): Traded, then RelayTraded with the same amounts and the
+        names the reconciler stores (amountIn / amountOut / usdCounted). Returns the trade indexed from them."""
         self.n += 1
-        event = SmartAccountEvent.objects.create(
-            address=address, tx_hash=tx, log_index=0, name='RelayTraded',
-            args={'id': '1', 'venue': USDT, 'tokenIn': CUSD, 'tokenOut': NVDA, 'spent': str(100 * WEI),
-                  'got': str(2 * WEI), 'usdCounted': str(100 * WEI)},
-            block_number=1000 + self.n, block_time=timezone.now())
-        return account_trades.index_event(event)
+        block, when = 1000 + self.n, timezone.now()
+        traded = SmartAccountEvent.objects.create(
+            address=address, tx_hash=tx, log_index=0, name='Traded', block_number=block, block_time=when,
+            args={'venue': USDT, 'tokenIn': token_in, 'tokenOut': token_out, 'amountIn': str(amount_in),
+                  'amountOut': str(amount_out)})
+        relayed = SmartAccountEvent.objects.create(
+            address=address, tx_hash=tx, log_index=1, name='RelayTraded', block_number=block, block_time=when,
+            args={'id': '1', 'venue': USDT, 'tokenIn': token_in, 'tokenOut': token_out,
+                  'amountIn': str(amount_in), 'amountOut': str(amount_out), 'usdCounted': str(amount_in)})
+        row = account_trades.index_event(traded)
+        account_trades.index_event(relayed)
+        return row
+
+    def settle(self, tx=HASH, address=ACCT):
+        return self.emitted(tx, CUSD, NVDA, 100 * WEI, 2 * WEI, address=address)
 
     def test_the_owner_shares_a_settled_hands_off_buy(self):
         self.relay()
@@ -142,13 +153,7 @@ class HandsOffShareTests(CommunityTestBase):
         self.settle()
         sale = '0x' + 'ef' * 32
         self.relay(tx=sale, side='sell')
-        self.n += 1
-        event = SmartAccountEvent.objects.create(
-            address=ACCT, tx_hash=sale, log_index=0, name='RelayTraded',
-            args={'id': '1', 'venue': USDT, 'tokenIn': NVDA, 'tokenOut': CUSD, 'spent': str(WEI),
-                  'got': str(60 * WEI), 'usdCounted': str(60 * WEI)},
-            block_number=1000 + self.n, block_time=timezone.now())
-        account_trades.index_event(event)
+        self.emitted(sale, NVDA, CUSD, WEI, 60 * WEI)
         _row, snap, final = activity_share.preview_activity(self.user, 'stock', sale)
         self.assertTrue(final)
         self.assertEqual((snap.kind, snap.data['pnl_usd'], snap.data['pnl_pct']), ('stock_sell', '10.00', '20.00'))
@@ -158,17 +163,31 @@ class HandsOffShareTests(CommunityTestBase):
         self.relay()
         self.settle()
         SmartAccountEvent.objects.create(
-            address=ACCT, tx_hash='0x' + 'cd' * 32, log_index=0, name='RelayTraded',
-            args={'id': '2'}, block_number=1000, block_time=timezone.now())   # never indexed
+            address=ACCT, tx_hash='0x' + 'cd' * 32, log_index=0, name='Traded',
+            args={'tokenIn': CUSD, 'tokenOut': NVDA}, block_number=1000, block_time=timezone.now())   # never indexed
         sale = '0x' + 'ef' * 32
         self.relay(tx=sale, side='sell')
-        self.n += 1
-        event = SmartAccountEvent.objects.create(
-            address=ACCT, tx_hash=sale, log_index=0, name='RelayTraded',
-            args={'id': '1', 'venue': USDT, 'tokenIn': NVDA, 'tokenOut': CUSD, 'spent': str(WEI),
-                  'got': str(60 * WEI), 'usdCounted': str(60 * WEI)},
-            block_number=1000 + self.n, block_time=timezone.now())
-        account_trades.index_event(event)
+        self.emitted(sale, NVDA, CUSD, WEI, 60 * WEI)
         _row, snap, _final = activity_share.preview_activity(self.user, 'stock', sale)
         self.assertEqual(snap.kind, 'stock_sell')
         self.assertIsNone(snap.data.get('pnl_usd'))
+
+    def test_a_hands_off_trade_is_one_trade_with_its_units(self):
+        # relayTrade logs Traded and RelayTraded: one trade, its real units (2026-11-25: twice, and 0 units).
+        self.settle()
+        rows = list(SmartAccountTrade.objects.filter(address=ACCT.lower()).exclude(kind=''))
+        self.assertEqual([(r.kind, r.units, r.usd) for r in rows], [('stock_buy', Decimal('2'), Decimal('100'))])
+
+    def test_a_sale_paid_in_dollar_plus_is_priced_from_its_receipt_when_the_block_is_pruned(self):
+        from inbox.account_trades import _topic
+        price = 105 * 10 ** 16      # US$1.05 a share
+        receipt = {'logs': [{'address': PLUS, 'topics': [_topic('Minted(address,uint256,uint256,uint256)'), '0x0'],
+                             'data': '0x' + f'{10:064x}' + f'{10:064x}' + f'{price:064x}'}]}
+
+        def rpc(method, params, timeout=12):
+            if method == 'eth_call':
+                raise RuntimeError("bsc rpc eth_call: {'code': -32000, 'message': 'missing trie node'}")
+            return receipt
+        with patch('cusd_plus.vault.vault_address', return_value=PLUS), patch('cusd_plus.vault._rpc', side_effect=rpc):
+            row = self.emitted('0x' + 'ab' * 32, NVDA, PLUS, WEI, 20 * WEI)
+        self.assertEqual((row.kind, row.usd), ('stock_sell', Decimal('21')))

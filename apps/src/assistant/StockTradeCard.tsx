@@ -259,7 +259,8 @@ export function StockTradeCard({ messageId, action, onLeave }: {
     }
   });
   // The same sheet again from the card: for whoever closed it, or comes back later.
-  const share = (txHash: string) => leaveThen(() => requestActivityShare({ group: 'stock', reference: txHash }));
+  const share = (txHash: string) => leaveThen(() => requestActivityShare({ group: 'stock', reference: txHash,
+    again: true }));
 
   const settled = (icon: string, line: string, tone: 'good' | 'plain' = 'plain', txHash = '') => (
     <View style={styles.card}>

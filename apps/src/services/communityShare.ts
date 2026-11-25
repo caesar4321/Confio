@@ -15,6 +15,9 @@ export type ActivityShareGroup = 'stock' | 'crypto' | 'perps' | 'send' | 'ramp' 
 
 export type ActivityShareRequest = {
   group: ActivityShareGroup;
+  /** A tap on a "Compartir" button: opens even if this reference already opened once this session (the
+   *  once-per-session rule is for the sheet opening by itself; a button that does nothing reads as broken). */
+  again?: boolean;
   /** stock / crypto / perps → the batch tx hash; send → SendTransaction internalId; ramp → Koywe orderId or Infinia journey internalId. */
   reference: string | null | undefined;
 };
@@ -27,11 +30,11 @@ const opened = new Set<string>();
 
 const keyFor = (group: string, reference: string) => `${group}:${reference}`;
 
-export function requestActivityShare({ group, reference }: ActivityShareRequest): boolean {
+export function requestActivityShare({ group, reference, again }: ActivityShareRequest): boolean {
   const ref = (reference || '').trim();
   if (!ref || !listener) return false;
   const key = keyFor(group, ref);
-  if (opened.has(key)) return false;
+  if (opened.has(key) && !again) return false;
   let taken = false;
   try {
     taken = listener({ group, reference: ref });

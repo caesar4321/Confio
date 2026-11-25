@@ -1483,7 +1483,8 @@ def _mark_published(locked, item, now):
 # A trade the member asked for in the Confío IA chat and their Cuenta
 # inteligente made (smart_account/relay_trades.py: SmartRelayTrade 'done') is
 # no ledger row of theirs. Its status reference is the relayTrade tx hash; its
-# final view is the account trade decoded from the RelayTraded event
+# final view is the account trade decoded from its Traded event (relayTrade logs
+# Traded, then RelayTraded as the hands-off marker)
 # (inbox/account_trades.py: SmartAccountTrade, exact units and dollars). Until
 # the reconciler indexed that event, the sheet shows a preview from the trade
 # row and "Compartir" leaves an intent, as for a wallet trade. Only the trade's
@@ -1512,7 +1513,7 @@ def _account_trade(relay):
     from .models import SmartAccountTrade
 
     return (SmartAccountTrade.objects
-            .filter(event__tx_hash__iexact=relay.tx_hash, event__name='RelayTraded',
+            .filter(event__tx_hash__iexact=relay.tx_hash, event__name='Traded',
                     address=relay.smart_account.contract_address.lower())
             .exclude(kind='').order_by('event__log_index').first())
 

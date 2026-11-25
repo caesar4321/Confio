@@ -168,7 +168,7 @@ describe('buying', () => {
       await act(async () => { node.props.onPress(); });
       expect(onLeave).toHaveBeenCalledTimes(1);
       await act(async () => { jest.advanceTimersByTime(300); });
-      expect(mockShare).toHaveBeenCalledWith({ group: 'stock', reference: '0xabc' });
+      expect(mockShare).toHaveBeenCalledWith({ group: 'stock', reference: '0xabc', again: true });
     } finally {
       jest.useRealTimers();
     }
