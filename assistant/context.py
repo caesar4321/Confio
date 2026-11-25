@@ -36,7 +36,8 @@ RECALL = 'recall_memory'
 # allow-list: a tool added later counts as acting until it is put here.
 # analyze_finances is not here: it is paid and takes free text of the model's.
 SAFE_WITH_CONTEXT = frozenset({
-    'navigate', 'show_steps', 'get_month_summary', 'get_transactions', 'get_portfolio', 'get_exchange_rate',
+    'navigate', 'show_steps', 'get_month_summary', 'get_transactions', 'get_portfolio', 'get_futures',
+    'get_exchange_rate',
     'get_topup_status', 'get_topup_limits', 'read_public_document', 'get_stock_quote', 'smart_account_rules',
     'smart_account_review',
 })

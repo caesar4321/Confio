@@ -454,56 +454,62 @@ class Query(graphene.ObjectType):
                 for r in rows]
 
     def resolve_perps_positions(self, info, include_done=False, done_limit=None):
-        from blockchain.models import PerpPosition
-
-        from . import hyperliquid, perps_flow, perps_market_data
-
         user = _user(info)
         wallet = _personal_wallet(info) if user else None
         if user is None or wallet is None:
             return []
-        positions = (PerpPosition.objects.filter(user=user, wallet=wallet)
-                     # A quote is not a position yet (an unsigned one left by a killed
-                     # app is replaced by the next quote, or lapses).
-                     .exclude(state__in=('cancelled', 'quoted')).select_related('market')
-                     .prefetch_related('margin_changes').order_by('-created_at'))
-        if not include_done:
-            rows = list(positions.exclude(state__in=PerpPosition.TERMINAL_STATES))
-        elif done_limit is None:
-            rows = list(positions)
-        else:
-            # The Futuros list pages its closed positions; everything else
-            # (the position screen, the app's resume flows) asks for them all.
-            limit = max(1, min(int(done_limit), MAX_DONE_LIMIT))
-            rows = list(positions.exclude(state__in=PerpPosition.TERMINAL_STATES))
-            rows += list(positions.filter(state='done', open_batch__isnull=False, returned_usd__isnull=False)
-                         .order_by(F('done_at').desc(nulls_last=True), '-created_at')[:limit])
-        live_by_coin, free_by_dex = {}, {}
-        dexes = {p.market.dex for p in rows if p.state in ('open', 'funded', 'bridging', 'closed', 'liquidated')}
-        try:
-            # Core too: with one live position per member, free USDC is its money.
-            for dex in sorted(dexes | ({''} if dexes else set())):
-                state = hyperliquid.clearinghouse_state(wallet, dex)
-                free_by_dex[dex] = Decimal(str(state.get('withdrawable') or '0'))
-                for entry in state['assetPositions']:
-                    pos = entry.get('position') or {}
-                    if pos.get('coin'):
-                        live_by_coin[pos['coin']] = pos
-        except hyperliquid.HyperliquidError:
-            logger.warning('perps positions: Hyperliquid unreadable for %s', wallet)
-            return None
-        # In-flight rows move here too, so the app sees the next step at once.
-        for position in rows:
-            if position.state in ('bridging', 'open', 'returning', 'refunded'):
-                try:
-                    perps_flow.reconcile_position(position)
-                except Exception:  # noqa: BLE001 — display read; the task reconciles too
-                    logger.warning('perps inline reconcile failed for %s', position.id, exc_info=True)
-        contexts = perps_market_data.all_contexts(p.market.dex for p in rows)
-        return [_position_type(p, live_by_coin.get(p.market.coin) if p.state == 'open' else None, contexts,
-                               free_usd=(free_by_dex.get('', Decimal(0))
-                                         + (free_by_dex.get(p.market.dex, Decimal(0)) if p.market.dex else 0)))
-                for p in rows]
+        return position_rows(user, wallet, include_done=include_done, done_limit=done_limit)
+
+
+def position_rows(user, wallet, *, include_done=False, done_limit=None, reconcile=True):
+    """The member's positions as the Futuros screens show them; None when
+    Hyperliquid can't be read. reconcile=False is a pure read (Confío IA)."""
+    from blockchain.models import PerpPosition
+
+    from . import hyperliquid, perps_flow, perps_market_data
+
+    positions = (PerpPosition.objects.filter(user=user, wallet=wallet)
+                 # A quote is not a position yet (an unsigned one left by a killed
+                 # app is replaced by the next quote, or lapses).
+                 .exclude(state__in=('cancelled', 'quoted')).select_related('market')
+                 .prefetch_related('margin_changes').order_by('-created_at'))
+    if not include_done:
+        rows = list(positions.exclude(state__in=PerpPosition.TERMINAL_STATES))
+    elif done_limit is None:
+        rows = list(positions)
+    else:
+        # The Futuros list pages its closed positions; everything else
+        # (the position screen, the app's resume flows) asks for them all.
+        limit = max(1, min(int(done_limit), MAX_DONE_LIMIT))
+        rows = list(positions.exclude(state__in=PerpPosition.TERMINAL_STATES))
+        rows += list(positions.filter(state='done', open_batch__isnull=False, returned_usd__isnull=False)
+                     .order_by(F('done_at').desc(nulls_last=True), '-created_at')[:limit])
+    live_by_coin, free_by_dex = {}, {}
+    dexes = {p.market.dex for p in rows if p.state in ('open', 'funded', 'bridging', 'closed', 'liquidated')}
+    try:
+        # Core too: with one live position per member, free USDC is its money.
+        for dex in sorted(dexes | ({''} if dexes else set())):
+            state = hyperliquid.clearinghouse_state(wallet, dex)
+            free_by_dex[dex] = Decimal(str(state.get('withdrawable') or '0'))
+            for entry in state['assetPositions']:
+                pos = entry.get('position') or {}
+                if pos.get('coin'):
+                    live_by_coin[pos['coin']] = pos
+    except hyperliquid.HyperliquidError:
+        logger.warning('perps positions: Hyperliquid unreadable for %s', wallet)
+        return None
+    # In-flight rows move here too, so the app sees the next step at once.
+    for position in rows if reconcile else ():
+        if position.state in ('bridging', 'open', 'returning', 'refunded'):
+            try:
+                perps_flow.reconcile_position(position)
+            except Exception:  # noqa: BLE001 — display read; the task reconciles too
+                logger.warning('perps inline reconcile failed for %s', position.id, exc_info=True)
+    contexts = perps_market_data.all_contexts(p.market.dex for p in rows)
+    return [_position_type(p, live_by_coin.get(p.market.coin) if p.state == 'open' else None, contexts,
+                           free_usd=(free_by_dex.get('', Decimal(0))
+                                     + (free_by_dex.get(p.market.dex, Decimal(0)) if p.market.dex else 0)))
+            for p in rows]
 
 
 def _flow_error(exc) -> str:

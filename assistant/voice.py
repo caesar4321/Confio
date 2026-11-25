@@ -81,6 +81,8 @@ TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions', 'prepare_p
 
 # A store task starts from typed words and continues on cards.
 TEXT_ONLY_TOOLS |= {'start_store_task'}
+# Futuros reads the venue live; a call has its own tool list (SERVER_TOOLS).
+TEXT_ONLY_TOOLS |= {'get_futures'}
 
 
 def _realtime_tools(belt):
@@ -113,6 +115,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
 
     from .guide import rejected_order_note
     from .rails import colombia_pause_note
+    from .verification_note import verification_note
 
     belt = Toolbelt(viewer, TurnResult(reply=''), analyses_left=0, paid_offers_allowed=False)
     local_now = timezone.now().astimezone(viewer.tz)
@@ -126,7 +129,7 @@ def start_session(viewer, conversation, *, first_name, account_label, country):
         conversation=conversation_home(viewer.request_meta),
         local_account_topup=_local_account_topup(viewer, country),
         bo_withdraw=_bo_withdraw(viewer, country),
-    ) + colombia_pause_note() + rejected_order_note(viewer) + VOICE_NOTE
+    ) + colombia_pause_note() + rejected_order_note(viewer) + verification_note(viewer) + VOICE_NOTE
     model = conf.get('CONFIO_ASSISTANT_REALTIME_MODEL')
     # The secret only has to live until the call connects.
     body = {

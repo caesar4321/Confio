@@ -446,6 +446,9 @@ def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=
         movements = [m for m in movements if needle in (m.counterparty_name or '').lower()]
     movements.sort(key=lambda m: m.when, reverse=True)
     limit = max(1, min(int(limit or 30), 50))
+    shown = movements[:limit]
+    delivery = _send_delivery([m.row_id for m in shown
+                               if m.direction == 'sent' and m.row_id and m.kind in DELIVERED_KINDS])
     return {
         'disponible': True,
         'mes': f'{MONTHS_ES[month - 1]} {year}',
@@ -461,10 +464,60 @@ def movements_data(viewer: Viewer, months_back=0, group='all', search='', limit=
                 'contraparte': third_party_text(m.counterparty_name),
                 'categoria': CATEGORY_LABELS.get(m.category) if m.category else (
                     'sin categoría' if m.kind in {'merchant', 'p2p_send', 'payroll_out', 'donation'} else None),
+                **delivery.get(m.row_id, {}),
             }
-            for m in movements[:limit]
+            for m in shown
         ],
     }
+
+
+# Money sent to someone; withdrawals and savings moves have their own tools.
+# Donations go to a campaign vault, never to someone's wallet.
+DELIVERED_KINDS = frozenset({'p2p_send', 'merchant', 'payroll_out'})
+_SEND_STATE = {
+    'CONFIRMED': 'confirmado en la red: ya llegó a ese destino',
+    'FAILED': 'falló: el dinero no salió',
+    'AML_REVIEW': 'en revisión antes de salir',
+}
+
+
+def _send_delivery(row_ids):
+    """Where each outgoing movement went and whether it arrived. "Did it
+    reach them?" had no answer (2026-11-23): a US$30 send to an outside
+    wallet, confirmed on chain, was described as "salió, sin confirmar si
+    llegó", and the person was told to check a Confío account it never
+    went to."""
+    if not row_ids:
+        return {}
+    try:
+        from users.models_unified import UnifiedTransactionTable
+        rows = list(UnifiedTransactionTable.objects.filter(pk__in=row_ids).values(
+            'pk', 'status', 'counterparty_user_id', 'counterparty_business_id', 'counterparty_type',
+            'counterparty_address', 'is_invitation', 'invitation_claimed', 'invitation_reverted'))
+    except Exception:  # noqa: BLE001 - the movements stand without it
+        logger.warning('Confio Assistant: send delivery unavailable', exc_info=True)
+        return {}
+    out = {}
+    for row in rows:
+        # Never to_address: contract legs (the Comprar escrow) keep the
+        # contract there and leave counterparty_address blank on purpose.
+        address = (row['counterparty_address'] or '').strip()
+        if row['is_invitation'] and not row['invitation_claimed']:
+            out[row['pk']] = {
+                'destino': 'invitación a alguien sin cuenta Confío',
+                'estado_envio': ('devuelta: no la reclamó a tiempo' if row['invitation_reverted']
+                                 else 'esperando a que cree su cuenta Confío para recibirlo'),
+            }
+            continue
+        if row['counterparty_user_id'] or row['counterparty_business_id']:
+            destination = 'una cuenta Confío'
+        elif row['counterparty_type'] == 'external' and address.startswith('0x') and len(address) == 42:
+            destination = f'billetera externa {address[:6]}…{address[-4:]} (BNB Smart Chain, BEP20), no una cuenta Confío'
+        else:
+            continue
+        out[row['pk']] = {'destino': destination,
+                          'estado_envio': _SEND_STATE.get(row['status'], 'en camino, todavía sin confirmar')}
+    return out
 
 
 def _known_usd(value):
@@ -1273,6 +1326,21 @@ class Toolbelt:
                 'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
                 'strict': True,
             }]
+            if self._futures_offered():
+                specs.append({
+                    'type': 'function',
+                    'name': 'get_futures',
+                    'description': (
+                        'Sus posiciones abiertas en Futuros, como las muestra la app: activo, lado (largo o '
+                        'corto), apalancamiento, lo que puso, lo que vale ahora, ganancia o pérdida no realizada, '
+                        'precio de entrada, actual y de liquidación, financiamiento, take profit y stop loss. '
+                        'Úsala antes de responder sobre sus futuros; nunca le pidas esos datos. Explica qué '
+                        'significan y el riesgo (cuánto falta para la liquidación), nunca cuándo cerrar.'
+                    ),
+                    'parameters': {'type': 'object', 'properties': {}, 'required': [],
+                                   'additionalProperties': False},
+                    'strict': True,
+                })
         specs += [
             {
                 'type': 'function',
@@ -1611,6 +1679,7 @@ class Toolbelt:
             'get_stock_quote': self.get_stock_quote,
             'read_public_document': self.read_public_document,
             'get_portfolio': self.get_portfolio,
+            'get_futures': self.get_futures,
             'get_exchange_rate': self.get_exchange_rate,
             'get_topup_status': self.get_topup_status,
             'search_market_news': self.search_market_news,
@@ -1799,6 +1868,18 @@ class Toolbelt:
     def get_portfolio(self):
         return portfolio_data(self.viewer)
 
+    def _futures_offered(self):
+        if not hasattr(self, '_futures_cache'):
+            from . import futures
+            self._futures_cache = futures.offered(self.viewer)
+        return self._futures_cache
+
+    def get_futures(self):
+        if not self._futures_offered():
+            return {'error': 'herramienta desconocida: get_futures'}
+        from . import futures
+        return futures.futures_data(self.viewer)
+
     def get_exchange_rate(self, currency=None):
         return exchange_rate_data(self.viewer, currency)
 
@@ -1867,8 +1948,8 @@ class Toolbelt:
     # Tools that read the person's own money: after one of them, this turn's
     # model has account data in context, so no free-text web query leaves.
     PERSONAL_DATA_TOOLS = frozenset({
-        'get_month_summary', 'get_transactions', 'get_portfolio', 'analyze_finances', 'get_topup_status',
-        'categorize_transactions', 'smart_account_rules', 'smart_account_review', 'propose_smart_account_rule',
+        'get_month_summary', 'get_transactions', 'get_portfolio', 'get_futures', 'analyze_finances',
+        'get_topup_status', 'categorize_transactions', 'smart_account_rules', 'smart_account_review', 'propose_smart_account_rule',
         'propose_target_allocation', 'smart_account_alerts', 'prepare_payment',
         'start_store_task', 'withdraw_payment_card', 'prepare_whatsapp_reply', 'prepare_mail',
     })
@@ -2716,7 +2797,8 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
     )
     from .guide import rejected_order_note
     from .rails import colombia_pause_note
-    system += colombia_pause_note() + rejected_order_note(viewer)
+    from .verification_note import verification_note
+    system += colombia_pause_note() + rejected_order_note(viewer) + verification_note(viewer)
     if belt.waiting_for_team:
         system += WAITING_FOR_TEAM_NOTE
     system += getattr(belt, 'guide_note', '')
