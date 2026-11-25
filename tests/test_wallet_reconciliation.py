@@ -42,6 +42,8 @@ class WalletReconciliationTests(TestCase):
             account_type='personal', account_index=0, business_id=None)
         self.service.owned_accounts = MagicMock(return_value=[self.account])
         self.service.User.objects.select_for_update.return_value.get.return_value = self.user
+        # No Cuenta inteligente: owns_live_smart_account() reads Account.objects.
+        self.service.Account.objects.filter.return_value.exists.return_value = False
         self.service.Account.all_objects.filter.return_value.exclude.return_value.exists.return_value = False
         self.service.RetiredWalletAddress.objects.filter.return_value.exclude.return_value.exists.return_value = False
         self.service.RetiredWalletAddress.normalize_address.side_effect = lambda chain, addr: addr
@@ -68,6 +70,19 @@ class WalletReconciliationTests(TestCase):
     def complete(self, prepared, signature=None):
         return self.service.CompleteWalletReconciliation.mutate(
             None, self.info, prepared.grant, signature or self.signature(prepared))
+
+    def test_cuenta_inteligente_owner_gets_no_grant_and_cannot_complete(self):
+        proof = self.prepare()
+        self.service.Account.objects.filter.return_value.exists.return_value = True
+        withheld = self.prepare()
+        self.assertTrue(withheld.success)
+        self.assertIsNone(withheld.grant)
+        refused = self.complete(proof)
+        self.assertFalse(refused.success)
+        self.assertEqual(refused.error, 'A Cuenta inteligente blocks replacing a personal wallet')
+        self.service.Account.objects.filter.assert_called_with(
+            user=self.user, account_type='smart', deleted_at__isnull=True)
+        self.account.save.assert_not_called()
 
     def test_google_reconciles_without_balance_checks_and_keeps_old_addresses(self):
         proof = self.prepare()

@@ -20,6 +20,8 @@ from .models import Account, RetiredWalletAddress, User
 
 SALT = 'confio.signin-wallet-reconciliation.v1'
 MAX_AGE = 600
+KEYED_ACCOUNT_TYPES = ('personal', 'business')
+SMART_ACCOUNT_REFUSAL = 'A Cuenta inteligente blocks replacing a personal wallet'
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,31 @@ def challenge(payload):
 def owned_accounts(user, lock=False):
     query = Account.objects.select_for_update() if lock else Account.objects
     # Owner relation only: employee business access does not own wallet keys.
-    return list(query.filter(user=user, deleted_at__isnull=True).order_by('pk'))
+    #
+    # Keyed types only, as a separate rule: a Cuenta inteligente ('smart') is
+    # a contract whose address is not derived from the wallet secret, so the
+    # row can neither be proven nor rewritten here, and every installed app
+    # rejects an inventory that lists it. Leaving the row out does NOT make
+    # the contract safe from this flow: its owner on chain is a personal
+    # wallet, so see owns_live_smart_account() for the guard on replacing one.
+    return list(query.filter(
+        user=user, deleted_at__isnull=True, account_type__in=KEYED_ACCOUNT_TYPES,
+    ).order_by('pk'))
+
+
+def owns_live_smart_account(user):
+    """True while the user has any live Cuenta inteligente row, own or inherited.
+
+    A contract's owner on chain is one of this user's personal wallets.
+    Registering a different address for that wallet would leave the contract
+    owned by the old key while every server mirror named the new one, and
+    nothing here can move contract ownership. So while this is true, no
+    personal wallet that already has a BSC address may be given another (a
+    contract's owner is a BSC key; an Algorand-only row can still migrate). It
+    does not check which wallet owns which contract: deliberately wider.
+    """
+    return Account.objects.filter(
+        user=user, account_type='smart', deleted_at__isnull=True).exists()
 
 
 def anchors(account):
@@ -132,6 +158,10 @@ class PrepareWalletReconciliation(graphene.Mutation):
                         or any(not isinstance(value, str) or not re.fullmatch(
                             r'[A-Za-z0-9_-]{10,100}', value) for value in recovery_file_ids)))):
                 return cls(success=False, error='Invalid Drive recovery reservation')
+            # Not refused for a Cuenta inteligente owner: the app reserves ids
+            # to upload the secret it ALREADY holds as often as a new one, and
+            # no address comes with this call to tell them apart. A new
+            # personal wallet is stopped at the grant and at Complete.
             with transaction.atomic():
                 owner = User.objects.select_for_update().get(pk=user.pk)
                 if not owner.is_active or owner.firebase_uid != identity['uid']:
@@ -141,6 +171,20 @@ class PrepareWalletReconciliation(graphene.Mutation):
                     owner.save(update_fields=['wallet_recovery_drive_ids'])
                 return cls(success=True, recovery_file_ids=owner.wallet_recovery_drive_ids)
         if address is None:
+            return cls(success=True, accounts=account_results(accounts))
+        if (account.bsc_address and address != account.bsc_address.lower()
+                and owns_live_smart_account(user)):
+            # Inventory only, no grant. The app needs no grant to sign in with
+            # a key that matches (found locally or restored from a backup);
+            # without one it stops before it replaces the active Keychain
+            # secret, drops the old session or changes the registration (a
+            # Google app may by then have staged and uploaded a new secret,
+            # which stays unregistered). Only personal/0 can be judged here, since it is
+            # the only address offered; Complete checks every personal wallet.
+            # INFO: a stale local key later repaired from a backup also lands
+            # here, and nothing was refused in that sign-in.
+            logger.info('Wallet replacement grant withheld: user=%s owns a '
+                        'Cuenta inteligente', user.pk)
             return cls(success=True, accounts=account_results(accounts))
         payload = {
             'version': 2, 'user': user.pk, 'account': account.pk,
@@ -227,6 +271,19 @@ class CompleteWalletReconciliation(graphene.Mutation):
                 account = next((item for item in accounts if item.pk == payload['account']), None)
                 if not account:
                     return cls(success=False, error='Account not found')
+                # Authoritative, because Prepare cannot be: its grant may
+                # predate the Cuenta inteligente (the app has then already
+                # stored the new secret, and is refused all the same), and it
+                # saw personal/0 only, so a secondary personal wallet that
+                # would change is caught here. Deliberately wider than the one
+                # wallet that owns the contract: see owns_live_smart_account().
+                changing = [item.pk for item in accounts
+                            if item.account_type == 'personal' and item.bsc_address
+                            and item.bsc_address.lower() != targets[str(item.pk)]]
+                if changing and owns_live_smart_account(owner):
+                    logger.warning('Wallet replacement refused: user=%s owns a Cuenta '
+                                   'inteligente, personal accounts=%s', owner.pk, changing)
+                    return cls(success=False, error=SMART_ACCOUNT_REFUSAL)
                 # A retry after a lost response still verifies identity and signature.
                 if all(not item.algorand_address and item.is_keyless_migrated
                        and (item.bsc_address or '').lower() == targets[str(item.pk)]

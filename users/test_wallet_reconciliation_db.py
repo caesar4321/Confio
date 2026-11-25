@@ -253,6 +253,130 @@ class OwnedWalletInventoryDatabaseTests(TestCase):
         self.account.refresh_from_db()
         self.assertEqual(self.account.bsc_address, self.old_address)
 
+    def _smart_account(self, index=0):
+        contract = '0x' + '9a' * 20
+        return contract, Account.objects.create(user=self.user, account_type='smart',
+            account_index=index, bsc_address=contract)
+
+    def _sign_all_targets(self):
+        self.signature = self.wallet.sign_message(
+            encode_defunct(text=self.proof.challenge)).signature.hex()
+        self.wallet_proofs = [
+            {'account_id': str(pk), 'bsc_address': wallet.address,
+             'signature': wallet.sign_message(encode_defunct(text=wallet_challenge(
+                 self.proof.challenge, str(pk), wallet.address))).signature.hex()}
+            for pk, wallet in self.targets.items()
+        ]
+
+    def _prepare(self, address=None, provider='google.com', **extra):
+        identity = {'uid': self.user.firebase_uid, 'auth_time': timezone.now().timestamp(),
+                    'firebase': {'sign_in_provider': provider}}
+        with patch('firebase_admin.auth.verify_id_token', return_value=identity):
+            return PrepareWalletReconciliation.mutate(
+                None, self.info, 'test-token', address, **extra)
+
+    def test_smart_account_is_left_out_of_the_inventory(self):
+        # Listing a Cuenta inteligente locked its owner out of sign-in: the
+        # app refuses an inventory with any type other than personal/business.
+        _, smart = self._smart_account()
+        for address in (None, self.old_address, self.wallet.address):
+            result = self._prepare(address)
+            self.assertTrue(result.success)
+            self.assertNotIn(str(smart.pk), [item['account_id'] for item in result.accounts])
+            self.assertNotIn('smart', [item['account_type'] for item in result.accounts])
+
+    def test_smart_account_owner_gets_no_grant_to_replace_personal_wallet(self):
+        # The contract's owner on chain is a personal wallet. The registered
+        # address gets a grant as before; a different one gets the inventory
+        # and no grant, so the app has nothing to commit.
+        self._smart_account(index=1)  # an inherited account counts the same
+        for provider in ('google.com', 'apple.com'):
+            self.assertTrue(self._prepare(self.old_address, provider).grant)
+            replacement = self._prepare(self.wallet.address, provider)
+            self.assertTrue(replacement.success)
+            self.assertIsNone(replacement.grant)
+            self.assertIsNone(replacement.challenge)
+
+    def test_grant_older_than_the_smart_account_cannot_replace_its_owner(self):
+        # setUp's grant was issued before the Cuenta inteligente existed.
+        contract, smart = self._smart_account()
+        result = self.complete()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, 'A Cuenta inteligente blocks replacing a personal wallet')
+        self.account.refresh_from_db()
+        self.business.refresh_from_db()
+        smart.refresh_from_db()
+        self.assertEqual(self.account.bsc_address, self.old_address)
+        self.assertEqual(self.business.bsc_address, '0x' + '67' * 20)
+        self.assertEqual(smart.bsc_address, contract)
+        self.assertFalse(RetiredWalletAddress.objects.filter(user=self.user).exists())
+
+    def test_deleted_smart_account_does_not_block_a_replacement(self):
+        _, smart = self._smart_account()
+        smart.soft_delete()
+        self.proof = self._prepare(self.wallet.address)
+        self.assertTrue(self.proof.grant)
+        self._sign_all_targets()
+        self.assertTrue(self.complete().success)
+
+    def test_smart_account_does_not_block_a_first_bsc_address(self):
+        # Nothing to orphan: a personal wallet with no BSC address owns no contract.
+        Account.objects.filter(pk=self.account.pk).update(
+            bsc_address=None, algorand_address='P' * 58, is_keyless_migrated=False)
+        self._smart_account()
+        self.proof = self._prepare(self.wallet.address, 'apple.com')
+        self.assertTrue(self.proof.grant)
+        self._sign_all_targets()
+        self.assertTrue(self.complete().success)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.bsc_address, self.wallet.address.lower())
+
+    def test_smart_account_owner_can_still_replace_other_wallets(self):
+        # The personal wallet keeps its address; only the ones that cannot
+        # own a contract change (a business, a personal with no BSC address).
+        # Stored checksummed, offered lowercase: the match ignores case.
+        self.assertNotEqual(self.wallet.address, self.wallet.address.lower())
+        Account.objects.filter(pk=self.account.pk).update(bsc_address=self.wallet.address)
+        contract, smart = self._smart_account()
+        self.proof = self._prepare(self.wallet.address.lower())
+        self.assertTrue(self.proof.grant)
+        self._sign_all_targets()
+        self.assertTrue(self.complete().success)
+        self.assertTrue(self.complete().success)  # the retry after a lost response
+        for row in (self.account, self.secondary, self.business, smart):
+            row.refresh_from_db()
+        self.assertEqual(self.account.bsc_address.lower(), self.wallet.address.lower())
+        self.assertEqual(self.secondary.bsc_address, self.targets[self.secondary.pk].address.lower())
+        self.assertIsNone(self.secondary.algorand_address)
+        self.assertEqual(self.business.bsc_address, self.targets[self.business.pk].address.lower())
+        self.assertEqual(smart.bsc_address, contract)
+
+    def test_smart_account_owner_can_still_reserve_drive_ids(self):
+        # The app reserves ids to upload the secret it already holds, too.
+        self._smart_account()
+        proposal = ['payload-file-id', 'manifest-file-id']
+        self.assertEqual(self._prepare(recovery_file_ids=[]).recovery_file_ids, [])
+        result = self._prepare(recovery_file_ids=proposal)
+        self.assertTrue(result.success)
+        self.assertEqual(result.recovery_file_ids, proposal)
+
+    def test_smart_account_owner_cannot_replace_a_secondary_personal_wallet(self):
+        # Wider than the one wallet that owns the contract, on purpose.
+        Account.objects.filter(pk=self.account.pk).update(bsc_address=self.wallet.address)
+        secondary_address = '0x' + 'ab' * 20
+        Account.objects.filter(pk=self.secondary.pk).update(bsc_address=secondary_address)
+        self._smart_account()
+        self.proof = self._prepare(self.wallet.address)
+        self.assertTrue(self.proof.grant)
+        self._sign_all_targets()
+        result = self.complete()
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, 'A Cuenta inteligente blocks replacing a personal wallet')
+        self.secondary.refresh_from_db()
+        self.business.refresh_from_db()
+        self.assertEqual(self.secondary.bsc_address, secondary_address)
+        self.assertEqual(self.business.bsc_address, '0x' + '67' * 20)
+
     def test_employee_only_wallet_is_excluded_and_unchanged(self):
         from users.models_employee import BusinessEmployee
         other_user = User(username='another-owner', firebase_uid='another-owner')
