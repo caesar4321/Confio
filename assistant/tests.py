@@ -2885,7 +2885,7 @@ class FaqTextTests(TestCase):
         for only_conversation in ('el botón de la casa', 'deslizar la conversación'):
             self.assertNotIn(only_conversation, tabs)
         self.assertIn('la cifra "Ahorros" arriba de Comunidad', conversation)
-        # Everything outside the app map is the same text.
+        # Outside the app map and what Confío is, it is the same text.
         for shared in ('## Dónde está cada cosa en la app', '- Recibir: tu número Confío',
                        '- Perfil: verificación de identidad', 'Pagar lee los QR de cobro de Confío'):
             self.assertIn(shared, tabs)
@@ -2903,6 +2903,51 @@ class FaqTextTests(TestCase):
         self.assertTrue(conversation_home({'HTTP_X_CONFIO_HOME': ' Conversation '}))
         for other in ({}, None, {'HTTP_X_CONFIO_HOME': ''}, {'HTTP_X_CONFIO_HOME': 'tabs'}):
             self.assertFalse(conversation_home(other))
+
+    def test_what_confio_is_follows_the_home_this_build_has(self):
+        """The five-tab app is a dollar wallet with an assistant inside; the
+        conversation build is an assistant that works with those dollars. An
+        old build keeps hearing about the app it has, word for word."""
+        from .prompts import build_system_prompt, faq_text
+
+        base = dict(first_name='Ana', account_label='Personal', country='BO', screen='Home',
+                    local_now='2026-11-25 10:00', destinations=['home', 'send'])
+        tabs = build_system_prompt(**base)
+        conversation = build_system_prompt(**base, conversation=True)
+        wallet = ('- Confío es una billetera de dólares digitales para Latinoamérica: guardar, enviar, recibir y pagar '
+                  'en dólares, recargar y retirar con bancos locales, y acceder a acciones de EE.UU.\n')
+        approved = ('## Qué es Confío\n- Confío es una app de dólares digitales para guardar, enviar, recibir y '
+                    'pagar. Tú controlas tu dinero.\n')
+        assistant = '- Confío es un asistente con IA para Latinoamérica: la persona te escribe lo que necesita'
+        custody = '- Confío no custodia el dinero de los usuarios: cada usuario controla su billetera.\n'
+        # Nothing added around the old lines either: each is followed by what always followed it.
+        self.assertIn('# Quién eres\n' + wallet + custody, tabs)
+        self.assertIn(approved + '\n## Lo que Confío no ofrece', tabs)
+        self.assertIn('# Quién eres\n' + assistant, conversation)
+        self.assertNotIn('asistente con IA', tabs.split('# Lo que puedes hacer')[0])
+        self.assertNotIn('asistente con IA', faq_text())
+        self.assertNotIn(wallet, conversation)
+        self.assertNotIn('Confío es una app de dólares digitales', conversation)
+        for prompt in (tabs, conversation):
+            self.assertNotIn('{identity}', prompt)
+            # Custody is said the same way to both.
+            self.assertIn(custody, prompt)
+        # What keeps the new line honest for every account: it prepares or
+        # takes her there, never acts alone; examples only of what she can do;
+        # the dollars are hers; and it is not introduced as a wallet.
+        for kept in ('tú lo preparas con tus herramientas o la llevas a donde se hace; nada se mueve sin que ella lo '
+                     'apruebe.',
+                     'Trabajas con sus dólares digitales, que están en una billetera a su nombre:',
+                     'los ejemplos, solo de lo que esa persona puede hacer en esta conversación y en su país.',
+                     'No lo presentes como una billetera ni como "una app de dólares digitales".\n' + custody):
+            self.assertIn(kept, conversation)
+        # The conversation build still hears that the person approves and that
+        # the money is hers, and never that the assistant acts on its own.
+        self.assertIn('nada se mueve sin que ella lo apruebe', conversation)
+        self.assertIn('## Qué es Confío\n- Confío es un asistente con IA: le escribes lo que necesitas y lo prepara '
+                      'o te lleva a donde se hace; tú apruebas cada paso. Tus dólares digitales están en una '
+                      'billetera a tu nombre: tú controlas tu dinero.\n', conversation)
+        self.assertNotIn('hace las cosas por', conversation)
 
     def test_destinations_are_described_for_the_home_this_build_has(self):
         from .prompts import build_system_prompt

@@ -1,7 +1,12 @@
 
 
 ## Qué es Confío
+[[tabs]]
 - Confío es una app de dólares digitales para guardar, enviar, recibir y pagar. Tú controlas tu dinero.
+[[/tabs]]
+[[conversation]]
+- Confío es un asistente con IA: le escribes lo que necesitas y lo prepara o te lleva a donde se hace; tú apruebas cada paso. Tus dólares digitales están en una billetera a tu nombre: tú controlas tu dinero.
+[[/conversation]]
 
 ## Lo que Confío no ofrece (dilo solo cuando pregunten por eso)
 - Confío no ofrece préstamos, créditos ni adelantos de dinero.

@@ -33,9 +33,9 @@ def dex_offered(meta) -> bool:
     return crypto_risk.platform_allowed(meta) and perps_risk.platform_allowed(meta)
 
 
-# The app map differs between the five-tab app and the conversation home
-# (docs/designs/ai-assistant-first-redesign.md 7): faq.md carries both, each
-# inside its own markers, and the build says which one it is.
+# The app map and what Confío is differ between the five-tab app and the
+# conversation home: faq.md carries both, each inside its own markers, and the
+# build says which one it is.
 _LAYOUT_BLOCKS = {name: re.compile(rf'^\[\[{name}\]\]\n.*?^\[\[/{name}\]\]\n', re.S | re.M)
                   for name in ('tabs', 'conversation')}
 
@@ -82,10 +82,28 @@ def faq_text(*, dex=True, conversation=False):
     text = text.replace('[[dex]]\n', '').replace('[[/dex]]\n', '')
     return _for_layout(text, conversation).replace('{local_account_fee}', fee)
 
+# What Confío is, said the way this build presents it. The five-tab app is a
+# dollar wallet with an assistant inside it. In the build whose Inicio is the
+# conversation, the assistant is the app and the wallet is what it works with,
+# so the same server describes Confío differently to each (keyed by
+# conversation_home, never by version: an old build must keep hearing about
+# the app it actually has).
+IDENTITY = {
+    False: ('- Confío es una billetera de dólares digitales para Latinoamérica: guardar, enviar, recibir y pagar en '
+            'dólares, recargar y retirar con bancos locales, y acceder a acciones de EE.UU.'),
+    True: ('- Confío es un asistente con IA para Latinoamérica: la persona te escribe lo que necesita, como le '
+           'escribiría a alguien, y tú lo preparas con tus herramientas o la llevas a donde se hace; nada se mueve '
+           'sin que ella lo apruebe. Trabajas con sus dólares digitales, que están en una billetera a su nombre: '
+           'guardar, enviar, recibir y pagar en dólares, recargar y retirar con bancos locales, y acceder a acciones '
+           'de EE.UU. Cuando pregunten qué es Confío, preséntalo en ese orden: primero el asistente al que se le pide '
+           'lo que uno necesita, después sus dólares; los ejemplos, solo de lo que esa persona puede hacer en esta '
+           'conversación y en su país. No lo presentes como una billetera ni como "una app de dólares digitales".'),
+}
+
 SYSTEM_PROMPT = """Eres Confio Assistant, el asistente dentro de la app Confío.
 
 # Quién eres
-- Confío es una billetera de dólares digitales para Latinoamérica: guardar, enviar, recibir y pagar en dólares, recargar y retirar con bancos locales, y acceder a acciones de EE.UU.
+{identity}
 - Confío no custodia el dinero de los usuarios: cada usuario controla su billetera.
 - Nombra los productos completos: "Confío Dollar" y "Confío Dollar+", nunca "Dollar+" ni "Dollar" solos.
 - Hablas español latinoamericano neutro y cálido. Sobre Confío y su dinero eres breve (2-4 oraciones salvo que pidan detalle); en una tarea general, el largo que la tarea necesite. Tuteas. Sin jerga cripto si no hace falta.
@@ -482,7 +500,8 @@ def build_system_prompt(*, first_name, account_label, country, screen, local_now
                         smart_account_real=False, smart_account_ops=False, conversation=False):
     described = {**DESTINATIONS, **CONVERSATION_DESTINATIONS} if conversation else DESTINATIONS
     lines = '\n'.join(f'- `{key}`: {described[key]}' for key in destinations)
-    prompt = (SYSTEM_PROMPT.replace('{invest_rules}', INVEST_RULES_GUIDANCE)
+    prompt = (SYSTEM_PROMPT.replace('{identity}', IDENTITY[bool(conversation)])
+              .replace('{invest_rules}', INVEST_RULES_GUIDANCE)
               .replace('{faq}', faq_text(dex=dex, conversation=conversation))
               + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open, smart_account_real)
               + (SMART_ACCOUNT_OPS_SECTION if smart_account_ops else '')
