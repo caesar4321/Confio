@@ -84,6 +84,8 @@ def sync(connection_id):
         wait = min(INTERVAL * 2 ** min(connection.failures, 6), MAX_BACKOFF)
         mine.update(failures=min(connection.failures + 1, 100), next_sync_at=now + wait)
         return
+    if config.chat_consented(connection):
+        chat.catch_up(connection)  # found before the conversation was agreed to: told now, once
     if finished:
         mine.update(last_sync_at=now, failures=0, next_sync_at=now + INTERVAL)
     else:

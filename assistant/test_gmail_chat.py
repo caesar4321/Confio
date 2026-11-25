@@ -243,3 +243,26 @@ class SecondReviewTests(GmailChatTest):
             chat.prepare(self.user, 'que sí', need_id=self.need(connection).pk)
         SupportMessage.objects.update(created_at=timezone.now() - timedelta(hours=1))
         self.assertIsNone(chat.last_need(self.user))
+
+
+
+class CatchUpTests(GmailChatTest):
+    def test_needs_found_before_the_new_consent_are_told_once(self):
+        connection = self.connect()
+        self.need(connection, kind='payment')
+        old = self.need(connection, kind='deadline')
+        MailNeed.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=5))
+        self.box.message.return_value = gmail_message(sender='Luz <avisos@luz.example>', subject='Factura')
+        fresh = self.mail(subject='Factura')
+        with self.with_box(), patch.object(chat.text, 'parse', return_value=fresh):
+            chat.catch_up(connection)
+            chat.catch_up(connection)
+        [post] = self.posts()
+        self.assertIn('«Factura»', post.body)
+
+    def test_nothing_under_the_older_consent(self):
+        connection = self.connect(consent_version=2)
+        self.need(connection)
+        with self.with_box():
+            chat.catch_up(connection)
+        self.assertEqual(self.posts(), [])

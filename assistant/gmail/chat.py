@@ -152,6 +152,31 @@ def tell(connection, need, mail):
         logger.warning('Gmail need %s not told in the chat: %s', need.pk, type(exc).__name__)
 
 
+CATCH_UP = 3
+
+
+def catch_up(connection):
+    """Recent needs never told (found before the person accepted the conversation, or before this build): told
+    now, a few per sync, each read again from Gmail for its subject. Never fails the sync."""
+    from inbox.models import SupportMessage
+    from . import session
+    try:
+        since = timezone.now() - timedelta(days=FRESH_DAYS)
+        told = {str(tag).split(':', 1)[1] for tag in SupportMessage.objects.filter(
+            conversation__user=connection.user, metadata__gmail=True,
+            metadata__notice__startswith='gmail-need:').values_list('metadata__notice', flat=True)}
+        waiting = [need for need in connection.needs.filter(dismissed=False, created_at__gte=since).order_by('created_at')
+                   if str(need.pk) not in told][:CATCH_UP]
+        if not waiting:
+            return
+        box = session.mailbox(connection)
+        for need in waiting:
+            mail = text.parse(box.message(crypto.unseal(need.sealed)['id']))
+            tell(connection, need, mail)
+    except Exception as exc:  # noqa: BLE001 - logged by type only; the next sync tries again
+        logger.warning('Gmail catch-up failed: %s', type(exc).__name__)
+
+
 def _need_by_sender(connection, name):
     """The newest need from the sender the assistant named (as it told it). Only an exact or a unique longer name."""
     wanted = ' '.join(str(name or '').split()).casefold()
