@@ -252,15 +252,42 @@ def _reply_state(row) -> str:
 
 
 MESSAGES = {
-    'done': 'Listo: compré {what} por {spent} desde tu Cuenta inteligente. Tu pago queda protegido hasta que lo '
-            'recibas; lo sigues en Comprar, Mis compras. Si se reembolsa, vuelve a tu Cuenta inteligente.',
-    'cap': 'Todavía no lo compré: supera tu límite semanal de compras. Si lo subes con Confío Face, lo compro y te '
-           'aviso aquí.',
-    'balance': 'No compré nada: tu Cuenta inteligente no tiene dólares suficientes. Puedes recargar desde el chat.',
-    'price': 'No lo compré: el precio o el envío cambió y no se movió nada. Pídemelo de nuevo para ver el nuevo total.',
-    'unavailable': 'No lo compré: ese producto ya no está disponible así y no se movió nada.',
-    'reverted': 'No se hizo: la compra no pasó en la red y no se movió nada. Puedes pedírmela otra vez.',
-    'failed': 'No pude comprarlo ahora y no se movió nada. Puedes pedírmelo otra vez o comprarlo tú en Comprar.',
+    'done': {'es': 'Listo: compré {what} por {spent} desde tu Cuenta inteligente. Tu pago queda protegido hasta que '
+                   'lo recibas; lo sigues en Comprar, Mis compras. Si se reembolsa, vuelve a tu Cuenta inteligente.',
+             'pt': 'Pronto: comprei {what} por {spent} pela sua Cuenta inteligente. Seu pagamento fica protegido até '
+                   'você receber; acompanhe em Comprar, Mis compras. Se for reembolsado, volta para sua Cuenta '
+                   'inteligente.',
+             'en': 'Done: I bought {what} for {spent} from your Cuenta inteligente. Your payment stays protected '
+                   'until you receive it; follow it in Comprar, Mis compras. If it is refunded, it goes back to your '
+                   'Cuenta inteligente.'},
+    'cap': {'es': 'Todavía no lo compré: supera tu límite semanal de compras. Si lo subes con Confío Face, lo compro '
+                  'y te aviso aquí.',
+            'pt': 'Ainda não comprei: passa do seu limite semanal de compras. Se você aumentar com Confío Face, eu '
+                  'compro e aviso aqui.',
+            'en': "I haven't bought it yet: it is above your weekly purchase limit. Raise it with Confío Face and "
+                  "I'll buy it and tell you here."},
+    'balance': {'es': 'No compré nada: tu Cuenta inteligente no tiene dólares suficientes. Puedes recargar desde el '
+                      'chat.',
+                'pt': 'Não comprei nada: sua Cuenta inteligente não tem dólares suficientes. Você pode recarregar '
+                      'pelo chat.',
+                'en': "I didn't buy anything: your Cuenta inteligente doesn't have enough dollars. You can top up "
+                      "from the chat."},
+    'price': {'es': 'No lo compré: el precio o el envío cambió y no se movió nada. Pídemelo de nuevo para ver el '
+                    'nuevo total.',
+              'pt': 'Não comprei: o preço ou o frete mudou e nada foi movido. Peça de novo para ver o novo total.',
+              'en': "I didn't buy it: the price or the shipping changed, and nothing moved. Ask me again to see the "
+                    "new total."},
+    'unavailable': {'es': 'No lo compré: ese producto ya no está disponible así y no se movió nada.',
+                    'pt': 'Não comprei: esse produto não está mais disponível assim e nada foi movido.',
+                    'en': "I didn't buy it: that product is no longer available like that, and nothing moved."},
+    'reverted': {'es': 'No se hizo: la compra no pasó en la red y no se movió nada. Puedes pedírmela otra vez.',
+                 'pt': 'Não foi feito: a compra não passou na rede e nada foi movido. Pode me pedir de novo.',
+                 'en': "It didn't go through: the purchase failed on the network and nothing moved. You can ask me "
+                       "again."},
+    'failed': {'es': 'No pude comprarlo ahora y no se movió nada. Puedes pedírmelo otra vez o comprarlo tú en '
+                     'Comprar.',
+               'pt': 'Não consegui comprar agora e nada foi movido. Pode me pedir de novo ou comprar você em Comprar.',
+               'en': "I couldn't buy it now and nothing moved. You can ask me again or buy it yourself in Comprar."},
 }
 # Checkout refusals that mean the listing or the delivery changed (said as 'unavailable').
 UNAVAILABLE = frozenset(('product_unavailable', 'out_of_stock', 'city_not_live', 'store_city_only',
@@ -272,7 +299,9 @@ UNAVAILABLE = frozenset(('product_unavailable', 'out_of_stock', 'city_not_live',
 def _post(row, key: str, **values) -> None:
     from assistant.service import post_system_note
     try:
-        post_system_note(row.user, MESSAGES[key].format(**values), f'relay_purchase:{row.internal_id}:{row.status}',
+        from .relay_trades import lang_of, said
+        post_system_note(row.user, said(MESSAGES[key], lang_of(row)).format(**values),
+                         f'relay_purchase:{row.internal_id}:{row.status}',
                          actions=[card(row)])
         from .models import SmartRelayPurchase
         SmartRelayPurchase.objects.filter(pk=row.pk).update(notified_at=timezone.now())
@@ -303,7 +332,8 @@ def _offer_raise(row) -> None:
     SmartRelayPurchase.objects.filter(pk=row.pk).update(status='waiting_rule', error_code='cap', order=None,
                                                         updated_at=timezone.now())
     try:
-        post_system_note(row.user, MESSAGES['cap'], f'relay_purchase:{row.internal_id}:cap:{mark}',
+        from .relay_trades import lang_of, said
+        post_system_note(row.user, said(MESSAGES['cap'], lang_of(row)), f'relay_purchase:{row.internal_id}:cap:{mark}',
                          actions=[{'type': 'purchase_cap', 'purchase': str(row.internal_id),
                                    'target': str(row.internal_id), 'label': 'Subir mi límite de compras'}])
     except Exception:  # noqa: BLE001
@@ -581,7 +611,8 @@ def finish(row_id: int) -> None:
             escrow.sync_order(row.order)        # the chain is the authority on funded
         except Exception:  # noqa: BLE001 — the keeper re-mirrors depositing orders
             logger.warning('relay purchase %s: order %s not mirrored yet', row.pk, row.order_id, exc_info=True)
-    _end(row, 'done', '', note='done', what=row.title, spent=money(spent))
+    from .relay_trades import lang_of
+    _end(row, 'done', '', note='done', what=row.title, spent=money(spent, lang_of(row)))
 
 
 def status_of(user, internal_id) -> dict | None:
@@ -697,6 +728,16 @@ def prepare_purchase_move(viewer, purchase_id):
 
 # ── every RelayPurchased the reconciler sees ────────────────────────────
 
+PAID_TITLE = {'es': 'Tu Cuenta inteligente pagó una compra', 'pt': 'Sua Cuenta inteligente pagou uma compra',
+              'en': 'Your Cuenta inteligente paid for a purchase'}
+PAID_BODY = {'es': 'Tu Cuenta inteligente pagó una compra en Comprar',
+             'pt': 'Sua Cuenta inteligente pagou uma compra em Comprar',
+             'en': 'Your Cuenta inteligente paid for a purchase in Comprar'}
+NOT_ASKED = {'es': ' No lo pediste en el chat: si no reconoces esta compra, escríbenos aquí ahora.',
+             'pt': ' Você não pediu isso no chat: se não reconhece esta compra, escreva aqui agora.',
+             'en': " You didn't ask for it in the chat: if you don't recognize this purchase, write to us here now."}
+
+
 def on_relay_purchased(account, event) -> None:
     """The owner hears of every hands-off purchase at once: a push always, and a
     chat note unless the chat purchase's own result note covers it. One no
@@ -711,18 +752,21 @@ def on_relay_purchased(account, event) -> None:
     row = SmartRelayPurchase.objects.filter(tx_hash__iexact=tx).first()
     order_id = str(args.get('orderId') or '').lower().removeprefix('0x')
     order = Order.objects.filter(order_id32=order_id).select_related('store').first() if order_id else None
+    from .relay_trades import FOR_VALUE, conversation_lang, lang_of, said
+    user = account.owner_user
+    lang = lang_of(row) if row is not None else conversation_lang(user)
     try:
         from assistant.trades import money
-        value = money(hands_off._usd(int(args.get('amount') or 0)))
+        value = money(hands_off._usd(int(args.get('amount') or 0)), lang)
     except Exception:  # noqa: BLE001
         value = ''
     what = f' {order.product_title}' if order is not None else ''
-    body = f'Tu Cuenta inteligente pagó una compra en Comprar{":" + what if what else ""}' + (
-        f' por {value}' if value else '') + '.'
+    title = said(PAID_TITLE, lang)
+    body = said(PAID_BODY, lang) + (f':{what}' if what else '') + (
+        said(FOR_VALUE, lang).format(value=value) if value else '') + '.'
     if row is None:
-        body += ' No lo pediste en el chat: si no reconoces esta compra, escríbenos aquí ahora.'
-    user = account.owner_user
-    safe(_send, user, 'Tu Cuenta inteligente pagó una compra', body, kind='relay_purchased', account=account,
+        body += said(NOT_ASKED, lang)
+    safe(_send, user, title, body, kind='relay_purchased', account=account,
          security=row is None, data={'tx_hash': tx})
     if row is None:
         try:

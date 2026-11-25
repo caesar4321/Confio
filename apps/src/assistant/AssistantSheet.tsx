@@ -406,7 +406,8 @@ function Bubble({ message, onAction, onWalk, pet, onAvatar, roomy, onPrepared, o
       {message.pending || !handsOffActions(message.actions).length ? null : (() => {
         const { HandsOffCards } = require('./HandsOffCards');
         return (
-        <HandsOffCards messageId={message.id} actions={message.actions} onOpen={(screen: string,
+        <HandsOffCards messageId={message.id} actions={message.actions} onLeave={roomy ? undefined : onWalk}
+          onSettled={onPrepared} onOpen={(screen: string,
           params?: Record<string, unknown>) => {
           onWalk();
           setTimeout(() => {

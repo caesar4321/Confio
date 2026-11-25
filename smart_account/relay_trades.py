@@ -67,19 +67,60 @@ def new_nonce() -> str:
     return secrets.token_hex(12)
 
 
-def kept_meta(meta) -> dict:
-    """Only the headers the gates read (platform, country)."""
-    return {key: str(meta[key])[:200] for key in _META_KEYS if (meta or {}).get(key)}
+def kept_meta(meta, lang: str = '') -> dict:
+    """Only the headers the gates read (platform, country), and the language the
+    chat answered the "sí" in (`lang`: the result note is said in it)."""
+    kept = {key: str(meta[key])[:200] for key in _META_KEYS if (meta or {}).get(key)}
+    if lang in LANGS:
+        kept['lang'] = lang
+    return kept
+
+
+# ── the person's language ───────────────────────────────────────────────
+
+LANGS = ('es', 'pt', 'en')
+# The person's last few messages decide (assistant/confirm.language), as the chat reads them.
+LANG_WINDOW = 3
+
+
+def conversation_lang(user, conversation_id=None, before=None) -> str:
+    """'es' | 'pt' | 'en': the language of the person's latest chat messages (up to `before`)."""
+    try:
+        from assistant import confirm
+        from inbox.models import SupportMessage
+        found = SupportMessage.objects.filter(conversation__user=user, sender_type='USER')
+        if conversation_id:
+            found = found.filter(conversation_id=conversation_id)
+        if before is not None:
+            found = found.filter(created_at__lte=before + timedelta(seconds=5))
+        texts = [body for body in found.order_by('-created_at', '-pk').values_list('body', flat=True)[:LANG_WINDOW]
+                 if (body or '').strip()]
+        return confirm.language(texts) if texts else 'es'
+    except Exception:  # noqa: BLE001 — a note in Spanish beats no note
+        logger.warning('relay: could not read the chat language of user %s', getattr(user, 'pk', None))
+        return 'es'
+
+
+def lang_of(row) -> str:
+    """The language the row's result is told in: the one the chat answered its "sí" in, else the chat's."""
+    said = str((row.meta or {}).get('lang') or '')
+    if said in LANGS:
+        return said
+    return conversation_lang(row.user, row.conversation_id, before=row.created_at)
+
+
+def said(texts: dict, lang: str) -> str:
+    return texts.get(lang) or texts['es']
 
 
 def create(user, *, nonce: str, side: str, asset_kind: str, ticker: str, amount, sell_all: bool, meta,
-           conversation_id=None, status: str = 'pending'):
+           conversation_id=None, status: str = 'pending', lang: str = ''):
     """The row for one "sí". The same question's second "sí" gets the first row back."""
     from .context import own_account
     from .models import SmartRelayTrade
     defaults = dict(smart_account=own_account(user), side=side, asset_kind=asset_kind, ticker=ticker,
                     amount_usd=None if sell_all or amount is None else Decimal(amount), sell_all=bool(sell_all),
-                    meta=kept_meta(meta), status=status, conversation_id=conversation_id)
+                    meta=kept_meta(meta, lang), status=status, conversation_id=conversation_id)
     try:
         with transaction.atomic():
             row, created = SmartRelayTrade.objects.get_or_create(user=user, nonce=nonce, defaults=defaults)
@@ -150,22 +191,48 @@ def _reply_state(row) -> str:
 
 
 MESSAGES = {
-    'done_buy': 'Listo: compré {what} por {spent} desde tu Cuenta inteligente. Lo tienes ahí.',
-    'done_sell': 'Listo: vendí {what} y recibiste {got} en tu Cuenta inteligente.',
-    'market_closed': 'No compré ni vendí nada: el mercado de acciones está cerrado. Pídemelo cuando abra.',
-    'cap': 'Todavía no lo hice: esa operación supera tu límite semanal (compras y ventas cuentan). Si lo subes '
-           'con Confío Face, la hago y te aviso aquí.',
-    'balance': 'No compré nada: tu Cuenta inteligente no tiene dólares suficientes. Puedes recargar desde el chat.',
-    'price_moved': 'No lo hice: el precio se movió mientras lo preparaba y no se movió nada. Inténtalo de nuevo.',
-    'reverted': 'No se hizo: la operación no pasó en la red y no se movió nada. Puedes pedírmelo otra vez.',
-    'failed': 'No pude hacerlo ahora y no se movió nada. Puedes pedírmelo otra vez o hacerlo tú en Invertir.',
+    'done_buy': {'es': 'Listo: compré {what} por {spent} desde tu Cuenta inteligente. Lo tienes ahí.',
+                 'pt': 'Pronto: comprei {what} por {spent} pela sua Cuenta inteligente. Já está lá.',
+                 'en': 'Done: I bought {what} for {spent} from your Cuenta inteligente. It is there now.'},
+    'done_sell': {'es': 'Listo: vendí {what} y recibiste {got} en tu Cuenta inteligente.',
+                  'pt': 'Pronto: vendi {what} e você recebeu {got} na sua Cuenta inteligente.',
+                  'en': 'Done: I sold {what} and you got {got} in your Cuenta inteligente.'},
+    'market_closed': {'es': 'No compré ni vendí nada: el mercado de acciones está cerrado. Pídemelo cuando abra.',
+                      'pt': 'Não comprei nem vendi nada: o mercado de ações está fechado. Peça de novo quando abrir.',
+                      'en': "I didn't buy or sell anything: the stock market is closed. Ask me again when it opens."},
+    'cap': {'es': 'Todavía no lo hice: esa operación supera tu límite semanal (compras y ventas cuentan). Si lo subes '
+                  'con Confío Face, la hago y te aviso aquí.',
+            'pt': 'Ainda não fiz: essa operação passa do seu limite semanal (compras e vendas contam). Se você '
+                  'aumentar com Confío Face, eu faço e aviso aqui.',
+            'en': "I haven't done it yet: that trade is above your weekly limit (buys and sells count). Raise it "
+                  "with Confío Face and I'll do it and tell you here."},
+    'balance': {'es': 'No compré nada: tu Cuenta inteligente no tiene dólares suficientes. Puedes recargar desde el '
+                      'chat.',
+                'pt': 'Não comprei nada: sua Cuenta inteligente não tem dólares suficientes. Você pode recarregar '
+                      'pelo chat.',
+                'en': "I didn't buy anything: your Cuenta inteligente doesn't have enough dollars. You can top up "
+                      "from the chat."},
+    'price_moved': {'es': 'No lo hice: el precio se movió mientras lo preparaba y no se movió nada. Inténtalo de '
+                          'nuevo.',
+                    'pt': 'Não fiz: o preço mudou enquanto eu preparava e nada foi movido. Tente de novo.',
+                    'en': "I didn't do it: the price moved while I was preparing it, and nothing moved. Try again."},
+    'reverted': {'es': 'No se hizo: la operación no pasó en la red y no se movió nada. Puedes pedírmelo otra vez.',
+                 'pt': 'Não foi feito: a operação não passou na rede e nada foi movido. Pode me pedir de novo.',
+                 'en': "It didn't go through: the trade failed on the network and nothing moved. You can ask me "
+                       "again."},
+    'failed': {'es': 'No pude hacerlo ahora y no se movió nada. Puedes pedírmelo otra vez o hacerlo tú en Invertir.',
+               'pt': 'Não consegui fazer agora e nada foi movido. Pode me pedir de novo ou fazer você em Invertir.',
+               'en': "I couldn't do it now and nothing moved. You can ask me again or do it yourself in Invertir."},
 }
+# What a sell's note says when the dollars it brought are unknown.
+SOME_DOLLARS = {'es': 'los dólares', 'pt': 'os dólares', 'en': 'the dollars'}
+GOLD = {'es': 'oro digital (XAUt)', 'pt': 'ouro digital (XAUt)', 'en': 'digital gold (XAUt)'}
 
 
 def _post(row, key: str, **values) -> None:
     from assistant.service import post_system_note
     try:
-        body = MESSAGES[key].format(**values)
+        body = said(MESSAGES[key], lang_of(row)).format(**values)
         post_system_note(row.user, body, f'relay_trade:{row.internal_id}:{row.status}',
                          actions=[card(row)])
         from .models import SmartRelayTrade
@@ -188,7 +255,8 @@ def _offer_raise(row) -> None:
                                                      updated_at=timezone.now())
     try:
         # One note per raise offer: a second over-cap after a raise is a new message (the tag dedupes).
-        post_system_note(row.user, MESSAGES['cap'], f'relay_trade:{row.internal_id}:cap:{_offer_mark(row)}',
+        post_system_note(row.user, said(MESSAGES['cap'], lang_of(row)),
+                         f'relay_trade:{row.internal_id}:cap:{_offer_mark(row)}',
                          actions=[{'type': 'trade_cap', 'trade': str(row.internal_id),
                                    'target': str(row.internal_id), 'label': 'Subir mi límite semanal'}])
     except Exception:  # noqa: BLE001 — the trade waits; asking again shows the card too
@@ -494,22 +562,23 @@ def finish(row_id: int) -> None:
         if event:
             break
     from assistant.trades import money
+    lang = lang_of(row)
     values = {'what': row.ticker.removesuffix('on'), 'spent': '', 'got': ''}
     if event:
         SmartRelayTrade.objects.filter(pk=row.pk).update(
             amount_in=event['amountIn'], amount_out=event['amountOut'], usd_counted=event['usdCounted'])
         dollar_in = event['tokenIn'] in (chain.cusd_plus_address(), chain.cusd_address())
         if dollar_in:
-            values['spent'] = money(hands_off.dollar_usd(event['tokenIn'], int(event['amountIn'])))
+            values['spent'] = money(hands_off.dollar_usd(event['tokenIn'], int(event['amountIn'])), lang)
         else:
-            values['got'] = money(hands_off.dollar_usd(event['tokenOut'], int(event['amountOut'])))
+            values['got'] = money(hands_off.dollar_usd(event['tokenOut'], int(event['amountOut'])), lang)
     if not values['spent'] and row.amount_usd is not None:
-        values['spent'] = money(row.amount_usd)
+        values['spent'] = money(row.amount_usd, lang)
     if not values['got']:
-        values['got'] = 'los dólares'
+        values['got'] = said(SOME_DOLLARS, lang)
     if row.asset_kind == 'crypto':
         token = crypto_catalog.by_symbol(row.ticker)
-        values['what'] = 'oro digital (XAUt)' if row.ticker == 'XAUT' else (token.symbol if token else row.ticker)
+        values['what'] = said(GOLD, lang) if row.ticker == 'XAUT' else (token.symbol if token else row.ticker)
     _end(row, 'done', '', note='done_buy' if row.side == 'buy' else 'done_sell', **values)
 
 
@@ -525,7 +594,7 @@ def status_of(user, internal_id) -> dict | None:
     shown = {'waiting_rule': 'waiting_rule', 'waiting_move': 'waiting_move', 'pending': 'pending',
              'sent': 'pending', 'unknown': 'pending'}
     out = {'status': shown.get(row.status, row.status), 'tx_hash': row.tx_hash or '',
-           'label': label(row), 'error_code': row.error_code or ''}
+           'label': label(row), 'error_code': row.error_code or '', 'asset_kind': row.asset_kind}
     if row.status == 'waiting_rule':
         # The cap card's figures: the choices, the one preselected, the cap today (when raising).
         rule = hands_off.trade_rule(row.smart_account)
@@ -561,6 +630,18 @@ def _asset_name(address: str) -> str:
     return token.symbol if token is not None else address[:10]
 
 
+TRADED_TITLE = {
+    'buy': {'es': 'Tu Cuenta inteligente compró {asset}', 'pt': 'Sua Cuenta inteligente comprou {asset}',
+            'en': 'Your Cuenta inteligente bought {asset}'},
+    'sell': {'es': 'Tu Cuenta inteligente vendió {asset}', 'pt': 'Sua Cuenta inteligente vendeu {asset}',
+             'en': 'Your Cuenta inteligente sold {asset}'},
+}
+FOR_VALUE = {'es': ' por {value}', 'pt': ' por {value}', 'en': ' for {value}'}
+NOT_ASKED = {'es': ' No lo pediste en el chat: si no reconoces esta operación, escríbenos aquí ahora.',
+             'pt': ' Você não pediu isso no chat: se não reconhece esta operação, escreva aqui agora.',
+             'en': " You didn't ask for it in the chat: if you don't recognize this trade, write to us here now."}
+
+
 def on_relay_traded(account, event) -> None:
     """The owner hears of every hands-off trade at once: a push always, and a
     chat note unless the chat trade's own result note covers it. A trade no
@@ -576,17 +657,18 @@ def on_relay_traded(account, event) -> None:
     asset = _asset_name(str(args.get('tokenOut' if buy else 'tokenIn') or ''))
     dollar_token, units = (args.get('tokenIn'), args.get('amountIn')) if buy else (args.get('tokenOut'),
                                                                                   args.get('amountOut'))
+    user = account.owner_user
+    lang = lang_of(row) if row is not None else conversation_lang(user)
     try:
         from assistant.trades import money
-        value = money(hands_off.dollar_usd(str(dollar_token).lower(), int(units or 0)))
+        value = money(hands_off.dollar_usd(str(dollar_token).lower(), int(units or 0)), lang)
     except Exception:  # noqa: BLE001 — the alert goes out without the figure
         value = ''
-    verb = 'compró' if buy else 'vendió'
-    body = f'Tu Cuenta inteligente {verb} {asset}' + (f' por {value}' if value else '') + '.'
+    title = said(TRADED_TITLE['buy' if buy else 'sell'], lang).format(asset=asset)
+    body = title + (said(FOR_VALUE, lang).format(value=value) if value else '') + '.'
     if row is None:
-        body += ' No lo pediste en el chat: si no reconoces esta operación, escríbenos aquí ahora.'
-    user = account.owner_user
-    safe(_send, user, f'Tu Cuenta inteligente {verb} {asset}', body, kind='relay_traded', account=account,
+        body += said(NOT_ASKED, lang)
+    safe(_send, user, title, body, kind='relay_traded', account=account,
          security=row is None, data={'tx_hash': tx})
     if row is None:
         try:

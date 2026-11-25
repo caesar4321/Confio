@@ -166,6 +166,9 @@ class AssistantRelayTradeType(graphene.ObjectType):
     current_cap = graphene.String()
     # While waiting_move: the dollars the move card moves in (the server's).
     move_amount = graphene.String()
+    # stock | crypto: which Comunidad share the card offers once done (asked in its own query: older
+    # servers lack it).
+    asset_kind = graphene.String()
 
 
 def _hands_off_prepare(info, fn):

@@ -1,6 +1,7 @@
 // Hands-off chat trades by the Cuenta inteligente (server: smart_account/relay_trades.py, assistant/trades.py).
 // Its own query and mutations, never fields in the shared thread query: a server without them rejects only these.
 import { gql } from '@apollo/client';
+import { createContext, useContext, useEffect, useRef } from 'react';
 
 import type { SmartAccountPreparedBatch } from '../services/smartAccount';
 import { isSchemaMismatch } from '../utils/graphqlSchemaMismatch';
@@ -120,4 +121,35 @@ export function prepareTradeMove(client: Client, trade: string) {
 
 export function prepareAccountMigration(client: Client) {
   return prepared(client, PREPARE_ACCOUNT_MIGRATION, {}, 'prepareAssistantAccountMigration');
+}
+
+
+/** Reloads the open conversation (AssistantSheet's thread refetch); HandsOffCards provides it. */
+export const ThreadRefreshContext = createContext<(() => void) | null>(null);
+
+// The result note is posted right after the row turns final: read the thread again a moment later too.
+export const SETTLED_REFRESH_AGAIN_MS = 3000;
+
+/**
+ * A hands-off card that saw its trade or purchase leave 'pending' reloads the conversation, so the result
+ * note the server posted (and the share it carries) shows now, not on the next poll or reopen. Never for a
+ * card that appeared already settled (an old message).
+ */
+export function useSettledRefresh(status: string | null | undefined) {
+  const refresh = useContext(ThreadRefreshContext);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const was = useRef<string | null | undefined>(undefined);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  useEffect(() => {
+    const before = was.current;
+    was.current = status;
+    if (!status || before !== 'pending' || status === 'pending') {
+      return;
+    }
+    const run = () => { refreshRef.current?.(); };
+    run();
+    timer.current = setTimeout(run, SETTLED_REFRESH_AGAIN_MS);
+  }, [status]);
 }

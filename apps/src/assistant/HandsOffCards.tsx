@@ -8,24 +8,78 @@
 //   relay_purchase, purchase_cap, purchase_move, purchase_offer: the same for a Comprar purchase (ComprarCards.tsx)
 //
 // Every figure is the server's (assistantRelayTrade); the only number sent from here is the cap the person picks.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { useApolloClient } from '@apollo/client';
+import { gql, useApolloClient } from '@apollo/client';
+import Icon from 'react-native-vector-icons/Feather';
 
 import { Text, TextInput } from '../components/common/AppText';
 import { Button } from '../components/common/Button';
 import { SignFlowSheet } from '../components/smartAccount/SignFlowSheet';
 import { useSignFlow } from '../components/smartAccount/useSignFlow';
 import { DEX_TRADING_UI_ENABLED } from '../config/features';
+import { requestActivityShare, type ActivityShareGroup } from '../services/communityShare';
 import type { AssistantAction } from './api';
 import { ComprarCard } from './ComprarCards';
 import { PURCHASE_TYPES } from './comprarHandsOff';
 import {
   capAmount, capText, diyScreenAllowed, GET_RELAY_TRADE, handsOffActions, prepareAccountMigration,
-  prepareTradeCap, prepareTradeMove, RelayTrade, RESUME_RELAY_TRADE,
+  prepareTradeCap, prepareTradeMove, RelayTrade, RESUME_RELAY_TRADE, ThreadRefreshContext, useSettledRefresh,
 } from './handsOff';
 
 type Open = (screen: string, params?: Record<string, unknown>) => void;
+/** In the floating box: closes it before the share sheet opens. */
+type Leave = (() => void) | undefined;
+
+// Its own query: a server without `assetKind` fails only this, never the card's status.
+export const GET_RELAY_TRADE_KIND = gql`
+  query AssistantRelayTradeKind($trade: UUID!) {
+    assistantRelayTrade(trade: $trade) { assetKind }
+  }
+`;
+
+/** The Comunidad share a done hands-off trade offers: none for bitcoin or gold where the app ships without them. */
+export function shareGroupFor(assetKind: string | null | undefined, dexEnabled: boolean): ActivityShareGroup | null {
+  if (assetKind === 'stock') return 'stock';
+  if (assetKind === 'crypto') return dexEnabled ? 'crypto' : null;
+  return null;
+}
+
+/**
+ * The share of a done trade, as the signed chat trade's card: the sheet opens by itself once, when this card
+ * saw the trade turn done (never for a trade already done when the card appeared, an old message scrolled
+ * back); not in the floating box (iOS shows one modal at a time), where it is the card's button.
+ */
+function useDoneShare(trade: string | null | undefined, status: string | undefined, txHash: string, onLeave: Leave) {
+  const client = useApolloClient();
+  const firstSeen = useRef<string | null>(null);
+  const offered = useRef(false);
+  const [group, setGroup] = useState<ActivityShareGroup | null>(null);
+  if (status && firstSeen.current === null) {
+    firstSeen.current = status;
+  }
+  useEffect(() => {
+    if (status !== 'done' || !txHash || !trade) {
+      return undefined;
+    }
+    let stop = false;
+    Promise.resolve()
+      .then(() => client.query({ query: GET_RELAY_TRADE_KIND, variables: { trade }, fetchPolicy: 'no-cache' }))
+      .then((result) => {
+        if (stop) return;
+        const found = shareGroupFor(result.data?.assistantRelayTrade?.assetKind, DEX_TRADING_UI_ENABLED);
+        setGroup(found);
+        const live = firstSeen.current !== null && firstSeen.current !== 'done';
+        if (found && live && !onLeave && !offered.current) {
+          offered.current = true;
+          requestActivityShare({ group: found, reference: txHash });
+        }
+      })
+      .catch(() => undefined);   // an older server: no share
+    return () => { stop = true; };
+  }, [client, status, txHash, trade, onLeave]);
+  return group;
+}
 
 const INK = '#111827';
 const MUTED = '#6B7280';
@@ -58,7 +112,7 @@ function useRelayTrade(trade: string | null | undefined) {
   return { row, load };
 }
 
-export function RelayTradeCard({ action }: { action: AssistantAction }) {
+export function RelayTradeCard({ action, onLeave }: { action: AssistantAction; onLeave?: () => void }) {
   const { row, load } = useRelayTrade(action.target);
   useEffect(() => {
     let stop = false;
@@ -73,6 +127,14 @@ export function RelayTradeCard({ action }: { action: AssistantAction }) {
     return () => { stop = true; if (timer) clearTimeout(timer); };
   }, [load]);
   const status = row?.status ?? 'pending';
+  const txHash = row?.txHash || '';
+  const group = useDoneShare(action.target, row?.status, txHash, onLeave);
+  useSettledRefresh(row?.status);
+  const share = () => {
+    if (!group) return;
+    onLeave?.();
+    setTimeout(() => requestActivityShare({ group, reference: txHash }), onLeave ? 250 : 0);
+  };
   return (
     <View style={styles.card} testID="relay-trade-card">
       <Text style={styles.title}>{row?.label || action.label}</Text>
@@ -80,11 +142,18 @@ export function RelayTradeCard({ action }: { action: AssistantAction }) {
         {status === 'pending' ? <ActivityIndicator size="small" /> : null}
         <Text style={styles.hint}>{STATUS_WORDS[status] ?? STATUS_WORDS.pending}</Text>
       </View>
+      {status === 'done' && group && txHash ? (
+        <Pressable onPress={share} accessibilityRole="button" accessibilityLabel="Compartir"
+          testID="relay-trade-share" style={({ pressed }) => [styles.share, pressed && styles.sharePressed]}>
+          <Icon name="share-2" size={16} color="#047857" />
+          <Text style={styles.shareText}>Compartir</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
-export function TradeCapCard({ action }: { action: AssistantAction }) {
+export function TradeCapCard({ action, onLeave }: { action: AssistantAction; onLeave?: () => void }) {
   const client = useApolloClient();
   const { row, load } = useRelayTrade(action.target);
   const [picked, setPicked] = useState<string | null>(null);
@@ -110,7 +179,7 @@ export function TradeCapCard({ action }: { action: AssistantAction }) {
   }, [row, picked]);
 
   if (resumed || (row && row.status !== 'waiting_rule')) {
-    return <RelayTradeCard action={action} />;
+    return <RelayTradeCard action={action} onLeave={onLeave} />;
   }
   const choices = row?.choices?.length ? row.choices : ['250', '1000', '2500'];
   const raise = row?.mode === 'raise';
@@ -153,7 +222,7 @@ export function TradeCapCard({ action }: { action: AssistantAction }) {
   );
 }
 
-export function TradeMoveCard({ action }: { action: AssistantAction }) {
+export function TradeMoveCard({ action, onLeave }: { action: AssistantAction; onLeave?: () => void }) {
   const client = useApolloClient();
   const { row, load } = useRelayTrade(action.target);
   const [resumed, setResumed] = useState(false);
@@ -170,7 +239,7 @@ export function TradeMoveCard({ action }: { action: AssistantAction }) {
   });
   useEffect(() => { load(); }, [load]);
   if (resumed || (row && row.status !== 'waiting_move')) {
-    return <RelayTradeCard action={action} />;
+    return <RelayTradeCard action={action} onLeave={onLeave} />;
   }
   const amount = row?.moveAmount ? `US$${Number(row.moveAmount).toFixed(2)}` : '';
   return (
@@ -229,23 +298,25 @@ export function MigrationCard({ action }: { action: AssistantAction }) {
 }
 
 /** Every hands-off card of one message (one of each kind). */
-export function HandsOffCards({ messageId, actions, onOpen }: {
-  messageId: string; actions: AssistantAction[]; onOpen: Open;
+export function HandsOffCards({ messageId, actions, onOpen, onLeave, onSettled }: {
+  messageId: string; actions: AssistantAction[]; onOpen: Open; onLeave?: () => void;
+  /** Reloads the conversation: a trade or purchase seen settling brings its result note in at once. */
+  onSettled?: () => void;
 }) {
   const seen = new Set<string>();
   return (
-    <>
+    <ThreadRefreshContext.Provider value={onSettled ?? null}>
       {handsOffActions(actions).filter((a) => !seen.has(a.type) && seen.add(a.type)).map((a) => {
         const key = `${messageId}:${a.type}`;
-        if (a.type === 'relay_trade' && a.target) return <RelayTradeCard key={key} action={a} />;
-        if (a.type === 'trade_cap' && a.target) return <TradeCapCard key={key} action={a} />;
-        if (a.type === 'trade_move' && a.target) return <TradeMoveCard key={key} action={a} />;
+        if (a.type === 'relay_trade' && a.target) return <RelayTradeCard key={key} action={a} onLeave={onLeave} />;
+        if (a.type === 'trade_cap' && a.target) return <TradeCapCard key={key} action={a} onLeave={onLeave} />;
+        if (a.type === 'trade_move' && a.target) return <TradeMoveCard key={key} action={a} onLeave={onLeave} />;
         if (a.type === 'trade_offer') return <TradeOfferCard key={key} action={a} onOpen={onOpen} />;
         if (a.type === 'account_migration') return <MigrationCard key={key} action={a} />;
         if (PURCHASE_TYPES.has(a.type)) return <ComprarCard key={key} action={a} onOpen={onOpen} />;
         return null;
       })}
-    </>
+    </ThreadRefreshContext.Provider>
   );
 }
 
@@ -264,6 +335,12 @@ const styles = StyleSheet.create({
   choiceTextOn: { fontWeight: '700', color: '#047857' },
   input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8,
     fontSize: 15, color: INK },
+  share: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 40,
+    borderRadius: 12, borderWidth: 1, borderColor: '#A7F3D0',
+  },
+  sharePressed: { backgroundColor: '#ECFDF5' },
+  shareText: { fontSize: 15, fontWeight: '700', color: '#047857' },
   link: { alignSelf: 'center', minHeight: 36, justifyContent: 'center', paddingHorizontal: 12 },
   linkText: { fontSize: 14, color: MUTED, textDecorationLine: 'underline' },
 });

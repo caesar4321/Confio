@@ -19,7 +19,7 @@ import {
   GET_RELAY_PURCHASE, PURCHASE_CAP_CHOICES, preparePurchaseCap, preparePurchaseMove, purchaseCapAmount,
   RelayPurchase, RESUME_RELAY_PURCHASE,
 } from './comprarHandsOff';
-import { capText } from './handsOff';
+import { capText, useSettledRefresh } from './handsOff';
 
 type Open = (screen: string, params?: Record<string, unknown>) => void;
 
@@ -84,6 +84,7 @@ export function RelayPurchaseCard({ action, onOpen }: { action: AssistantAction;
     tick();
     return () => { stop = true; if (timer) clearTimeout(timer); };
   }, [load]);
+  useSettledRefresh(row?.status);
   const status = row?.status ?? 'pending';
   return (
     <View style={styles.card} testID="relay-purchase-card">

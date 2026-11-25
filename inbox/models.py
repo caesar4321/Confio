@@ -847,10 +847,16 @@ class CommunityActivityShare(models.Model):
     """A member post made from one of their own money movements (a stock
     trade, a top-up, a withdrawal, a send). The post's metadata holds the
     snapshot readers see; this row ties it to the activity so one movement
-    is shared at most once while its post stands."""
+    is shared at most once while its post stands. A hands-off chat trade of
+    the member's Cuenta inteligente is no ledger row of theirs: it is tied to
+    its account trade instead (exactly one of the two is set)."""
     content_item = models.OneToOneField(ContentItem, on_delete=models.CASCADE, related_name='activity_share')
     unified_transaction = models.ForeignKey(
-        'users.UnifiedTransactionTable', on_delete=models.PROTECT, related_name='community_shares')
+        'users.UnifiedTransactionTable', on_delete=models.PROTECT, related_name='community_shares',
+        null=True, blank=True)
+    account_trade = models.ForeignKey(
+        'inbox.SmartAccountTrade', on_delete=models.PROTECT, related_name='community_shares',
+        null=True, blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='community_activity_shares')
     kind = models.CharField(max_length=20)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -859,7 +865,7 @@ class CommunityActivityShare(models.Model):
         indexes = [models.Index(fields=['unified_transaction'], name='inbox_activity_share_tx_idx')]
 
     def __str__(self):
-        return f'{self.user_id} shared {self.kind} {self.unified_transaction_id}'
+        return f'{self.user_id} shared {self.kind} {self.unified_transaction_id or f"a{self.account_trade_id}"}'
 
 
 class CommunityProfileSettings(models.Model):

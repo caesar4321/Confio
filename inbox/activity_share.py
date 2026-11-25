@@ -662,8 +662,11 @@ def has_other_share(item, *, include_pending=False) -> bool:
     statuses = [CommunityReviewStatus.APPROVED]
     if include_pending:
         statuses.append(CommunityReviewStatus.PENDING)
+    # The same activity: its ledger row, or (a hands-off trade) its account trade.
+    same = ({'unified_transaction_id': share.unified_transaction_id} if share.unified_transaction_id is not None
+            else {'account_trade_id': share.account_trade_id})
     return CommunityActivityShare.objects.filter(
-        unified_transaction_id=share.unified_transaction_id,
+        **same,
         user_id=share.user_id,
         content_item__community_review__status__in=statuses,
     ).exclude(content_item_id=item.id).exists()
@@ -708,14 +711,6 @@ def share_activity(user, business, unified_id, note: str = '', show_amount: bool
     from users.models import User
 
     from . import community
-    from .models import (
-        CommunityActivityShare,
-        CommunityPostReview,
-        ContentItem,
-        ContentItemType,
-        ContentStatus,
-        OwnerType,
-    )
 
     note = (note or '').strip()
     if len(note) > NOTE_MAX_CHARS:
@@ -735,29 +730,45 @@ def share_activity(user, business, unified_id, note: str = '', show_amount: bool
                 raise ActivityShareError('already_shared', ALREADY_SHARED)
             raise ActivityShareError('not_shareable', NOT_SHAREABLE)
         row, snap = found
-        activity = {**snap.data, 'show_amount': bool(show_amount)}
-        item = ContentItem.objects.create(
-            channel=community.community_channel(),
-            author_user=user,
-            owner_type=OwnerType.USER,
-            owner_user=user,
-            item_type=ContentItemType.TEXT,
-            status=ContentStatus.DRAFT,
-            body=note,
-            tag=community.COMMUNITY_TAG,
-            send_push=False,
-            send_in_app=False,
-            metadata={'community': True, 'activity': activity},
-        )
-        CommunityActivityShare.objects.create(
-            content_item=item, unified_transaction=row, user=user, kind=snap.kind)
-        review = CommunityPostReview.objects.create(content_item=item)
-        review_id = review.id
+        item = _create_post(user, note, snap, show_amount, unified_transaction=row)
         consume_intents_for(row, user, item)
-        if note:
-            transaction.on_commit(lambda: community.enqueue_review(review_id))
-        else:
-            transaction.on_commit(lambda: approve_template(review_id))
+    return item
+
+
+def _create_post(user, note, snap, show_amount, **activity_link):
+    """The post and its share row (`activity_link`: the ledger row or the account trade), inside the caller's
+    transaction and author lock. A template goes up at once; a note is reviewed."""
+    from . import community
+    from .models import (
+        CommunityActivityShare,
+        CommunityPostReview,
+        ContentItem,
+        ContentItemType,
+        ContentStatus,
+        OwnerType,
+    )
+
+    activity = {**snap.data, 'show_amount': bool(show_amount)}
+    item = ContentItem.objects.create(
+        channel=community.community_channel(),
+        author_user=user,
+        owner_type=OwnerType.USER,
+        owner_user=user,
+        item_type=ContentItemType.TEXT,
+        status=ContentStatus.DRAFT,
+        body=note,
+        tag=community.COMMUNITY_TAG,
+        send_push=False,
+        send_in_app=False,
+        metadata={'community': True, 'activity': activity},
+    )
+    CommunityActivityShare.objects.create(content_item=item, user=user, kind=snap.kind, **activity_link)
+    review = CommunityPostReview.objects.create(content_item=item)
+    review_id = review.id
+    if note:
+        transaction.on_commit(lambda: community.enqueue_review(review_id))
+    else:
+        transaction.on_commit(lambda: approve_template(review_id))
     return item
 
 
@@ -815,14 +826,19 @@ def _position_state(activity, trades_by_wallet) -> tuple[str, Decimal | None]:
     the member bought the stock again afterwards; ('open', None) while it is
     still held; ('unknown', None) when the history can't be read, which
     shows no P&L rather than a live number that may not apply."""
-    wallet = activity.get('wallet')
+    account = activity.get('account') if not activity.get('wallet') else None
+    wallet = activity.get('wallet') or account
     if not wallet:
         return 'unknown', None
     crypto = activity.get('kind') in CRYPTO_KINDS
     key = ('crypto' if crypto else 'stock', wallet)
     if key not in trades_by_wallet:
         try:
-            trades_by_wallet[key] = (_crypto_wallet_trades if crypto else _wallet_trades)(wallet)
+            if account:
+                # A hands-off trade: the Cuenta inteligente's own trades.
+                trades_by_wallet[key] = _account_ledger(account, crypto)
+            else:
+                trades_by_wallet[key] = (_crypto_wallet_trades if crypto else _wallet_trades)(wallet)
         except Exception:  # noqa: BLE001
             logger.warning('activity share: could not read trades of a wallet')
             trades_by_wallet[key] = None
@@ -1046,7 +1062,7 @@ INTENT_WINDOWS = {
     'pay': timedelta(hours=2),
     'ramp': timedelta(hours=48),
 }
-PREVIEW_ONLY_KEYS = ('wallet', 'batch_id', 'position_id')
+PREVIEW_ONLY_KEYS = ('wallet', 'account', 'batch_id', 'position_id')
 
 
 def _stock_preview(user, reference):
@@ -1258,12 +1274,15 @@ def consume_intents_for(row, user, content_item):
     """A share of this activity exists: any intent still waiting for it is
     done, so it can never publish a second copy later (e.g. after the
     member deletes the first)."""
+    return _consume_references(references_for_row(row), user, content_item)
+
+
+def _consume_references(refs, user, content_item):
     from django.db.models import Q
     from django.db.models.functions import Lower
 
     from .models import ActivityShareIntent, ActivityShareIntentStatus
 
-    refs = references_for_row(row)
     if not refs:
         return 0
     lowered = {r.lower() for r in refs}
@@ -1282,6 +1301,15 @@ def preview_activity(user, group, reference):
     if found is not None:
         row, snap = found
         return row, snap, True
+    account = _account_target(user, group, reference)
+    if account is not None:
+        # A hands-off chat trade: no ledger row of the member's, ever.
+        if account.trade is not None:
+            if account.snap is None or is_account_shared(account.trade.id, user):
+                return None
+            return None, account.snap, True
+        snap = _relay_preview(account.relay, group)
+        return (None, snap, False) if snap is not None else None
     previewer = PREVIEWERS.get(group or '')
     if previewer is None or not reference:
         return None
@@ -1312,6 +1340,9 @@ def share_or_schedule(user, business, group, reference, note='', show_amount=Tru
     block = community.posting_block(user, business, activity=True)
     if block:
         raise ActivityShareError(block, community.BLOCK_MESSAGES[block])
+    account = _account_target(user, group, reference)
+    if account is not None:
+        return _share_or_schedule_account(user, business, group, reference, account, note, show_amount)
     preview = preview_activity(user, group, reference)
     if preview is None:
         raise ActivityShareError('not_shareable', NOT_SHAREABLE)
@@ -1329,10 +1360,6 @@ def share_or_schedule(user, business, group, reference, note='', show_amount=Tru
 
 
 def _schedule_locked(user, group, reference, note, show_amount):
-    from django.db import IntegrityError
-
-    from .models import ActivityShareIntent, ActivityShareIntentStatus
-
     settled = _row_for_reference(user, reference)
     if settled is not None and is_shared(settled.id, user):
         raise ActivityShareError('already_shared', ALREADY_SHARED)
@@ -1340,6 +1367,14 @@ def _schedule_locked(user, group, reference, note, show_amount):
     if found is not None:
         # Settled while we looked: share it now rather than schedule.
         return 'published', share_activity(user, None, found[0].id, note, show_amount)
+    return 'scheduled', _new_intent(user, group, reference, note, show_amount)
+
+
+def _new_intent(user, group, reference, note, show_amount):
+    from django.db import IntegrityError
+
+    from .models import ActivityShareIntent, ActivityShareIntentStatus
+
     try:
         intent, _ = ActivityShareIntent.objects.update_or_create(
             user=user, group=group, reference=reference[:128], status=ActivityShareIntentStatus.PENDING,
@@ -1349,12 +1384,11 @@ def _schedule_locked(user, group, reference, note, show_amount):
     except IntegrityError:
         intent = ActivityShareIntent.objects.get(
             user=user, group=group, reference=reference[:128], status=ActivityShareIntentStatus.PENDING)
-    return 'scheduled', intent
+    return intent
 
 
 def resolve_share_intents(limit: int = 200) -> dict:
     """Publish pending intents whose activity has settled; drop expired ones."""
-    from . import community
     from .models import ActivityShareIntent, ActivityShareIntentStatus
 
     now = timezone.now()
@@ -1377,6 +1411,10 @@ def resolve_share_intents(limit: int = 200) -> dict:
             locked = ActivityShareIntent.objects.select_for_update(skip_locked=True).filter(
                 id=intent.id, status=ActivityShareIntentStatus.PENDING).first()
             if locked is None:
+                continue
+            account = _account_target(locked.user, locked.group, locked.reference)
+            if account is not None:
+                _resolve_account_intent(locked, account, now, out)
                 continue
             settled = _row_for_reference(locked.user, locked.reference)
             if settled is not None and is_shared(settled.id, locked.user):
@@ -1415,18 +1453,256 @@ def resolve_share_intents(limit: int = 200) -> dict:
                 locked.save(update_fields=['status', 'last_error', 'resolved_at'])
                 out['failed'] += 1
                 continue
-            locked.status = ActivityShareIntentStatus.PUBLISHED
-            locked.content_item = item
-            locked.resolved_at = now
-            locked.save(update_fields=['status', 'content_item', 'resolved_at'])
+            _mark_published(locked, item, now)
             out['published'] += 1
-            # The sheet said "se publicará" and stopped following: always tell
-            # the member how it went. A template is up now; a note is told
-            # when its review finishes, however quickly.
-            if locked.note:
-                item.metadata = {**(item.metadata or {}), community.NOTIFY_ON_REVIEW: True}
-                item.save(update_fields=['metadata', 'updated_at'])
-            else:
-                review_id = item.community_review.id
-                transaction.on_commit(lambda rid=review_id: community.notify_post_reviewed(rid))
     return out
+
+
+def _mark_published(locked, item, now):
+    from . import community
+    from .models import ActivityShareIntentStatus
+
+    locked.status = ActivityShareIntentStatus.PUBLISHED
+    locked.content_item = item
+    locked.resolved_at = now
+    locked.save(update_fields=['status', 'content_item', 'resolved_at'])
+    # The sheet said "se publicará" and stopped following: always tell
+    # the member how it went. A template is up now; a note is told
+    # when its review finishes, however quickly.
+    if locked.note:
+        item.metadata = {**(item.metadata or {}), community.NOTIFY_ON_REVIEW: True}
+        item.save(update_fields=['metadata', 'updated_at'])
+    else:
+        review_id = item.community_review.id
+        transaction.on_commit(lambda rid=review_id: community.notify_post_reviewed(rid))
+
+
+
+# ── Hands-off trades of the member's Cuenta inteligente ──────────────────────
+#
+# A trade the member asked for in the Confío IA chat and their Cuenta
+# inteligente made (smart_account/relay_trades.py: SmartRelayTrade 'done') is
+# no ledger row of theirs. Its status reference is the relayTrade tx hash; its
+# final view is the account trade decoded from the RelayTraded event
+# (inbox/account_trades.py: SmartAccountTrade, exact units and dollars). Until
+# the reconciler indexed that event, the sheet shows a preview from the trade
+# row and "Compartir" leaves an intent, as for a wallet trade. Only the trade's
+# owner, from their own account; once per post standing, as every share.
+
+ACCOUNT_GROUPS = {'stock': STOCK_KINDS, 'crypto': CRYPTO_KINDS}
+
+
+def _relay_trade(user, reference):
+    """The member's own done hands-off chat trade behind `reference` (its tx hash), or None."""
+    reference = (reference or '').strip()[:128]
+    if not reference.lower().startswith('0x'):
+        return None
+    from smart_account.models import SmartRelayTrade
+
+    relay = (SmartRelayTrade.objects.select_related('smart_account')
+             .filter(user=user, status='done', tx_hash__iexact=reference,
+                     created_at__gte=timezone.now() - SHAREABLE_FOR).first())
+    account = relay.smart_account if relay is not None else None
+    if account is None or account.owner_user_id != user.id:
+        return None
+    return relay
+
+
+def _account_trade(relay):
+    from .models import SmartAccountTrade
+
+    return (SmartAccountTrade.objects
+            .filter(event__tx_hash__iexact=relay.tx_hash, event__name='RelayTraded',
+                    address=relay.smart_account.contract_address.lower())
+            .exclude(kind='').order_by('event__log_index').first())
+
+
+def _account_target(user, group, reference):
+    """SimpleNamespace(relay, trade, snap) for the member's own hands-off trade
+    behind a stock/crypto reference (trade None while it is not indexed yet;
+    snap None when it can't be shared), or None when the reference is not one."""
+    if group not in ACCOUNT_GROUPS:
+        return None
+    try:
+        relay = _relay_trade(user, reference)
+        if relay is None or (relay.asset_kind == 'crypto') != (group == 'crypto'):
+            return None
+        trade = _account_trade(relay)
+        snap = _account_snapshot(trade) if trade is not None else None
+    except Exception:  # noqa: BLE001 — an unreadable trade is simply not shareable
+        logger.exception('activity share: could not read a hands-off trade')
+        return None
+    if snap is not None and snap.kind not in ACCOUNT_GROUPS[group]:
+        snap = None
+    return SimpleNamespace(relay=relay, trade=trade, snap=snap)
+
+
+def is_account_shared(trade_id, user) -> bool:
+    """is_shared for a hands-off trade (its account trade)."""
+    from .models import CommunityActivityShare, CommunityReviewStatus
+
+    return CommunityActivityShare.objects.filter(
+        account_trade_id=trade_id,
+        user=user,
+        content_item__community_review__status__in=[
+            CommunityReviewStatus.PENDING, CommunityReviewStatus.APPROVED],
+    ).exists()
+
+
+def _account_ledger(address, crypto: bool):
+    """[(id, Trade)] the account's own trades of one class, oldest first, for
+    P&L. An event the ledger has not indexed yet makes it unreadable ('?')."""
+    from cusd_plus.stock_month import Trade
+    from smart_account.models import SmartAccountEvent
+
+    from .account_trades import TRADE_EVENTS
+    from .models import SmartAccountTrade
+
+    address = (address or '').lower()
+    prefix = 'crypto_' if crypto else 'stock_'
+    rows = list(SmartAccountTrade.objects.filter(address=address, kind__startswith=prefix)
+                .order_by('block_number', 'event__log_index'))
+    out = [(f'a{r.id}', Trade(symbol=r.symbol, kind=r.kind, units=Decimal(r.units),
+                              usd=None if r.usd is None else Decimal(r.usd), when=r.traded_at)) for r in rows]
+    if SmartAccountEvent.objects.filter(address=address, name__in=TRADE_EVENTS,
+                                        portfolio_trade__isnull=True).exists():
+        # First, never last: _realized stops at the sale it explains, and an unindexed trade before that sale
+        # must make its P&L unknown, not a frozen wrong figure (review 2026-11-25).
+        out.insert(0, ('a?', Trade(symbol='?pending', kind=f'{prefix}buy', units=Decimal('0'), usd=None,
+                                   when=timezone.now())))
+    return out
+
+
+def _account_data(kind, symbol, units, usd, when, address, batch_id) -> dict | None:
+    if units is None or usd is None or units <= 0 or usd <= 0 or kind not in STOCK_KINDS + CRYPTO_KINDS:
+        return None
+    if kind in CRYPTO_KINDS:
+        token = _crypto_token(symbol)
+        if token is None:
+            return None
+        ticker, name, extra = token.ticker, token.name, {'category': token.category}
+    else:
+        ticker, name = _ticker_and_name(symbol)
+        extra = {}
+    return {
+        'kind': kind,
+        'symbol': symbol,
+        'ticker': ticker,
+        'name': name,
+        **extra,
+        'units': format(units.normalize(), 'f'),
+        'amount_usd': _money(usd),
+        'price_usd': format((usd / units).quantize(Decimal('0.0001')), 'f'),
+        'date': _date(when),
+        # Server-side only, for live P&L; never serialized.
+        'account': address.lower(),
+        'batch_id': batch_id,
+    }
+
+
+def _account_snapshot(trade) -> Snapshot | None:
+    if trade.symbol.startswith('?') or trade.usd is None:
+        return None
+    batch_id = f'a{trade.id}'
+    data = _account_data(trade.kind, trade.symbol, Decimal(trade.units), Decimal(trade.usd), trade.traded_at,
+                         trade.address, batch_id)
+    if data is None:
+        return None
+    if trade.kind in SELL_KINDS:
+        data = _with_realized(data, _account_ledger(trade.address, trade.kind in CRYPTO_KINDS), batch_id)
+    return Snapshot(trade.kind, data)
+
+
+def _relay_preview(relay, group) -> Snapshot | None:
+    """The sheet's view while the account trade is not indexed yet: the
+    trade row's own receipt figures (what is published comes from the
+    account trade)."""
+    from smart_account.relay_trades import asset_token
+
+    from .account_trades import _asset
+
+    try:
+        asset = _asset(asset_token(relay.asset_kind, relay.ticker))
+        if asset is None:
+            return None
+        category, symbol, decimals = asset
+        raw = relay.amount_out if relay.side == 'buy' else relay.amount_in
+        units = Decimal(int(raw or 0)) / (Decimal(10) ** decimals)
+        usd = Decimal(int(relay.usd_counted or 0)) / Decimal(10) ** 18
+    except Exception:  # noqa: BLE001 — a preview is never worth a crash
+        logger.exception('activity share: hands-off preview failed')
+        return None
+    kind = f'{category}_{relay.side}'
+    if kind not in ACCOUNT_GROUPS.get(group, ()):
+        return None
+    data = _account_data(kind, symbol, units, usd, relay.updated_at or timezone.now(),
+                         relay.smart_account.contract_address, None)
+    return Snapshot(kind, data) if data is not None else None
+
+
+def share_account_trade(user, business, group, reference, note: str = '', show_amount: bool = True):
+    """share_activity for a hands-off trade: published from its account trade."""
+    from users.models import User
+
+    from . import community
+
+    note = (note or '').strip()
+    with transaction.atomic():
+        User.objects.select_for_update().filter(pk=user.pk).first()
+        block = community.posting_block(user, business, activity=True)
+        if block:
+            raise ActivityShareError(block, community.BLOCK_MESSAGES[block])
+        account = _account_target(user, group, reference)
+        if account is None or account.trade is None or account.snap is None:
+            raise ActivityShareError('not_shareable', NOT_SHAREABLE)
+        if is_account_shared(account.trade.id, user):
+            raise ActivityShareError('already_shared', ALREADY_SHARED)
+        item = _create_post(user, note, account.snap, show_amount, account_trade=account.trade)
+        _consume_references({account.relay.tx_hash}, user, item)
+    return item
+
+
+def _share_or_schedule_account(user, business, group, reference, account, note, show_amount):
+    if account.trade is not None:
+        return 'published', share_account_trade(user, business, group, reference, note, show_amount)
+    with transaction.atomic():
+        from users.models import User
+
+        User.objects.select_for_update().filter(pk=user.pk).first()
+        again = _account_target(user, group, reference)
+        if again is not None and again.trade is not None:
+            # Indexed while we looked: share it now rather than schedule.
+            return 'published', share_account_trade(user, None, group, reference, note, show_amount)
+        if _relay_preview(account.relay, group) is None:
+            raise ActivityShareError('not_shareable', NOT_SHAREABLE)
+        return 'scheduled', _new_intent(user, group, reference, note, show_amount)
+
+
+def _resolve_account_intent(locked, account, now, out):
+    from .models import ActivityShareIntentStatus, CommunityActivityShare
+
+    if account.trade is None:
+        locked.attempts += 1
+        locked.save(update_fields=['attempts'])
+        return
+    if is_account_shared(account.trade.id, locked.user):
+        existing = CommunityActivityShare.objects.filter(
+            account_trade_id=account.trade.id, user=locked.user).order_by('-id').first()
+        locked.status = ActivityShareIntentStatus.PUBLISHED
+        locked.content_item_id = existing.content_item_id if existing else None
+        locked.last_error = 'shared directly'
+        locked.resolved_at = now
+        locked.save(update_fields=['status', 'content_item', 'last_error', 'resolved_at'])
+        return
+    try:
+        item = share_account_trade(locked.user, None, locked.group, locked.reference, locked.note,
+                                   locked.show_amount)
+    except ActivityShareError as exc:
+        locked.status = ActivityShareIntentStatus.FAILED
+        locked.last_error = exc.code[:200]
+        locked.resolved_at = now
+        locked.save(update_fields=['status', 'last_error', 'resolved_at'])
+        out['failed'] += 1
+        return
+    _mark_published(locked, item, now)
+    out['published'] += 1
