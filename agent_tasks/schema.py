@@ -48,6 +48,8 @@ class AgentOptionType(graphene.ObjectType):
     title = graphene.String(required=True)
     price = graphene.String(required=True)
     image = graphene.String(required=True)
+    rating = graphene.String(description='Its star rating as the store writes it (out of 5), or empty')
+    reviews = graphene.String(description='How many reviews, as the store writes it, or empty')
     cap = graphene.String(description='The most it may cost with shipping and taxes: choosing it approves up to this '
                                       '(spec decision 42). Empty when its price could not be read.')
     unit = graphene.String(description='Its price as a plain number ("1249.00"), only when `cap` is set: the app '
@@ -212,7 +214,7 @@ def task_type(task):
                                          for line in (task.order.get('breakdown') or [])
                                          if line.get('kind') in notes.BREAKDOWN_LABELS])
                if task.order else None),
-        options=[AgentOptionType(title=str(o.get('title') or ''), price=str(o.get('price') or ''),
+        options=[AgentOptionType(title=str(o.get('title') or ''), rating=str(o.get('rating') or ''), reviews=str(o.get('reviews') or ''), price=str(o.get('price') or ''),
                                  image=str(o.get('image') or ''), cap=str(o.get('cap') or '') or None,
                                  unit=_unit(o, task.country))
                  for o in (task.options or [])],
