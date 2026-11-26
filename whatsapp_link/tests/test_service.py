@@ -743,7 +743,9 @@ class HistoryTests(ChatTests):
                          [('Sofía', 'contacto', 'Se me antojan unos chocolates')])
         self.assertTrue(found['mensajes'][0]['cuando'].startswith('hace '))
         whole = assistant_tool.history_call(self.viewer(), chat_name='Sofía', days=30)
-        self.assertEqual([m['de'] for m in whole['mensajes']], ['contacto', 'ella'])  # oldest first, both sides
+        # Oldest first, both sides; hers marked as the user's, never as "ella" (read as the contact).
+        self.assertEqual([m['de'] for m in whole['mensajes']], ['contacto', 'usuario'])
+        self.assertIn('«usuario» es la persona con la que hablas', assistant_tool.history_spec()['description'])
         both = assistant_tool.history_call(self.viewer(), words='pedido CHOCOLATES')
         self.assertEqual({m['chat'] for m in both['mensajes']}, {'Sofía', 'Farmacia Central'})
         nothing = assistant_tool.history_call(self.viewer(), chat_name='Sofía', words='flores')
