@@ -526,7 +526,7 @@ def _generate(viewer, step, *, conversation, first_name, account_label, country)
         'reasoning': {'effort': conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')}, 'store': False,
     }, timeout=conf.get('ASSISTANT_GUIDE_MODEL_TIMEOUT_SECONDS'))
     usage = TurnResult(reply='')
-    usage.add_usage(model, data.get('usage'))
+    usage.add_usage(data.get('_provider_model') or model, data.get('usage'))
     AssistantTurn.objects.create(
         user=viewer.user, conversation=conversation, screen='guide', models_used=usage.models_used,
         input_tokens=usage.input_tokens, cached_input_tokens=usage.cached_input_tokens,

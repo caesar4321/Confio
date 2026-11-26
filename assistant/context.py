@@ -77,8 +77,8 @@ SHRUNK_NOTE = ('\n# Sin herramientas\nLa conversación no cabía: ves solo el ú
                'herramientas. Responde con eso. No digas que hiciste, preparaste ni guardaste nada.\n')
 
 _TOO_LARGE = re.compile(r'context_length_exceeded|exceeds the context window|maximum context length|'
-                        r'prompt is too long|request_too_large|(?:OpenAI|status code|error code:) ?413', re.I)
-_REJECTED = re.compile(r'(?:OpenAI|error code:) ?400|Claude refused|^refusal$|^empty reply$', re.I)
+                        r'prompt is too long|request_too_large|input token count|(?:OpenAI|Gemini|status code|error code:) ?413', re.I)
+_REJECTED = re.compile(r'(?:OpenAI|Gemini|error code:) ?400|Claude refused|^refusal$|^empty reply$', re.I)
 
 
 class RawPass(Exception):

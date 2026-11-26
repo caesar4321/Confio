@@ -235,7 +235,7 @@ def _cited_answer(data, *, empty):
     calls = sum(1 for item in data.get('output') or [] if item.get('type') == 'web_search_call')
     if data.get('status') in {'failed', 'incomplete'}:
         # Still billed: hand usage back so the turn meters it.
-        return {'encontrado': False, 'motivo': 'La búsqueda no terminó.', '_usage': data.get('usage'),
+        return {'encontrado': False, 'motivo': 'La búsqueda no terminó.', '_usage': data.get('usage'), '_model': data.get('_provider_model'),
                 '_search_calls': calls}
     searched = any(item.get('type') == 'web_search_call' and item.get('status') == 'completed'
                    for item in data.get('output') or [])
@@ -254,13 +254,13 @@ def _cited_answer(data, *, empty):
                     if source not in sources:
                         sources.append(source)
     if not searched or not texts or not sources:
-        return {'encontrado': False, 'motivo': empty, '_usage': data.get('usage'), '_search_calls': calls}
+        return {'encontrado': False, 'motivo': empty, '_usage': data.get('usage'), '_model': data.get('_provider_model'), '_search_calls': calls}
     return {
         'encontrado': True,
         'resumen_no_verificado': '\n'.join(texts)[:2000],
         'fuentes': sources[:4],
         'buscado_utc': timezone.now().isoformat(timespec='minutes'),
-        '_usage': data.get('usage'),
+        '_usage': data.get('usage'), '_model': data.get('_provider_model'),
         '_search_calls': calls,
     }
 

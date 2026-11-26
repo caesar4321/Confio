@@ -208,7 +208,7 @@ def generate(ticker: str, name: str) -> dict:
     if not sources:
         raise SearchIncomplete('no_sources')
     return {'description': description, 'website': clean_website(str(answer.get('website') or '')),
-            'sources': sources, 'model': model}
+            'sources': sources, 'model': data.get('_provider_model') or model}
 
 
 def missing_listed() -> list[tuple[str, str]]:

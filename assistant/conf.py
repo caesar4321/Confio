@@ -14,6 +14,12 @@ DEFAULTS = {
     # Everyday turns (support, navigation, quick questions).
     'CONFIO_ASSISTANT_MODEL': 'gpt-6-luna',
     'CONFIO_ASSISTANT_REASONING_EFFORT': 'low',
+    # A gemini-* model answers through assistant/gemini.py (paid tier, Google Cloud credit). Past this many
+    # seconds, or on any Gemini failure, the fallback model answers the rest of the turn.
+    'CONFIO_ASSISTANT_GEMINI_TIMEOUT_SECONDS': 20,
+    'CONFIO_ASSISTANT_FALLBACK_MODEL': 'gpt-6-luna',  # also answers JSON-schema calls and hosted web searches
+    # Screen cards beside a Gemini answer: one short pass whose only tool is navigate.
+    'CONFIO_ASSISTANT_CARD_MODEL': 'gpt-6-luna',
     # Only the analyze_finances tool reaches the frontier model.
     'CONFIO_ASSISTANT_ANALYSIS_MODEL': 'gpt-6.2-sol',
     'CONFIO_ASSISTANT_ANALYSIS_REASONING_EFFORT': 'medium',
@@ -60,6 +66,7 @@ DEFAULTS = {
     # USD per 1M tokens: (input, cached input, output); transcription per minute.
     'CONFIO_ASSISTANT_PRICES': {
         'gpt-6-luna': ('0.10', '0.01', '0.50'),
+        'gemini-4-hydrogen': ('1.50', '0.075', '7.50'),
         'gpt-6.1-sol': ('2.00', '0.10', '10.00'),
         'gpt-6.2-sol': ('2.00', '0.10', '10.00'),
         'claude-haiku-5-5': ('0.10', '0.01', '0.50'),
@@ -120,6 +127,12 @@ DEFAULTS = {
 
 def get(name):
     return getattr(settings, name, DEFAULTS[name])
+
+
+def openai_model():
+    """The assistant model for a caller that only speaks to OpenAI."""
+    model = get('CONFIO_ASSISTANT_MODEL')
+    return get('CONFIO_ASSISTANT_FALLBACK_MODEL') if str(model).startswith('gemini-') else model
 
 
 def price_for(model):

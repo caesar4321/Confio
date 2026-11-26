@@ -364,6 +364,53 @@ def _phone_eligible(viewer):
 # --------------------------------------------------------------------------- #
 
 def _openai_post(payload, timeout=None):
+    """One model call in the Responses shape. A `gemini-*` model goes to Gemini
+    (assistant/gemini.py); if Gemini fails or is slow, the same payload moves to
+    the fallback model for the rest of this turn (the dict is changed in place,
+    so the next tool step stays there). `_provider_model` says who answered."""
+    model = str(payload.get('model') or '')
+    if model.startswith('gemini-') and not _gemini_takes(payload):
+        # A JSON-schema answer, or OpenAI's hosted web search (Google's grounding terms
+        # need its search chips shown, which the chat can't): the fallback model does these.
+        payload['model'] = model = conf.get('CONFIO_ASSISTANT_FALLBACK_MODEL') or model
+    if model.startswith('gemini-'):
+        from . import gemini
+        try:
+            limit = conf.get('CONFIO_ASSISTANT_GEMINI_TIMEOUT_SECONDS')
+            data = gemini.post(payload, timeout=min(timeout, limit) if timeout else limit)
+        except gemini.GeminiUnavailable as exc:
+            fallback = conf.get('CONFIO_ASSISTANT_FALLBACK_MODEL')
+            if not fallback:
+                raise AssistantUnavailable(str(exc)) from exc
+            logger.warning('Confio Assistant: %s failed (%s); %s answers', model, exc, fallback)
+            payload['model'] = fallback
+            gemini.for_openai(payload.get('input'))
+            data = _openai_responses(payload, timeout)
+            data['_provider_model'] = fallback
+            if exc.usage:  # an empty Gemini answer is still billed
+                data['_gemini_usage'] = (model, exc.usage)
+            return data
+        else:
+            data['_provider_model'] = model
+            return data
+    data = _openai_responses(payload, timeout)
+    data['_provider_model'] = payload.get('model')
+    return data
+
+
+def _meter(result, data, model):
+    result.add_usage(data.get('_provider_model') or model, data.get('usage'))
+    if data.get('_gemini_usage'):
+        result.add_usage(*data['_gemini_usage'])
+
+
+def _gemini_takes(payload):
+    return (not payload.get('text')
+            and all(tool.get('type') == 'function' for tool in payload.get('tools') or [])
+            and all(str(item).startswith('reasoning.') for item in payload.get('include') or []))
+
+
+def _openai_responses(payload, timeout=None):
     api_key = getattr(settings, 'OPENAI_API_KEY', '')
     if not api_key:
         raise AssistantUnavailable('OPENAI_API_KEY is not configured')
@@ -1491,7 +1538,9 @@ class Toolbelt:
                 'name': 'search_web',
                 'description': (
                     'Busca en la web, con fuentes, información actual para una pregunta general que no es de Confío '
-                    '(noticias, horarios, eventos, clima, precios o datos fuera de Confío). query = solo la '
+                    '(noticias, horarios, eventos, clima, precios o datos fuera de Confío). Úsala también para que tu respuesta '
+                    'traiga datos reales (precios, opciones, lugares) cuando la persona quiere decidir o conseguir algo. '
+                    'query = solo la '
                     'pregunta pública, corta; nunca nombres, montos, saldos ni datos de la cuenta de la persona. '
                     'Una por mensaje. Después de usarla respondes sin más herramientas. language = idioma del usuario.'
                 ),
@@ -2046,7 +2095,7 @@ class Toolbelt:
             # A search outage must not sink the whole answer.
             logger.warning('Confio Assistant: market news search failed', exc_info=True)
             return {'error': 'No pude buscar noticias ahora.'}
-        self.result.add_usage(conf.get('CONFIO_ASSISTANT_MODEL'), found.get('_usage'))
+        self.result.add_usage(found.get('_model') or conf.get('CONFIO_ASSISTANT_MODEL'), found.get('_usage'))
         self.result.cost_usd += market.search_cost(found.get('_search_calls') or 0)
         if found.get('encontrado'):
             # Web text is untrusted: the answer that follows gets no tools.
@@ -2087,7 +2136,7 @@ class Toolbelt:
         except AssistantUnavailable:
             logger.warning('Confio Assistant: web search failed', exc_info=True)
             return {'error': 'No pude buscar en internet ahora.'}
-        self.result.add_usage(conf.get('CONFIO_ASSISTANT_MODEL'), found.get('_usage'))
+        self.result.add_usage(found.get('_model') or conf.get('CONFIO_ASSISTANT_MODEL'), found.get('_usage'))
         self.result.cost_usd += market.search_cost(found.get('_search_calls') or 0)
         if found.get('encontrado'):
             # Web text is untrusted: the answer that follows gets no tools.
@@ -2818,6 +2867,104 @@ def _promised_unchecked_portfolio(belt, result):
             and any(s.get('name') == 'get_portfolio' for s in belt.specs()))
 
 
+CARD_PASS_NOTE = (
+    '\n# Solo tarjetas\nEl asistente ya contestó el último mensaje con esta respuesta, que la persona verá tal '
+    'cual:\n«{reply}»\nTu único trabajo es decidir si junto a ella va la tarjeta de una pantalla de la app que la '
+    'ayude a hacer lo que se habló. Si sirve una, llama `navigate` una vez. Si no hace falta ninguna (un saludo, una '
+    'tarea general, algo que no se hace en la app), no llames nada. No escribas texto: nadie lo leerá.\n')
+
+
+# "Toca la tarjeta de abajo", "te dejo la tarjeta de Recibir": a card the reply
+# promises, said as one. Never "tarjeta de embarque", never a bank card.
+_CARD_PROMISE = re.compile(
+    r'(?i)(?:\b(?:toc[aáeo]\w*|puls[ae]\w*|presion[ae]\w*)\b[^.!?\n]{0,40}\btarjetas?\b'
+    r'|\btarjetas?\b[^.!?\n]{0,30}\b(?:de abajo|aqu[ií] abajo|m[aá]s abajo)\b'
+    r'|\bte\s+dej[oéa]\w*\s+(?:aqu[ií]\s+|abajo\s+)?(?:la|las|una|unas)\s+tarjetas?\b'
+    r'|\btarjetas?\s+que\s+te\s+dej[eé]\b)')
+
+
+def _has_card(result):
+    return bool(result.actions)
+
+
+def _without_promises(reply):
+    """The reply minus the sentences that promise a card, line by line: a list,
+    a code block or a paragraph break is never joined or re-spaced."""
+    lines = []
+    for line in reply.split('\n'):
+        parts = re.split(r'(?<=[.!?])[ \t]+', line)
+        kept = [part for part in parts if not _CARD_PROMISE.search(part)]
+        if len(kept) == len(parts):
+            lines.append(line)
+        elif kept:
+            lines.append(' '.join(kept))
+    return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+
+
+def _keep_card_promise(belt, result):
+    """A reply that promises a card the turn never made (Gemini did, 2026-11-26:
+    "te dejo la tarjeta de Recibir" and nothing under it). Code makes it when the
+    reply names exactly one screen; otherwise the card model decides (Gemini
+    turns), and a promise still unkept is taken out of the reply."""
+    from .confirm import busy
+
+    reply = result.reply or ''
+    # Gemini turns only; and never beside another card, a question or a refusal the reply points at.
+    if (not getattr(belt, 'card_spec', None) or _has_card(result) or busy(result, count_writes=False)
+            or getattr(result, 'payment_refusal', None) or not _CARD_PROMISE.search(reply)):
+        return
+    sentences = [part for line in reply.split('\n') for part in re.split(r'(?<=[.!?])[ \t]+', line)]
+    promised = [sentence for sentence in sentences if _CARD_PROMISE.search(sentence)]
+    if conversation_home(belt.viewer.request_meta):  # older builds open a screen at once: there, no card is made
+        named = set(_ANY_SCREEN.findall(' '.join(promised))) or set(_ANY_SCREEN.findall(reply))
+        named.discard('Inicio')  # there Inicio is this conversation, not a screen
+        keys = {_SCREEN_WORDS[word] for word in named}
+        if len(keys) == 1:
+            (key,) = keys
+            if key in belt.destinations and belt.navigate(key, open_now=False).get('ok'):
+                result.tools.append({'name': 'navigate:auto', 'ok': True, 'args': {'destination': key}})
+                return
+        _add_cards(belt, result)
+    if not _has_card(result):
+        kept = _without_promises(reply)
+        if kept:
+            result.reply = kept
+
+
+def _add_cards(belt, result):
+    """The card a Gemini answer promised when code can't tell which screen:
+    one short pass of the card model, whose only tool is navigate."""
+    spec = getattr(belt, 'card_spec', None)
+    if not spec or not result.reply or belt.force_tool:
+        return
+    # Words from the web or a chat never steer a tool: then the pass sees only the person.
+    untrusted = belt.saw_web or getattr(belt, 'saw_whatsapp', False)
+    reply = '(respuesta con información de afuera de Confío)' if untrusted else result.reply[:3000]
+    payload = {
+        'model': conf.get('CONFIO_ASSISTANT_CARD_MODEL'),
+        'instructions': belt.card_system + CARD_PASS_NOTE.format(reply=reply),
+        'input': list(getattr(belt, 'card_input', None) or []),
+        'tools': [spec],
+        'max_output_tokens': 400,
+        'store': False,
+        'reasoning': {'effort': 'low'},
+    }
+    try:
+        data = _openai_post(payload)
+    except AssistantUnavailable:
+        logger.warning('Confio Assistant: card pass failed', exc_info=True)
+        return  # the answer stands without a card
+    result.add_usage(data.get('_provider_model') or payload['model'], data.get('usage'))
+    for call in [item for item in data.get('output') or []
+                 if item.get('type') == 'function_call' and item.get('name') == 'navigate'][:1]:
+        try:
+            args = json.loads(call.get('arguments') or '{}')
+        except (TypeError, ValueError):
+            continue
+        args['open_now'] = False  # the reply promised a card to tap, never a screen opened over it
+        _run_tool(belt, result, 'navigate', args)
+
+
 def _open_claimed_screen(belt, result):
     if not belt.can_navigate or any(a.get('type') == 'navigate' for a in result.actions):
         return
@@ -2880,6 +3027,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
             done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                              country=country)
         _open_claimed_screen(belt, done)
+        _keep_card_promise(belt, done)
         return done
     except AssistantUnavailable as exc:
         # Usage already spent (a search, an analysis) is still billed: the
@@ -2981,6 +3129,11 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
         specs = [spec for spec in specs if spec.get('name') not in photo_rules.TOOLS_OFF_WITH_A_PHOTO]
     if model.startswith('claude-'):
         return _run_turn_claude(belt, result, history, system, model, effort, specs)
+    # A Gemini answer may promise a card it never made: _keep_card_promise
+    # makes it, and only when code can't tell which, this spec goes to the card model.
+    belt.card_spec = (next((spec for spec in specs if spec.get('name') == 'navigate'), None)
+                      if model.startswith('gemini-') else None)
+    belt.card_system = system
     payload = {
         'model': model,
         'instructions': system,
@@ -2999,11 +3152,12 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
         payload['reasoning'] = {'effort': effort}
     if belt.force_tool:
         payload['tool_choice'] = {'type': 'function', 'name': belt.force_tool}
+    belt.card_input = list(payload['input'])
 
     input_items = list(payload['input'])
     for _ in range(conf.get('CONFIO_ASSISTANT_MAX_TOOL_STEPS')):
         data = _post_fitting(belt, payload, input_items)
-        result.add_usage(model, data.get('usage'))
+        _meter(result, data, model)
         output = data.get('output') or []
         calls = [item for item in output if item.get('type') == 'function_call']
         if not calls:
@@ -3030,7 +3184,7 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
     else:
         payload = {**payload, 'input': input_items, 'tool_choice': 'none'}
         data = _post_fitting(belt, payload, input_items)
-        result.add_usage(model, data.get('usage'))
+        _meter(result, data, model)
         result.reply = _with_cut_note(_output_text(data), _hit_output_limit(data))
 
     return _finish(result)

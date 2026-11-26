@@ -96,7 +96,7 @@ def _moderate(text=None, image_data_url=None):
 def _photo_is_a_pet(data_url):
     """Refuse photos of people: a pet must never become someone's likeness."""
     payload = {
-        'model': conf.get('CONFIO_ASSISTANT_MODEL'),
+        'model': conf.openai_model(),  # posted to OpenAI directly
         'input': [{'role': 'user', 'content': [
             {'type': 'input_text', 'text': (
                 'Responde solo JSON {"persona": bool, "animal_o_objeto": bool}. '
