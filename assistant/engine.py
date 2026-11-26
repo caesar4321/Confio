@@ -2927,6 +2927,14 @@ _PROMISED_CHECK = re.compile(
     r'[^.]*\b(portafolio|cartera|saldo|cuenta|n[uú]meros|gastos)', re.I)
 RETRY_NOTE = ('\n# Revisa antes de contestar\nLlama get_portfolio antes de responder (si no lo llamaste ya) y '
               'contesta con sus datos. Nunca digas que vas a revisar algo: revísalo con la herramienta y contesta.\n')
+RETRY_NOTES = {
+    'get_portfolio': RETRY_NOTE,
+    'search_whatsapp_messages': ('\n# Busca antes de contestar\nBusca con search_whatsapp_messages lo que pregunta y '
+                                 'contesta solo con lo que encuentre, o di tal cual que no lo encontró. Nunca digas lo '
+                                 'que hay o no hay en sus chats sin buscarlo.\n'),
+    'ask_my_mail': ('\n# Busca antes de contestar\nLee su correo con ask_my_mail para lo que pregunta y contesta solo '
+                    'con lo que encuentre. Nunca digas lo que hay o no hay en su correo sin leerlo.\n'),
+}
 
 
 # "En Bolivia no se ofrecen acciones" said without looking (Marizela,
@@ -2945,6 +2953,37 @@ def _promised_unchecked_portfolio(belt, result):
             and bool(_PROMISED_CHECK.search(reply)
                      or _CLAIMED_UNAVAILABLE.search(re.sub(r'EE\.\s?UU\.', 'EEUU', reply)))
             and any(s.get('name') == 'get_portfolio' for s in belt.specs()))
+
+
+# "No encontré mensajes de un chat llamado «mio»" with no search run (Luis, 2026-11-26): a result told
+# without looking. Read tools only: what she keeps in WhatsApp and her Gmail.
+# Only a result about messages or mails ("no encontré mensajes de…", "en lo guardado de WhatsApp"), never any
+# sentence that names WhatsApp or an email address: a false hit would read her chats unasked.
+_FOUND = r'\b(?:no\s+)?(?:encontr[eéoó]\w*|hall[eéoó]\w*|encontrei|achei)\b'
+_CLAIMED_READ = {
+    'search_whatsapp_messages': re.compile(
+        _FOUND + r'[^.!?;\n]{0,40}\bmensa(?:jes?|gens?)\b[^.!?;\n]{0,80}\bwhatsapp\b'
+        r'|\ben lo guardado de (?:tu |su )?whatsapp\b'
+        r'|\bno hay mensajes\b[^.!?;\n]{0,80}\bwhatsapp\b', re.I),
+    'ask_my_mail': re.compile(
+        _FOUND + r'[^.!?;\n]{0,40}\b(?:correos|e-?mails|mails)\b'
+        r'|\ben (?:tu|su) (?:correo|gmail|bandeja)\b[^.!?;\n]{0,40}' + _FOUND
+        + r'|\bno hay correos\b', re.I),
+}
+READ_TOOLS = ('search_whatsapp_messages', 'ask_my_mail', 'get_my_calendar')
+
+
+def _claimed_unread(belt, result):
+    """The read tool a reply tells a result of though none ran this turn, or ''."""
+    called = {str(t.get('name', '')).split(':')[0] for t in result.tools if isinstance(t, dict)}
+    if belt.force_tool or called & set(READ_TOOLS) or belt.saw_web:
+        return ''
+    reply = result.reply or ''
+    offered = {spec.get('name') for spec in belt.specs()}
+    for name, claim in _CLAIMED_READ.items():
+        if name in offered and claim.search(reply):
+            return name
+    return ''
 
 
 CARD_PASS_NOTE = (
@@ -3106,6 +3145,13 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
             done.reply = ''
             done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                              country=country)
+        unread = '' if belt.shrunk else _claimed_unread(belt, done)
+        if unread:
+            # Told what her chats or her mail hold without reading them: run once more, made to read first.
+            belt.force_tool = unread
+            done.reply = ''
+            done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
+                             country=country)
         _open_claimed_screen(belt, done)
         _keep_card_promise(belt, done)
         return done
@@ -3201,7 +3247,7 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
         system += photo_rules.NOTE
     system += context_rules.notes(belt)
     if belt.force_tool:
-        system += RETRY_NOTE
+        system += RETRY_NOTES.get(belt.force_tool, RETRY_NOTE)
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')
     specs = belt.specs()
