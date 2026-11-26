@@ -99,6 +99,23 @@ class Mailbox:
         data = _call('GET', f'{API}/threads/{thread_id}', headers=self._headers, params={'format': 'full'})
         return list(data.get('messages') or [])[-THREAD_MESSAGES * 3:]  # text.conversation keeps the 8 around it
 
+    def message_marks(self, message_id) -> dict:
+        """One message as its thread, labels and date only (format=minimal): no headers, no text."""
+        if not str(message_id).isalnum():
+            raise GmailError(400)
+        data = _call('GET', f'{API}/messages/{message_id}', headers=self._headers, params={'format': 'minimal'})
+        return {'threadId': data.get('threadId'), 'labelIds': list(data.get('labelIds') or []),
+                'internalDate': data.get('internalDate')}
+
+    def thread_marks(self, thread_id) -> list:
+        """The thread's messages as Gmail's labels and dates only (format=minimal): no headers, no text. Enough to
+        know whether she replied after a mail (gmail.followups)."""
+        if not str(thread_id).isalnum():
+            raise GmailError(400)
+        data = _call('GET', f'{API}/threads/{thread_id}', headers=self._headers, params={'format': 'minimal'})
+        return [{'labelIds': list(m.get('labelIds') or []), 'internalDate': m.get('internalDate')}
+                for m in (data.get('messages') or []) if isinstance(m, dict)]
+
     def send(self, raw, thread_id=None):
         body = {'raw': raw, **({'threadId': thread_id} if thread_id else {})}
         return _call('POST', f'{API}/messages/send', headers=self._headers, json=body)

@@ -41,6 +41,9 @@ class WhatsAppLink(models.Model):
     # The version of the text the person accepted before linking (service.CONSENT_VERSION).
     consent_version = models.PositiveSmallIntegerField(default=0)
     linked_at = models.DateTimeField(null=True, blank=True)
+    # The last chat history WhatsApp handed the device (service._past): null when none came (linked before the
+    # bridge took it, or WhatsApp sent none), so a search can say what it holds.
+    history_at = models.DateTimeField(null=True, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
     next_sync_at = models.DateTimeField(null=True, blank=True, db_index=True)
     lease_until = models.DateTimeField(null=True, blank=True)
@@ -71,6 +74,12 @@ class WhatsAppNotice(models.Model):
     dismissed = models.BooleanField(default=False)
     notified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    # Follow-ups while it is still open (whatsapp_link.followups): how many were posted, the last, and when it was
+    # found answered (or superseded by a newer message of the same chat). Never followed up again once resolved.
+    told_at = models.DateTimeField(null=True, blank=True)  # posted in her conversation (chat.tell); else never followed up
+    followups = models.PositiveSmallIntegerField(default=0)
+    followed_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['link', 'source_key'], name='whatsapp_notice_once')]

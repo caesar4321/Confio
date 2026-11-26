@@ -13,6 +13,7 @@ import (
 	"golang.org/x/net/proxy"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -70,10 +71,10 @@ func (b *bridge) get(link string) *device {
 }
 
 // route sends a device's connections through its country's proxy, if one is set (proxy.go), and counts their
-// bytes either way. It also keeps the chat history WhatsApp offers a new device from being downloaded: only new
-// messages are used.
+// bytes either way. The chat history WhatsApp hands a new device is downloaded (whatsmeow does it and emits
+// events.HistorySync): its last historyDays of one-to-one text go to Django to be asked about (past).
 func (b *bridge) route(d *device) error {
-	d.client.ManualHistorySyncDownload = true
+	d.client.ManualHistorySyncDownload = false
 	var base proxy.ContextDialer = &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 	if address := b.proxies.For(d.country, d.link); address != "" {
 		parsed, err := url.Parse(address)
@@ -228,6 +229,30 @@ func (b *bridge) handle(d *device, raw any) {
 		if data, ok := incoming(ctx, func(info types.MessageInfo) string { return nameOf(ctx, d.client, info) }, evt, own...); ok {
 			b.enqueue(ctx, d.link, d.grant, "message", data)
 		}
+	case *events.HistorySync:
+		b.mu.Lock()
+		quiet := d.refused || d.dropping
+		b.mu.Unlock()
+		if quiet || evt.Data == nil {
+			return
+		}
+		own := []string{d.client.Store.GetLID().User}
+		if d.client.Store.ID != nil {
+			own = append(own, d.client.Store.ID.User)
+		}
+		rows := past(ctx, d.client.ParseWebMessage, func(info types.MessageInfo) string { return nameOf(ctx, d.client, info) },
+			evt.Data, time.Now(), own...)
+		for start := 0; start < len(rows); start += historyBatch {
+			end := min(start+historyBatch, len(rows))
+			b.enqueue(ctx, d.link, d.grant, "history", map[string]any{"messages": rows[start:end]})
+		}
+		if len(rows) == 0 && evt.Data.GetSyncType() != waHistorySync.HistorySync_PUSH_NAME {
+			// Nothing to keep, but history came: Django tells a search so ("still arriving", then "none").
+			b.enqueue(ctx, d.link, d.grant, "history", map[string]any{"messages": []any{}})
+		}
+		// Counts only: never a number or a message.
+		log.Printf("link %s: history %s chunk %d: %d conversations, %d kept", d.link, evt.Data.GetSyncType(),
+			evt.Data.GetChunkOrder(), len(evt.Data.GetConversations()), len(rows))
 	case *events.LoggedOut:
 		// Removed from Dispositivos vinculados on the phone, or WhatsApp ended the session.
 		log.Printf("link %s: logged out by WhatsApp (on connect: %v)", d.link, evt.OnConnect)

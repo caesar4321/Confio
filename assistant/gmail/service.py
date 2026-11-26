@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 MAX_WORDS = 1000
 ANSWER_FROM = 5
 AGENDA_DAYS = 2
+AGENDA_LIMIT = 50  # events one read carries (client.Calendar.events)
 MAX_EVENT_TITLE = 80
 
 
@@ -60,15 +61,16 @@ def overview(user, account, jwt_context) -> dict:
     return result
 
 
-def agenda(user) -> list:
-    """Today and tomorrow, read from Google for this one answer: never stored, never sent to a model."""
+def agenda(user, days=AGENDA_DAYS) -> list:
+    """From today, read from Google for this one answer: never stored. The screen shows today and tomorrow; Confío
+    IA asks for up to two weeks when she asks about hers (read_tool)."""
     connection = connection_of(user)
     if connection is None:
         raise MailRefused('not_connected', 'Conecta tu Gmail primero.')
     if not config.consented(connection):
         raise MailRefused('reconnect', session.OUTDATED)
     limits.claim(user, 'agenda')
-    events = session.calendar(connection).events(timezone.now(), AGENDA_DAYS, config.utc_offset(user))
+    events = session.calendar(connection).events(timezone.now(), days, config.utc_offset(user), limit=AGENDA_LIMIT)
     return [{'title': text.strict_line(event['title'], MAX_EVENT_TITLE, numbers=True) or 'Sin título',
              'day': event['day'], 'starts_at': event['starts_at'], 'all_day': event['all_day']}
             for event in events]
@@ -109,7 +111,12 @@ def ask(user, question) -> dict:
         raise MailRefused('error', 'No pude leer tus correos ahora. Inténtalo de nuevo.')
     return {'answer': answer, 'sources': [
         {'handle': compose.handle_for(connection, mail), 'sender': mail.sender, 'subject': mail.subject,
-         'sent_at': mail.sent_at} for mail in mails]}
+         'sent_at': mail.sent_at, 'name': _name(mail)} for mail in mails]}
+
+
+def _name(mail) -> str:
+    from . import chat
+    return chat.sender_name(mail)
 
 
 def need_source(user, need_id) -> dict:

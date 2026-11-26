@@ -5,7 +5,7 @@ from django.core.cache import cache
 from .errors import MailRefused
 
 logger = logging.getLogger(__name__)
-PER_DAY = {'ask': 40, 'draft': 40, 'send': 20, 'connect': 10, 'source': 60, 'agenda': 120}
+PER_DAY = {'ask': 40, 'draft': 40, 'send': 20, 'connect': 10, 'source': 60, 'agenda': 120, 'followup': 30}
 
 
 def claim(user, action):

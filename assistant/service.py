@@ -786,6 +786,15 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         else:
             body = _with_line(line, _WHATSAPP_UNLINKED.get(confirm.language([clean]), _WHATSAPP_UNLINKED['es']))
             result.actions = metadata['actions'] = []
+    if getattr(result, 'gmail_read', False):
+        # Her Gmail or calendar was read for this answer, so it may quote them: tagged, to go with the connection
+        # (gmail.chat.erase on disconnect).
+        metadata['gmail_read'] = True
+    elif (_follows_gmail_answer(history) and _gmail_connected(user)
+          and not (result.payment_intent or result.rule_proposal or result.pending_action)):
+        # As whatsapp_follow: no read this time, but the answer right before quoted her mail ("¿y cuánto era?"), so
+        # this one may too. One step only.
+        metadata['gmail_follow'] = True
     if result.rule_proposal:
         metadata['rule_proposal'] = result.rule_proposal
     if result.payment_intent:
@@ -869,6 +878,12 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
             reply.refresh_from_db()
             result.actions = []
         transaction.on_commit(lambda: _erase_if_unlinked(user, whatsapp_read))
+    if reply is not None and (metadata.get('gmail_read') or metadata.get('gmail_follow')):
+        # Disconnected while this was being answered: that disconnect's erase ran before this reply existed.
+        transaction.on_commit(lambda: _erase_if_gmail_gone(user))
+        reply.refresh_from_db()  # outside a transaction that ran now: what is returned is what is kept
+        if (reply.metadata or {}).get('gmail_erased'):
+            result.actions = []  # blanked by a disconnect mid-answer: no card beside it either
     if reply is None:
         if line:
             memory.note_to_thread(conversation, line, user_message.id)   # it happened: said all the same
@@ -923,6 +938,34 @@ _WHATSAPP_UNLINKED = {
     'pt': 'Seu WhatsApp foi desvinculado enquanto eu respondia, então não guardei o que encontrei nas suas mensagens.',
     'en': 'Your WhatsApp was unlinked while I was answering, so I did not keep what I found in your messages.',
 }
+
+
+def _erase_if_gmail_gone(user):
+    try:
+        from .gmail import chat as gmail_chat
+        from .gmail.models import GmailConnection
+        # Disconnected (the row is gone), not expired: on expiry the notices and what was said stay (Privacy §7).
+        if not GmailConnection.objects.filter(user=user).exists():
+            gmail_chat.erase(user.pk)
+    except Exception:  # noqa: BLE001 - logged by type only
+        logger.warning('Confio Assistant: Gmail answer check failed', exc_info=True)
+
+
+def _gmail_connected(user) -> bool:
+    try:
+        from .gmail.models import GmailConnection
+        return GmailConnection.objects.filter(user=user).exists()
+    except Exception:  # noqa: BLE001 - unknown: not tagged, as for WhatsApp
+        return False
+
+
+def _follows_gmail_answer(history) -> bool:
+    """Is the last thing said before the message being answered an answer that read her Gmail or calendar?"""
+    for said in reversed(history or []):
+        if getattr(said, 'sender_type', '') == 'USER':
+            continue
+        return bool((getattr(said, 'metadata', None) or {}).get('gmail_read'))
+    return False
 
 
 def _follows_whatsapp_answer(history) -> bool:

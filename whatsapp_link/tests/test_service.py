@@ -1178,3 +1178,130 @@ class PushTests(ChatTests):
         self.message(self.link, text='¿Vienes?', chat=self.SOFIA, name='Sofía')
         service.sync(self.link.pk)
         self.assertEqual(self.left(*made), {made[1]})
+
+
+class PastHistoryTests(ChatTests):
+    """The chats WhatsApp hands a new device: kept to be asked about, never looked at, pushed or told."""
+
+    GENESIS = '59170000003@s.whatsapp.net'
+
+    def viewer(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(user=self.user, account_type='personal', is_employee=False)
+
+    def row(self, msg_id, text, days_ago=2, from_me=False, chat=None, name='Esposa Génesis'):
+        at = int((timezone.now() - timedelta(days=days_ago)).timestamp())
+        return {'chat': chat or self.GENESIS, 'name': name, 'phone': '59170000003', 'text': text, 'id': msg_id,
+                'at': at, 'from_me': from_me}
+
+    def history(self, *rows, link=None):
+        self.event(link or self.link, 'history', messages=list(rows))
+
+    def test_history_is_kept_under_its_own_time_and_never_looked_at(self):
+        self.link.linked_at = timezone.now() - timedelta(minutes=5)
+        self.link.save(update_fields=['linked_at'])
+        self.history(self.row('G1', 'Trae el pan cuando vengas'), self.row('G2', 'Dale', from_me=True),
+                     self.row('G3', 'Muy viejo', days_ago=40), self.row('G4', 'Tu código de verificación es 482913'))
+        kept = list(WhatsAppInbox.objects.filter(link=self.link).order_by('pk'))
+        self.assertEqual(len(kept), 2)
+        self.assertTrue(all(row.looked_at for row in kept))
+        for row in kept:
+            self.assertLess(row.created_at, timezone.now() - timedelta(days=1))  # the message's time: 30-day erase
+        self.link.refresh_from_db()
+        self.assertIsNotNone(self.link.history_at)
+        self.tasks.sync.apply_async.assert_not_called()
+        service.sync(self.link.pk)
+        self.important.assert_not_called()
+        self.pushes.assert_not_called()
+        self.assertEqual(self.thread(), [])
+        self.assertFalse(WhatsAppNotice.objects.exists())
+
+    def test_delivered_twice_or_live_first_is_kept_once(self):
+        self.message(self.link, text='hola', chat=self.GENESIS, name='Esposa Génesis', msg_id='G1')
+        self.history(self.row('G1', 'hola'), self.row('G2', 'otra'))
+        self.history(self.row('G1', 'hola'), self.row('G2', 'otra'))
+        self.assertEqual(WhatsAppInbox.objects.filter(link=self.link).count(), 2)
+
+    def test_a_message_written_after_the_link_waits_for_its_look(self):
+        self.link.linked_at = timezone.now() - timedelta(days=3)
+        self.link.save(update_fields=['linked_at'])
+        self.history(self.row('G1', 'Su pedido está listo', days_ago=1))
+        self.assertIsNone(WhatsAppInbox.objects.get(link=self.link).looked_at)
+        self.tasks.sync.apply_async.assert_called_once()
+
+    def test_not_kept_on_an_unlinked_or_older_consent_link(self):
+        self.link.state = WhatsAppLink.State.GONE
+        self.link.save(update_fields=['state'])
+        self.history(self.row('G1', 'hola'))
+        self.assertFalse(WhatsAppInbox.objects.exists())
+        self.tasks.logout.delay.assert_called_once()  # its device goes
+        WhatsAppLink.objects.all().delete()
+        old = self.linked(consent_version=service.CONSENT_VERSION - 1)
+        self.history(self.row('G1', 'hola'), link=old)
+        self.assertFalse(WhatsAppInbox.objects.exists())
+
+    def test_kept_while_the_note_is_pending_but_not_read_and_gone_if_undone(self):
+        from whatsapp_link import assistant_tool
+        self.link.sealed_phone = service._seal(PHONE)
+        self.link.save(update_fields=['sealed_phone'])
+        self.history(self.row('G1', 'Trae el pan'))
+        self.assertEqual(WhatsAppInbox.objects.count(), 1)
+        self.assertFalse(assistant_tool.history_call(self.viewer(), words='pan')['ok'])
+        service._note_failed(self.link.pk, self.link.grant)
+        self.assertFalse(WhatsAppInbox.objects.exists())
+
+    def test_the_chat_is_found_by_its_words_in_any_order(self):
+        from whatsapp_link import assistant_tool
+        self.history(self.row('G1', 'Trae el pan cuando vengas'))
+        for asked in ('Genesis esposa', 'esposa génesis', 'GENESIS'):
+            found = assistant_tool.history_call(self.viewer(), chat_name=asked, words=None)
+            self.assertEqual([m['texto'] for m in found['mensajes']], ['Trae el pan cuando vengas'], asked)
+        self.assertEqual(assistant_tool.history_call(self.viewer(), chat_name='Genesis hermana')['mensajes'], [])
+
+    def test_nothing_found_says_what_is_kept(self):
+        from whatsapp_link import assistant_tool
+        # Just linked, no history yet: it may still be coming.
+        note = assistant_tool.history_call(self.viewer(), chat_name='Genesis')['nota']
+        self.assertIn('vuelva a pedir en unos minutos', note)
+        self.assertNotIn('hasta 30 días, incluido', note)
+        # History arriving right now: the same.
+        self.history(self.row('G1', 'hola', chat='59170000009@s.whatsapp.net', name='Pedro'))
+        self.assertIn('sigue entregando', assistant_tool.history_call(self.viewer(), chat_name='Genesis')['nota'])
+        # Linked long ago with no history: only what arrived since the link.
+        WhatsAppLink.objects.filter(pk=self.link.pk).update(history_at=None,
+                                                            linked_at=timezone.now() - timedelta(days=2))
+        note = assistant_tool.history_call(self.viewer(), chat_name='Genesis')['nota']
+        self.assertIn('solo se guarda lo que llegó desde que lo vinculó, hace 2 días', note)
+        # History settled: then nothing is nothing.
+        WhatsAppLink.objects.filter(pk=self.link.pk).update(history_at=timezone.now() - timedelta(hours=1))
+        self.assertIn('incluido lo que WhatsApp entregó al vincular',
+                      assistant_tool.history_call(self.viewer(), chat_name='Genesis')['nota'])
+        self.assertIn('incluido lo que WhatsApp entregó al vincular', assistant_tool.history_spec()['description'])
+
+    def test_an_empty_history_still_counts_as_arrived(self):
+        self.history()
+        self.link.refresh_from_db()
+        self.assertIsNotNone(self.link.history_at)
+        self.assertFalse(WhatsAppInbox.objects.exists())
+
+    def test_a_relink_forgets_the_last_pairings_history(self):
+        from whatsapp_link import assistant_tool
+        WhatsAppLink.objects.filter(pk=self.link.pk).update(state=WhatsAppLink.State.GONE,
+                                                            history_at=timezone.now() - timedelta(days=3))
+        link = service.start_link(self.user, f'+{PHONE}', CONSENT)
+        self.assertIsNone(WhatsAppLink.objects.get(pk=link.pk).history_at)
+        # Paired again a minute ago, no history yet: it may still be coming, never "none in 30 days".
+        WhatsAppLink.objects.filter(pk=link.pk).update(state=WhatsAppLink.State.LINKED, sealed_phone='',
+                                                       linked_at=timezone.now() - timedelta(minutes=1))
+        self.assertIn('vuelva a pedir en unos minutos',
+                      assistant_tool.history_call(self.viewer(), chat_name='Genesis')['nota'])
+
+    def test_the_latest_of_a_chat_is_by_message_time_not_arrival(self):
+        # A live message, then 40 older ones from the history (higher ids): the latest is still the live one.
+        self.message(self.link, text='Llego a las 8', chat=self.GENESIS, name='Esposa Génesis', msg_id='LIVE',
+                     at=int(timezone.now().timestamp()))
+        self.history(*[self.row(f'H{i}', f'viejo {i}', days_ago=3) for i in range(40)])
+        lines, whole = service.history(self.link, chat='Genesis')
+        self.assertFalse(whole)
+        self.assertEqual(lines[-1]['texto'], 'Llego a las 8')
+        self.assertEqual(len(lines), service.HISTORY_LINES)

@@ -14,6 +14,7 @@ import logging
 import re
 
 from django.db import transaction
+from django.utils import timezone
 
 from . import service
 from .models import WhatsAppDraft, WhatsAppNotice
@@ -84,9 +85,45 @@ def tell(link, notice, replies):
     # Always a way to say it in her own words: the assistant writes the full reply, on a card she confirms.
     actions.append({'type': 'whatsapp_other', 'target': str(notice.pk), 'label': 'Otro…'})
     try:
-        _post(link.user, '\n'.join(lines), f'whatsapp-notice:{notice.pk}', actions)
+        if _post(link.user, '\n'.join(lines), f'whatsapp-notice:{notice.pk}', actions) is not None:
+            WhatsAppNotice.objects.filter(pk=notice.pk, told_at__isnull=True).update(told_at=timezone.now())
     except Exception as exc:  # noqa: BLE001 - the notice is kept either way (the WhatsApp screen shows it)
         logger.warning('WhatsApp notice %s not posted to the chat: %s', notice.pk, type(exc).__name__)
+
+
+FOLLOW_WORDS = {
+    'reply': '«{name}» sigue esperando tu respuesta',
+    'appointment': 'La cita que te escribió «{name}»',
+    'payment': 'El cobro o pago que te escribió «{name}»',
+    'urgent': 'Lo que te escribió «{name}»',
+}
+
+
+def follow_up(link, items, now, zone):
+    """ONE follow-up message for everything of hers still open and due now (whatsapp_link.followups): [(notice,
+    number)], each named. Plain text with an answer button for the first, never the notice
+    card (that card draws the original message and hides this text). Tagged like every WhatsApp post: it goes with
+    the link."""
+    from assistant.gmail.followups import when_words
+
+    def line(notice):
+        data = service._unseal(notice.sealed, {})
+        lead = FOLLOW_WORDS.get(notice.kind, 'Lo que te escribió «{name}»').format(name=_name(data.get('chat')))
+        return lead, f'«{_quote(data.get("preview"), 160)}»', when_words(notice.created_at, now, zone)
+
+    first = items[0][0]
+    if len(items) == 1:
+        lead, quote, when = line(first)
+        lines = [f'{lead} (te escribió {when}):', quote, '¿Qué le respondo?']
+    else:
+        lines = ['Siguen pendientes en tu WhatsApp:']
+        for notice, _number in items:
+            lead, quote, when = line(notice)
+            lines.append(f'• {lead} ({when}): {quote}')
+        lines.append(f'¿Qué le respondo a «{_name(service._unseal(first.sealed, {}).get("chat"))}»?')
+    actions = [{'type': 'whatsapp_other', 'target': str(first.pk), 'label': 'Otro…'}]
+    tag = 'whatsapp-followup:' + ','.join(f'{notice.pk}.{number}' for notice, number in items)
+    return _post(link.user, '\n'.join(lines), tag[:200], actions)
 
 
 def prepare(user, text=None, *, notice_id=None, chat=None, phone=None, instructions=None):

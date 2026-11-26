@@ -43,7 +43,10 @@ export function consentText(): string[] {
       + 'OpenAI para redactarlo, y el correo queda en una tarjeta con el destinatario, el asunto y el texto exactos. '
       + 'Solo sale cuando tocas Enviar. Nunca pago nada por ti.',
     'Si das el permiso de calendario, cada mañana cuento los eventos de hoy de tu Google Calendar para el aviso. '
-      + 'Tus eventos no se guardan ni se envían a OpenAI.',
+      + 'Si me preguntas por tu correo o tu calendario («¿qué tengo mañana?»), lo leo en ese momento: OpenAI lee los correos '
+      + 'para responder tu pregunta, y lo que encontré (quién te escribió, el asunto y la fecha, o el título, el día y la hora de los eventos) '
+      + 'lo procesan los proveedores de IA de Confío (OpenAI, Anthropic y Google) para responderte, y mi respuesta '
+      + 'queda en nuestra conversación hasta que desconectes. Tus eventos no se guardan aparte.',
     'Confío guarda cifrados tu acceso y tu dirección de Gmail hasta que desconectes; de cada aviso, el tipo, la '
       + 'fecha, el remitente y un resumen, hasta 30 días después; y los borradores sin enviar, hasta 24 horas. Para '
       + 'respetar el cupo de Google guardamos un código derivado de cada cuenta que conecta, sin tu dirección.',

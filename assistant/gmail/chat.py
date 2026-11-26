@@ -16,7 +16,7 @@ from datetime import timedelta
 from email.utils import getaddresses
 
 from django.core import signing
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from . import compose, config, crypto, text
@@ -92,7 +92,7 @@ def _push(connection, need):
         logger.warning('Gmail push failed: %s', type(exc).__name__)
 
 
-def _post(user, body, tag, actions=(), connection=None, extra=None):
+def _post(user, body, tag, actions=(), connection=None, extra=None, existing_ok=False):
     """A Confío IA message in the person's own thread (personal account), once per tag.
 
     With `connection`, only while it still exists under the same grant, checked under its row lock: a disconnect
@@ -113,7 +113,9 @@ def _post(user, body, tag, actions=(), connection=None, extra=None):
         conversation = get_or_create_support_conversation(user, personal, None)
         existing = conversation.messages.filter(metadata__notice=tag).first()
         if existing is not None:
-            return None if connection is not None else existing
+            # Already there: for a follow-up, it was posted (by a run cut short after posting); for a notice, it was
+            # told before and is not told (or pushed) again.
+            return existing if existing_ok or connection is None else None
         message = SupportMessage.objects.create(
             conversation=conversation, sender_type='AGENT', message_type='TEXT', body=body,
             metadata={'ai': True, 'notice': tag, 'gmail': True, 'actions': list(actions), **(extra or {})})
@@ -157,7 +159,8 @@ def tell(connection, need, mail):
             return
         data = crypto.unseal(need.sealed)
         subject = _unquoted(text.strict_line(mail.subject or '', 120, numbers=True)) or 'sin asunto'
-        lines = [f'«{_unquoted(data.get("sender")) or sender_name(mail)}» te escribió a tu Gmail: «{subject}»']
+        shown = _unquoted(data.get('sender')) or sender_name(mail)
+        lines = [f'«{shown}» te escribió a tu Gmail: «{subject}»']
         if data.get('summary'):
             lines.append(f'Según el correo: {_unquoted(data["summary"])}')
         lines.append(KIND_WORDS.get(need.kind, 'Parece importante.'))
@@ -176,9 +179,78 @@ def tell(connection, need, mail):
             return
         if _post(connection.user, '\n'.join(lines), f'gmail-need:{need.pk}', actions, connection=connection,
                  extra={'mail_about': _about(data.get('from_key'), subject)}):
+            # Told: what a follow-up names is what was shown here (sender and subject, already cleaned), so a
+            # follow-up never reads the mail's text again (gmail.followups).
+            MailNeed.objects.filter(pk=need.pk, told_at__isnull=True).update(
+                told_at=timezone.now(), sealed=crypto.seal({**data, 'shown_subject': subject,
+                                                            'shown_sender': shown, 'thread': mail.thread_id or ''}))
             _push(connection, need)
     except Exception as exc:  # noqa: BLE001 - the need is kept either way; logged by type only
         logger.warning('Gmail need %s not told in the chat: %s', need.pk, type(exc).__name__)
+
+
+FOLLOW_WORDS = {
+    'reply': '«{name}» sigue esperando tu respuesta a «{subject}»',
+    'appointment': 'La cita o reunión de «{name}»: «{subject}»',
+    'payment': '«{subject}» de «{name}» vence hoy',
+    'deadline': '«{subject}» de «{name}» vence hoy',
+}
+
+
+def _follow_line(need):
+    """From what was shown when it was told (chat.tell keeps it): the mail is never read again for its words."""
+    data = crypto.unseal(need.sealed)
+    subject = data.get('shown_subject') or 'sin asunto'
+    name = data.get('shown_sender') or _unquoted(data.get('sender')) or 'Alguien'
+    return FOLLOW_WORDS.get(need.kind, 'Sigue pendiente «{subject}» de «{name}»').format(name=name, subject=subject)
+
+
+def follow_up(connection, items):
+    """ONE follow-up message for what of hers is still open and due now (gmail.followups): [(need, number)], the
+    first with its answer button, each named. Plain text with
+    buttons, never the notice card (that card draws the original mail). Tagged like every Gmail post: it goes with
+    the connection."""
+    first = items[0][0]
+    if len(items) == 1:
+        need = first
+        lines = [('Recordatorio: ' if need.kind in ('payment', 'deadline') else '') + _follow_line(need) + '.']
+        summary = crypto.unseal(need.sealed).get('summary')
+        if summary:
+            lines.append(f'Según el correo: {_unquoted(summary)}')
+    else:
+        lines = ['Siguen pendientes en tu Gmail:'] + [f'• {_follow_line(need)}.' for need, _number in items]
+    actions = []
+    if connection.can_send and first.kind in ('reply', 'appointment'):
+        if len(items) == 1:
+            lines[0] += ' ¿Le respondo?'
+        else:
+            name = crypto.unseal(first.sealed).get('shown_sender') or 'el primero'
+            lines.append(f'¿Le respondo a «{name}»?')
+        actions.append({'type': 'mail_reply', 'target': str(first.pk), 'label': 'Responder…'})
+    tag = 'gmail-followup:' + ','.join(f'{need.pk}.{number}' for need, number in items)
+    return _post(connection.user, '\n'.join(lines), tag[:200], actions, connection=connection, existing_ok=True)
+
+
+def push_follow_up(connection, count):
+    """A follow-up's push: fixed words only (never who wrote or what), read as a reminder, never as a new mail.
+    In her daytime and at most one Gmail push an hour, as _push; a need's notified_at (the morning count) is left
+    alone."""
+    from django.core.cache import cache
+    from .oauth import NOTICE_TYPE
+    try:
+        local = timezone.now() + timedelta(hours=config.utc_offset(connection.user))
+        if local.hour not in DAYTIME or not cache.add(f'gmail-push:{connection.user_id}', 1,
+                                                       int(PUSH_GAP.total_seconds())):
+            return False
+        from notifications.models import NotificationType
+        from notifications.utils import create_notification
+        words = 'Un correo sigue pendiente' if count == 1 else f'{count} correos siguen pendientes'
+        create_notification(user=connection.user, notification_type=NotificationType.SYSTEM, title='Pendiente · Gmail',
+                            message=f'{words}. Te lo recuerdo en Confío IA.', data={'type': NOTICE_TYPE})
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('Gmail follow-up push failed: %s', type(exc).__name__)
+        return False
 
 
 CATCH_UP = 3
@@ -322,11 +394,26 @@ def sent(user, draft_id):
         logger.warning('Gmail send outcome not posted: %s', type(exc).__name__)
 
 
+READ_ERASED = 'Borré esta respuesta porque hablaba de tu Gmail o tu calendario y lo desconectaste.'
+
+
 def erase(user_id):
-    """Everything Gmail the assistant said in the person's conversation: gone with the connection."""
+    """Everything Gmail the assistant said in the person's conversation, its answers about her mail and calendar
+    too: gone with the connection."""
     from inbox.models import SupportMessage
     try:
         with transaction.atomic():
             SupportMessage.objects.filter(conversation__user_id=user_id, metadata__gmail=True).delete()
+            # An answer that told her what her mail or calendar said (assistant.service tags it): its words go, as
+            # WhatsApp's (whatsapp_link.chat.erase). The line stays, so the thread and the turn that points at it
+            # keep their shape.
+            # A card that came in the same reply (a payment she asked for in her own words) keeps its own marks.
+            told = SupportMessage.objects.filter(conversation__user_id=user_id).filter(
+                models.Q(metadata__gmail_read=True) | models.Q(metadata__gmail_follow=True))
+            for message in told.only('pk', 'metadata'):
+                kept = {key: value for key, value in (message.metadata or {}).items()
+                        if key not in ('gmail_read', 'gmail_follow', 'actions')}
+                SupportMessage.objects.filter(pk=message.pk).update(
+                    body=READ_ERASED, metadata={**kept, 'ai': True, 'actions': [], 'gmail_erased': True})
     except Exception as exc:  # noqa: BLE001 - logged by type only
         logger.error('Gmail chat posts not erased: %s', type(exc).__name__)

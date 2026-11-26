@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, DateTimeField, Q, Value, When
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 
@@ -421,7 +421,7 @@ def start_link(user, phone, consent_version, country=''):
             raise LinkRefused('already_linked')
         fields = dict(state=WhatsAppLink.State.PAIRING, reason='', sealed_phone=_seal(digits), phone_hint=digits[-4:],
                       phone_key=phone_key(digits), provider=PROVIDER,
-                      sealed_code='', code_at=None, linked_at=None, next_sync_at=None, failures=0,
+                      sealed_code='', code_at=None, linked_at=None, history_at=None, next_sync_at=None, failures=0,
                       consent_version=consent_version, grant=uuid.uuid4(), session_expires_at=None)
         if link is None:
             link = WhatsAppLink.objects.create(user=user, **fields)
@@ -480,7 +480,7 @@ def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pe
         link.inbox.all().delete()
         WhatsAppLink.objects.filter(pk=link.pk).update(
             reason='unlinking', grant=uuid.uuid4(), sealed_code='', code_at=None, sealed_phone='', next_sync_at=None,
-            updated_at=timezone.now())
+            history_at=None, updated_at=timezone.now())
     _forget_pushes(user.pk)
     from . import chat
     chat.erase(user)  # what the assistant said about it in the conversation goes too
@@ -547,11 +547,11 @@ def _on_event(event):
         pk=int(event.get('link') or 0), grant=str(event.get('grant') or '')).exclude(reason='unlinking').first() \
         if str(event.get('link') or '').isdigit() else None
     if link is None:
-        if kind in ('paired', 'message'):
+        if kind in ('paired', 'message', 'history'):
             # A device for a pairing that is over (unlinked or asked again meanwhile): it must not stay linked.
             _queue_logout(event.get('link'), event.get('grant'))
         return
-    if kind in ('paired', 'message') and link.state not in (WhatsAppLink.State.PAIRING, WhatsAppLink.State.LINKED):
+    if kind in ('paired', 'message', 'history') and link.state not in (WhatsAppLink.State.PAIRING, WhatsAppLink.State.LINKED):
         _queue_logout(link.pk, link.grant)  # this pairing ended here (failed, gone): its device goes too
         return
     if kind == 'code':
@@ -578,6 +578,8 @@ def _on_event(event):
         logger.error('WhatsApp bridge: WhatsApp says the client is outdated; update whatsmeow and redeploy')
     elif kind == 'message':
         _arrived(link, data)
+    elif kind == 'history':
+        _past(link, data)
 
 
 def _queue_logout(link_id, grant):
@@ -645,6 +647,72 @@ def _arrived(link, data):
         _queue_sync(link.pk)
 
 
+HISTORY_PER_EVENT = 500
+
+
+def _past(link, data):
+    """The chats' history WhatsApp handed the new device (its last HISTORY_DAYS, one-to-one text, filtered by the
+    bridge as new messages are): kept like any kept message, under the message's own time, so she can ask about it
+    right after linking and it is erased on the same day as it would have been. Already looked at: old messages are
+    never classified, pushed or told; one written after the link (it came with the history) waits for its look
+    like a new message. Kept while the owner's note is still being written, as nothing is read before it is
+    (assistant_tool._link) and an undone link erases them (unlink)."""
+    # The accepted texts cover it (founder 2026-11-26): the same check as a new message.
+    if link.state != WhatsAppLink.State.LINKED or link.consent_version < CONSENT_VERSION:
+        return
+    items = data.get('messages') if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return
+    now = timezone.now()
+    since = _history_since()
+    linked = link.linked_at.timestamp() if link.linked_at else now.timestamp()
+    rows, times = {}, {}
+    for item in items[:HISTORY_PER_EVENT]:
+        if not isinstance(item, dict):
+            continue
+        row = {'name': str(item.get('name') or '')[:MAX_NAME], 'preview': str(item.get('text') or '')[:1000]}
+        chat_id = str(item.get('chat') or '')
+        try:
+            at = int(item.get('at') or 0)
+        except (TypeError, ValueError):
+            continue
+        if not row['preview'] or not chat_id or at <= 0 or private(row):
+            continue
+        when = datetime.fromtimestamp(min(at, int(now.timestamp())), tz=dt_timezone.utc)
+        if when < since:
+            continue
+        from_me = item.get('from_me') is True
+        key = _key(str(link.user_id), str(link.grant), str(item.get('id') or ''), chat_id)
+        new = not from_me and at >= linked  # written after the link: a new message, looked at as one
+        rows[key] = WhatsAppInbox(
+            link=link, source_key=key, chat_key=_chat_key(link, chat_id), from_me=from_me,
+            looked_at=None if new else now,
+            sealed=_seal({'chat': chat_id, 'name': row['name'], 'phone': str(item.get('phone') or ''),
+                          'text': row['preview'], 'at': at}))
+        times[key] = when
+    if not rows:
+        # History came with nothing to keep (or only a marker that a chunk came): it still came.
+        _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').update(history_at=now)
+        return
+    with transaction.atomic():
+        if _mine(link).select_for_update().filter(state=WhatsAppLink.State.LINKED).exclude(
+                reason='unlinking').first() is None:
+            return  # unlinked meanwhile: write nothing
+        known = set(WhatsAppInbox.objects.filter(link=link, source_key__in=list(rows)).values_list(
+            'source_key', flat=True))
+        made = [row for key, row in rows.items() if key not in known]
+        # A live copy that lands between the read and the write is the same row: kept once.
+        WhatsAppInbox.objects.bulk_create(made, ignore_conflicts=True)
+        # created_at is the message's own time: the 30-day erase (sweep) and the days asked about go by it.
+        keys = [row.source_key for row in made]
+        if keys:
+            WhatsAppInbox.objects.filter(link=link, source_key__in=keys, created_at__gte=now).update(created_at=Case(
+                *[When(source_key=key, then=Value(times[key])) for key in keys], output_field=DateTimeField()))
+        _mine(link).update(history_at=now)
+    if any(row.looked_at is None for row in made):
+        _queue_sync(link.pk)
+
+
 def _chat_key(link, chat_id):
     return _key(str(link.user_id), str(link.grant), 'chat', chat_id)
 
@@ -696,7 +764,8 @@ def history(link, *, chat=None, words=None, days=None) -> tuple:
     since = _history_since()
     if days:
         since = max(since, timezone.now() - timedelta(days=max(1, int(days))))
-    who = _fold(chat).strip()
+    # Every word of the name, in any order: "Genesis esposa" finds the chat saved as "Esposa Génesis".
+    who = [part for part in _fold(chat).split() if part]
     terms = [term for term in _fold(words).split() if len(term) > 1][:6]
     kept = WhatsAppInbox.objects.filter(link=link, created_at__gte=since)
     # By chat id: a chat is the one asked for when any of its lines carries that name, and all of its lines come
@@ -705,10 +774,15 @@ def history(link, *, chat=None, words=None, days=None) -> tuple:
     read, before, whole = 0, None, True
 
     def asked():
-        return [cid for cid in matches if not who or any(who in name for name in names[cid])]
+        return [cid for cid in matches if not who or any(all(part in name for part in who) for name in names[cid])]
+
+    def older(rows, cursor):
+        # Newest first by the message's own time (created_at: history comes in after live messages, with older
+        # times), pk among equals.
+        return rows.filter(Q(created_at__lt=cursor[0]) | Q(created_at=cursor[0], pk__lt=cursor[1])) if cursor else rows
 
     while True:
-        page = list((kept.filter(pk__lt=before) if before else kept).order_by('-pk')[:HISTORY_PAGE])
+        page = list(older(kept, before).order_by('-created_at', '-pk')[:HISTORY_PAGE])
         for row in page:
             data = _unseal(row.sealed, {})
             text = data.get('text')
@@ -731,12 +805,12 @@ def history(link, *, chat=None, words=None, days=None) -> tuple:
         read += len(page)
         if len(page) < HISTORY_PAGE:
             break
-        before = page[-1].pk
+        before = (page[-1].created_at, page[-1].pk)
         if not terms and sum(len(matches[cid]) for cid in asked()) >= HISTORY_LINES:
             whole = False  # the latest was asked for, and that much is here; older ones were not read
             break
         if read >= HISTORY_ROWS:
-            whole = not kept.filter(pk__lt=before).exists()
+            whole = not older(kept, before).exists()
             break
     found = [(item, cid) for cid in asked() for item in matches[cid]]
     # The messages holding most of the words; among equals, the newest. Told oldest first.
@@ -851,7 +925,7 @@ def _fail(link, reason, logout=True):
 def _gone(link, reason='gone', ended_by=WhatsAppLinkRecord.EndedBy.PHONE):
     """Unlinked from the phone (or WhatsApp ended the device): what came from it goes."""
     if not _mine(link).filter(state=WhatsAppLink.State.LINKED).update(
-            state=WhatsAppLink.State.GONE, reason=reason, next_sync_at=None, sealed_phone=''):
+            state=WhatsAppLink.State.GONE, reason=reason, next_sync_at=None, sealed_phone='', history_at=None):
         return
     link.notices.all().delete()
     link.inbox.all().delete()
@@ -987,6 +1061,8 @@ def _store(link, taken) -> list:
                 'kind': verdict['kind'], 'notified_at': timezone.now(),
                 'sealed': _seal({'chat': row['name'], 'jid': row['chat'], 'phone': row['phone'],
                                  'preview': row['preview'], 'summary': verdict['summary'],
+                                 # The newest message's own time: a reply of hers after it settles a follow-up.
+                                 'at': int(row['at'] or 0),
                                  'time': when.strftime('%H:%M') if when else ''})})
             if made:
                 found.append((_notice, verdict.get('replies') or []))

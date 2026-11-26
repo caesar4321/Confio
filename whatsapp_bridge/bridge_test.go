@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,7 +14,10 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/proto/waAdv"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -129,6 +133,68 @@ func TestTypingForIsPacedAndBounded(t *testing.T) {
 	}
 }
 
+// parseWeb: what ParseWebMessage does for a one-to-one chat, without a client.
+func parseWeb(chat types.JID, web *waWeb.WebMessageInfo) (*events.Message, error) {
+	info := types.MessageInfo{
+		MessageSource: types.MessageSource{Chat: chat, Sender: chat, IsFromMe: web.GetKey().GetFromMe(),
+			IsGroup: chat.Server == types.GroupServer},
+		ID: web.GetKey().GetID(), PushName: web.GetPushName(), Timestamp: time.Unix(int64(web.GetMessageTimestamp()), 0),
+	}
+	if info.IsFromMe {
+		info.Sender = types.NewJID("59170000009", types.DefaultUserServer)
+	}
+	return &events.Message{Info: info, Message: web.GetMessage()}, nil
+}
+
+func webText(id string, at time.Time, fromMe bool, text string) *waHistorySync.HistorySyncMsg {
+	return &waHistorySync.HistorySyncMsg{Message: &waWeb.WebMessageInfo{
+		Key:              &waCommon.MessageKey{ID: proto.String(id), FromMe: proto.Bool(fromMe)},
+		MessageTimestamp: proto.Uint64(uint64(at.Unix())),
+		Message:          &waE2E.Message{Conversation: proto.String(text)},
+	}}
+}
+
+func TestPastKeepsOnlyRecentOneToOneText(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	recent, old := now.Add(-2*24*time.Hour), now.Add(-31*24*time.Hour)
+	blob := &waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_INITIAL_BOOTSTRAP.Enum(),
+		Conversations: []*waHistorySync.Conversation{
+			{ID: proto.String("59171234567@s.whatsapp.net"), Name: proto.String("Esposa Génesis"), Messages: []*waHistorySync.HistorySyncMsg{
+				webText("A1", recent, false, "Compra pan"),
+				webText("A2", recent, true, "ya voy"),
+				webText("A3", old, false, "hace mucho"),
+				webText("A4", recent, false, "Tu código de verificación es 482913"),
+				webText("A5", recent, false, ""),
+			}},
+			{ID: proto.String("120363@g.us"), Messages: []*waHistorySync.HistorySyncMsg{webText("G1", recent, false, "grupo")}},
+			{ID: proto.String("status@broadcast"), Messages: []*waHistorySync.HistorySyncMsg{webText("S1", recent, false, "estado")}},
+			{ID: proto.String("59170000009@s.whatsapp.net"), Messages: []*waHistorySync.HistorySyncMsg{webText("N1", recent, true, "nota")}},
+			{ID: proto.String("12345@lid"), PnJID: proto.String("59176543210@s.whatsapp.net"),
+				Messages: []*waHistorySync.HistorySyncMsg{webText("L1", recent, false, "hola desde lid")}},
+		},
+	}
+	rows := past(context.Background(), parseWeb, func(types.MessageInfo) string { return "+0" }, blob, now, "59170000009")
+	got := map[string]map[string]any{}
+	for _, row := range rows {
+		got[row["id"].(string)] = row
+	}
+	if len(rows) != 3 || got["A1"] == nil || got["A2"] == nil || got["L1"] == nil {
+		t.Fatalf("kept %v", rows)
+	}
+	if got["A1"]["name"] != "Esposa Génesis" || got["A1"]["at"] != recent.Unix() || got["A2"]["from_me"] != true {
+		t.Fatalf("row %v", got["A1"])
+	}
+	// The LID chat is the same chat as its new messages: by the number.
+	if got["L1"]["chat"] != "59176543210@s.whatsapp.net" || got["L1"]["phone"] != "59176543210" {
+		t.Fatalf("lid row %v", got["L1"])
+	}
+	push := &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_PUSH_NAME.Enum(), Conversations: blob.Conversations}
+	if len(past(context.Background(), parseWeb, func(types.MessageInfo) string { return "" }, push, now)) != 0 {
+		t.Fatal("a push-name blob is not messages")
+	}
+}
+
 // ---- with a database (BRIDGE_TEST_DSN, e.g. postgres://postgres@localhost/whatsapp_bridge_test?sslmode=disable)
 
 func testDB(t *testing.T) *sql.DB {
@@ -212,7 +278,7 @@ func TestEventsStayQueuedUntilDjangoTakesThem(t *testing.T) {
 	b.enqueue(ctx, "7", "g", "message", map[string]any{"text": "hola"})
 
 	batch, _ := b.pending(ctx, 50)
-	if err := b.post(ctx, batch); err == nil {
+	if err := b.post(ctx, encode(batch)); err == nil {
 		t.Fatal("a 503 counted as delivered")
 	}
 	if left, _ := b.pending(ctx, 50); len(left) != 2 {
@@ -237,6 +303,114 @@ func TestEventsStayQueuedUntilDjangoTakesThem(t *testing.T) {
 	last := fake.got[len(fake.got)-1]["events"].([]any)
 	if len(last) != 2 || last[0].(map[string]any)["kind"] != "paired" || fake.auth != "Bearer secret-token" {
 		t.Fatalf("delivered %v with %q", last, fake.auth)
+	}
+}
+
+// sizedDjango: refuses a body over its limit (as Django's 2.5 MB) or one holding "poison"; records the rest.
+type sizedDjango struct {
+	limit     int
+	largest   int
+	delivered int
+	refused   int
+}
+
+func (f *sizedDjango) Do(r *http.Request) (*http.Response, error) {
+	body, _ := io.ReadAll(r.Body)
+	var payload struct {
+		Events []json.RawMessage `json:"events"`
+	}
+	status := http.StatusOK
+	if len(body) > f.limit || strings.Contains(string(body), "poison") || json.Unmarshal(body, &payload) != nil {
+		status = http.StatusBadRequest
+		f.refused++
+	} else {
+		f.delivered += len(payload.Events)
+		f.largest = max(f.largest, len(body))
+	}
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+}
+
+func runDeliver(t *testing.T, b *bridge, ctx context.Context) {
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { b.deliver(runCtx); close(done) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if left, _ := b.pending(ctx, 50); len(left) == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}
+
+func TestOneDeliveryStaysUnderDjangosLimit(t *testing.T) {
+	db := testDB(t)
+	b := newBridge(db, nil, "token", "http://django")
+	fake := &sizedDjango{limit: 2_500_000}
+	b.http = fake
+	ctx := context.Background()
+	// "<>&" stored as 3 bytes; HTML-escaped it would be 18: what counts is the body as posted.
+	text := strings.Repeat("<>&", 300)
+	for i := 0; i < 40; i++ {
+		rows := make([]any, 100)
+		for j := range rows {
+			rows[j] = map[string]any{"text": text, "id": fmt.Sprint(i, "-", j)}
+		}
+		b.enqueue(ctx, "7", "g", "history", map[string]any{"messages": rows})
+	}
+	runDeliver(t, b, ctx)
+	if left, _ := b.pending(ctx, 50); len(left) != 0 || fake.refused != 0 || fake.delivered != 40 {
+		t.Fatalf("left %d, refused %d, delivered %d", len(left), fake.refused, fake.delivered)
+	}
+	if fake.largest > deliverBytes+deliverBytes/2 || strings.Contains(string(encode([]event{{Data: json.RawMessage(`"<"`)}})), `\u003c`) {
+		t.Fatalf("largest body %d", fake.largest)
+	}
+}
+
+func TestARefusedEventNeverStallsTheQueue(t *testing.T) {
+	db := testDB(t)
+	b := newBridge(db, nil, "token", "http://django")
+	fake := &sizedDjango{limit: 2_500_000}
+	b.http = fake
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		text := "hola"
+		kind := "message"
+		if i == 2 {
+			text, kind = "poison", "history"
+		}
+		b.enqueue(ctx, "7", "g", kind, map[string]any{"text": text})
+	}
+	runDeliver(t, b, ctx)
+	if left, _ := b.pending(ctx, 50); len(left) != 0 || fake.delivered != 4 {
+		t.Fatalf("left %d, delivered %d", len(left), fake.delivered)
+	}
+	// A 400 on anything but history is most likely our own misconfiguration: the event waits, never dropped.
+	b.enqueue(ctx, "7", "g", "paired", map[string]any{"text": "poison"})
+	runCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	b.deliver(runCtx)
+	cancel()
+	if left, _ := b.pending(ctx, 50); len(left) != 1 || left[0].Kind != "paired" {
+		t.Fatalf("a refused pairing event was dropped: %d left", len(left))
+	}
+	_, _ = b.db.ExecContext(ctx, `DELETE FROM bridge_event`)
+	// Anything else Django answers (a wrong token's 404, a 5xx) keeps the events.
+	b.enqueue(ctx, "7", "g", "message", map[string]any{"text": "hola"})
+	b.http = &fakeDjango{status: http.StatusNotFound}
+	batch, _ := b.pending(ctx, 50)
+	var refused *refusedError
+	if err := b.post(ctx, encode(batch)); err == nil || errors.As(err, &refused) {
+		t.Fatalf("a 404 counted as refused or delivered: %v", err)
+	}
+}
+
+func TestIncomingStripsNul(t *testing.T) {
+	data, ok := incoming(context.Background(), func(types.MessageInfo) string { return "Ana\x00" },
+		message(person("59171234567"), "ho\x00la"), "")
+	if !ok || data["text"] != "hola" || data["name"] != "Ana" {
+		t.Fatalf("%v %v", ok, data)
 	}
 }
 

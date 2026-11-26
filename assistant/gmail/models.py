@@ -87,6 +87,11 @@ class MailNeed(models.Model):
     dismissed = models.BooleanField(default=False)
     notified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Follow-ups while it is still open (gmail.followups), as WhatsApp's notices.
+    told_at = models.DateTimeField(null=True, blank=True)  # posted in her conversation (chat.tell); else never followed up
+    followups = models.PositiveSmallIntegerField(default=0)
+    followed_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         app_label = 'assistant'

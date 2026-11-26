@@ -113,10 +113,11 @@ func main() {
 	}
 	// What the person sees in Dispositivos vinculados when it is linked by code: "Chrome".
 	store.DeviceProps.Os = proto.String("Confío")
-	// Only new messages are used: ask WhatsApp for as little history as it allows (and it is never downloaded).
+	// The chats' last historyDays, as Django keeps them (HISTORY_DAYS): asked for when the device is linked, so a
+	// question right after linking finds the chats she already had. Sizes capped: text is all that is kept.
 	if sync := store.DeviceProps.HistorySyncConfig; sync != nil {
-		sync.FullSyncDaysLimit, sync.FullSyncSizeMbLimit = proto.Uint32(1), proto.Uint32(1)
-		sync.RecentSyncDaysLimit, sync.StorageQuotaMb = proto.Uint32(1), proto.Uint32(1)
+		sync.FullSyncDaysLimit, sync.FullSyncSizeMbLimit = proto.Uint32(historyDays), proto.Uint32(historyMb)
+		sync.RecentSyncDaysLimit, sync.StorageQuotaMb = proto.Uint32(historyDays), proto.Uint32(historyMb)
 	}
 
 	routes, err := parseProxies(sec.Proxies)

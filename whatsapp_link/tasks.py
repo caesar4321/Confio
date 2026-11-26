@@ -57,3 +57,17 @@ def drop_profile(self, provider_name, context_id, session_id=''):
 def sweep():
     from . import service
     service.sweep()
+
+
+@shared_task(name='whatsapp_link.followups', ignore_result=True, soft_time_limit=100, time_limit=110)
+def followups():
+    """Follow-ups for what Confío IA told about WhatsApp and is still open, until the next day."""
+    from . import followups as chat_followups
+    chat_followups.run()
+
+
+@shared_task(name='whatsapp_link.mail_followups', ignore_result=True, soft_time_limit=100, time_limit=110)
+def mail_followups():
+    """The same for Gmail (assistant.gmail.followups): its own task, so neither one's time limit cuts the other."""
+    from assistant.gmail import followups as mail
+    mail.run()

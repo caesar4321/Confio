@@ -83,6 +83,8 @@ TEXT_ONLY_TOOLS = {'read_public_document', 'categorize_transactions', 'prepare_p
 TEXT_ONLY_TOOLS |= {'start_store_task'}
 # Futuros reads the venue live; a call has its own tool list (SERVER_TOOLS).
 TEXT_ONLY_TOOLS |= {'get_futures'}
+# Her Gmail and calendar are read in the chat, where the answer is tagged to go with the connection.
+TEXT_ONLY_TOOLS |= {'ask_my_mail', 'get_my_calendar', 'prepare_mail'}
 # A rail's waitlist is joined from the chat, where its state section is (assistant/pay_rails.py).
 TEXT_ONLY_TOOLS |= {'notify_rail'}
 # WhatsApp: a reply waits on a card, and what her chats say is read in the conversation, where the answer that

@@ -219,6 +219,10 @@ def disconnect(connection) -> bool:
             row.delete()
         GmailOAuthState.objects.filter(user_id=connection.user_id).delete()
         _forget_notices(connection.user_id)
+        # An answer about her mail saved while this ran (it saw the row still there) is erased once this commits.
+        from . import chat
+        user_id = connection.user_id
+        transaction.on_commit(lambda: chat.erase(user_id))
     if not blob:
         return True
     if _grant_shared(row.email_key):
