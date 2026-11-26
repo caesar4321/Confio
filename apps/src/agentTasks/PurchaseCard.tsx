@@ -19,7 +19,7 @@ import { PurchaseDone } from './PurchaseDone';
 import { PurchaseJourney } from './PurchaseJourney';
 import {
   ACTIVE, ANSWER_AGENT_NOTIFY, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
-  CANCEL_AGENT_TASK, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, RESUME_AGENT_PAYMENT, SIGN_IN_AGENT_STORE,
+  CANCEL_AGENT_TASK, CHANGE_AGENT_ADDRESS, CHOOSE_AGENT_ADDRESS, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, RESUME_AGENT_PAYMENT, SIGN_IN_AGENT_STORE,
 } from './api';
 import { CapRule, cartTop } from './helpers';
 
@@ -213,6 +213,14 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
             {task.order.address ? (
               <Text style={styles.address}>Envío a: {task.order.address}</Text>
             ) : null}
+            {task.reason === 'approve' && task.order.address ? (
+              <Pressable onPress={() => act('address', CHANGE_AGENT_ADDRESS, {}, 'changeAgentAddress')}
+                accessibilityRole="button" accessibilityLabel="Cambiar dirección" style={styles.changeAddress}
+                disabled={tapping !== null}>
+                {tapping === 'address' ? <ActivityIndicator color={colors.primaryDark} />
+                  : <Text style={styles.linkText}>Cambiar dirección</Text>}
+              </Pressable>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -255,6 +263,20 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
             </View>
           </View>
         )
+      ) : null}
+      {waiting && task.reason === 'address' ? (
+        <View style={styles.addresses}>
+          {(task.order?.addresses ?? []).map((address, index) => (
+            <Pressable key={`${index}:${address}`} accessibilityRole="button" accessibilityLabel={address}
+              style={styles.addressOption}
+              disabled={tapping !== null}
+              onPress={() => act(`address:${index}`, CHOOSE_AGENT_ADDRESS, { index, address }, 'chooseAgentAddress')}>
+              <Icon name="map-pin" size={16} color={colors.primaryDark} />
+              <Text style={styles.addressText}>{address}</Text>
+              {tapping === `address:${index}` ? <ActivityIndicator color={colors.primaryDark} /> : null}
+            </Pressable>
+          ))}
+        </View>
       ) : null}
       {waiting && task.reason === 'step' ? (
         <View style={styles.stepRow}>
@@ -553,6 +575,11 @@ const styles = StyleSheet.create({
   assuranceText: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.onHeroField },
   stepRow: { marginTop: 12, gap: 4 },
   address: { fontSize: 13, color: '#6B7280', marginTop: 4 },
+  changeAddress: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' },
+  addresses: { marginTop: 12, gap: 8 },
+  addressOption: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 12,
+    borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', minHeight: 48 },
+  addressText: { flex: 1, fontSize: 14, color: colors.text.primary },
   line: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
   lineLabel: { fontSize: 13, color: '#6B7280' },
   lineValue: { fontSize: 13, color: '#6B7280', fontVariant: ['tabular-nums'] },

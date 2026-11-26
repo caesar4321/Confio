@@ -412,6 +412,8 @@ def checkout(step, browser, reader, seen):
             return step.remember('payment_shown', f'refused: not this order\'s payment page ({why})')
         # The runner reads it off this tab, as it is on screen. No model reads a payment.
         return step.save(state='awaiting_code', reason='', shown_target=browser.target)
+    if name == 'show_addresses' and not after:
+        return _addresses(step, seen, args)
     element = seen.element(args.get('ref'))
     # Off screen is fine: the real click scrolls it into view and refuses it if anything covers it.
     if element is None or element.get('disabled'):
@@ -452,6 +454,28 @@ def checkout(step, browser, reader, seen):
 
 
 REFUSED = object()
+MAX_ADDRESSES = 10
+
+
+def _addresses(step, seen, args):
+    """The person asked for another delivery address (service.change_address): the saved ones the store lists,
+    each kept only if this page writes it, are shown on the card to choose from. Nothing is selected here."""
+    task = step.task
+    if not (task.order or {}).get('address_wanted'):
+        return step.remember('show_addresses', 'refused: the person did not ask for another address')
+    listed = []
+    for text in args.get('addresses') or []:
+        text = guard.clean(agent.redact(' '.join(str(text or '').split())), 160)
+        if text and written_on(seen.text, text) and _place(text) not in {_place(one) for one in listed}:
+            listed.append(text)
+    if not listed:
+        if count(task, 'address_wanted') >= NO_ADDRESS_TRIES:
+            return step.stop('cannot_do')
+        return step.remember('show_addresses', 'refused: copy each saved address exactly as this page writes it',
+                             counts=counted(task, 'address_wanted'))
+    return step.hand_over('address', order={**(task.order or {}), 'addresses': listed[:MAX_ADDRESSES],
+                                            'approved': None},
+                          body=notes.say(notes.NEEDS_PERSON['address'], task))
 
 
 def chosen_cart(task):
@@ -590,6 +614,13 @@ def _order(step, browser, reader, seen, element, label, args):
         return step.remember('ready_to_order', 'refused: name the item')
     total = guard.clean(agent.redact(args.get('total')), 40)
     amount = amount_of(total)
+    if (task.order or {}).get('address_wanted'):
+        # Asked on the card: never the old order again. A store with no way to change it stops, never loops.
+        if count(task, 'address_wanted') >= NO_ADDRESS_TRIES:
+            return step.stop('cannot_do')
+        return step.remember('ready_to_order', 'refused: the person wants another delivery address: open the '
+                                               'store\'s way to change it and call show_addresses',
+                             counts=counted(task, 'address_wanted'))
     read, why = _reviewed(step, seen, element, _review_list(cart) if cart else item, amount)
     if read is None:
         return step.remember('ready_to_order', f'refused: {why}')
@@ -602,6 +633,14 @@ def _order(step, browser, reader, seen, element, label, args):
         address = approved['address']
     else:
         address = read['ship_to'] if written_on(seen.text, read['ship_to']) else ''
+    choice = (task.order or {}).get('address_choice')
+    if choice and address and not read.get('ships_to_chosen'):
+        # The person chose a saved address on the card: the order goes there, or it is not offered.
+        if count(task, 'wrong_address') >= NO_ADDRESS_TRIES:
+            return step.stop('cannot_do')
+        return step.remember('ready_to_order', f'refused: it is not delivered to the address the person chose '
+                                               f'("{choice[:100]}"): select that one for this order',
+                             counts=counted(task, 'wrong_address'))
     if not address:
         # Founder, 2026-11-26: no order goes to an address the person never saw. Where it is delivered must be
         # written on the page that places it, so the card can show it. A store that never shows it: not bought.
@@ -614,7 +653,9 @@ def _order(step, browser, reader, seen, element, label, args):
     order = {'item': item, 'total': total, 'amount': format(amount, 'f'), 'button': label, 'page': where,
              'image': picked.get('image', '') or (cart[0].get('image', '') if cart else ''), 'address': address,
              'breakdown': breakdown(read, seen.text, amount),
-             'seen_clabes': (task.order or {}).get('seen_clabes') or []}
+             'seen_clabes': (task.order or {}).get('seen_clabes') or [],
+             # The saved address the person chose on the card stays the one it must go to.
+             'address_choice': (task.order or {}).get('address_choice') or ''}
     if cart:
         # What was chosen stays with the order (the card lists it; a later step checks against it).
         order = {**order, 'cart': cart, 'items': [{'title': entry.get('title') or '', 'quantity': entry.get('quantity'),
@@ -638,7 +679,7 @@ def _order(step, browser, reader, seen, element, label, args):
             notes.NEEDS_PERSON['subscribe'], task) + notes.breakdown_text(order))
     if not approved and mode != 'manual' and cap.get('item') == item \
             and cap_allows(cap, read, total, amount, order.get('breakdown') or []) \
-            and confirmed_before(task, address):
+            and confirmed_before(task, address) and not (task.order or {}).get('address_choice'):
         # Only to an address they confirmed on an earlier order card: "Elegir" is tapped before the
         # checkout shows where it goes, so a new address is always asked.
         # "Elegir" approved this item up to its top total (spec decision 42): at or under it, no second tap.

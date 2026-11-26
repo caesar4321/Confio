@@ -2250,6 +2250,69 @@ class CheckoutTests(StepBase):
         self.assertEqual((task.state, task.reason), ('stopped', 'cannot_do'))
         self.reader.click.assert_not_called()
 
+    def test_the_person_picks_another_saved_address_from_the_card(self):
+        from agent_tasks.schema import task_type
+        other = 'Av Paulista 900, Sao Paulo'
+        task = self.named()
+        self.assertEqual((task.reason, task.order['address']), ('approve', ADDRESS.lower()))
+        with self.assertRaises(service.TaskRefused):   # nothing to choose before the store lists them
+            service.choose_address(self.account, self.user, task.internal_id, 0)
+        task = service.change_address(self.account, self.user, task.internal_id)
+        self.assertEqual(task.state, 'working')
+        # The old card is never offered again before the address is changed.
+        task = self.step(task, checkout_page())
+        self.assertIn('wants another delivery address', task.history[-1]['result'])
+        # The store's own list: each kept only as this page writes it, never selected here.
+        listing = snap(f'Escolha o endereço de entrega {ADDRESS} Usar este endereço {other} Usar este endereço',
+                       f'{BASE}/checkout/address', elements=[element('Usar este endereço', ref=0),
+                                                             element('Usar este endereço', ref=1)])
+        self.operate.return_value = ('show_addresses', {'addresses': [ADDRESS, other, 'Rua Inventada 1, Rio']})
+        task = self.step(task, listing)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'address'))
+        self.assertEqual(task_type(task).order.addresses, [ADDRESS, other])
+        self.assertIn('direcciones guardadas', task_type(task).message)
+        with self.assertRaises(service.TaskRefused):   # a card that listed other words picks nothing
+            service.choose_address(self.account, self.user, task.internal_id, 1, address=ADDRESS)
+        task = service.choose_address(self.account, self.user, task.internal_id, 1, address=other)
+        self.assertEqual((task.state, task.order['address_choice']), ('working', other))
+        # Still the old address at the checkout: not offered.
+        self.operate.return_value = self.ORDER
+        task = self.step(task, checkout_page())
+        self.assertIn('not delivered to the address the person chose', task.history[-1]['result'])
+        # The chosen one: the card shows it, and only the person's tap orders it.
+        task = self.step(task, checkout_page(address=other))
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.assertEqual(task.order['address'], other.lower())
+        self.reader.click.assert_not_called()
+        task = service.approve(self.account, self.user, task.internal_id, total='R$ 189,00', address=other.lower())
+        task = self.step(task, checkout_page(address=other))
+        self.reader.click.assert_called_once()
+
+    def test_a_store_with_no_way_to_change_the_address_stops_never_loops(self):
+        task = service.change_address(self.account, self.user, self.named().internal_id)
+        for _ in range(operate.NO_ADDRESS_TRIES + 1):
+            task = self.step(task, checkout_page())
+        self.assertEqual((task.state, task.reason), ('stopped', 'cannot_do'))
+        self.review.assert_called_once()   # only the first card's: no reader is paid for a certain refusal
+        self.reader.click.assert_not_called()
+
+    def test_a_chosen_address_is_shown_on_the_card_even_within_elegirs_top_total(self):
+        self.confirmed_earlier()
+        task = self.cap_task('200')
+        AgentTask.objects.filter(pk=task.pk).update(order={**task.order, 'address_choice': ADDRESS})
+        task.refresh_from_db()
+        self.operate.return_value = self.ORDER
+        task = self.step(task, self.priced())
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.assertEqual(task.order['address_choice'], ADDRESS)   # kept until the order is placed
+        self.reader.click.assert_not_called()
+
+    def test_a_list_of_addresses_nobody_asked_for_is_never_shown(self):
+        self.operate.return_value = ('show_addresses', {'addresses': [ADDRESS]})
+        task = self.step(self.make_task(phase='ordering'), checkout_page())
+        self.assertEqual(task.state, 'working')
+        self.assertIn('did not ask for another address', task.history[-1]['result'])
+
     def test_an_address_is_the_same_place_word_for_word_and_only_a_specific_one_is_remembered(self):
         self.assertTrue(operate.same_place('Ana Pérez, Calle 1 #23, CDMX', 'ana perez calle 1 23 cdmx'))
         self.assertFalse(operate.same_place('Ana Pérez, Calle 12 #23, CDMX', 'Calle 1'))

@@ -87,6 +87,9 @@ class AgentOrderType(graphene.ObjectType):
     total = graphene.String(required=True)
     image = graphene.String(required=True)
     address = graphene.String(description='Where it is delivered, as the checkout writes it: part of the approval.')
+    addresses = graphene.List(graphene.NonNull(graphene.String), required=True,
+                              description='With reason `address`: the saved delivery addresses the store lists, to '
+                                          'choose one with chooseAgentAddress (its index and these words).')
     breakdown = graphene.List(graphene.NonNull(lambda: AgentPayDetailType), required=True,
                               description='What makes up the total (productos, envío...), checked to add up to it.')
 
@@ -227,6 +230,8 @@ def task_type(task):
                               item=str(task.order.get('item') or ''), total=str(task.order.get('total') or ''),
                               image=str(task.order.get('image') or ''),
                               address=str(task.order.get('address') or ''),
+                              addresses=[str(one) for one in (task.order.get('addresses') or [])]
+                              if task.state == 'needs_person' and task.reason == 'address' else [],
                               breakdown=[AgentPayDetailType(label=notes.BREAKDOWN_LABELS[line['kind']].capitalize(),
                                                             value=('- ' if line['kind'] == 'discount' else '')
                                                             + str(line.get('amount') or ''))
@@ -535,6 +540,35 @@ class AnswerAgentRequest(_Result):
             return _failure(cls, exc)
 
 
+class ChangeAgentAddress(_Result):
+    """On the order card: deliver it to another of the person's saved addresses at the store."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id):
+        try:
+            return cls(success=True, errors=[], task=task_type(service.change_address(*_owner(info), id)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
+class ChooseAgentAddress(_Result):
+    """The saved address the person picked on the card: its index and the words the card showed."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        index = graphene.Int(required=True)
+        address = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, id, index, address=None):
+        try:
+            return cls(success=True, errors=[], task=task_type(
+                service.choose_address(*_owner(info), id, int(index), address=address)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
 class AnswerAgentStep(_Result):
     """Yes or no to one step the agent could not judge by itself ("¿lo hago?")."""
     class Arguments:
@@ -630,6 +664,8 @@ class Mutation(graphene.ObjectType):
     give_agent_code = GiveAgentCode.Field()
     approve_agent_order = ApproveAgentOrder.Field()
     answer_agent_step = AnswerAgentStep.Field()
+    change_agent_address = ChangeAgentAddress.Field()
+    choose_agent_address = ChooseAgentAddress.Field()
     answer_agent_request = AnswerAgentRequest.Field()
     answer_agent_notify = AnswerAgentNotify.Field()
     open_agent_live_view = OpenAgentLiveView.Field()

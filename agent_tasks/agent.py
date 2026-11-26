@@ -179,6 +179,10 @@ OPERATE_TOOLS = [
                           '<chosen> lists as not opened yet.'),
     _tool('order_placed', 'This page is the store\'s confirmation that the order already exists, though you never '
                           'named its final button.'),
+    _tool('show_addresses', 'Only when <done> says the person wants another delivery address: this page lists '
+                            'their saved delivery addresses (or pick-up points) to choose from. Copy each one '
+                            'exactly as written, one line each, at most 10.',
+          {'addresses': {'type': 'array', 'items': _TEXT}}),
     _tool('wait', 'The page is still loading: look again.'),
     _tool('give_up', 'Stop: the order cannot be made here.',
           {'reason': {'type': 'string', 'enum': ['no_payment', 'out_of_stock', 'cannot_do']}, 'why': {'type': 'string', 'description': 'In a few plain Spanish words, the reason, as the page shows it ("el producto está agotado", "la tienda pidió un documento").'}}),
@@ -214,7 +218,12 @@ How to work:
   of the store. If a press is refused, find another way: never try the same thing again.
 - If the store asks to sign in, or for a code it sent, call sign_in: the person's own sign-in is typed for you.
 - From the cart, go to the checkout. Keep the delivery address and the options the store already has selected;
-  pick the cheapest delivery when one must be picked. Never add extras, warranties, insurance, gift cards,
+  pick the cheapest delivery when one must be picked.
+- If <done> says the person wants another delivery address (and not yet which one): press the store's way to
+  change this order's delivery address ("Cambiar", "Modificar", "Alterar" beside it) and, on the list of their
+  saved addresses, call show_addresses. If <done> says which one they chose, select exactly that one for this order ("Usar esta
+  dirección", "Enviar a esta dirección", its option) and go on to the final button. Never add, edit or delete an
+  address, and never make one the default. Never add extras, warranties, insurance, gift cards,
   subscriptions or memberships, and decline them when offered.
 - Payment method: choose {pay}. Never a card, never credit, never another method. If the store does not offer
   {pay} for this order, give_up(no_payment).
@@ -383,6 +392,8 @@ REVIEW_TOOLS = [_tool('review', 'What this checkout page says about the order.',
                                                      'its quantity, and nothing else is.'},
     'ship_to': {'type': 'string', 'description': 'Where it is delivered, copied exactly as the page writes it (one '
                                                  'line, at most 120 characters), or empty when the page does not say.'},
+    'ships_to_chosen': {'type': 'boolean', 'description': 'True when there is no <chosen_address>, or the order is '
+                                                         'delivered to that very address.'},
     'lines': {'type': 'array', 'description': 'The figures the page lists that make up the total, in its order.',
               'items': {'type': 'object', 'additionalProperties': False, 'required': ['kind', 'amount'], 'properties': {
                   'kind': {'type': 'string', 'enum': ['products', 'shipping', 'tax', 'discount', 'fee', 'other']},
@@ -404,6 +415,9 @@ Answer with review:
   nothing else (no other product, no other quantity, none missing). If the page does not show a quantity you
   must check, false.
 - ship_to: the delivery address or pick-up point, copied exactly as written.
+- ships_to_chosen: when <chosen_address> is given (the saved address the person chose for this order, as the
+  store's list wrote it), true only if this order is delivered to that same place (the same street and number;
+  its wording may differ). Without <chosen_address>, true.
 - lines: what makes up the total as the page lists it (products, shipping, taxes, discounts, other fees), each
   with its kind and its figure as written. Empty if the page lists none. Products are one line when the page
   writes their subtotal, or one line per product when it writes only each product's figure; never both.
@@ -429,7 +443,9 @@ def review(task, page, element, item, meter):
         named = f'<items>\n{safe(listed)}\n</items>'
     else:
         named = f'<item>{safe(redact(item))}</item>'
-    content = (f'<store>{task.site}</store>\n{named}\n'
+    choice = str((task.order or {}).get('address_choice') or '')
+    picked = f'<chosen_address>{safe(redact(choice))}</chosen_address>\n' if choice else ''
+    content = (f'<store>{task.site}</store>\n{named}\n{picked}'
                f'<page>\naddress: {safe(_bare_url(page.url))}\ntitle: {safe(page.title)}\n\n{safe(text)}\n\n'
                f'options selected on the page:\n{safe(chosen) or "- none"}\n</page>\n'
                f"<button>\n{safe(kind)}: {safe(redact(element.get('label'))[:300]) or '(no text)'}\n</button>")
@@ -441,6 +457,7 @@ def review(task, page, element, item, meter):
     return {'places_order': args.get('places_order') is True,
             'pays_with': args.get('pays_with') if args.get('pays_with') in ('asked', 'card', 'other') else 'unclear',
             'total': str(args.get('total') or '')[:40], 'item_shown': args.get('item_shown') is True,
+            'ships_to_chosen': args.get('ships_to_chosen') is True or not choice,
             'ship_to': ' '.join(str(args.get('ship_to') or '').split())[:120], 'why': str(args.get('why') or '')[:160],
             'lines': [{'kind': str(line.get('kind')), 'amount': str(line.get('amount') or '')[:24]}
                       for line in (args.get('lines') or [])[:8] if isinstance(line, dict)]}

@@ -204,7 +204,15 @@ def review_by_words(task, page, element, item, meter):
             'pays_with': 'asked' if not refusal else ('card' if 'card' in refusal else 'other'),
             'total': grand_total(page.text),
             'item_shown': item_shown,
-            'ship_to': ship_to(page.text), 'why': refusal or 'read by words', 'lines': []}
+            'ship_to': ship_to(page.text), 'why': refusal or 'read by words', 'lines': [],
+            # The chosen saved address, word for word in what the page delivers to.
+            'ships_to_chosen': _ships_to_chosen(task, ship_to(page.text))}
+
+
+def _ships_to_chosen(task, delivered):
+    from agent_tasks import operate
+    choice = (getattr(task, 'order', None) or {}).get('address_choice')
+    return not choice or operate.same_place(delivered, choice) or operate.same_place(choice, delivered)
 
 
 def payment_page_by_words(task, page, meter):

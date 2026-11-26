@@ -294,6 +294,26 @@ it('the order card says where it is delivered', async () => {
     { id: ID, total: '$189.00', address: 'ana perez, calle 1 #23, cdmx' });
 });
 
+it('the order card changes where it goes: the person picks one of their saved addresses', async () => {
+  mockTask = task({ reason: 'approve', options: [],
+    order: { item: 'Chocolate Ibarra', total: '$189.00', image: '', address: 'ana perez, calle 1 #23, cdmx' } });
+  mockMutate.mockResolvedValue(answered('changeAgentAddress'));
+  let tree = await mount();
+  await act(async () => { labelled(tree, 'Cambiar dirección').props.onPress(); });
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID });
+  mockMutate.mockClear();
+  mockTask = task({ reason: 'address', options: [], message: '¿A cuál de tus direcciones guardadas…',
+    order: { item: 'Chocolate Ibarra', total: '$189.00', image: '', address: 'ana perez, calle 1 #23, cdmx',
+      addresses: ['Calle 1 #23, CDMX', 'Av. Reforma 222, CDMX'] } });
+  tree = await mount();
+  expect(texts(tree)).toEqual(expect.arrayContaining(['Calle 1 #23, CDMX', 'Av. Reforma 222, CDMX']));
+  expect(texts(tree)).not.toContain('Cambiar dirección');   // no confirm while choosing
+  mockMutate.mockResolvedValue(answered('chooseAgentAddress'));
+  await act(async () => { labelled(tree, 'Av. Reforma 222, CDMX').props.onPress(); });
+  // The index and the words the card showed: a card that listed others picks nothing.
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, index: 1, address: 'Av. Reforma 222, CDMX' });
+});
+
 it('a code the store sent is typed in the card', async () => {
   mockTask = task({ reason: 'otp', options: [], message: 'amazon.com.mx te envió un código…' });
   mockMutate.mockResolvedValue(answered('giveAgentCode'));

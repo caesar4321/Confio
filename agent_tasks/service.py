@@ -277,7 +277,7 @@ def resume(account, user, task_id, view=None):
     task = get(account, user, task_id)
     # A card in the chat has its own answer (choose, sign_in, give_code, approve): this is not one.
     if task.state != 'needs_person' or task.reason in ('choose', 'login', 'otp', 'approve', 'subscribe',
-                                                        'account_wait'):
+                                                        'account_wait', 'address'):
         raise TaskRefused('not_open')
     if not task.wait_until or task.wait_until <= timezone.now():
         runner.end(task, 'stopped', 'person_timeout', only={'state': 'needs_person'})
@@ -459,6 +459,47 @@ def answer_step(account, user, task_id, yes):
     else:
         entry = {'did': f"the person said no to \"{asked['label']}\"", 'result': 'find another way, never that'}
     return _answered(account, user, task_id, 'step', order=order,
+                     history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
+
+
+MAX_ADDRESS_CHANGES = 3
+
+
+def change_address(account, user, task_id):
+    """On the order card, the person wants it delivered elsewhere: the agent opens the store's own way to change
+    this order's address and lists their saved ones on the card (operate._addresses). Nothing is approved."""
+    task = get(account, user, task_id)
+    if task.state != 'needs_person' or task.reason != 'approve' or not (task.order or {}).get('address'):
+        raise TaskRefused('not_open')
+    if int((task.counts or {}).get('address_changes') or 0) >= MAX_ADDRESS_CHANGES:
+        raise TaskRefused('goal', 'Ya cambiamos la dirección varias veces. Elige la que quieres en la tienda y '
+                                  'vuelve a pedírmelo.')
+    order = {**(task.order or {}), 'approved': None, 'address_wanted': True, 'addresses': [],
+             'address_choice': ''}
+    entry = {'did': 'the person wants another delivery address',
+             'result': 'open the store\'s way to change this order\'s address, then call show_addresses'}
+    return _answered(account, user, task_id, 'approve', order=order,
+                     counts={**(task.counts or {}), 'address_wanted': 0, 'address_changes':
+                             int((task.counts or {}).get('address_changes') or 0) + 1},
+                     history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
+
+
+def choose_address(account, user, task_id, index, address=None):
+    """The person picked one of their saved addresses on the card (`address`: the words that card showed).
+    The agent selects that one for this order; the order card then shows it and asks again."""
+    task = get(account, user, task_id)
+    listed = (task.order or {}).get('addresses') or []
+    if task.state != 'needs_person' or task.reason != 'address' or not isinstance(index, int) \
+            or not 0 <= index < len(listed):
+        raise TaskRefused('not_open')
+    picked = str(listed[index])
+    if address is not None and str(address) != picked:
+        raise TaskRefused('not_open')   # the card they tapped listed another one
+    order = {**(task.order or {}), 'address_wanted': False, 'addresses': [], 'address_choice': picked,
+             'approved': None}
+    entry = {'did': 'the person chose the delivery address', 'result': f'select "{picked[:110]}" for this order, '
+                                                                       'then go on to the final button'}
+    return _answered(account, user, task_id, 'address', order=order,
                      history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
 
 

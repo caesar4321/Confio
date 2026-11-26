@@ -25,7 +25,7 @@ const TASK_FIELDS = `
   notify
   options { title price image cap unit rating reviews }
   capRule { margin minExtra commaDecimals maxQuantity }
-  order { item items { title quantity image } total image address breakdown { label value } }
+  order { item items { title quantity image } total image address addresses breakdown { label value } }
 `;
 
 export const GET_AGENT_TASK = gql`
@@ -52,6 +52,20 @@ export const ANSWER_AGENT_REQUEST = gql`
 export const ANSWER_AGENT_NOTIFY = gql`
   mutation AnswerAgentNotify($id: UUID!, $yes: Boolean!) {
     answerAgentNotify(id: $id, yes: $yes) { ${RESULT} }
+  }
+`;
+
+// On the order card: deliver it to another of the person's saved addresses at the store.
+export const CHANGE_AGENT_ADDRESS = gql`
+  mutation ChangeAgentAddress($id: UUID!) {
+    changeAgentAddress(id: $id) { ${RESULT} }
+  }
+`;
+
+// The saved address picked on the card: its index, and the words the card showed.
+export const CHOOSE_AGENT_ADDRESS = gql`
+  mutation ChooseAgentAddress($id: UUID!, $index: Int!, $address: String) {
+    chooseAgentAddress(id: $id, index: $index, address: $address) { ${RESULT} }
   }
 `;
 
@@ -164,6 +178,8 @@ export type AgentOption = {
 export type AgentOrderItem = { title: string; quantity: number; image: string };
 export type AgentOrder = {
   item: string; total: string; image: string; address?: string | null;
+  // With reason `address`: the person's saved delivery addresses at the store, to pick one.
+  addresses?: string[] | null;
   // The products chosen into one cart, with how many of each (empty for one item chosen the older way).
   items?: AgentOrderItem[] | null;
   // What the total is made of (Productos, Envío…): the server checked it adds up to the total.
