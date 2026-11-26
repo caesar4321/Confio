@@ -4919,14 +4919,14 @@ class ReviewAndPauseRowsTests(TestCase):
                                               reason_code='infinia_co_partner_paused', account_countries=['COL'])
         with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=[]):
             note = rails.colombia_pause_note()
-            self.assertIn('Bre-B en pausa', note)
+            self.assertIn('Bre-B de Confío en pausa', note)
             self.assertNotIn('PSE', note)
         rule.is_active = False
         rule.save()
         with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=['CO']):
             note = rails.colombia_pause_note()
             self.assertIn('PSE', note)
-            self.assertNotIn('Bre-B en pausa', note)
+            self.assertNotIn('Bre-B de Confío en pausa', note)
         with override_settings(KOYWE_ON_RAMP_PAUSED_COUNTRIES=[]):
             self.assertEqual(rails.colombia_pause_note(), '')
 
