@@ -314,6 +314,39 @@ it('the order card changes where it goes: the person picks one of their saved ad
   expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, index: 1, address: 'Av. Reforma 222, CDMX' });
 });
 
+it('a new address is written, read back whole, and only then sent', async () => {
+  const draft = { name: 'Ana Pérez', phone: '5512345678', street: 'Calle 1', number: '', apartment: '',
+    neighborhood: 'Centro', city: '', state: 'CDMX', postalCode: '06000', references: '' };
+  mockTask = task({ reason: 'address', options: [], message: 'amazon pide una dirección de envío…',
+    // As Apollo returns it: with __typename, which must never be sent back.
+    order: { item: 'Chocolate', total: '$189.00', image: '', addresses: [],
+      draftAddress: { __typename: 'AgentNewAddressType', ...draft } } });
+  mockMutate.mockResolvedValue(answered('addAgentAddress'));
+  const tree = await mount();
+  // No saved ones: the form is open, starting from what the person already gave Confío.
+  const input = (label: string) => tree.root.findAll((n) => n.props.accessibilityLabel === label
+    && typeof n.props.onChangeText === 'function')[0];
+  expect(input('Calle').props.value).toBe('Calle 1');
+  const review = () => tree.root.findAll((n) => n.props.title === 'Revisar dirección')[0];
+  expect(review().props.disabled).toBe(true);   // the city is missing
+  await act(async () => { input('Número').props.onChangeText('23'); input('Ciudad').props.onChangeText('CDMX'); });
+  await act(async () => { review().props.onPress(); });
+  expect(texts(tree)).toContain('Calle 1 23, Centro, CDMX, CDMX, 06000');
+  expect(mockMutate).not.toHaveBeenCalled();   // nothing sent before they confirm what they read
+  await act(async () => { tree.root.findAll((n) => n.props.title === 'Confirmar dirección')[0].props.onPress(); });
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, address: { ...draft, number: '23', city: 'CDMX' } });
+});
+
+it('with saved addresses, a new one is one tap away', async () => {
+  mockTask = task({ reason: 'address', options: [], message: '¿A cuál…',
+    order: { item: 'Chocolate', total: '$189.00', image: '', addresses: ['Calle 1 #23, CDMX'], draftAddress: null } });
+  const tree = await mount();
+  expect(texts(tree)).toContain('Otra dirección');
+  expect(tree.root.findAll((n) => n.props.accessibilityLabel === 'Calle')).toHaveLength(0);
+  await act(async () => { labelled(tree, 'Otra dirección').props.onPress(); });
+  expect(tree.root.findAll((n) => n.props.accessibilityLabel === 'Calle').length).toBeGreaterThan(0);
+});
+
 it('a code the store sent is typed in the card', async () => {
   mockTask = task({ reason: 'otp', options: [], message: 'amazon.com.mx te envió un código…' });
   mockMutate.mockResolvedValue(answered('giveAgentCode'));

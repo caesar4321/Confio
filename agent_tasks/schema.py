@@ -78,6 +78,33 @@ class AgentPickInput(graphene.InputObjectType):
     quantity = graphene.Int(required=True)
 
 
+class AgentNewAddressType(graphene.ObjectType):
+    """A delivery address the person writes on the card (service.NEW_ADDRESS_FIELDS)."""
+    name = graphene.String(required=True)
+    phone = graphene.String(required=True)
+    street = graphene.String(required=True)
+    number = graphene.String(required=True)
+    apartment = graphene.String(required=True)
+    neighborhood = graphene.String(required=True)
+    city = graphene.String(required=True)
+    state = graphene.String(required=True)
+    postal_code = graphene.String(required=True)
+    references = graphene.String(required=True)
+
+
+class AgentNewAddressInput(graphene.InputObjectType):
+    name = graphene.String(required=True)
+    phone = graphene.String(required=True)
+    street = graphene.String(required=True)
+    number = graphene.String()
+    apartment = graphene.String()
+    neighborhood = graphene.String()
+    city = graphene.String(required=True)
+    state = graphene.String()
+    postal_code = graphene.String()
+    references = graphene.String()
+
+
 class AgentOrderType(graphene.ObjectType):
     """The order the person approves in the chat: the store's own words."""
     items = graphene.List(graphene.NonNull(AgentOrderItemType), required=True,
@@ -90,6 +117,9 @@ class AgentOrderType(graphene.ObjectType):
     addresses = graphene.List(graphene.NonNull(graphene.String), required=True,
                               description='With reason `address`: the saved delivery addresses the store lists, to '
                                           'choose one with chooseAgentAddress (its index and these words).')
+    draft_address = graphene.Field(AgentNewAddressType,
+                                   description='With reason `address`: what the new-address form starts with (the '
+                                               'person\'s own name, phone and Confío address), for addAgentAddress.')
     breakdown = graphene.List(graphene.NonNull(lambda: AgentPayDetailType), required=True,
                               description='What makes up the total (productos, envío...), checked to add up to it.')
 
@@ -189,6 +219,8 @@ def task_type(task):
             reason = 'login_again'
         if reason == 'approve' and (task.order or {}).get('manual'):
             reason = 'approve_manual'   # the card they confirm on says they pay it themselves
+        if reason == 'address' and not (task.order or {}).get('addresses'):
+            reason = 'address_new'   # none saved at the store: the card asks for a new one
         message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task).replace(
             '{step}', str(((task.order or {}).get('ask_step') or {}).get('label') or '')[:80]).replace(
             '{what}', str(((task.order or {}).get('request') or {}).get('what') or '')[:120])
@@ -232,6 +264,8 @@ def task_type(task):
                               address=str(task.order.get('address') or ''),
                               addresses=[str(one) for one in (task.order.get('addresses') or [])]
                               if task.state == 'needs_person' and task.reason == 'address' else [],
+                              draft_address=AgentNewAddressType(**service.draft_address(task.user))
+                              if task.state == 'needs_person' and task.reason == 'address' else None,
                               breakdown=[AgentPayDetailType(label=notes.BREAKDOWN_LABELS[line['kind']].capitalize(),
                                                             value=('- ' if line['kind'] == 'discount' else '')
                                                             + str(line.get('amount') or ''))
@@ -553,6 +587,21 @@ class ChangeAgentAddress(_Result):
             return _failure(cls, exc)
 
 
+class AddAgentAddress(_Result):
+    """A new delivery address the person wrote on the card and confirmed: added at the store for this order."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        address = AgentNewAddressInput(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, address):
+        try:
+            fields = {key: address.get(key) for key in service.NEW_ADDRESS_FIELDS}
+            return cls(success=True, errors=[], task=task_type(service.add_address(*_owner(info), id, fields)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
 class ChooseAgentAddress(_Result):
     """The saved address the person picked on the card: its index and the words the card showed."""
     class Arguments:
@@ -666,6 +715,7 @@ class Mutation(graphene.ObjectType):
     answer_agent_step = AnswerAgentStep.Field()
     change_agent_address = ChangeAgentAddress.Field()
     choose_agent_address = ChooseAgentAddress.Field()
+    add_agent_address = AddAgentAddress.Field()
     answer_agent_request = AnswerAgentRequest.Field()
     answer_agent_notify = AnswerAgentNotify.Field()
     open_agent_live_view = OpenAgentLiveView.Field()

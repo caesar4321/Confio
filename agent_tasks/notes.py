@@ -33,6 +33,8 @@ NEEDS_PERSON = {
     'choose': 'Encontré estas opciones en {site}. Elige una y yo sigo.',
     # The person asked for another delivery address on the order card: their saved ones at the store.
     'address': '¿A cuál de tus direcciones guardadas en {site} lo envío? Elige una y te muestro el pedido otra vez.',
+    # The store asks for a delivery address and has none saved: the person writes one on the card.
+    'address_new': '{site} pide una dirección de envío. Escríbela en la tarjeta y la agrego por ti.',
     'details': '{site} pide datos que solo escribes tú.' + CARRY_ON,
     'choice': 'Hay algo que debes elegir tú en {site}.' + CARRY_ON,
     'consent': '{site} pide aceptar condiciones. Eso lo decides tú.' + CARRY_ON,

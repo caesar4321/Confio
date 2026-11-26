@@ -475,7 +475,7 @@ def change_address(account, user, task_id):
         raise TaskRefused('goal', 'Ya cambiamos la dirección varias veces. Elige la que quieres en la tienda y '
                                   'vuelve a pedírmelo.')
     order = {**(task.order or {}), 'approved': None, 'address_wanted': True, 'addresses': [],
-             'address_choice': ''}
+             'address_choice': '', 'new_address': None}
     entry = {'did': 'the person wants another delivery address',
              'result': 'open the store\'s way to change this order\'s address, then call show_addresses'}
     return _answered(account, user, task_id, 'approve', order=order,
@@ -496,10 +496,61 @@ def choose_address(account, user, task_id, index, address=None):
     if address is not None and str(address) != picked:
         raise TaskRefused('not_open')   # the card they tapped listed another one
     order = {**(task.order or {}), 'address_wanted': False, 'addresses': [], 'address_choice': picked,
-             'approved': None}
+             'new_address': None, 'approved': None}
     entry = {'did': 'the person chose the delivery address', 'result': f'select "{picked[:110]}" for this order, '
                                                                        'then go on to the final button'}
     return _answered(account, user, task_id, 'address', order=order,
+                     history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
+
+
+# A new delivery address, typed by the person on the card and confirmed there before it is sent. Each field
+# goes into the store's own form only as written here (operate.fill_address): no model ever types it.
+NEW_ADDRESS_FIELDS = ('name', 'phone', 'street', 'number', 'apartment', 'neighborhood', 'city', 'state',
+                      'postal_code', 'references')
+NEW_ADDRESS_REQUIRED = ('name', 'phone', 'street', 'city')
+NEW_ADDRESS_MAX = 80
+
+
+def address_line(fields):
+    """The new address in one line, as the card confirmed it: what the order must be delivered to."""
+    street = ' '.join(part for part in (fields.get('street'), fields.get('number')) if part)
+    parts = [street, fields.get('apartment'), fields.get('neighborhood'), fields.get('city'), fields.get('state'),
+             fields.get('postal_code')]
+    return ', '.join(part for part in parts if part)
+
+
+def draft_address(user):
+    """What the card's new-address form starts with: the person's own name, phone and the address they saved in
+    Confío (ramps), all theirs to change before they confirm. Never another person's."""
+    draft = {'name': (user.get_full_name() or '').strip()[:NEW_ADDRESS_MAX],
+             'phone': str(user.phone_number or '')[:NEW_ADDRESS_MAX]}
+    saved = getattr(user, 'ramp_user_address', None)
+    if saved is not None:
+        draft.update({'street': saved.address_street[:NEW_ADDRESS_MAX],
+                      'neighborhood': saved.address_neighborhood[:NEW_ADDRESS_MAX],
+                      'city': saved.address_city[:NEW_ADDRESS_MAX], 'state': saved.address_state[:NEW_ADDRESS_MAX],
+                      'postal_code': saved.address_zip_code[:NEW_ADDRESS_MAX]})
+    return {key: str(draft.get(key) or '') for key in NEW_ADDRESS_FIELDS}
+
+
+def add_address(account, user, task_id, fields):
+    """On the address card the person typed a new delivery address and confirmed it: the agent adds exactly
+    that one at the store for this order (operate.fill_address / address_button). Nothing is ordered."""
+    task = get(account, user, task_id)
+    if task.state != 'needs_person' or task.reason != 'address':
+        raise TaskRefused('not_open')
+    clean = {key: ' '.join(str((fields or {}).get(key) or '').split()) for key in NEW_ADDRESS_FIELDS}
+    if any(len(value) > NEW_ADDRESS_MAX for value in clean.values()):
+        raise TaskRefused('goal', 'Cada dato de la dirección puede tener hasta 80 caracteres.')
+    if any(not clean[key] for key in NEW_ADDRESS_REQUIRED):
+        raise TaskRefused('goal', 'Escribe tu nombre, un teléfono, la calle y la ciudad.')
+    line = address_line(clean)
+    order = {**(task.order or {}), 'address_wanted': False, 'addresses': [], 'address_choice': line,
+             'new_address': clean, 'new_address_typed': [], 'approved': None}
+    entry = {'did': 'the person gave a new delivery address and confirmed it',
+             'result': 'open the store\'s form to add an address for this order, then call fill_address'}
+    return _answered(account, user, task_id, 'address', order=order,
+                     counts={**(task.counts or {}), 'address_form': 0, 'address_saved': 0},
                      history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
 
 

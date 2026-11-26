@@ -2307,6 +2307,109 @@ class CheckoutTests(StepBase):
         self.assertEqual(task.order['address_choice'], ADDRESS)   # kept until the order is placed
         self.reader.click.assert_not_called()
 
+    NEW = {'name': 'Ana Perez', 'phone': '11999990000', 'street': 'Rua Nova', 'number': '45', 'apartment': '',
+           'neighborhood': 'Centro', 'city': 'Campinas', 'state': 'SP', 'postal_code': '13010-000', 'references': ''}
+
+    def test_the_person_adds_a_new_address_and_only_code_types_it(self):
+        from agent_tasks.schema import task_type
+        self.reader.choose.return_value = ''
+        checked = self.patch('agent_tasks.agent.address_step', return_value=(True, 'it is'))
+        task = service.change_address(self.account, self.user, self.named().internal_id)
+        listing = snap(f'Escolha o endereço {ADDRESS} Adicionar endereço', f'{BASE}/checkout/address',
+                       elements=[element('Adicionar endereço', ref=0)])
+        self.operate.return_value = ('show_addresses', {'addresses': [ADDRESS]})
+        task = self.step(task, listing)
+        self.assertEqual(task.reason, 'address')
+        self.assertEqual(task_type(task).order.draft_address.phone, str(self.user.phone_number or ''))
+        with self.assertRaises(service.TaskRefused):   # the store needs a street, a city and a way to call
+            service.add_address(self.account, self.user, task.internal_id, {**self.NEW, 'street': ''})
+        task = service.add_address(self.account, self.user, task.internal_id, self.NEW)
+        line = 'Rua Nova 45, Centro, Campinas, SP, 13010-000'
+        self.assertEqual((task.state, task.order['address_choice']), ('working', line))
+        # Saving before anything was typed: refused. Opening the store's form: pressed.
+        self.operate.return_value = ('address_button', {'ref': 0, 'purpose': 'save'})
+        task = self.step(task, listing)
+        self.assertIn('fill this form', task.history[-1]['result'])
+        self.operate.return_value = ('address_button', {'ref': 0, 'purpose': 'open'})
+        checked.return_value = (False, 'it deletes a saved address')   # the second model's no is final
+        task = self.step(task, listing)
+        self.assertIn('not the button to open', task.history[-1]['result'])
+        self.reader.click.assert_not_called()
+        checked.return_value = (True, 'it is')
+        task = self.step(task, listing)
+        self.reader.click.assert_called_once()
+        # The model names the fields; code types the person's own words into them.
+        form = snap('Novo endereço', f'{BASE}/checkout/address/new', elements=[
+            field('Nome completo', 0), field('Telefone', 1, 'tel'), field('CEP', 2), field('Rua', 3),
+            field('Número', 4), element('Estado', ref=5, tag='select'), field('Número do cartão', 6),
+            element('Salvar endereço', ref=7)])
+        self.operate.return_value = ('fill_address', {'fields': [
+            {'ref': 0, 'key': 'name'}, {'ref': 1, 'key': 'phone'}, {'ref': 2, 'key': 'postal_code'},
+            {'ref': 3, 'key': 'street'}, {'ref': 4, 'key': 'number'}, {'ref': 5, 'key': 'state'},
+            {'ref': 0, 'key': 'references'}]})
+        task = self.step(task, form)
+        self.assertEqual([call.args[1] for call in self.reader.type.call_args_list],
+                         ['Ana Perez', '11999990000', '13010-000', 'Rua Nova', '45'])
+        self.assertEqual(self.reader.choose.call_args.args[1], 'SP')
+        self.assertIn('references: the person did not give it', task.history[-1]['result'])
+        self.assertEqual(set(task.order['new_address_typed']),
+                         {'name', 'phone', 'postal_code', 'street', 'number', 'state'})
+        # A card field among real ones: nothing at all is typed (every field is checked first).
+        self.operate.return_value = ('fill_address', {'fields': [{'ref': 3, 'key': 'street'}, {'ref': 6, 'key': 'number'}]})
+        task = self.step(task, form)
+        self.assertIn('is not an address field', task.history[-1]['result'])
+        self.assertEqual(self.reader.type.call_count, 5)
+        # A form the second model does not see as one to add an address: nothing typed.
+        checked.return_value = (False, 'a question to the seller')
+        self.operate.return_value = ('fill_address', {'fields': [{'ref': 3, 'key': 'street'}]})
+        task = self.step(task, form)
+        self.assertIn('not a form to add an address', task.history[-1]['result'])
+        self.assertEqual(self.reader.type.call_count, 5)
+        checked.return_value = (True, 'it is')
+        # Saved only on the page it was filled on.
+        self.operate.return_value = ('address_button', {'ref': 0, 'purpose': 'save'})
+        task = self.step(task, listing)
+        self.assertIn('fill this form', task.history[-1]['result'])
+        self.operate.return_value = ('address_button', {'ref': 7, 'purpose': 'save'})
+        task = self.step(task, form)
+        self.assertEqual(self.reader.click.call_count, 2)
+        # The checkout must deliver to it; then the card shows it and only the person's tap orders it.
+        self.operate.return_value = self.ORDER
+        task = self.step(task, checkout_page())
+        self.assertIn('not delivered to the address the person chose', task.history[-1]['result'])
+        task = self.step(task, checkout_page(address=line))
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.assertEqual(task.order['address'], line.lower())
+        self.assertEqual(self.reader.click.call_count, 2)
+
+    def test_a_store_asking_for_an_address_with_none_saved_asks_the_person_for_one(self):
+        from agent_tasks.schema import task_type
+        checked = self.patch('agent_tasks.agent.address_step', return_value=(False, 'it shows one'))
+        self.operate.return_value = ('show_addresses', {'addresses': []})
+        task = self.step(self.make_task(phase='ordering'), checkout_page())
+        self.assertIn('does not ask for an address', task.history[-1]['result'])   # never on the driver's word
+        checked.return_value = (True, 'it asks')
+        task = self.step(task, checkout_page())
+        self.assertEqual((task.state, task.reason), ('needs_person', 'address'))
+        shown = task_type(task)
+        self.assertIn('pide una dirección de envío', shown.message)
+        self.assertEqual(shown.order.addresses, [])
+        self.assertIsNotNone(shown.order.draft_address)
+
+    def test_a_quantity_or_message_field_never_gets_the_persons_address(self):
+        self.patch('agent_tasks.agent.address_step', return_value=(True, 'it is'))
+        task = self.make_task(phase='ordering', order={'new_address': self.NEW, 'new_address_typed': []})
+        for label in ('Cantidad', 'Pregunta al vendedor', 'Cupom'):
+            with self.subTest(label=label):
+                self.operate.return_value = ('fill_address', {'fields': [{'ref': 0, 'key': 'number'}]})
+                task = self.step(task, snap('Form', f'{BASE}/checkout/x', elements=[field(label, 0)]))
+                self.assertIn('is not an address field', task.history[-1]['result'])
+        quantity = snap('Form', f'{BASE}/checkout/x', elements=[element('Cantidad', ref=0, tag='select', name='q')])
+        self.operate.return_value = ('fill_address', {'fields': [{'ref': 0, 'key': 'number'}]})
+        task = self.step(task, quantity)
+        self.reader.type.assert_not_called()
+        self.reader.choose.assert_not_called()
+
     def test_a_list_of_addresses_nobody_asked_for_is_never_shown(self):
         self.operate.return_value = ('show_addresses', {'addresses': [ADDRESS]})
         task = self.step(self.make_task(phase='ordering'), checkout_page())

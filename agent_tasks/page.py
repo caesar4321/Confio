@@ -268,6 +268,27 @@ _SEARCH = '(() => {' + _SAME + r'''
 })()'''
 
 
+# One option of a store's own <select> (a state, a colonia): the one whose words are the person's, set as a
+# browser sets it. Nothing else of the page is touched.
+_CHOOSE = '(() => {' + _SAME + r'''
+  if (el.tagName !== 'SELECT' || el.disabled) return 'not_a_select';
+  const norm = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+  const want = norm(__TEXT__);
+  if (!want) return 'no_option';
+  const options = [...el.options].filter(o => !o.disabled);
+  const opt = options.find(o => norm(o.text) === want) ||
+    (want.length >= 3 ? options.filter(o => norm(o.text).startsWith(want + ' ') || norm(o.text).startsWith(want))
+      .sort((a, b) => a.text.length - b.text.length)[0] : null);
+  if (!opt) return 'no_option';
+  // The prototype's setter: a page's framework (React) sees the change as a person's.
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, opt.value);
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return '';
+})()'''
+
+
 def _script(template, **values):
     values = {'MAX_ELEMENTS': MAX_ELEMENTS, 'MAX_TEXT': MAX_TEXT, 'MAX_LABEL': MAX_LABEL, **values}
     # One pass: a page's words that look like a slot ("__URL__") are never filled in.
@@ -414,6 +435,10 @@ class Reader:
         # JSON shown as a page opens with {" or [{ / [" / [1: "[Promoção] Frete" is text.
         bare_json = re.match(r'\s*(\{\s*["}]|\[\s*([\[{"\]\d-]|true|false|null))', start)
         return content_type == 'text/html' and not bare_json and not error
+
+    def choose(self, element, text) -> str:
+        """'' when the option of that <select> whose words are `text` was chosen, else why not."""
+        return self._act(_CHOOSE, element, TEXT=text)
 
     def search(self, element, text) -> str:
         return self._act(_SEARCH, element, TEXT=text)

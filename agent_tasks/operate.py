@@ -414,6 +414,10 @@ def checkout(step, browser, reader, seen):
         return step.save(state='awaiting_code', reason='', shown_target=browser.target)
     if name == 'show_addresses' and not after:
         return _addresses(step, seen, args)
+    if name == 'fill_address' and not after:
+        return fill_address(step, reader, seen, args)
+    if name == 'address_button' and not after:
+        return address_button(step, reader, seen, args)
     element = seen.element(args.get('ref'))
     # Off screen is fine: the real click scrolls it into view and refuses it if anything covers it.
     if element is None or element.get('disabled'):
@@ -455,12 +459,142 @@ def checkout(step, browser, reader, seen):
 
 REFUSED = object()
 MAX_ADDRESSES = 10
+MAX_FILLS, MAX_FORM_OPENS, MAX_SAVES = 8, 3, 2
+_TYPED_KINDS = ('', 'text', 'tel', 'number')
+# Keys a store's own dropdown may hold; never a quantity, an instalment or a delivery option.
+_CHOSEN_KEYS = ('state', 'city', 'neighborhood')
+# Fields that are never part of an address, whatever a model calls them.
+_NOT_ADDRESS = re.compile(r'qty|quantity|cantidad|quantidade|cupom|cupon|coupon|codigo promo|promo|gift|regalo|presente'
+                          r'|mensaje|mensagem|message|pregunta|question|pergunta|comentario|review|resena|avaliacao'
+                          r'|search|buscar|busca|email|e-mail|correo|password|senha|contrasena')
+
+
+def _value(new, key):
+    if key == 'street_and_number':
+        return ' '.join(part for part in (new.get('street'), new.get('number')) if part)
+    return str(new.get(key) or '')
+
+
+def _store_page(task, seen):
+    return sites.within(seen.url, task.site) and not seen.secret
+
+
+def fill_address(step, reader, seen, args):
+    """The store's form to add the new address the person confirmed on the card (service.add_address): the
+    model names which field is which; code types or chooses the person's own words, never anything else. Every
+    field is checked before anything is typed, and a second model must see the form as one to add an address."""
+    task = step.task
+    new = (task.order or {}).get('new_address') or {}
+    if not new:
+        return step.remember('fill_address', 'refused: the person gave no new address')
+    if not _store_page(task, seen):
+        return step.remember('fill_address', 'refused: not the store\'s own address form')
+    if count(task, 'address_fills') >= MAX_FILLS:
+        return step.stop('cannot_do')
+    counts = counted(task, 'address_fills')
+    planned, refused = [], []
+    for entry in (args.get('fields') or [])[:12]:
+        key, element = str(entry.get('key') or ''), seen.element(entry.get('ref'))
+        if element is None or element.get('disabled') or element.get('search'):
+            refused.append(f'{key}: no such field')
+            continue
+        auto, words = str(element.get('autocomplete') or ''), guard.fold(f"{element.get('name')} {element.get('label')}")
+        if auto.startswith('cc-') or element.get('type') == 'password' or _PAYMENT_FIELD.search(words) \
+                or _NOT_ADDRESS.search(words) or element.get('secret_form'):
+            return step.remember('fill_address', f'refused: "{_label(element)}" is not an address field',
+                                 counts=counts)
+        tag, role = element.get('tag'), element.get('role')
+        if key == 'open':
+            if role not in ('combobox', 'listbox'):
+                refused.append(f'{key}: not a dropdown')
+                continue
+            planned.append((key, element, 'open', ''))
+            continue
+        value = _value(new, key)
+        if not value:
+            refused.append(f'{key}: the person did not give it')
+        elif tag == 'select' and key in _CHOSEN_KEYS:
+            planned.append((key, element, 'choose', value))
+        elif tag == 'input' and (element.get('type') or '') in _TYPED_KINDS:
+            planned.append((key, element, 'type', value))
+        elif role == 'option' and key in _CHOSEN_KEYS and (_place(element.get('label')) == _place(value) or (
+                len(_place(value)) >= 3 and _place(element.get('label')).startswith(_place(value)))):
+            planned.append((key, element, 'click', value))   # an option the store drew, with the person's words
+        else:
+            refused.append(f'{key}: not a field for it')
+    if not planned:
+        return step.remember('fill_address', f"refused: {'; '.join(refused) or 'name the fields'}"[:120], counts=counts)
+    yes, why = agent.address_step(task, seen, planned[0][1], 'fill', step.meter)
+    if not yes:
+        return step.remember('fill_address', f'refused: not a form to add an address ({why})'[:120], counts=counts)
+    typed = list((task.order or {}).get('new_address_typed') or [])
+    for key, element, how, value in planned:
+        done = (reader.type(element, value) if how == 'type' else reader.choose(element, value) if how == 'choose'
+                else reader.click(element))
+        if done:
+            refused.append(f'{key}: {done}')
+        elif key != 'open' and key not in typed:
+            typed.append(key)
+    result = f"filled: {', '.join(typed) or 'nothing'}" + (f"; refused: {'; '.join(refused)}" if refused else '')
+    return step.remember('fill_address', result[:120], counts=counts,
+                         order={**(task.order or {}), 'new_address_typed': typed,
+                                'new_address_page': step.fingerprint(seen.url)})
+
+
+def address_button(step, reader, seen, args):
+    """The two presses of adding the person's confirmed new address: the store's button that opens its form,
+    and the one that saves it on the page it was filled on. A second model must see it as exactly that button
+    (agent.address_step, no answer is a no), and the click judge must not see it place, pay or request."""
+    task = step.task
+    new = (task.order or {}).get('new_address') or {}
+    purpose = args.get('purpose')
+    element = seen.element(args.get('ref'))
+    if not new or purpose not in ('open', 'save'):
+        return step.remember('address_button', 'refused: the person gave no new address')
+    if not _store_page(task, seen):
+        return step.remember('address_button', 'refused: not the store\'s own page')
+    if element is None or element.get('disabled') or guard.final_looking(element):
+        return step.remember('address_button', 'refused: not that button')
+    if element.get('tag') == 'a' and not sites.within(element.get('href') or '', task.site, house=True):
+        return step.remember('address_button', 'refused: it leaves the store')
+    if purpose == 'save':
+        typed = set((task.order or {}).get('new_address_typed') or [])
+        if not typed & {'street', 'street_and_number'} \
+                or (task.order or {}).get('new_address_page') != step.fingerprint(seen.url):
+            return step.remember('address_button', 'refused: fill this form with fill_address first')
+    what = 'address_form' if purpose == 'open' else 'address_saved'
+    if count(task, what) >= (MAX_FORM_OPENS if purpose == 'open' else MAX_SAVES):
+        return step.stop('cannot_do')
+    counts = counted(task, what)
+    yes, why = agent.address_step(task, seen, element, purpose, step.meter)
+    if not yes:
+        return step.remember('address_button', f'refused: not the button to {purpose} the new address ({why})'[:120],
+                             counts=counts)
+    try:
+        verdict, why = agent.judge(task, seen, element, step.meter)
+    except agent.AgentUnavailable:
+        verdict, why = 'unsure', 'the check could not run'
+    if verdict in ('places_order', 'card', 'request', 'unsure'):
+        return step.remember('address_button', f'refused: {verdict} ({why})'[:120], counts=counts)
+    refused = reader.click(element)
+    return step.remember(f'address_button {purpose}', f'refused: {refused}' if refused else 'pressed', counts=counts)
 
 
 def _addresses(step, seen, args):
     """The person asked for another delivery address (service.change_address): the saved ones the store lists,
     each kept only if this page writes it, are shown on the card to choose from. Nothing is selected here."""
     task = step.task
+    if not args.get('addresses') and not (task.order or {}).get('address_wanted'):
+        # The store asks for a delivery address and has none saved: the person gives one on the card.
+        if count(task, 'address_asked') >= NO_ADDRESS_TRIES:
+            return step.stop('cannot_do')
+        yes, why = agent.address_step(task, seen, None, 'asks', step.meter)
+        if not yes:
+            return step.remember('show_addresses', f'refused: the store does not ask for an address here ({why})'[:120],
+                                 counts=counted(task, 'address_asked'))
+        return step.hand_over('address', order={**(task.order or {}), 'addresses': [], 'approved': None},
+                              counts=counted(task, 'address_asked'),
+                              body=notes.say(notes.NEEDS_PERSON['address_new'], task))
     if not (task.order or {}).get('address_wanted'):
         return step.remember('show_addresses', 'refused: the person did not ask for another address')
     listed = []

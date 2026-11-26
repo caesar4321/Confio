@@ -18,7 +18,7 @@ import { saveImageToGallery } from '../utils/saveImageToGallery';
 import { PurchaseDone } from './PurchaseDone';
 import { PurchaseJourney } from './PurchaseJourney';
 import {
-  ACTIVE, ANSWER_AGENT_NOTIFY, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
+  ACTIVE, ADD_AGENT_ADDRESS, AgentNewAddress, ANSWER_AGENT_NOTIFY, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
   CANCEL_AGENT_TASK, CHANGE_AGENT_ADDRESS, CHOOSE_AGENT_ADDRESS, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, RESUME_AGENT_PAYMENT, SIGN_IN_AGENT_STORE,
 } from './api';
 import { CapRule, cartTop } from './helpers';
@@ -276,6 +276,9 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
               {tapping === `address:${index}` ? <ActivityIndicator color={colors.primaryDark} /> : null}
             </Pressable>
           ))}
+          <NewAddress key={task.id} draft={task.order?.draftAddress ?? null} open={!task.order?.addresses?.length}
+            sending={tapping === 'new_address'} disabled={tapping !== null}
+            onSend={(address) => act('new_address', ADD_AGENT_ADDRESS, { address }, 'addAgentAddress')} />
         </View>
       ) : null}
       {waiting && task.reason === 'step' ? (
@@ -545,6 +548,77 @@ function SignIn({ site, sending, onSend }: {
           con tu sesión».
         </Text>
       </View>
+    </View>
+  );
+}
+
+const NEW_FIELDS: { key: keyof AgentNewAddress; label: string; required?: boolean; phone?: boolean }[] = [
+  { key: 'name', label: 'Nombre de quien recibe', required: true },
+  { key: 'phone', label: 'Teléfono', required: true, phone: true },
+  { key: 'street', label: 'Calle', required: true },
+  { key: 'number', label: 'Número' },
+  { key: 'apartment', label: 'Depto., piso (opcional)' },
+  { key: 'neighborhood', label: 'Colonia o barrio' },
+  { key: 'city', label: 'Ciudad', required: true },
+  { key: 'state', label: 'Estado o provincia' },
+  { key: 'postalCode', label: 'Código postal' },
+  { key: 'references', label: 'Referencias (opcional)' },
+];
+const EMPTY_ADDRESS: AgentNewAddress = { name: '', phone: '', street: '', number: '', apartment: '', neighborhood: '',
+  city: '', state: '', postalCode: '', references: '' };
+
+const pick = (from: Partial<AgentNewAddress>): AgentNewAddress => Object.fromEntries(
+  NEW_FIELDS.map((f) => [f.key, String(from[f.key] ?? '').trim()])) as AgentNewAddress;
+
+// The one line the store is checked against: what the person confirms before anything is typed at the store.
+export const addressLine = (a: AgentNewAddress) => [[a.street, a.number].filter(Boolean).join(' '), a.apartment,
+  a.neighborhood, a.city, a.state, a.postalCode].map((part) => part.trim()).filter(Boolean).join(', ');
+
+// A new delivery address: written here, read back whole, and only then sent to be added at the store.
+function NewAddress({ draft, open, sending, disabled, onSend }: {
+  draft: AgentNewAddress | null; open: boolean; sending: boolean; disabled: boolean;
+  onSend: (address: AgentNewAddress) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(open);
+  const [reviewing, setReviewing] = useState(false);
+  // Only the address's own keys: a query result also carries __typename, which the mutation would refuse.
+  const [address, setAddress] = useState<AgentNewAddress>(() => pick(draft ?? EMPTY_ADDRESS));
+  const clean = pick(address);
+  const ready = NEW_FIELDS.every((f) => !f.required || clean[f.key]);
+  if (!editing) {
+    return (
+      <Pressable onPress={() => setEditing(true)} accessibilityRole="button" accessibilityLabel="Otra dirección"
+        style={styles.addressOption} disabled={disabled}>
+        <Icon name="plus" size={16} color={colors.primaryDark} />
+        <Text style={styles.addressText}>Otra dirección</Text>
+      </Pressable>
+    );
+  }
+  if (reviewing) {
+    return (
+      <View style={styles.form}>
+        <Text style={styles.message}>La agrego en la tienda así, tal cual:</Text>
+        <Text style={styles.addressText}>{clean.name} · {clean.phone}</Text>
+        <Text style={styles.addressText}>{addressLine(clean)}</Text>
+        {clean.references ? <Text style={styles.address}>{clean.references}</Text> : null}
+        <Button title="Confirmar dirección" loading={sending} disabled={disabled}
+          onPress={() => { onSend(clean); }} />
+        <Pressable onPress={() => setReviewing(false)} accessibilityRole="button" accessibilityLabel="Corregir"
+          style={styles.link} disabled={disabled}>
+          <Text style={styles.linkText}>Corregir</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.form}>
+      {NEW_FIELDS.map((f) => (
+        <TextInput key={f.key} style={styles.input} value={address[f.key]} placeholder={f.label}
+          placeholderTextColor="#9CA3AF" accessibilityLabel={f.label} maxLength={80}
+          keyboardType={f.phone ? 'phone-pad' : 'default'}
+          onChangeText={(value) => setAddress((was) => ({ ...was, [f.key]: value }))} />
+      ))}
+      <Button title="Revisar dirección" disabled={!ready || disabled} onPress={() => setReviewing(true)} />
     </View>
   );
 }

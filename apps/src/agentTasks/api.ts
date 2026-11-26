@@ -25,7 +25,9 @@ const TASK_FIELDS = `
   notify
   options { title price image cap unit rating reviews }
   capRule { margin minExtra commaDecimals maxQuantity }
-  order { item items { title quantity image } total image address addresses breakdown { label value } }
+  order { item items { title quantity image } total image address addresses
+    draftAddress { name phone street number apartment neighborhood city state postalCode references }
+    breakdown { label value } }
 `;
 
 export const GET_AGENT_TASK = gql`
@@ -59,6 +61,13 @@ export const ANSWER_AGENT_NOTIFY = gql`
 export const CHANGE_AGENT_ADDRESS = gql`
   mutation ChangeAgentAddress($id: UUID!) {
     changeAgentAddress(id: $id) { ${RESULT} }
+  }
+`;
+
+// A new delivery address the person wrote on the card and confirmed: added at the store for this order.
+export const ADD_AGENT_ADDRESS = gql`
+  mutation AddAgentAddress($id: UUID!, $address: AgentNewAddressInput!) {
+    addAgentAddress(id: $id, address: $address) { ${RESULT} }
   }
 `;
 
@@ -175,11 +184,18 @@ export type AgentOption = {
   // Stars out of 5 and the review count, as the store writes them; empty when it shows none.
   rating?: string | null; reviews?: string | null;
 };
+export type AgentNewAddress = {
+  name: string; phone: string; street: string; number: string; apartment: string; neighborhood: string;
+  city: string; state: string; postalCode: string; references: string;
+};
+
 export type AgentOrderItem = { title: string; quantity: number; image: string };
 export type AgentOrder = {
   item: string; total: string; image: string; address?: string | null;
   // With reason `address`: the person's saved delivery addresses at the store, to pick one.
   addresses?: string[] | null;
+  // With reason `address`: what the new-address form starts with (the person's own name, phone, Confío address).
+  draftAddress?: AgentNewAddress | null;
   // The products chosen into one cart, with how many of each (empty for one item chosen the older way).
   items?: AgentOrderItem[] | null;
   // What the total is made of (Productos, Envío…): the server checked it adds up to the total.
