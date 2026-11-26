@@ -764,6 +764,21 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         result.pending_watch['lang'] = confirm.language([clean])
         body = f'{body}\n\n{watch_confirmation_question(result.pending_watch)}'
     metadata = {'ai': True, 'actions': result.actions}
+    # Her kept WhatsApp messages were read for this answer, so it may quote them: tagged, to go with that link
+    # (whatsapp_link.chat.erase). Unlinked while it was being thought: what it found is not kept at all.
+    whatsapp_read = getattr(result, 'whatsapp_read', None)
+    if (whatsapp_read is None and _follows_whatsapp_answer(history) and _whatsapp_grant(user)
+            and not (result.payment_intent or result.rule_proposal or result.pending_action)):
+        # No search this time, but the answer right before this question quoted them, so this one may too ("¿y a qué
+        # hora dijo?"): it goes with the link as well. One step only, under its own mark: an answer after this one
+        # is not marked by it, or one search would mark, and one unlink blank, the whole conversation.
+        metadata['whatsapp_follow'] = True
+    if whatsapp_read is not None:
+        if _whatsapp_still_linked(user, whatsapp_read):
+            metadata['whatsapp_read'] = True
+        else:
+            body = _with_line(line, _WHATSAPP_UNLINKED.get(confirm.language([clean]), _WHATSAPP_UNLINKED['es']))
+            result.actions = metadata['actions'] = []
     if result.rule_proposal:
         metadata['rule_proposal'] = result.rule_proposal
     if result.payment_intent:
@@ -839,6 +854,14 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                     reply.body = _with_line(line, _COULD_NOT_KEEP_QUESTION.get(
                         lost_lang, _COULD_NOT_KEEP_QUESTION['es']))
                     reply.save(update_fields=['body'])
+    if reply is not None and metadata.get('whatsapp_read'):
+        # Unlinked between the check above and this save: that unlink's erase may have run before this reply
+        # existed. Erasing again is harmless; it blanks this one too. Checked now, for what is answered, and once
+        # more when everything around this is committed: an unlink after that erases the reply itself.
+        if not _erase_if_unlinked(user, whatsapp_read):
+            reply.refresh_from_db()
+            result.actions = []
+        transaction.on_commit(lambda: _erase_if_unlinked(user, whatsapp_read))
     if reply is None:
         if line:
             memory.note_to_thread(conversation, line, user_message.id)   # it happened: said all the same
@@ -884,6 +907,50 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     return AskOutcome(user_message=user_message, reply_message=reply, actions=result.actions,
                       mode='HUMAN' if waiting else 'AI',
                       remaining_turns=remaining - 1, transcript=transcript, data_changed=bool(result.writes))
+
+
+_WHATSAPP_UNLINKED = {
+    'es': 'Tu WhatsApp se desvinculó mientras te respondía, así que no guardé lo que encontré en tus mensajes.',
+    'pt': 'Seu WhatsApp foi desvinculado enquanto eu respondia, então não guardei o que encontrei nas suas mensagens.',
+    'en': 'Your WhatsApp was unlinked while I was answering, so I did not keep what I found in your messages.',
+}
+
+
+def _follows_whatsapp_answer(history) -> bool:
+    """Is the last thing said before the message being answered an answer that read her WhatsApp messages?"""
+    for said in reversed(history):
+        if getattr(said, 'sender_type', '') == 'USER':
+            continue
+        return bool((getattr(said, 'metadata', None) or {}).get('whatsapp_read'))
+    return False
+
+
+def _whatsapp_grant(user) -> str:
+    try:
+        from whatsapp_link import assistant_tool
+        return assistant_tool.grant_of(user)
+    except Exception as exc:  # noqa: BLE001 - by type only; '' reads as unlinked: the answer is not kept
+        logger.warning('Confio Assistant: WhatsApp link lookup failed (%s)', type(exc).__name__)
+        return ''
+
+
+def _whatsapp_still_linked(user, grant) -> bool:
+    """Is the WhatsApp an answer read still the one linked? Unknown counts as no: the answer is not kept."""
+    try:
+        from whatsapp_link import assistant_tool
+        return bool(grant) and assistant_tool.reading(user, grant)
+    except Exception as exc:  # noqa: BLE001 - by type only
+        logger.warning('Confio Assistant: WhatsApp link check failed (%s)', type(exc).__name__)
+        return False
+
+
+def _erase_if_unlinked(user, grant) -> bool:
+    """True while the WhatsApp an answer read is still linked; else what was said about it is erased now."""
+    if _whatsapp_still_linked(user, grant):
+        return True
+    from whatsapp_link import chat as whatsapp_chat
+    whatsapp_chat.erase(user)
+    return False
 
 
 def _by_team(message):

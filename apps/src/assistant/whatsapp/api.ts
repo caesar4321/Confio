@@ -6,8 +6,10 @@ import { gql } from '@apollo/client';
 // what the person approves. 2: the person types the number, and one note goes to their own chat once linked.
 // 3: linked from Confío's own servers; new messages of personal chats arrive as they come, never "en línea".
 // 4: each chat's last 48 hours (both sides, hers from her phone too) kept encrypted as context.
+// 5: each chat's last 30 days kept encrypted, and she can ask the assistant about them. The server takes 4 and 5
+// and still reports 4 as its text, so a build on 4 keeps linking; a number above this one means "update".
 // The text is consentText() and CONSENT_DATA in rules.ts: change them together.
-export const WHATSAPP_CONSENT_VERSION = 4;
+export const WHATSAPP_CONSENT_VERSION = 5;
 
 export type WhatsAppState = 'none' | 'pairing' | 'linked' | 'gone' | 'failed';
 

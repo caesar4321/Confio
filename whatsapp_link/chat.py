@@ -154,12 +154,19 @@ def erase(user):
     from inbox.models import SupportMessage
     try:
         SupportMessage.objects.filter(conversation__user=user, metadata__whatsapp=True).delete()
+        # An answer that told her what her kept messages said (assistant.service tags it): its words go. The line
+        # stays, so the thread and the turn that points at it keep their shape.
+        for mark in ('whatsapp_read', 'whatsapp_follow'):  # the answer that read them, and the one right after it
+            SupportMessage.objects.filter(conversation__user=user, **{f'metadata__{mark}': True}).update(
+                body=READ_ERASED, metadata={'ai': True, 'actions': [], 'whatsapp_erased': True})
     except Exception as exc:  # noqa: BLE001 - retried by the next unlink path; logged by type only
         logger.error('WhatsApp chat posts not erased: %s', type(exc).__name__)
 
 
-CONSENT_CHANGED = ('Cambié cómo leo tu WhatsApp: ahora entiendo la conversación completa de cada chat (las últimas '
-                   '48 horas, también lo que tú respondes), para avisarte mejor y sugerirte respuestas con sentido. '
+READ_ERASED = 'Borré esta respuesta porque hablaba de tus mensajes de WhatsApp y lo desvinculaste.'
+
+CONSENT_CHANGED = ('Cambié cómo leo tu WhatsApp: ahora entiendo la conversación completa de cada chat (guardo los '
+                   'últimos 30 días, también lo que tú respondes), para avisarte mejor y que me preguntes por ellos. '
                    'Hasta que lo revises no leo nada. Revísalo en «WhatsApp, correo y calendario» → WhatsApp → '
                    'Revisar.')
 

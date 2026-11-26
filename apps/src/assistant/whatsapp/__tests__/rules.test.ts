@@ -30,7 +30,8 @@ it('every state says what to do next', () => {
 it('the consent says plainly what Confío does', () => {
   const text = consentText().join(' ');
   for (const words of ['no marcamos nada como leído', 'mientras tu WhatsApp siga vinculado', 'tú lo apruebas', 'en línea', 'desvincularlo',
-    'Mensaje para ti', 'único mensaje que Confío escribe sin']) {
+    'Mensaje para ti', 'único mensaje que Confío escribe sin', 'últimos 30 días', 'preguntarme por esos mensajes',
+    'notificación que dice quién te escribió y qué']) {
     expect(text).toContain(words);
   }
 });

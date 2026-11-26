@@ -50,7 +50,8 @@ def create_notification(
     Returns:
         Created Notification instance
     """
-    logger.info(f"create_notification called with user={user}, type={notification_type}, title={title}")
+    # Never the title: one can carry a third party's name (a WhatsApp contact), and a log is not erased with it.
+    logger.info(f"create_notification called with user={user}, type={notification_type}")
     
     if not is_broadcast and not user:
         raise ValueError("User is required for personal notifications")

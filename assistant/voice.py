@@ -85,6 +85,9 @@ TEXT_ONLY_TOOLS |= {'start_store_task'}
 TEXT_ONLY_TOOLS |= {'get_futures'}
 # A rail's waitlist is joined from the chat, where its state section is (assistant/pay_rails.py).
 TEXT_ONLY_TOOLS |= {'notify_rail'}
+# WhatsApp: a reply waits on a card, and what her chats say is read in the conversation, where the answer that
+# quotes them is kept apart to go with the link.
+TEXT_ONLY_TOOLS |= {'prepare_whatsapp_reply', 'search_whatsapp_messages'}
 
 
 def _realtime_tools(belt):

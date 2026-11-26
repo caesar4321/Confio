@@ -10,8 +10,8 @@ export const CONSENT_POINTS: { icon: string; text: string }[] = [
 ];
 /** Always in sight before linking: what is read, by whom, for how long. */
 export const CONSENT_DATA = 'Recibimos los mensajes de tus chats personales (no grupos) mientras siga vinculado. '
-  + 'Guardamos cifradas las últimas 48 horas de cada chat para entender la conversación; una IA marca lo '
-  + 'importante y lo guardamos cifrado mientras siga vinculado. '
+  + 'Guardamos cifrados los últimos 30 días de cada chat, para entender la conversación y para que me preguntes '
+  + 'por ellos; una IA marca lo importante y lo guardamos cifrado mientras siga vinculado. '
   + 'Al vincularlo te dejamos una nota en tu propio chat, para que sepas que se vinculó.';
 
 /** A number with its country code, as WhatsApp takes it: + and 8 to 15 digits. */
@@ -33,10 +33,13 @@ export function consentText(): string[] {
       + 'vinculado: los que te escriben y los que tú envías desde tu teléfono. No recibimos grupos ni estados, no '
       + 'marcamos nada como leído y no apareces «en línea». Los mensajes que parecen códigos o contraseñas se '
       + 'descartan sin guardarse.',
-    'Guardamos cifradas las últimas 48 horas de cada chat, para entender la conversación completa (los mensajes '
+    'Guardamos cifrados los últimos 30 días de cada chat, para entender la conversación completa (los mensajes '
       + 'partidos, lo que ya respondiste) y no sugerirte algo fuera de contexto; lo más antiguo se borra solo.',
+    'Puedes preguntarme por esos mensajes en nuestra conversación («¿qué me dijo Ana del sábado?»): un modelo de '
+      + 'IA busca en ellos para responderte a ti, y a nadie más.',
     'Un modelo de IA lee esa conversación, marca lo importante (cobros, pedidos, entregas, citas, alguien '
-      + 'esperando tu respuesta) y te lo cuento en nuestra conversación, con respuestas sugeridas. Guardamos lo '
+      + 'esperando tu respuesta) y te lo cuento en nuestra conversación, con respuestas sugeridas, y en una '
+      + 'notificación que dice quién te escribió y qué, como la de WhatsApp. Guardamos lo '
       + 'importante, cifrado, mientras tu WhatsApp siga vinculado. Al desvincularlo, desde Confío o desde tu '
       + 'teléfono, lo borramos todo.',
     'Solo enviamos un mensaje cuando tú lo apruebas aquí, uno por uno y a ritmo de persona. Nunca pagamos nada '

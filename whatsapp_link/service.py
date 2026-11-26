@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
 
@@ -44,7 +45,13 @@ MAX_NAME = 120
 # 2: the person types the number; Confío writes one note to their own chat when it is linked.
 # 3: linked from our own servers (whatsmeow), new messages arrive as they come, never "online".
 # 4: each chat's last 48 hours (both sides, hers from her phone too) kept sealed as context.
+# 5: each chat's last 30 days kept sealed, and she can ask the assistant about them (founder 2026-11-26: on
+# every link, whichever of the two texts it accepted).
+# CONSENT_VERSION is the oldest text a link may run under, and what builds are told to show: a build whose text
+# is 4 keeps linking and is never told to update. TEXT_VERSION is the text of today's builds.
 CONSENT_VERSION = 4
+TEXT_VERSION = 5
+ACCEPTED_CONSENT = (CONSENT_VERSION, TEXT_VERSION)
 NOTICE_TYPE = 'whatsapp_link'
 LIMITS = {'link': 10, 'refresh': 30, 'write': 40}
 TITLE = 'Confío IA'
@@ -203,12 +210,14 @@ def _mine(link):
     return WhatsAppLink.objects.filter(pk=link.pk, grant=link.grant)
 
 
-def _notify(user, message, data=None):
+def _notify(user, message, data=None, title=None):
     try:
         from notifications.models import NotificationType
         from notifications.utils import create_notification
-        # Fixed words and counts only: a lock screen never shows a WhatsApp message.
-        create_notification(user=user, notification_type=NotificationType.SYSTEM, title=TITLE, message=message,
+        # Fixed words, but for what a look found important (sync, _push): that one says who wrote and what, as
+        # WhatsApp's own notification does on the same phone. All of them go with the link (_forget_pushes), and
+        # none outlives the messages (sweep).
+        create_notification(user=user, notification_type=NotificationType.SYSTEM, title=title or TITLE, message=message,
                             data={'type': NOTICE_TYPE, 'screen': 'WhatsApp', **(data or {})})
     except SoftTimeLimitExceeded:
         raise
@@ -216,13 +225,105 @@ def _notify(user, message, data=None):
         logger.warning('WhatsApp notice failed: %s', type(exc).__name__)
 
 
-def _forget_pushes(user_id):
+def _forget_pushes(user_id=None, before=None, kind=None):
+    """The notifications of one person's WhatsApp (unlinked; `kind`: only those), or everyone's older than `before`
+    (sweep)."""
     try:
         from notifications.models import Notification
+        rows = Notification.objects.filter(data__type=NOTICE_TYPE)
+        rows = rows.filter(user_id=user_id) if before is None else rows.filter(created_at__lt=before)
+        if kind:
+            rows = rows.filter(data__kind=kind)
         with transaction.atomic():
-            Notification.objects.filter(user_id=user_id, data__type=NOTICE_TYPE).delete()
+            rows.delete()
     except Exception as exc:  # noqa: BLE001
         logger.warning('WhatsApp notices not erased: %s', type(exc).__name__)
+
+
+PUSH_CHARS = 140
+# Control and direction characters. Not U+200D: it joins an emoji's parts.
+_NOT_WORDS = re.compile(r'[\x00-\x1f\x7f\u200b\u200c\u200e\u200f\u2028-\u202e\u2066-\u2069]')
+# A lock screen and a code. The plain cases never get this far (private: not stored). Here, a message with a
+# security word and any digit shows none of its words; in any other, a number of 4 to 8 digits is covered unless
+# it is plainly an amount of money, and so is a short run of letters and digits mixed. This is what the phone's
+# own WhatsApp notification shows of the same message, less those: not a filter a sender would bother to dodge
+# (the code is theirs to send), so no chase after invisible characters.
+_NUMBER = re.compile(r'\d(?:[\d .,\-–—/_]*\d)?')
+_AMOUNT = re.compile(r'\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?')
+_MIXED = re.compile(r'(?<![^\W_])(?=[^\W_]*\d)(?=[^\W_]*[^\W\d_])[^\W_]{6,12}(?![^\W_])')
+# Only marks that are not also words ("ves", "sol", "real", "pen" are).
+_MONEY_BEFORE = re.compile(r'(?:[$€]|\b(?:bs|s/|usd|usdt|mxn|brl|clp)\.?)\s?$', re.I)
+_MONEY_AFTER = re.compile(r'\s?(?:[$€]|(?:bs|bolivianos?|pesos?|soles|reales|bol[ií]vares|d[oó]lares|usd|usdt|mxn|brl|clp)\b)',
+                          re.I)
+PUSH_QUIET = 'Te escribió algo importante. Te lo cuento en Confío IA.'
+NO_NAME = 'Alguien'
+_FILLERS = 'ᅟᅠㅤﾠ'  # letters by category, blank to the eye
+
+
+def _shown(text, limit):
+    text = ' '.join(_NOT_WORDS.sub(' ', str(text or '')).split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
+
+
+def _no_codes(text):
+    """The text with whatever may be a code covered. An amount with its currency stays."""
+    def cover(match):
+        number = match.group(0)
+        digits = sum(c.isdigit() for c in number)
+        if _AMOUNT.fullmatch(number) and (_MONEY_BEFORE.search(text[:match.start()])
+                                          or _MONEY_AFTER.match(text[match.end():])):
+            return number
+        return '••••' if 4 <= digits <= 8 else number
+    return _MIXED.sub('••••', _NUMBER.sub(cover, text))
+
+
+def _reads_as_code(*texts):
+    """A security word and any digit: no word of it is shown. More than the intake drops (private), which wants
+    the digits to look like a code: "mi clave es Perro.12", "Steam code: X7K9P"."""
+    text = unicodedata.normalize('NFKC', ' '.join(str(t or '') for t in texts))
+    return bool(SECURITY.search(text)) and any(c.isdigit() for c in text)
+
+
+def _push_name(value):
+    """The chat's name for a push's title. It is the sender's to choose: one whose letters read as Confío or
+    WhatsApp, whatever sits between them, is nobody's name; a code is covered."""
+    name = ''.join(c for c in unicodedata.normalize('NFKC', str(value or ''))
+                   if unicodedata.category(c) != 'Cf' and c not in _FILLERS)
+    name = _shown(name.replace('«', '').replace('»', ''), 40)
+    letters = ''.join(c for c in _fold(name) if c.isascii() and c.isalpha())
+    if 'confio' in letters or 'whatsapp' in letters:
+        return NO_NAME
+    name = _no_codes(name)
+    return name if re.search(r'\w', name.replace('•', '')) else NO_NAME
+
+
+def _push(found):
+    """What the phone shows for what a look found important: (title, words). One chat: its name and what it wrote
+    (founder 2026-11-26: a push that says who and what is the one a person opens; "Tienes 1 mensaje importante"
+    was not). Several chats: their names and how many."""
+    chats = {}
+    for notice, _replies in found:
+        data = _unseal(notice.sealed, {})
+        data = data if isinstance(data, dict) else {}
+        chats[data.get('jid') or data.get('chat') or ''] = data  # the last of each chat
+    told = list(chats.values())
+    if not told:
+        return TITLE, PUSH_QUIET
+    names = list(dict.fromkeys(_push_name(data.get('chat')) for data in told))
+    if len(told) == 1:
+        last = told[0]
+        if private({'name': last.get('chat') or '', 'preview': last.get('preview') or ''}) or _reads_as_code(
+                last.get('chat'), last.get('preview')):
+            return f'{names[0]} · WhatsApp', PUSH_QUIET
+        words = _shown(_no_codes(_shown(last.get('preview'), 600)), PUSH_CHARS)
+        return f'{names[0]} · WhatsApp', words if re.search(r'\w', words.replace('•', '')) else PUSH_QUIET
+    if len(names) == 1:
+        who = f'{names[0]} y {len(told) - 1} más'
+    else:
+        who = f'{names[0]} y {names[1]}' if len(told) == 2 else f'{names[0]}, {names[1]} y {len(told) - 2} más'
+    count = len(found)
+    return TITLE, (f'{who}: {count if count < 10 else "más de 9"} mensajes importantes en WhatsApp. Te lo cuento en '
+                   'Confío IA.')
 
 
 # ------------------------------------------------------------------ the screen
@@ -300,7 +401,7 @@ def start_link(user, phone, consent_version, country=''):
     WhatsApp asks its owner to type the code in their own phone; one Confío account per WhatsApp number;
     a few prompts a day per number, from all of Confío; and, once linked, a note in the owner's own chat
     that says so (warn_self), which a person tricked into typing a code sees in their own WhatsApp."""
-    if consent_version != CONSENT_VERSION:
+    if consent_version not in ACCEPTED_CONSENT:
         raise LinkRefused('consent')
     if not str(phone or '').strip().startswith('+'):
         raise LinkRefused('phone')
@@ -359,10 +460,11 @@ def _pairing_ends():
 
 def accept_consent(user, consent_version):
     """A linked person accepts today's text: what arrives is kept again."""
-    if consent_version != CONSENT_VERSION:
+    if consent_version not in ACCEPTED_CONSENT:
         raise LinkRefused('consent')
-    WhatsAppLink.objects.filter(user=user, state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').update(
-        consent_version=consent_version)
+    # Never back to an older text: the row says the newest one the person accepted.
+    WhatsAppLink.objects.filter(user=user, state=WhatsAppLink.State.LINKED, consent_version__lt=consent_version).exclude(
+        reason='unlinking').update(consent_version=consent_version)
 
 
 def unlink(user, ended_by=WhatsAppLinkRecord.EndedBy.CONFIO, grant=None, only_pending=False):
@@ -551,6 +653,103 @@ def _context_since():
     return timezone.now() - timedelta(hours=conf.get('WHATSAPP_LINK_CONTEXT_HOURS'))
 
 
+def _history_since():
+    return timezone.now() - timedelta(days=conf.get('WHATSAPP_LINK_HISTORY_DAYS'))
+
+
+HISTORY_ROWS = 20000  # the newest kept messages one question reads, at most
+HISTORY_PAGE = 1000
+HISTORY_LINES = 25
+HISTORY_CHARS = 300   # of one message; the tool's whole answer must fit what the model is given (engine._run_tool)
+
+
+def _folded(text):
+    """The text without case or accents, and where in the text each of its characters came from."""
+    out, where = [], []
+    for index, char in enumerate(str(text or '')):
+        for piece in unicodedata.normalize('NFKD', char.casefold()):
+            if not unicodedata.combining(piece):
+                out.append(piece)
+                where.append(index)
+    return ''.join(out), where
+
+
+def _fold(text):
+    return _folded(text)[0]
+
+
+def _excerpt(text, folded, where, terms):
+    """What is told of a long message: the part around the first word asked about, with … where it was cut."""
+    if len(text) <= HISTORY_CHARS:
+        return text
+    spots = [where[spot] for spot in (folded.find(term) for term in terms) if spot >= 0]
+    start = min(max(0, min(spots) - HISTORY_CHARS // 3) if spots else 0, len(text) - HISTORY_CHARS)
+    return ('…' if start else '') + text[start:start + HISTORY_CHARS] + ('…' if start + HISTORY_CHARS < len(text) else '')
+
+
+def history(link, *, chat=None, words=None, days=None) -> tuple:
+    """What she asks about her own kept messages (HISTORY_DAYS, both sides): of one chat or of all, holding the
+    words she asks about, oldest first: ([{chat, de, texto, at}], whole). `whole` is False when what is told is not
+    all there is: more kept messages than one question reads (HISTORY_ROWS), or more that match than one answer
+    carries (HISTORY_LINES). Then neither "there is none" nor "these are all" can be said. Unsealed for this
+    answer, stored nowhere else."""
+    since = _history_since()
+    if days:
+        since = max(since, timezone.now() - timedelta(days=max(1, int(days))))
+    who = _fold(chat).strip()
+    terms = [term for term in _fold(words).split() if len(term) > 1][:6]
+    kept = WhatsAppInbox.objects.filter(link=link, created_at__gte=since)
+    # By chat id: a chat is the one asked for when any of its lines carries that name, and all of its lines come
+    # with it, hers too (hers can carry another name: her number, where the contact is not saved).
+    names, labels, named, matches = {}, {}, set(), {}
+    read, before, whole = 0, None, True
+
+    def asked():
+        return [cid for cid in matches if not who or any(who in name for name in names[cid])]
+
+    while True:
+        page = list((kept.filter(pk__lt=before) if before else kept).order_by('-pk')[:HISTORY_PAGE])
+        for row in page:
+            data = _unseal(row.sealed, {})
+            text = data.get('text')
+            if not text:
+                continue
+            cid, name = data.get('chat') or '', data.get('name') or ''
+            names.setdefault(cid, set()).add(_fold(name))
+            if name and cid not in named and (not row.from_me or cid not in labels):
+                labels[cid] = name  # the chat is called what the contact is called now: the newest of their lines
+                if not row.from_me:
+                    named.add(cid)
+            folded, where = _folded(text)
+            hits = sum(term in folded for term in terms)
+            if terms and not hits:
+                continue
+            of_chat = matches.setdefault(cid, [])
+            if terms or len(of_chat) <= HISTORY_LINES:  # the latest of a chat: no more than an answer carries
+                of_chat.append((hits, int(data.get('at') or 0) or int(row.created_at.timestamp()), row.pk, row.from_me,
+                                text, folded, where))
+        read += len(page)
+        if len(page) < HISTORY_PAGE:
+            break
+        before = page[-1].pk
+        if not terms and sum(len(matches[cid]) for cid in asked()) >= HISTORY_LINES:
+            whole = False  # the latest was asked for, and that much is here; older ones were not read
+            break
+        if read >= HISTORY_ROWS:
+            whole = not kept.filter(pk__lt=before).exists()
+            break
+    found = [(item, cid) for cid in asked() for item in matches[cid]]
+    # The messages holding most of the words; among equals, the newest. Told oldest first.
+    best = sorted(found, key=lambda pair: (-pair[0][0], -pair[0][1], -pair[0][2]))
+    if len(best) > HISTORY_LINES:
+        whole = False
+    lines = [{'chat': labels.get(cid) or '', 'de': 'ella' if from_me else 'contacto',
+              'texto': _excerpt(text, folded, where, terms), 'at': at}
+             for (_hits, at, _pk, from_me, text, folded, where), cid in sorted(
+                 best[:HISTORY_LINES], key=lambda pair: (pair[0][1], pair[0][2]))]
+    return lines, whole
+
+
 CONTEXT_LINES = 15
 
 
@@ -566,6 +765,12 @@ def conversation(link, chat_id, *, new_ids=()):
                           'nuevo': row.pk in new_ids, 'at': int(data.get('at') or 0)})
     lines.sort(key=lambda line: line['at'])
     return [{k: v for k, v in line.items() if k != 'at'} for line in lines[-CONTEXT_LINES:]]
+
+
+def _retire_unlooked(rows):
+    """A message that waited for its look past CONTEXT_HOURS is never looked at (a look reads the last hours, and a
+    notice about it would be stale): it stays only to be asked about."""
+    rows.filter(looked_at__isnull=True, created_at__lt=_context_since()).update(looked_at=timezone.now())
 
 
 def transcript(lines):
@@ -654,6 +859,7 @@ def _gone(link, reason='gone', ended_by=WhatsAppLinkRecord.EndedBy.PHONE):
     _end_record(link.user_id, ended_by)
     from . import chat
     chat.erase(link.user)
+    _forget_pushes(link.user_id)  # what the pushes said of its messages goes too; then the one that says it ended
     _notify(link.user, REASONS.get(reason) or GONE)
 
 
@@ -697,7 +903,8 @@ def private(row) -> bool:
 
 def sync(link_id):
     """Looks at what arrived since the last look, each chat in its whole recent conversation, and keeps only the
-    important. Messages stay only as the chat's context (CONTEXT_HOURS), sealed."""
+    important. Messages stay sealed: the last CONTEXT_HOURS are each look's context, HISTORY_DAYS can be asked
+    about (history)."""
     cache.delete(f'whatsapp-link:queued:{link_id}')
     if not enabled():
         return
@@ -711,7 +918,9 @@ def sync(link_id):
         _queue_sync(link_id)
         return
     try:
-        taken = list(WhatsAppInbox.objects.filter(link=link, from_me=False, looked_at__isnull=True).order_by('pk')[:100])
+        _retire_unlooked(WhatsAppInbox.objects.filter(link=link))
+        taken = list(WhatsAppInbox.objects.filter(link=link, from_me=False, looked_at__isnull=True,
+                                                  created_at__gte=_context_since()).order_by('pk')[:100])
         if not taken:
             return
         started = time.monotonic()
@@ -722,7 +931,7 @@ def sync(link_id):
         except Exception as exc:  # noqa: BLE001 - by type: a message can quote a chat
             logger.warning('WhatsApp classify %s failed: %s', link.pk, type(exc).__name__)
             return
-        # Looked at: kept only as the chat's context, until it is CONTEXT_HOURS old (sweep).
+        # Looked at: kept as the chat's context and to be asked about, until it is HISTORY_DAYS old (sweep).
         WhatsAppInbox.objects.filter(pk__in=[row.pk for row in taken]).update(looked_at=timezone.now())
     finally:
         cache.delete(lease)
@@ -733,11 +942,10 @@ def sync(link_id):
         from . import chat
         for notice, replies in found:
             chat.tell(link, notice, replies)  # Confío IA says it in the conversation, with replies to pick
-        count = len(found)
-        noun = 'mensaje importante' if count == 1 else 'mensajes importantes'
-        # Fixed words: a lock screen never shows what someone wrote. It opens the conversation.
-        _notify(link.user, f'Tienes {count if count < 10 else "más de 9"} {noun} en WhatsApp. Te lo cuento en '
-                           'Confío IA.', {'kind': 'messages'})
+        title, words = _push(found)
+        _notify(link.user, words, {'kind': 'messages'}, title=title)  # it opens the conversation
+        if not _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').exists():
+            _forget_pushes(link.user_id, kind='messages')  # unlinked while it was being told: it goes too
     if WhatsAppInbox.objects.filter(link=link, from_me=False, looked_at__isnull=True).exists():
         _queue_sync(link.pk)
 
@@ -956,8 +1164,7 @@ def send(draft_id, tries=0):
 def _sent(draft, status_, reason):
     fields = {}
     if status_ in (WhatsAppDraft.Status.SENT, WhatsAppDraft.Status.UNKNOWN):
-        # The card keeps showing what went and where (sealed) for as long as the chat's context is kept (consent
-        # v4: 48 hours), then it goes with it.
+        # The card keeps showing what went and where (sealed) for the hours each look reads as context, then goes.
         fields = {'expires_at': timezone.now() + timedelta(hours=conf.get('WHATSAPP_LINK_CONTEXT_HOURS'))}
     if WhatsAppDraft.objects.filter(pk=draft.pk, status=WhatsAppDraft.Status.SENDING).update(
             status=status_, reason=reason, **fields):
@@ -1008,9 +1215,13 @@ def sweep():
     if conf.get('WHATSAPP_LINK_KEEP_DAYS'):
         WhatsAppNotice.objects.filter(created_at__lt=now - timedelta(days=conf.get('WHATSAPP_LINK_KEEP_DAYS'))).delete()
     WhatsAppDraft.objects.filter(expires_at__lte=now).exclude(status=WhatsAppDraft.Status.SENDING).delete()
-    # Each chat's context is its last CONTEXT_HOURS: older messages go (looked at or not). And none stays on a link
-    # that is no longer linked (a message that landed just as the phone unlinked it).
-    WhatsAppInbox.objects.filter(Q(created_at__lt=_context_since()) | ~Q(link__state=WhatsAppLink.State.LINKED)
+    # What a push said of a message is kept no longer than the messages. An answer that told her what they said
+    # stays: it is the conversation's context, and later answers need it (founder 2026-11-26); it goes when she
+    # unlinks (chat.erase).
+    _forget_pushes(before=_history_since())
+    # Messages are kept HISTORY_DAYS: older ones go (looked at or not). And none stays on a link that is no longer
+    # linked (a message that landed just as the phone unlinked it).
+    WhatsAppInbox.objects.filter(Q(created_at__lt=_history_since()) | ~Q(link__state=WhatsAppLink.State.LINKED)
                                  | Q(link__reason='unlinking')).delete()
     for link in _leavers()[:20]:
         try:
@@ -1035,7 +1246,8 @@ def sweep():
             _note_failed(link_id, grant)
         elif cache.add(f'whatsapp-link:note-restart:{grant}', 1, 600):
             tasks.warn_self.apply_async((link_id, str(grant)), countdown=1)
-    # Messages waiting whose look was lost.
+    # Messages waiting whose look was lost; one that waited past the context window is never looked at.
+    _retire_unlooked(WhatsAppInbox.objects.all())
     for link_id in WhatsAppInbox.objects.filter(from_me=False, looked_at__isnull=True,
                                                 created_at__lt=now - timedelta(minutes=10),
                                                 link__state=WhatsAppLink.State.LINKED,

@@ -68,13 +68,13 @@ it('consent first, then the pairing asks for the code of the accepted text', asy
   expect(words()).not.toContain('restringir');
   expect(words()).not.toContain('alert-triangle');
   // What is read, by an AI, for how long: in sight before the button, not behind a toggle.
-  expect(words()).toContain('Guardamos cifradas las últimas 48 horas de cada chat');
+  expect(words()).toContain('Guardamos cifrados los últimos 30 días de cada chat');
   expect(words()).not.toContain('«Chrome»');  // the long text waits behind "Cómo funciona"
   await press('Cómo funciona');
   expect(words()).toContain('«Chrome»');
   expect(words()).not.toContain('restringir');
   await press('Vincular WhatsApp');
-  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 4, country: 'BO' } }));
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+59171234567', consentVersion: 5, country: 'BO' } }));
 });
 
 it('pairing: the code, copied as WhatsApp takes it, and the steps', async () => {
@@ -96,7 +96,7 @@ it('unlinking asks first', async () => {
 });
 
 it('a newer consent than this build knows: update, never the old text', () => {
-  mockLink = link({ consentVersion: 5 });
+  mockLink = link({ consentVersion: 6 });
   expect(open().words()).toContain('Actualiza la app');
 });
 
@@ -120,7 +120,7 @@ it('the number is typed with its country: the account number only fills it in, a
   await act(async () => {
     await button().props.onPress();
   });
-  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+584147654321', consentVersion: 4, country: 'VE' } }));
+  expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({ variables: { phone: '+584147654321', consentVersion: 5, country: 'VE' } }));
 });
 it('linked: the screen only manages the link; messages are told in the conversation', async () => {
   mockLink = link({ state: 'linked', notices: [notice], lastSyncAt: new Date().toISOString() });
