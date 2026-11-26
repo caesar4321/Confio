@@ -244,3 +244,75 @@ class FollowupTests(LinkTestBase):
         self.assertEqual(followups.run(TOLD + timedelta(hours=4)), 1)
         older.refresh_from_db()
         self.assertIsNone(older.resolved_at)
+
+
+class MergeTests(LinkTestBase):
+    """A chat that writes again before she answered: one post and one push, not two (2026-11-26, Luis)."""
+
+    def setUp(self):
+        super().setUp()
+        from users.models import Account
+        Account.objects.create(user=self.user, account_type='personal', account_index=0)
+        self.link = self.linked()
+
+    def tell(self, preview, minutes_after=0):
+        notice = WhatsAppNotice.objects.create(
+            link=self.link, source_key=f'm{WhatsAppNotice.objects.count()}', kind='reply',
+            notified_at=timezone.now(),
+            sealed=service._seal({'chat': 'Alejandro', 'jid': JID, 'phone': '59170000001', 'preview': preview,
+                                  'at': int(timezone.now().timestamp())}))
+        return notice, chat.tell(self.link, notice, ['Ya te lo paso'])
+
+    def notice_posts(self):
+        return list(SupportMessage.objects.filter(conversation__user=self.user,
+                                                  metadata__notice__startswith='whatsapp-notice:').order_by('pk'))
+
+    def test_a_second_message_grows_the_open_post(self):
+        first, merged_first = self.tell('Háblame que necesitas para hoy')
+        second, merged = self.tell('Pásame el pedido xfavor')
+        self.assertFalse(merged_first)
+        self.assertTrue(merged)
+        [post] = self.notice_posts()
+        self.assertIn('«Háblame que necesitas para hoy»\n«Pásame el pedido xfavor»', post.body)
+        self.assertEqual(post.metadata['notice'], f'whatsapp-notice:{second.pk}')
+        self.assertEqual({a['target'] for a in post.metadata['actions']}, {str(second.pk)})
+        second.refresh_from_db()
+        self.assertIsNotNone(second.told_at)
+        # The card draws the notice's words: both are there.
+        self.assertIn('Háblame', service._unseal(second.sealed, {})['preview'])
+        # The first one is settled by the newer one: never followed up twice.
+        self.assertTrue(followups.answered(self.link, first, service._unseal(first.sealed, {})))
+
+    def test_not_after_she_wrote_in_between(self):
+        self.tell('Háblame que necesitas para hoy')
+        from assistant.service import lock_user  # noqa: F401 - the conversation exists already
+        conversation = self.notice_posts()[0].conversation
+        SupportMessage.objects.create(conversation=conversation, sender_type='USER', message_type='TEXT', body='ok')
+        _notice, merged = self.tell('Pásame el pedido xfavor')
+        self.assertFalse(merged)
+        self.assertEqual(len(self.notice_posts()), 2)
+
+    def test_not_after_she_answered_on_whatsapp(self):
+        first, _ = self.tell('Háblame que necesitas para hoy')
+        WhatsAppInbox.objects.create(link=self.link, source_key='mine2', chat_key=service._chat_key(self.link, JID),
+                                     from_me=True, sealed=service._seal({'text': 'ya voy',
+                                                                         'at': int(timezone.now().timestamp()) + 5}))
+        _notice, merged = self.tell('Pásame el pedido xfavor')
+        self.assertFalse(merged)
+
+    def test_not_once_she_has_seen_it(self):
+        from inbox.models import SupportConversationState
+        self.tell('Háblame que necesitas para hoy')
+        conversation = self.notice_posts()[0].conversation
+        SupportConversationState.objects.create(conversation=conversation, user=self.user,
+                                                last_seen_at=timezone.now())
+        _notice, merged = self.tell('Pásame el pedido xfavor')
+        self.assertFalse(merged)
+        self.assertEqual(len(self.notice_posts()), 2)
+
+    def test_not_when_old(self):
+        self.tell('Háblame que necesitas para hoy')
+        SupportMessage.objects.filter(pk=self.notice_posts()[0].pk).update(
+            created_at=timezone.now() - timedelta(minutes=31))
+        _notice, merged = self.tell('Pásame el pedido xfavor')
+        self.assertFalse(merged)

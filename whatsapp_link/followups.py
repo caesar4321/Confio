@@ -41,6 +41,17 @@ def _message_time(data, fallback):
 
 
 def answered(link, notice, data) -> bool:
+    if replied(link, notice, data):
+        return True
+    # A newer message of the chat that was told and is followed up itself speaks for it.
+    jid = data.get('jid') or ''
+    newer = WhatsAppNotice.objects.filter(link=link, created_at__gt=notice.created_at, kind__in=KINDS,
+                                          told_at__isnull=False).exclude(pk=notice.pk)
+    return bool(jid) and any(service_unseal(other.sealed).get('jid') == jid for other in newer)
+
+
+def replied(link, notice, data) -> bool:
+    """She answered that chat after the message the notice told: on her phone, or from a Confío card."""
     from . import service
     jid, phone = data.get('jid') or '', data.get('phone') or ''
     if not jid and not phone:
@@ -59,10 +70,12 @@ def answered(link, notice, data) -> bool:
         fields = service._unseal(draft.sealed, {})
         if (jid and fields.get('jid') == jid) or (phone and fields.get('phone') == phone):
             return True
-    # A newer message of the chat that was told and is followed up itself speaks for it.
-    newer = WhatsAppNotice.objects.filter(link=link, created_at__gt=notice.created_at, kind__in=KINDS,
-                                          told_at__isnull=False).exclude(pk=notice.pk)
-    return bool(jid) and any(service._unseal(other.sealed, {}).get('jid') == jid for other in newer)
+    return False
+
+
+def service_unseal(sealed):
+    from . import service
+    return service._unseal(sealed, {}) or {}
 
 
 def push_words(notices):

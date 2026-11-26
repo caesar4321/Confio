@@ -12,6 +12,7 @@ navigate/card actions):
 """
 import logging
 import re
+from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -31,7 +32,7 @@ KIND_WORDS = {
 }
 
 
-def _post(user, body, tag, actions=()):
+def _post(user, body, tag, actions=(), quotes=None):
     """A Confío IA message in the person's own thread (their personal account), once per tag."""
     from assistant.service import lock_user
     from inbox.models import SupportMessage
@@ -49,7 +50,8 @@ def _post(user, body, tag, actions=()):
             return existing
         message = SupportMessage.objects.create(
             conversation=conversation, sender_type='AGENT', message_type='TEXT', body=body,
-            metadata={'ai': True, 'notice': tag, 'whatsapp': True, 'actions': list(actions)})
+            metadata={'ai': True, 'notice': tag, 'whatsapp': True, 'actions': list(actions),
+                      **({'quotes': quotes} if quotes else {})})
         conversation.last_message_at = message.created_at
         conversation.save(update_fields=['last_message_at', 'updated_at'])
     return message
@@ -84,11 +86,71 @@ def tell(link, notice, replies):
     actions += [{'type': 'whatsapp_reply', 'target': str(notice.pk), 'label': reply} for reply in replies[:3]]
     # Always a way to say it in her own words: the assistant writes the full reply, on a card she confirms.
     actions.append({'type': 'whatsapp_other', 'target': str(notice.pk), 'label': 'Otro…'})
+    merged = False
     try:
-        if _post(link.user, '\n'.join(lines), f'whatsapp-notice:{notice.pk}', actions) is not None:
+        if earlier:
+            merged = _merge(link, notice, data, lines, actions)
+        if merged or _post(link.user, '\n'.join(lines), f'whatsapp-notice:{notice.pk}', actions,
+                           quotes=[_quote(data.get('preview'))]) is not None:
             WhatsAppNotice.objects.filter(pk=notice.pk, told_at__isnull=True).update(told_at=timezone.now())
     except Exception as exc:  # noqa: BLE001 - the notice is kept either way (the WhatsApp screen shows it)
         logger.warning('WhatsApp notice %s not posted to the chat: %s', notice.pk, type(exc).__name__)
+    return merged
+
+
+MERGE_WINDOW = timedelta(minutes=30)
+MERGE_QUOTES = 4
+
+
+def _merge(link, notice, data, lines, actions) -> bool:
+    """A chat that writes again before she answered (2026-11-26: «Háblame que necesitas para hoy», then 5 minutes
+    later «Pásame el pedido xfavor», two posts and two pushes): the open post of that chat becomes this one, its
+    words added to what it already quoted, when it is still the last thing in her conversation, unread, under
+    MERGE_WINDOW old, and she has not answered that chat since. True when it merged (no new post, no new push)."""
+    from assistant.service import lock_user
+    from inbox.schema import get_or_create_support_conversation
+    from users.models import Account
+
+    from .followups import replied
+    personal = Account.objects.filter(user=link.user, account_type='personal', account_index=0,
+                                      deleted_at__isnull=True).first()
+    if personal is None:
+        return False
+    with transaction.atomic():
+        lock_user(link.user)
+        conversation = get_or_create_support_conversation(link.user, personal, None)
+        last = conversation.messages.order_by('-created_at', '-pk').first()
+        tag = str(((last.metadata or {}).get('notice') or '') if last else '')
+        if not tag.startswith('whatsapp-notice:') or last.created_at < timezone.now() - MERGE_WINDOW:
+            return False
+        # Only while she has not seen it: a post she read gets no unread mark when it grows (unread counts by
+        # created_at), and no push either: what is new would arrive silently.
+        from inbox.models import SupportConversationState
+        seen = SupportConversationState.objects.filter(conversation=conversation, user=link.user,
+                                                       last_seen_at__gte=last.created_at).exists()
+        if seen:
+            return False
+        previous = WhatsAppNotice.objects.filter(link=link, pk=tag.split(':', 1)[1]).first() \
+            if tag.split(':', 1)[1].isdigit() else None
+        if previous is None or previous.pk == notice.pk:
+            return False
+        before = service._unseal(previous.sealed, {}) or {}
+        if not data.get('jid') or before.get('jid') != data.get('jid') or replied(link, previous, before):
+            return False
+        quotes = list((last.metadata or {}).get('quotes') or [_quote(before.get('preview'))])
+        quotes = (quotes + [_quote(data.get('preview'))])[-MERGE_QUOTES:]
+        verb = 'te escribió' if ' te escribió ' in (last.body.split('\n', 1)[0] + ' ') else 'siguió escribiendo'
+        body = [f'«{_name(data.get("chat"))}» {verb} por WhatsApp:'] + [f'«{quote}»' for quote in quotes] + lines[2:]
+        label = 'siguió' if verb == 'siguió escribiendo' else ''
+        actions = [dict(action, label=label) if action['type'] == 'whatsapp_notice' else action for action in actions]
+        # The card (new builds) draws the notice's own words, not this text: it shows what the post now quotes.
+        joined = '\n'.join(filter(None, [str(before.get('preview') or ''), str(data.get('preview') or '')]))
+        WhatsAppNotice.objects.filter(pk=notice.pk).update(sealed=service._seal({**data, 'preview': joined[-600:]}))
+        last.body = '\n'.join(body)
+        last.metadata = {**(last.metadata or {}), 'notice': f'whatsapp-notice:{notice.pk}', 'actions': actions,
+                         'quotes': quotes, 'merged': [*((last.metadata or {}).get('merged') or []), previous.pk]}
+        last.save(update_fields=['body', 'metadata'])
+    return True
 
 
 FOLLOW_WORDS = {

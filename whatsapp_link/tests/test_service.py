@@ -492,6 +492,16 @@ class ChatTests(LinkTestBase):
         from inbox.models import SupportMessage
         return list(SupportMessage.objects.filter(conversation__user=self.user).order_by('pk'))
 
+    def test_the_same_chat_again_before_she_answers_is_one_post_and_one_push(self):
+        self.message(self.link, text='Háblame que necesitas para hoy', at=1700000000)
+        service.sync(self.link.pk)
+        self.message(self.link, text='Pásame el pedido xfavor', msg_id='M2', at=1700000300)
+        service.sync(self.link.pk)
+        told = [m for m in self.thread() if str(m.metadata.get('notice', '')).startswith('whatsapp-notice:')]
+        self.assertEqual(len(told), 1)
+        self.assertIn('«Háblame que necesitas para hoy»\n«Pásame el pedido xfavor»', told[0].body)
+        self.assertEqual(self.pushes.call_count, 1)
+
     def test_an_important_message_is_told_in_the_conversation_with_replies(self):
         self.message(self.link)
         service.sync(self.link.pk)
@@ -623,8 +633,12 @@ class ContextTests(ChatTests):
         self.assertTrue(WhatsAppInbox.objects.get().from_me)
 
     def test_a_chat_that_keeps_writing_is_one_thread(self):
+        from inbox.models import SupportMessage
         self.message(self.link, text='¿Tienes el pedido?', msg_id='M1')
         service.sync(self.link.pk)
+        # She wrote to Confío IA in between: the next one is its own post (else it grows this one, chat._merge).
+        SupportMessage.objects.create(conversation=self.thread()[-1].conversation, sender_type='USER',
+                                      message_type='TEXT', body='¿Qué precio tiene el dólar?')
         self.message(self.link, text='Te espero hasta las 6', msg_id='M2', at=1700000300)
         service.sync(self.link.pk)
         told = [m.body for m in self.thread() if (m.metadata or {}).get('whatsapp')]

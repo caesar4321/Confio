@@ -133,3 +133,33 @@ class ContactAsWordTests(SimpleTestCase):
                 mock.patch.object(assistant_tool, '_nothing_note', return_value='nada'):
             assistant_tool.history_call(SimpleNamespace(), chat_name='Ana', words='sábado')
         self.assertEqual(calls, [('Ana', 'sábado')])
+
+
+class SinceLinkedTests(SimpleTestCase):
+    """2026-11-26: «¿Qué conversaciones tengo del día de hoy?» answered from what arrived since 11:15, as if all."""
+
+    def call(self, linked_hours_ago, history_at=None):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from whatsapp_link import assistant_tool
+        line = {'chat': 'Alejandro', 'de': 'contacto', 'texto': 'Pásame el pedido', 'at': 0}
+        link = SimpleNamespace(grant='g', linked_at=timezone.now() - timedelta(hours=linked_hours_ago),
+                               history_at=history_at)
+        viewer = SimpleNamespace(tz=ZoneInfo('America/Caracas'))
+        with mock.patch.object(assistant_tool, '_link', return_value=link), \
+                mock.patch.object(assistant_tool.service, 'history', return_value=([line], True)):
+            return assistant_tool.history_call(viewer)['nota']
+
+    def test_found_since_the_link_says_where_it_starts(self):
+        self.assertIn('solo tengo lo que llegó desde que lo vinculó', self.call(7))
+        self.assertIn('dile que solo ves desde', self.call(7))
+
+    def test_not_when_history_came_or_the_link_is_older_than_the_window(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        self.assertNotIn('Ojo', self.call(7, history_at=timezone.now() - timedelta(hours=1)))
+        self.assertNotIn('desde que lo vinculó', self.call(24 * 31))
+        self.assertIn('puede faltar algo', self.call(0.1))  # history may still be arriving
+        self.assertIn('puede faltar algo', self.call(7, history_at=timezone.now()))  # between its chunks

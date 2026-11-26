@@ -1022,10 +1022,12 @@ def sync(link_id):
     _mine(link).update(last_sync_at=timezone.now())
     if found and _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').exists():
         from . import chat
-        for notice, replies in found:
-            chat.tell(link, notice, replies)  # Confío IA says it in the conversation, with replies to pick
-        title, words = _push(found)
-        _notify(link.user, words, {'kind': 'messages'}, title=title)  # it opens the conversation
+        # Confío IA says it in the conversation, with replies to pick. One that only grew the open post of its
+        # chat (chat._merge) is not pushed again: she was told minutes ago and has not answered yet.
+        found = [(notice, replies) for notice, replies in found if not chat.tell(link, notice, replies)]
+        if found:
+            title, words = _push(found)
+            _notify(link.user, words, {'kind': 'messages'}, title=title)  # it opens the conversation
         if not _mine(link).filter(state=WhatsAppLink.State.LINKED).exclude(reason='unlinking').exists():
             _forget_pushes(link.user_id, kind='messages')  # unlinked while it was being told: it goes too
     if WhatsAppInbox.objects.filter(link=link, from_me=False, looked_at__isnull=True).exists():

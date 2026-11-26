@@ -12,6 +12,8 @@ import logging
 import re
 import time
 
+from django.utils import timezone
+
 from . import chat, service
 from .models import WhatsAppLink
 
@@ -119,6 +121,9 @@ def history_call(viewer, chat_name=None, words=None, days=None):
         if as_words:
             note += (f' No hay un chat llamado «{_data(chat_name, 40)}»; estos son mensajes de cualquier chat que lo '
                      'mencionan: di de qué chat es cada uno y no los atribuyas a esa persona.')
+        partial = _partial_note(viewer, link, span)
+        if partial:
+            note += ' ' + partial
         if not whole:
             note += (' No son todos: puede haber más mensajes, más antiguos o más de los que caben aquí. No los des '
                      'por el total; si importa, pídele el nombre del chat, otra palabra o menos días.')
@@ -138,6 +143,35 @@ NO_HISTORY_GRACE = 30 * 60  # a new link whose history has not come yet: WhatsAp
 
 def _since(seconds):
     return _ago(seconds).replace('hace ', '', 1)
+
+
+def _partial_note(viewer, link, span):
+    """Found, but the window reaches back before the link while WhatsApp handed over no older chats, or is still
+    handing them over (2026-11-26: «¿Qué conversaciones tengo del día de hoy?» answered with three chats, all from
+    after 11:15, said as the whole day): the answer says what is kept starts at the link, or may still be missing."""
+    linked_at = getattr(link, 'linked_at', None)
+    if linked_at is None:
+        return ''
+    history_at = getattr(link, 'history_at', None)
+    now = time.time()
+    if history_at is not None and now - history_at.timestamp() < HISTORY_SETTLES:
+        return ('Ojo: WhatsApp sigue entregando sus chats anteriores; puede faltar algo. Si responde sobre un '
+                'período, dile que aún están llegando y que lo vuelva a pedir en unos minutos.')
+    if history_at is not None:
+        return ''
+    linked = linked_at.timestamp()
+    if now - linked >= (span or 30) * 86400:
+        return ''
+    if now - linked < NO_HISTORY_GRACE:
+        return ('Ojo: vinculó su WhatsApp hace ' + _since(now - linked) + ' y WhatsApp puede seguir entregando sus '
+                'chats anteriores; puede faltar algo. Si responde sobre un período, dile que aún pueden estar '
+                'llegando y que lo vuelva a pedir en unos minutos.')
+    zone = getattr(viewer, 'tz', None)
+    at = linked_at.astimezone(zone) if zone else linked_at
+    today = timezone.now().astimezone(zone).date() if zone else timezone.now().date()
+    when = f"las {at.strftime('%H:%M')}" if at.date() == today else f"el {at.strftime('%d/%m a las %H:%M')}"
+    return (f'Ojo: de este WhatsApp solo tengo lo que llegó desde que lo vinculó ({when}); lo anterior no está '
+            f'aquí. Si responde sobre hoy o un período que empieza antes, dile que solo ves desde {when}.')
 
 
 def _nothing_note(link):
