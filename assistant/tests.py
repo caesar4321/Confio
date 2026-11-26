@@ -47,6 +47,7 @@ class AskTests(TestCase):
     def ask(self, body, **kwargs):
         return service.ask(self.user, self.account, None, self.jwt, body, **kwargs)
 
+    @override_settings(CONFIO_ASSISTANT_MODEL='gpt-6-luna')  # the price math below is Luna's
     @patch('assistant.engine._openai_post')
     def test_navigation_turn_returns_action_and_meters_cost(self, post):
         post.side_effect = [

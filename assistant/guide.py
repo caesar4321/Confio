@@ -530,7 +530,7 @@ def _generate(viewer, step, *, conversation, first_name, account_label, country)
     AssistantTurn.objects.create(
         user=viewer.user, conversation=conversation, screen='guide', models_used=usage.models_used,
         input_tokens=usage.input_tokens, cached_input_tokens=usage.cached_input_tokens,
-        output_tokens=usage.output_tokens, cost_usd=usage.cost_usd)
+        output_tokens=usage.output_tokens, cost_usd=usage.cost_usd, google_cost_usd=usage.google_cost_usd)
     return _output_text(data)
 
 

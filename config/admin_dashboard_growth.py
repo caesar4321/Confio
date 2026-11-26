@@ -192,6 +192,8 @@ def community(w):
     metered = (AssistantTurn.objects.filter(created_at__gte=since), VoiceSession.objects.filter(started_at__gte=since),
                CustomPet.objects.filter(created_at__gte=since))
     spend = sum((q.order_by().aggregate(cost=Sum('cost_usd'))['cost'] or Decimal('0') for q in metered), Decimal('0'))
+    # Google bills only Gemini turns (on the Cloud credit); voice and pets are OpenAI.
+    google = metered[0].order_by().aggregate(cost=Sum('google_cost_usd'))['cost'] or Decimal('0')
     talkers = len({user for q in metered for user in q.order_by().values_list('user_id', flat=True).distinct()})
     return {'community_table': {
         'labels': [label for label, _since in w.periods()],
@@ -205,6 +207,8 @@ def community(w):
             _count_row('Team joins', TeamMembership.objects.order_by(), 'joined_at', w, 'user_id'),
         ],
         'assistant_cost_30d': spend,
+        'assistant_cost_google_30d': google,
+        'assistant_cost_openai_30d': spend - google,
         'assistant_cost_per_person': spend / talkers if talkers else None,
         'tips_usd_30d': tips.filter(created_at__gte=w.rolling_30_start).aggregate(s=Sum('amount'))['s'] or Decimal('0'),
         'teams': Team.objects.count(),

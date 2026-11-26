@@ -12,7 +12,7 @@ DEFAULTS = {
     # Test accounts (BO, VE, GT): funded, so they need a way to see every step.
     'ASSISTANT_GUIDE_PREVIEW_USER_IDS': (4, 5, 21),
     # Everyday turns (support, navigation, quick questions).
-    'CONFIO_ASSISTANT_MODEL': 'gpt-6-luna',
+    'CONFIO_ASSISTANT_MODEL': 'gemini-4-hydrogen',  # Google Cloud credit; Privacy 1.16.0 names Google (2026-11-26)
     'CONFIO_ASSISTANT_REASONING_EFFORT': 'low',
     # A gemini-* model answers through assistant/gemini.py (paid tier, Google Cloud credit). Past this many
     # seconds, or on any Gemini failure, the fallback model answers the rest of the turn.
@@ -127,6 +127,12 @@ DEFAULTS = {
 
 def get(name):
     return getattr(settings, name, DEFAULTS[name])
+
+
+def provider_of(model):
+    """Who bills a model: 'google' (gemini-*, on the Google Cloud credit), 'anthropic', or 'openai'."""
+    model = str(model or '')
+    return 'google' if model.startswith('gemini-') else 'anthropic' if model.startswith('claude-') else 'openai'
 
 
 def openai_model():

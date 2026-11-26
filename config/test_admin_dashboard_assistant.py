@@ -56,7 +56,7 @@ class AssistantPivotTests(TestCase):
         type(user).objects.filter(pk=user.pk).update(onboarded_at=self.now - timedelta(days=3), country=country)
         return type(user).objects.get(pk=user.pk)
 
-    def turn(self, user, tools=(), modality='TEXT', actions=()):
+    def turn(self, user, tools=(), modality='TEXT', actions=(), google=Decimal('0')):
         from assistant.models import AssistantTurn
         from inbox.models import SupportConversation
         from users.models import Account
@@ -64,7 +64,7 @@ class AssistantPivotTests(TestCase):
         conversation, _ = SupportConversation.objects.get_or_create(user=user, account=account, status='OPEN')
         return AssistantTurn.objects.create(user=user, conversation=conversation, modality=modality,
                                             tools=list(tools), actions=list(actions), latency_ms=1200,
-                                            cost_usd=Decimal('0.002'))
+                                            cost_usd=Decimal('0.002'), google_cost_usd=google)
 
     def build(self, paid=()):
         with mock.patch.object(ia, 'paid_actions', return_value=list(paid)):
@@ -88,6 +88,16 @@ class AssistantPivotTests(TestCase):
         self.assertEqual((intents['trade'], intents['shopping'], intents['payment']), (1, 1, 0))
         self.assertEqual(out['cohort']['signups'], 4)
         self.assertEqual(out['cohort']['talked'], 4)
+
+    def test_model_cost_is_split_by_who_bills_it(self):
+        a, b, *_ = self.people
+        self.turn(a, ['get_portfolio'])                              # an OpenAI turn
+        self.turn(b, ['navigate'], google=Decimal('0.0015'))         # a Gemini turn with a luna card pass
+        self.turn(self.staff, ['navigate'], google=Decimal('0.002'))  # staff: never counted
+        quality = self.build()['quality']
+        self.assertEqual(quality['cost'], Decimal('0.004'))
+        self.assertEqual(quality['cost_google'], Decimal('0.0015'))
+        self.assertEqual(quality['cost_openai'], Decimal('0.0025'))
 
     def test_banned_people_are_left_out(self):
         from security.models import UserBan

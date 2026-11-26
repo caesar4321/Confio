@@ -679,6 +679,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         turn.cached_input_tokens = result.cached_input_tokens
         turn.output_tokens = result.output_tokens
         turn.cost_usd = result.cost_usd + transcription_cost(audio_seconds)
+        turn.google_cost_usd = result.google_cost_usd
         turn.tools = result.tools
         turn.error = 'superseded by human handoff'
         turn.latency_ms = int((time.monotonic() - started) * 1000)
@@ -876,6 +877,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         turn.cached_input_tokens = result.cached_input_tokens
         turn.output_tokens = result.output_tokens
         turn.cost_usd = result.cost_usd + transcription_cost(audio_seconds)
+        turn.google_cost_usd = result.google_cost_usd
         turn.tools = result.tools
         turn.error = 'superseded by human handoff'
         turn.latency_ms = int((time.monotonic() - started) * 1000)
@@ -902,6 +904,7 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     turn.cached_input_tokens = result.cached_input_tokens
     turn.output_tokens = result.output_tokens
     turn.cost_usd = result.cost_usd + transcription_cost(audio_seconds)
+    turn.google_cost_usd = result.google_cost_usd
     turn.tools = result.tools
     turn.actions = result.actions
     turn.error = ''
@@ -1338,7 +1341,8 @@ def _meter_partial(turn, partial):
     turn.cached_input_tokens += partial.cached_input_tokens
     turn.output_tokens += partial.output_tokens
     turn.cost_usd = (turn.cost_usd or 0) + partial.cost_usd
-    return ['models_used', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'cost_usd']
+    turn.google_cost_usd = (turn.google_cost_usd or 0) + partial.google_cost_usd
+    return ['models_used', 'input_tokens', 'cached_input_tokens', 'output_tokens', 'cost_usd', 'google_cost_usd']
 
 
 def _add_spend(result, extra):
@@ -1348,6 +1352,7 @@ def _add_spend(result, extra):
     result.cached_input_tokens += extra.cached_input_tokens
     result.output_tokens += extra.output_tokens
     result.cost_usd += extra.cost_usd
+    result.google_cost_usd += extra.google_cost_usd
 
 
 def _memory_reply(user, conversation, user_message, turn, remembered, remaining, transcript, audio_seconds,
@@ -1359,6 +1364,7 @@ def _memory_reply(user, conversation, user_message, turn, remembered, remaining,
     turn.cached_input_tokens = usage.cached_input_tokens
     turn.output_tokens = usage.output_tokens
     turn.cost_usd = usage.cost_usd + transcription_cost(audio_seconds)
+    turn.google_cost_usd = usage.google_cost_usd
     turn.tools = [{'name': 'memory', 'ok': True}]
     turn.latency_ms = int((time.monotonic() - started) * 1000)
     taken = _team_took_over(user, conversation, user_message)

@@ -530,6 +530,7 @@ class WindowTests(Base):
         run_tool.assert_not_called()
         self.assertEqual(outcome.reply_message.body, service.UNAVAILABLE_REPLY)
 
+    @override_settings(CONFIO_ASSISTANT_MODEL='gpt-6-luna')  # the OpenAI transport itself
     def test_the_real_openai_transport_is_recognised(self):
         sent = []
 

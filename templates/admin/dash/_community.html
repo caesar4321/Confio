@@ -14,7 +14,7 @@
     <div class="metric-card">
         <div class="metric-label">Assistant cost, last 30 days</div>
         <div class="metric-value">${{ community_table.assistant_cost_30d|floatformat:2|intcomma }}</div>
-        <div class="metric-change">{% if community_table.assistant_cost_per_person is not None %}${{ community_table.assistant_cost_per_person|floatformat:2 }} per person{% endif %}</div>
+        <div class="metric-change">{% if community_table.assistant_cost_per_person is not None %}${{ community_table.assistant_cost_per_person|floatformat:2 }} per person · {% endif %}OpenAI ${{ community_table.assistant_cost_openai_30d|floatformat:2|intcomma }} · Google ${{ community_table.assistant_cost_google_30d|floatformat:2|intcomma }}</div>
     </div>
     <div class="metric-card">
         <div class="metric-label">Tips, last 30 days</div>

@@ -62,7 +62,7 @@
         <div class="kpi">
             <div class="kpi-label">Model cost per person</div>
             <div class="kpi-value">{% if ia.quality.cost_per_person is not None %}US${{ ia.quality.cost_per_person|floatformat:3 }}{% else %}<span class="unknown">—</span>{% endif %}</div>
-            <div class="kpi-sub">US${{ ia.quality.cost|floatformat:2|intcomma }} in {{ ia.window_days }} days</div>
+            <div class="kpi-sub">US${{ ia.quality.cost|floatformat:2|intcomma }} in {{ ia.window_days }} days · OpenAI US${{ ia.quality.cost_openai|floatformat:2|intcomma }} · Google US${{ ia.quality.cost_google|floatformat:2|intcomma }}</div>
         </div>
     </div>
 
@@ -156,7 +156,7 @@
             </div>
             <div class="panel">
                 <h3>Shopping agent</h3>
-                <p class="ia-sub">{{ ia.shopping.started|intcomma }} store tasks by {{ ia.shopping.people|intcomma }} people · {{ ia.shopping.active|intcomma }} running now · model and browser US${{ ia.shopping.cost|floatformat:2 }}{% if ia.shopping.cost_per_task is not None %} (US${{ ia.shopping.cost_per_task|floatformat:3 }} a task){% endif %}</p>
+                <p class="ia-sub">{{ ia.shopping.started|intcomma }} store tasks by {{ ia.shopping.people|intcomma }} people · {{ ia.shopping.active|intcomma }} running now · model and browser US${{ ia.shopping.cost|floatformat:2 }}{% if ia.shopping.cost_google %} (Google US${{ ia.shopping.cost_google|floatformat:2 }}){% endif %}{% if ia.shopping.cost_per_task is not None %} (US${{ ia.shopping.cost_per_task|floatformat:3 }} a task){% endif %}</p>
                 <table class="mini-table">
                     <thead><tr><th>Store country</th><th class="num">Tasks</th><th class="num">Reached checkout</th><th class="num">Paid</th></tr></thead>
                     <tbody>

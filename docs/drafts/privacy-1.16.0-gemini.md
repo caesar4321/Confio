@@ -1,6 +1,6 @@
 # Política de Privacidad 1.16.0: borrador (Confío IA con Gemini)
 
-**Estado:** borrador al 26 de noviembre de 2026. No está publicado. Confío IA no responde con Gemini hasta que esta versión esté publicada.
+**Estado:** publicado el 26 de noviembre de 2026 en `users/legal/documents.py` (1.16.0), con un cambio: las búsquedas en internet siguen en OpenAI, así que el párrafo de Google no las menciona.
 
 **Contexto:** Confío IA pasa a responder con Gemini 4 Hydrogen (Google, mediante Google Cloud, nivel de pago). OpenAI sigue respondiendo cuando Gemini falla o tarda, coloca las tarjetas de pantallas junto a cada respuesta y transcribe los audios. Hoy la sección 3 nombra solo a OpenAI para Confío IA.
 

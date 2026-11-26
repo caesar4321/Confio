@@ -88,6 +88,9 @@ class AssistantTurn(models.Model):
     output_tokens = models.PositiveIntegerField(default=0)
     audio_seconds = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
+    # The part of cost_usd billed by Google (Gemini, on the Cloud credit); the rest is OpenAI. 0 before 2026-11-26.
+    # db_default: rows written by code that predates the column (mid-deploy) still save.
+    google_cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0, db_default=0)
     tools = models.JSONField(default=list, blank=True)
     actions = models.JSONField(default=list, blank=True)
     latency_ms = models.PositiveIntegerField(default=0)

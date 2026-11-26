@@ -60,6 +60,7 @@ class Meter:
 
     def __init__(self):
         self.usd = Decimal(0)
+        self.google_usd = Decimal(0)  # the part Google bills (Gemini, on the Cloud credit)
 
     def add(self, model, usage):
         # An unknown model is priced as dear, so the budget still holds.
@@ -68,8 +69,11 @@ class Meter:
         usage = usage or {}
         total = int(usage.get('input_tokens') or 0)
         cached = int((usage.get('input_tokens_details') or {}).get('cached_tokens') or 0)
-        self.usd += (max(total - cached, 0) * per_input + cached * per_cached
-                     + int(usage.get('output_tokens') or 0) * per_output) / Decimal(1_000_000)
+        cost = (max(total - cached, 0) * per_input + cached * per_cached
+                + int(usage.get('output_tokens') or 0) * per_output) / Decimal(1_000_000)
+        self.usd += cost
+        if str(model).startswith('gemini-'):
+            self.google_usd += cost
 
 
 def _call(model, *, system, content, tools, meter, user_id=None, max_output=2000, picture=None):

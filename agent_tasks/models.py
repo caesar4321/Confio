@@ -89,6 +89,8 @@ class AgentTask(models.Model):
     steps = models.PositiveSmallIntegerField(default=0)
     failures = models.PositiveSmallIntegerField(default=0)
     cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
+    # Gemini's part of cost_usd; db_default so tasks written by pre-deploy code still save.
+    google_cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0, db_default=0)
     # Short facts for the next step: what was done and what came of it. Never typed text.
     history = models.JSONField(default=list, blank=True)
     # The last pages the agent saw from the cart on, as the browser read them (their controls, a little text):

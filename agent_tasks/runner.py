@@ -281,7 +281,8 @@ class Step:
         rows = AgentTask.objects.filter(pk=self.task.pk)
         if self.meter.usd:
             # Spent money is recorded even when the step lost the task.
-            rows.update(cost_usd=F('cost_usd') + self.meter.usd.quantize(Decimal('0.000001')))
+            rows.update(cost_usd=F('cost_usd') + self.meter.usd.quantize(Decimal('0.000001')),
+                        google_cost_usd=F('google_cost_usd') + self.meter.google_usd.quantize(Decimal('0.000001')))
         released = rows.filter(lease=self.lease).update(lease=None, lease_until=None)
         state = rows.values_list('state', flat=True).first()
         if released and state in AgentTask.RUNNING:

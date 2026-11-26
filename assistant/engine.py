@@ -74,6 +74,7 @@ class TurnResult:
     cached_input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: Decimal = Decimal('0')
+    google_cost_usd: Decimal = Decimal('0')  # the part of cost_usd Google bills (Gemini); the rest is OpenAI
     writes: list = field(default_factory=list)
     # categorize_transactions proposal awaiting the user's "sí".
     pending_categorization: dict | None = None
@@ -108,11 +109,14 @@ class TurnResult:
             return
         per_input, per_cached, per_output = price
         million = Decimal(1_000_000)
-        self.cost_usd += (
+        cost = (
             Decimal(max(input_tokens - cached, 0)) * per_input
             + Decimal(cached) * per_cached
             + Decimal(output_tokens) * per_output
         ) / million
+        self.cost_usd += cost
+        if conf.provider_of(model) == 'google':
+            self.google_cost_usd += cost
 
 
 # Text written by other people (names they chose, remitter names): data, never

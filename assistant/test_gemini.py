@@ -105,6 +105,8 @@ class FallbackTests(SimpleTestCase):
         result = engine.TurnResult(reply='')
         engine._meter(result, data, 'gemini-4-hydrogen')
         self.assertEqual(result.models_used, ['gpt-6-luna', 'gemini-4-hydrogen'])
+        self.assertGreater(result.google_cost_usd, 0)
+        self.assertLess(result.google_cost_usd, result.cost_usd)  # luna's part stays OpenAI's
 
     def test_a_slow_caller_keeps_its_own_shorter_limit(self):
         with patch('assistant.gemini.post', return_value=text_response('ok')) as post:
@@ -169,6 +171,7 @@ class CardPassTests(TestCase):
         self.assertEqual(turn.models_used, ['gemini-4-hydrogen'])
         # The answer step: 400 fresh * 1.50 + 600 cached * 0.075 + 100 out * 7.50 (per 1M); the call step sent none
         self.assertEqual(str(turn.cost_usd), '0.001395')
+        self.assertEqual(turn.google_cost_usd, turn.cost_usd)  # all of it billed by Google
 
     def test_a_promised_card_naming_one_screen_is_made_by_code(self):
         answer = 'Entra a Recibir → Avanzado y copia tu dirección. Te dejo la tarjeta para que vayas directo.'

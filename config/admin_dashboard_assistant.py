@@ -27,7 +27,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
-from django.db.models import Min, Q
+from django.db.models import Min, Q, Sum
 
 from config.admin_dashboard_sections import ARG_TZ
 
@@ -242,7 +242,7 @@ def _build(w):
     prepared |= {r[0] for r in card_rows}
     tasks = [t for t in AgentTask.objects.filter(created_at__gte=since).order_by().values_list(
         'user_id', 'country', 'state', 'reason', 'checkout_at', 'payment_intent_id', 'payment_intent__outcome',
-        'cost_usd') if t[0] in counted]
+        'cost_usd', 'google_cost_usd') if t[0] in counted]
     prepared |= {t[0] for t in tasks}
     relay_trades = [r for r in SmartRelayTrade.objects.filter(created_at__gte=since).order_by().values_list(
         'user_id', 'status', 'amount_usd') if r[0] in counted]
@@ -338,6 +338,7 @@ def _build(w):
         'paid': sum(1 for t in tasks if t[6] == 'paid'),
         'active': sum(1 for t in tasks if t[2] in AgentTask.ACTIVE),
         'cost': sum((Decimal(t[7] or 0) for t in tasks), Decimal(0)),
+        'cost_google': sum((Decimal(t[8] or 0) for t in tasks), Decimal(0)),
         'countries': [{'country': c, 'tasks': n,
                        'checkout': sum(1 for t in tasks if (t[1] or '—') == c and t[4]),
                        'paid': sum(1 for t in tasks if (t[1] or '—') == c and t[6] == 'paid')}
@@ -367,6 +368,8 @@ def _build(w):
     }
 
     latencies.sort()
+    google_cost = (AssistantTurn.objects.filter(created_at__gte=since, user_id__in=list(talked)).order_by()
+                   .aggregate(total=Sum('google_cost_usd'))['total'] or Decimal(0)) if talked else Decimal(0)
 
     def percentile(p):
         return latencies[min(len(latencies) - 1, int(len(latencies) * p))] if latencies else None
@@ -380,6 +383,9 @@ def _build(w):
         'p50_s': (percentile(0.5) or 0) / 1000 if latencies else None,
         'p95_s': (percentile(0.95) or 0) / 1000 if latencies else None,
         'cost': cost,
+        # Who bills it: Google (Gemini, on the Cloud credit) and OpenAI (everything else: models, voice, searches).
+        'cost_google': google_cost,
+        'cost_openai': cost - google_cost,
         'cost_per_person': (cost / len(talked)) if talked else None,
         'denied': denied.most_common(TOP_REASONS),
     }
