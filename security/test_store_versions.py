@@ -43,6 +43,16 @@ class StoreVersionReadTests(TestCase):
                          set(store_versions.IOS_STOREFRONTS))
 
     @mock.patch('security.store_versions.requests.get')
+    def test_ios_lookup_is_never_the_same_url_twice(self, get):
+        # Apple's edge caches a lookup URL for 24 h (5.4.2, 2026-11-26).
+        get.return_value = lookup_response({'resultCount': 1, 'results': [{'version': '5.4.2'}]})
+        store_versions.ios_store_version()
+        store_versions.ios_store_version()
+        stamps = [c.kwargs['params']['t'] for c in get.call_args_list]
+        self.assertEqual(len(set(stamps)), 2)
+        self.assertTrue(all(stamps))
+
+    @mock.patch('security.store_versions.requests.get')
     def test_ios_empty_lookup(self, get):
         get.return_value = lookup_response({'resultCount': 0, 'results': []})
         self.assertIsNone(store_versions.ios_store_version())

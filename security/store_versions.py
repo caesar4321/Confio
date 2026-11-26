@@ -7,6 +7,7 @@ skips that platform; a missed poll only means the prompt comes an hour later.
 """
 import logging
 import re
+import time
 
 import requests
 from django.conf import settings
@@ -26,14 +27,20 @@ VERSION_IN_NAME = re.compile(r'(?<![0-9.])([0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4})(?
 
 # Apple's lookup is cached per storefront and lagged the 5.3.7 release by
 # hours (2026-11-12): ask a few of our storefronts and take the newest.
+# The cache is keyed on the whole URL and lives 24 h, so on 5.4.2
+# (2026-11-26) every storefront still answered 5.3.9 from our server: each
+# poll also carries a unique parameter, which Apple ignores and the cache
+# does not.
 IOS_STOREFRONTS = ('us', 'bo', 've', 'ar', 'co', 'pe')
 
 
 def ios_store_version():
     versions = []
+    uncached = str(time.time_ns())
     for country in IOS_STOREFRONTS:
         try:
-            response = requests.get(LOOKUP_URL, params={'id': IOS_APP_ID, 'country': country}, timeout=10)
+            response = requests.get(LOOKUP_URL, params={'id': IOS_APP_ID, 'country': country, 't': uncached},
+                                    timeout=10)
             response.raise_for_status()
             results = response.json().get('results') or []
         except (requests.RequestException, ValueError):
