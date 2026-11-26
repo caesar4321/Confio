@@ -393,9 +393,9 @@ def give_code(account, user, task_id, code):
     return _answered(account, user, task_id, 'otp')
 
 
-def approve(account, user, task_id, total=None):
-    """The person approved the order named in the chat: its item and that total. The agent presses the
-    store's final button only for the same total."""
+def approve(account, user, task_id, total=None, address=None):
+    """The person approved the order named in the chat: its item, that total and that address. The agent
+    presses the store's final button only for the same total and address. Builds before 5.4.3 send no address."""
     task = get(account, user, task_id)
     if task.reason == 'subscribe':
         # Held for Cuenta inteligente (decision 37). Subscribed now, the purchase goes on, and the ordinary
@@ -410,6 +410,9 @@ def approve(account, user, task_id, total=None):
         raise TaskRefused('not_open')
     if total is not None and str(total) != order['total']:
         # The card they tapped showed another order: they approve what they saw, or nothing.
+        raise TaskRefused('not_open')
+    if address is not None and str(address) != (order.get('address') or ''):
+        # The same total to another address is another order (founder, 2026-11-26).
         raise TaskRefused('not_open')
     # Bound to that item, that total, that button, on that page; used once (operate._order).
     order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item', 'address')}

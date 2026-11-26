@@ -115,8 +115,8 @@ it('the order is approved with one tap, showing the item and the total', async (
   expect(texts(tree)).toEqual(expect.arrayContaining(['Chocolate Ibarra 540 g', '$112.50']));
   await act(async () => { labelled(tree, 'Confirmar pedido').props.onPress(); });
   expect(mockMutate).toHaveBeenCalledTimes(1);
-  // Bound to the total on the card they saw.
-  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$112.50' });
+  // Bound to the total and the address on the card they saw.
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$112.50', address: '' });
 });
 
 it('without Cuenta inteligente the priced order comes with the offer, never a confirm button', async () => {
@@ -131,7 +131,7 @@ it('without Cuenta inteligente the priced order comes with the offer, never a co
   await act(async () => { tree.root.findAll((n) => n.props.title === 'Activar Cuenta inteligente')[0].props.onPress(); });
   expect(opened).toEqual([['SmartAccountOffer', { door: 'chip', trigger: 'agent_purchase' }]]);
   await act(async () => { labelled(tree, 'Ya la activé: seguir').props.onPress(); });
-  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$129.00' });
+  expect(mockMutate.mock.calls[0][0].variables).toEqual({ id: ID, total: '$129.00', address: '' });
 });
 
 it('each product says the most it may cost: choosing it approves up to that', async () => {
@@ -287,6 +287,11 @@ it('the order card says where it is delivered', async () => {
     order: { item: 'Chocolate Ibarra', total: '$189.00', image: '', address: 'ana perez, calle 1 #23, cdmx' } });
   const tree = await mount();
   expect(texts(tree)).toContain('Envío a: ana perez, calle 1 #23, cdmx');
+  mockMutate.mockResolvedValue(answered('approveAgentOrder'));
+  await act(async () => { labelled(tree, 'Confirmar pedido').props.onPress(); });
+  // The same total to another address is another order: the server refuses a card that showed another one.
+  expect(mockMutate.mock.calls[0][0].variables).toEqual(
+    { id: ID, total: '$189.00', address: 'ana perez, calle 1 #23, cdmx' });
 });
 
 it('a code the store sent is typed in the card', async () => {

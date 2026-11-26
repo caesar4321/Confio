@@ -508,11 +508,13 @@ class ApproveAgentOrder(_Result):
     class Arguments:
         id = graphene.UUID(required=True)
         total = graphene.String(description='The total on the card the person saw')
+        address = graphene.String(description='Where the card the person saw said it is delivered')
 
     @classmethod
-    def mutate(cls, root, info, id, total=None):
+    def mutate(cls, root, info, id, total=None, address=None):
         try:
-            return cls(success=True, errors=[], task=task_type(service.approve(*_owner(info), id, total=total)))
+            return cls(success=True, errors=[], task=task_type(
+                service.approve(*_owner(info), id, total=total, address=address)))
         except Exception as exc:  # noqa: BLE001
             return _failure(cls, exc)
 

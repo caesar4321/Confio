@@ -28,6 +28,8 @@ const POLL_MS = 2500;
 const TAP_DEADLINE_MS = 30_000;
 
 const https = (uri: string) => (/^https:\/\//.test(uri) ? uri : '');
+// What the person approves is the order on the card: its total and where it is delivered.
+const approval = (order: AgentOrder) => ({ total: order.total, address: order.address || '' });
 
 function Photo({ uri, size }: { uri: string; size: number }) {
   const [failed, setFailed] = useState(false);
@@ -209,7 +211,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
             ))}
             <Text style={styles.total}>{task.order.breakdown?.length ? `Total ${task.order.total}` : task.order.total}</Text>
             {task.order.address ? (
-              <Text style={styles.address} numberOfLines={2}>Envío a: {task.order.address}</Text>
+              <Text style={styles.address}>Envío a: {task.order.address}</Text>
             ) : null}
           </View>
         </View>
@@ -266,7 +268,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
       ) : null}
       {waiting && task.reason === 'approve' && task.order ? (
         <Button title="Confirmar pedido" loading={tapping === 'approve'}
-          onPress={() => { act('approve', APPROVE_AGENT_ORDER, { total: task.order!.total }, 'approveAgentOrder'); }} />
+          onPress={() => { act('approve', APPROVE_AGENT_ORDER, approval(task.order!), 'approveAgentOrder'); }} />
       ) : null}
       {/* Buying and paying is Cuenta inteligente's (spec decision 37): the offer instead of a confirm. Back
           subscribed, "seguir" resumes and the ordinary order card follows (who pays, the balance). */}
@@ -278,7 +280,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           ) : null}
           <Pressable accessibilityRole="button" accessibilityLabel="Ya la activé: seguir" style={styles.link}
             disabled={tapping !== null}
-            onPress={() => { act('approve', APPROVE_AGENT_ORDER, { total: task.order!.total }, 'approveAgentOrder'); }}>
+            onPress={() => { act('approve', APPROVE_AGENT_ORDER, approval(task.order!), 'approveAgentOrder'); }}>
             <Text style={styles.linkText}>Ya la activé: seguir</Text>
           </Pressable>
         </View>

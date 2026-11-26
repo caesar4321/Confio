@@ -1596,7 +1596,11 @@ class CheckoutTests(StepBase):
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
         self.assertIn('calle 1', task.order['address'])
-        task = service.approve(self.account, self.user, task.internal_id)
+        # A card that showed another address approves nothing, even at the same total.
+        with self.assertRaises(service.TaskRefused):
+            service.approve(self.account, self.user, task.internal_id, total='R$ 189,00', address='otra persona, av 9')
+        task = service.approve(self.account, self.user, task.internal_id, total='R$ 189,00',
+                               address=task.order['address'])
         moved = checkout_page(extra='Enviar a Otra Persona, Av 9, GDL Cambiar', address='')
         task = self.step(task, moved)
         self.reader.click.assert_not_called()   # another address: asked again

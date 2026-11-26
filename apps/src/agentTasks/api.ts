@@ -88,8 +88,8 @@ export const GIVE_AGENT_CODE = gql`
 `;
 
 export const APPROVE_AGENT_ORDER = gql`
-  mutation ApproveAgentOrder($id: UUID!, $total: String) {
-    approveAgentOrder(id: $id, total: $total) { ${RESULT} }
+  mutation ApproveAgentOrder($id: UUID!, $total: String, $address: String) {
+    approveAgentOrder(id: $id, total: $total, address: $address) { ${RESULT} }
   }
 `;
 
