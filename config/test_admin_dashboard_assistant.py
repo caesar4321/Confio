@@ -128,3 +128,15 @@ class CuentaPivotTests(TestCase):
         self.assertIsNone(out['trade_paused'])
         with mock.patch.object(cp, '_build', side_effect=RuntimeError('boom')):
             self.assertEqual(cp.cuenta_pivot(Window.current()), {'sap': {'unavailable': True}})
+
+
+class ConnectionSplitTests(AssistantPivotTests):
+    def test_team_connections_show_apart_from_real_people(self):
+        # Founder, 2026-11-25: "I connected both" while the tab said WhatsApp 0 (team left out, unsaid).
+        from whatsapp_link.models import WhatsAppLink
+        WhatsAppLink.objects.create(user=self.staff, provider='test', state='linked', linked_at=self.now)
+        WhatsAppLink.objects.create(user=self.people[0], provider='test', state='linked', linked_at=self.now)
+        WhatsAppLink.objects.create(user=self.people[1], provider='test', state='pairing')
+        wa = self.build()['connections']['whatsapp']
+        self.assertEqual(wa['linked'], {'real': 1, 'team': 1})
+        self.assertEqual(wa['linked_30'], {'real': 1, 'team': 1})

@@ -424,7 +424,7 @@ def _build(w):
         'excluded': len(excluded),
         'retention': chat_retention(w, counted),
         'depth': depth(turns),
-        'connections': connections(w, counted),
+        'connections': connections(w, counted, excluded),
         'recent': recent(counted),
     }
 
@@ -472,37 +472,57 @@ def depth(turns):
     return out
 
 
-def connections(w, counted):
-    """The errands' reach: WhatsApp linked as a device, Gmail and calendar. Each block on its own: a missing
-    app or table leaves only that block empty."""
+def connections(w, counted, team):
+    """The errands' reach: WhatsApp linked as a device, Gmail and calendar, each figure as {'real', 'team'}
+    (the rest of this tab counts real people only; the team's connections are shown beside them, never mixed
+    in). Google's 100-account count is one number for everyone: a grant is a hashed Google account, not a
+    person here. Each block on its own: a missing app or table leaves only that block empty."""
     since = w.now - timedelta(days=WINDOW_DAYS)
+
+    def pair(rows, test=lambda r: True):
+        return {'real': sum(1 for r in rows if r[0] in counted and test(r)),
+                'team': sum(1 for r in rows if r[0] in team and test(r))}
+
+    def by_owner(pairs):
+        """[(owner, status)] -> [(status, real, team)]."""
+        real, mine = Counter(), Counter()
+        for owner, status in pairs:
+            if owner in counted:
+                real[status] += 1
+            elif owner in team:
+                mine[status] += 1
+        return [(st, real.get(st, 0), mine.get(st, 0)) for st in sorted(set(real) | set(mine))]
+
     out = {}
     try:
         from whatsapp_link.models import WhatsAppDraft, WhatsAppLink, WhatsAppNotice
         links = [r for r in WhatsAppLink.objects.order_by().values_list('user_id', 'state', 'linked_at', 'id')
-                 if r[0] in counted]
-        link_ids = [r[3] for r in links]       # a handful: never an IN of every real user
+                 if r[0] in counted or r[0] in team]
+        owner = {r[3]: r[0] for r in links}    # a handful of links: never an IN of every real user
+        notices = [(owner[link],) for link in WhatsAppNotice.objects.filter(
+            created_at__gte=since, link_id__in=list(owner)).values_list('link_id', flat=True)]
         out['whatsapp'] = {
-            'by_state': Counter(r[1] for r in links).most_common(),
-            'linked': sum(1 for r in links if r[1] == 'linked'),
-            'linked_30': sum(1 for r in links if r[2] and r[2] >= since),
-            'notices_30': WhatsAppNotice.objects.filter(created_at__gte=since, link_id__in=link_ids).count(),
-            'drafts': Counter(WhatsAppDraft.objects.filter(link_id__in=link_ids).values_list(
-                'status', flat=True)).most_common(),
+            'linked': pair(links, lambda r: r[1] == 'linked'),
+            'linked_30': pair(links, lambda r: r[2] is not None and r[2] >= since),
+            'notices_30': pair(notices),
+            'drafts': by_owner((owner[link], status) for link, status in WhatsAppDraft.objects.filter(
+                link_id__in=list(owner)).values_list('link_id', 'status')),
         }
     except Exception:  # noqa: BLE001
         logger.info('assistant dashboard: WhatsApp unavailable', exc_info=True)
     try:
         from assistant.gmail.models import GmailConnection, GmailGrant, MailDraft
-        conns = [r for r in GmailConnection.objects.order_by().values_list('user_id', 'status', 'can_calendar',
-                                                                          'connected_at') if r[0] in counted]
+        conns = [r for r in GmailConnection.objects.order_by().values_list(
+            'user_id', 'status', 'can_calendar', 'connected_at', 'id') if r[0] in counted or r[0] in team]
+        owner = {r[4]: r[0] for r in conns}
         out['gmail'] = {
-            'by_status': Counter(r[1] for r in conns).most_common(),
-            'calendar': sum(1 for r in conns if r[2]),
-            'connected_30': sum(1 for r in conns if r[3] and r[3] >= since),
+            'connected': pair(conns, lambda r: str(r[1]).upper() == 'ACTIVE'),
+            'calendar': pair(conns, lambda r: str(r[1]).upper() == 'ACTIVE' and r[2]),
+            'connected_30': pair(conns, lambda r: r[3] is not None and r[3] >= since),
             'grants': GmailGrant.objects.count(),
             'grant_cap': 100,
-            'drafts': Counter(MailDraft.objects.values_list('status', flat=True)).most_common(),
+            'drafts': by_owner((owner[c], status) for c, status in MailDraft.objects.filter(
+                connection_id__in=list(owner)).values_list('connection_id', 'status')),
         }
     except Exception:  # noqa: BLE001
         logger.info('assistant dashboard: Gmail unavailable', exc_info=True)

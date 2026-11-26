@@ -213,21 +213,24 @@
             </div>
             <div class="panel">
                 <h3>Connected errands</h3>
+                <p class="ia-sub">Real people and, apart, the team (staff, founders): the rest of this tab counts real people only.</p>
                 {% with wa=ia.connections.whatsapp gm=ia.connections.gmail %}
                 <table class="mini-table">
+                    <thead><tr><th></th><th class="num">Real</th><th class="num">Team</th></tr></thead>
                     <tbody>
                         {% if wa %}
-                        <tr><td>WhatsApp linked now</td><td class="num">{{ wa.linked|intcomma }}</td></tr>
-                        <tr><td>…linked in {{ ia.window_days }} days</td><td class="num">{{ wa.linked_30|intcomma }}</td></tr>
-                        <tr><td>WhatsApp messages told in the chat</td><td class="num">{{ wa.notices_30|intcomma }}</td></tr>
-                        <tr><td>Reply drafts</td><td class="num">{% for st, n in wa.drafts %}{{ st }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}0{% endfor %}</td></tr>
-                        {% else %}<tr><td colspan="2" class="is-zero">WhatsApp: unavailable.</td></tr>{% endif %}
+                        <tr><td>WhatsApp linked now</td><td class="num{% if not wa.linked.real %} is-zero{% endif %}">{{ wa.linked.real|intcomma }}</td><td class="num">{{ wa.linked.team|intcomma }}</td></tr>
+                        <tr><td>…linked in {{ ia.window_days }} days</td><td class="num{% if not wa.linked_30.real %} is-zero{% endif %}">{{ wa.linked_30.real|intcomma }}</td><td class="num">{{ wa.linked_30.team|intcomma }}</td></tr>
+                        <tr><td>WhatsApp messages told in the chat, {{ ia.window_days }} days</td><td class="num{% if not wa.notices_30.real %} is-zero{% endif %}">{{ wa.notices_30.real|intcomma }}</td><td class="num">{{ wa.notices_30.team|intcomma }}</td></tr>
+                        {% for st, real, team in wa.drafts %}<tr><td>WhatsApp replies: {{ st }}</td><td class="num{% if not real %} is-zero{% endif %}">{{ real }}</td><td class="num">{{ team }}</td></tr>{% empty %}<tr><td>WhatsApp replies</td><td class="num is-zero">0</td><td class="num is-zero">0</td></tr>{% endfor %}
+                        {% else %}<tr><td colspan="3" class="is-zero">WhatsApp: unavailable.</td></tr>{% endif %}
                         {% if gm %}
-                        <tr><td>Gmail connected</td><td class="num">{% for st, n in gm.by_status %}{{ st }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}0{% endfor %}</td></tr>
-                        <tr><td>…with Google Calendar</td><td class="num">{{ gm.calendar|intcomma }}</td></tr>
-                        <tr><td>Google accounts used of the {{ gm.grant_cap }} allowed</td><td class="num{% if gm.grants >= 90 %} alarm{% endif %}">{{ gm.grants|intcomma }}</td></tr>
-                        <tr><td>Mail reply drafts</td><td class="num">{% for st, n in gm.drafts %}{{ st }} {{ n }}{% if not forloop.last %} · {% endif %}{% empty %}0{% endfor %}</td></tr>
-                        {% else %}<tr><td colspan="2" class="is-zero">Gmail: unavailable.</td></tr>{% endif %}
+                        <tr><td>Gmail connected now</td><td class="num{% if not gm.connected.real %} is-zero{% endif %}">{{ gm.connected.real|intcomma }}</td><td class="num">{{ gm.connected.team|intcomma }}</td></tr>
+                        <tr><td>…with Google Calendar</td><td class="num{% if not gm.calendar.real %} is-zero{% endif %}">{{ gm.calendar.real|intcomma }}</td><td class="num">{{ gm.calendar.team|intcomma }}</td></tr>
+                        <tr><td>…connected in {{ ia.window_days }} days</td><td class="num{% if not gm.connected_30.real %} is-zero{% endif %}">{{ gm.connected_30.real|intcomma }}</td><td class="num">{{ gm.connected_30.team|intcomma }}</td></tr>
+                        {% for st, real, team in gm.drafts %}<tr><td>Mail replies: {{ st|lower }}</td><td class="num{% if not real %} is-zero{% endif %}">{{ real }}</td><td class="num">{{ team }}</td></tr>{% empty %}<tr><td>Mail replies</td><td class="num is-zero">0</td><td class="num is-zero">0</td></tr>{% endfor %}
+                        <tr><td>Google accounts used of the {{ gm.grant_cap }} allowed <small>(everyone, team included)</small></td><td class="num{% if gm.grants >= 90 %} alarm{% endif %}" colspan="2">{{ gm.grants|intcomma }}</td></tr>
+                        {% else %}<tr><td colspan="3" class="is-zero">Gmail: unavailable.</td></tr>{% endif %}
                     </tbody>
                 </table>
                 {% endwith %}
