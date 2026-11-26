@@ -752,6 +752,29 @@ class HistoryTests(ChatTests):
         self.assertEqual(nothing['mensajes'], [])
         self.assertIn('No hay mensajes', nothing['nota'])
 
+    def test_a_chat_name_asked_as_words_and_an_added_word_still_find_the_chat(self):
+        # 2026-11-26: "Charcutería" searched as words, and "Genesis esposa" for the chat saved as "Génesis".
+        from whatsapp_link import assistant_tool
+        shop, wife = '58414000001@s.whatsapp.net', '58414000002@s.whatsapp.net'
+        self.message(self.link, text='Le tengo el pedido del sábado', chat=shop, name='Charcuteria La Esquina',
+                     msg_id='C1')
+        self.message(self.link, text='Llego a las 8', chat=wife, name='Génesis', msg_id='G1', at=1700000100)
+        by_words = assistant_tool.history_call(self.viewer(), words='Charcutería')
+        self.assertEqual([m['texto'] for m in by_words['mensajes']], ['Le tengo el pedido del sábado'])
+        added = assistant_tool.history_call(self.viewer(), chat_name='Genesis esposa')
+        self.assertEqual([(m['chat'], m['texto']) for m in added['mensajes']], [('Génesis', 'Llego a las 8')])
+        as_word = assistant_tool.history_call(self.viewer(), chat_name='sábado')     # a word asked as a chat
+        self.assertEqual([m['texto'] for m in as_word['mensajes']], ['Le tengo el pedido del sábado'])
+        exact = assistant_tool.history_call(self.viewer(), chat_name='Génesis')      # every word: only that chat
+        self.assertEqual({m['chat'] for m in exact['mensajes']}, {'Génesis'})
+        self.assertIn('coincide con el nombre de uno', by_words['nota'])
+        self.assertIn('no los atribuyas a esa persona', as_word['nota'])
+        # A chat named with every word exists but says nothing of the words: never another chat instead.
+        self.message(self.link, text='Hablamos mañana', chat='58414000003@s.whatsapp.net', name='Génesis Esposa',
+                     msg_id='E1', at=1700000200)
+        strict = assistant_tool.history_call(self.viewer(), chat_name='Genesis esposa', words='llego')
+        self.assertEqual(strict['mensajes'], [])
+
     def test_only_her_own_link_is_read(self):
         from whatsapp_link import assistant_tool
         self.message(self.link, text='Su pedido está listo')

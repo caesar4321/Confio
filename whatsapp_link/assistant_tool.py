@@ -97,6 +97,12 @@ def history_call(viewer, chat_name=None, words=None, days=None):
             named, named_whole = service.history(link, chat=words, words=None, days=span)
             if named:
                 lines, whole, as_name = named, named_whole, True
+        as_words = False
+        if not lines and chat_name and not words:
+            # ... and a name asked as a chat may be a word in the messages ("sábado"): any chat that mentions it.
+            mentioned, mentioned_whole = service.history(link, chat=None, words=chat_name, days=span)
+            if mentioned:
+                lines, whole, as_words = mentioned, mentioned_whole, True
     except Exception as exc:  # noqa: BLE001 - by type: an error can quote a chat
         logger.warning('WhatsApp history tool failed: %s', type(exc).__name__)
         return {'ok': False, '_denied': True, 'motivo': 'No pude buscar en sus mensajes ahora.'}
@@ -110,6 +116,9 @@ def history_call(viewer, chat_name=None, words=None, days=None):
         if as_name:
             note += (f' En lo revisado ningún mensaje tenía «{_data(words, 40)}», pero coincide con el nombre de uno '
                      'o más chats: estos son sus mensajes más recientes (cada uno dice de qué chat es).')
+        if as_words:
+            note += (f' No hay un chat llamado «{_data(chat_name, 40)}»; estos son mensajes de cualquier chat que lo '
+                     'mencionan: di de qué chat es cada uno y no los atribuyas a esa persona.')
         if not whole:
             note += (' No son todos: puede haber más mensajes, más antiguos o más de los que caben aquí. No los des '
                      'por el total; si importa, pídele el nombre del chat, otra palabra o menos días.')

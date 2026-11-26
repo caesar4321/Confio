@@ -773,7 +773,9 @@ def history(link, *, chat=None, words=None, days=None) -> tuple:
     names, labels, named, matches = {}, {}, set(), {}
     read, before, whole = 0, None, True
 
-    def asked():
+    def asked(loose=False):
+        if loose:  # the saved name whole, inside what she asked ("Genesis esposa" ⊇ "Genesis"), never a part of it
+            return [cid for cid in matches if any(name.split() and set(name.split()) <= set(who) for name in names[cid])]
         return [cid for cid in matches if not who or any(all(part in name for part in who) for name in names[cid])]
 
     def older(rows, cursor):
@@ -812,7 +814,13 @@ def history(link, *, chat=None, words=None, days=None) -> tuple:
         if read >= HISTORY_ROWS:
             whole = not older(kept, before).exists()
             break
-    found = [(item, cid) for cid in asked() for item in matches[cid]]
+    # "Genesis esposa" for the chat saved as "Genesis": a word she adds (who the person is to her) is not in the
+    # name. Only when no chat carries every word, and never "Genesis hermana" for "Esposa Génesis".
+    # Loose only when no saved chat name carries every word, whatever its messages hold.
+    named_whole = who and any(any(all(part in name for part in who) for name in chat_names)
+                              for chat_names in names.values())
+    chats = asked(loose=True) if who and not named_whole else asked()
+    found = [(item, cid) for cid in chats for item in matches[cid]]
     # The messages holding most of the words; among equals, the newest. Told oldest first.
     best = sorted(found, key=lambda pair: (-pair[0][0], -pair[0][1], -pair[0][2]))
     if len(best) > HISTORY_LINES:
