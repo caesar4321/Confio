@@ -7,7 +7,8 @@
  * disable() on ANY failed revalidation, including a plain user cancel, wiping
  * a working enrollment and demanding a fresh enable().
  *
- * Only a genuinely invalidated Keystore key may be treated as void.
+ * Only a guard that is genuinely unusable — an invalidated Keystore key, or
+ * a guard item that is not there at all — may be treated as void.
  */
 
 // Makes this file a module so its top-level test scaffolding does not collide
@@ -83,7 +84,8 @@ const freshService = () => {
  * revalidation returned false — including a plain user cancel — and then demand
  * a fresh enable(). That is the most likely source of "ya lo activé y me lo
  * sigue pidiendo": the app itself wiped the enrollment the user had just made.
- * Only a genuinely invalidated key may be treated as void.
+ * Only a genuinely invalidated key, or a guard that is missing, may be
+ * treated as void.
  */
 describe('biometricAuthService invalidation classification', () => {
   beforeEach(() => {
@@ -122,6 +124,28 @@ describe('biometricAuthService invalidation classification', () => {
       'android.security.keystore.KeyPermanentlyInvalidatedException'
     );
     expect(service.isPermanentInvalidation()).toBe(true);
+  });
+
+  // One cause consistent with the 2026-11 iPhone 17 report ("Desbloquear does
+  // nothing, no Face ID"), not confirmed on that phone: the "enabled"
+  // preference is there but the guard is not (e.g. a phone set up from
+  // another). The library then answers `false` with no prompt and no error
+  // (mocked here; the native code is not run), so no retry could ever prompt.
+  it('treats a guard that is gone as invalidation, and re-enrolling stores a new one', async () => {
+    mockStore.set(PREFS_SERVICE, { username: 'biometric_pref', password: 'enabled' });
+    const service = freshService();
+    expect(await service.authenticate('Desbloquea Confío', true, true)).toBe(false);
+    expect(service.isPermanentInvalidation()).toBe(true);
+
+    // The service's half of the repair (AuthContext's suite covers Desbloquear
+    // driving it): disable, then enable stores and verifies a new guard.
+    mockState.allGuardReadsFail = false;
+    await service.disable();
+    expect(await service.enable()).toBe(true);
+    expect(mockStore.get(GUARD_SERVICE)?.username).toBe('biometric_unlock');
+    expect(await service.isEnabled()).toBe(true);
+    expect(await service.authenticate('Desbloquea Confío', true, true)).toBe(true);
+    expect(service.isPermanentInvalidation()).toBe(false);
   });
 
   it('reports no invalidation when nothing has failed yet', async () => {

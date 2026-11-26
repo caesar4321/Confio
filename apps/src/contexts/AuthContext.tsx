@@ -8,7 +8,7 @@ import { AuthStackParamList, RootStackParamList } from '../types/navigation';
 import { useApolloClient, gql } from '@apollo/client';
 import * as Keychain from 'react-native-keychain';
 import { jwtDecode } from 'jwt-decode';
-import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
+import { refreshAccessToken } from '../apollo/client';
 import { getSessionCredentials, isSessionObserverInstalled, onSessionReset } from '../services/sessionStore';
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
@@ -19,6 +19,9 @@ import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { applyReviewLink, setReviewLinkApplier, takePendingReviewLink } from '../services/reviewLink';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { setLinkOpener, takeClipboardLink, takePendingLink } from '../services/linkSend';
+
+// How long a Desbloquear tap waits for a resume's own unlock prompt.
+const RESUME_PROMPT_WAIT_MS = 10_000;
 
 const MARK_ONBOARDED = gql`
   mutation MarkOnboarded {
@@ -214,7 +217,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // the session monitor). A ref: the monitor's effect can run again inside
   // the grace and must not forget it.
   const resetGraceUntilRef = useRef<number>(0);
-  const resumeAuthenticationRef = useRef(false);
+  // Set from the moment a resume covers Main until that resume's unlock
+  // attempt is over (answered, failed, or skipped for a session that is
+  // gone), and settles with whether it unlocked.
+  const resumeUnlockRef = useRef<Promise<boolean> | null>(null);
   // Last known "the phone has a lock set up for Confío"; null until read.
   const deviceLockEnrolledRef = useRef<boolean | null>(null);
   const [isLocked, setIsLocked] = useState(false);
@@ -345,16 +351,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     } catch (prefetchErr) {
     }
   };
-
-  // Mutation for token refresh (used on resume)
-  const REFRESH_TOKEN = gql`
-    mutation RefreshToken($refreshToken: String!, $accountType: String, $accountIndex: Int, $businessId: ID) {
-      refreshToken(refreshToken: $refreshToken, accountType: $accountType, accountIndex: $accountIndex, businessId: $businessId) {
-        token
-        refreshExpiresIn
-      }
-    }
-  `;
 
   // Set up navigation ready listener and check auth state
   useEffect(() => {
@@ -747,7 +743,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     };
   }, [isAuthenticated, isNavigationReady]);
 
-  // Refresh on resume to ensure valid access token before UI queries
+  // On resume: lock if the person was away, and refresh an expired access
+  // token alongside. GraphQL requests refresh for themselves before sending
+  // (apollo/client authLink); the websockets and a few direct calls read the
+  // stored token as it is, so this refresh is what brings theirs up to date,
+  // normally before the unlock prompt has been answered.
   useEffect(() => {
     let isAuthenticating = false;
     let appStateCycle = 0; // Tracks background/foreground cycles to avoid double prompts per resume
@@ -778,6 +778,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           lastPromptedCycle = currentCycle; // Mark this cycle as satisfied
           return;
         }
+        let settleResumeUnlock: (ok: boolean) => void = () => {};
+        let resumeUnlock: Promise<boolean> | null = null;
+        const beginResumeUnlock = () => {
+          resumeUnlock = new Promise<boolean>(resolve => { settleResumeUnlock = resolve; });
+          resumeUnlockRef.current = resumeUnlock;
+        };
         const lastInactive = lastInactiveAtRef.current;
         // Already locked: the lock screen's button retries, and the OS prompt
         // itself trips this listener, so prompting here would loop.
@@ -793,89 +799,81 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         // Keychain is read); a stale "enrolled" just reopens below without a
         // prompt, since deviceUnlock() re-checks.
         const coverNow = awayLong && deviceLockEnrolledRef.current !== false;
-        if (coverNow) {
-          resumeAuthenticationRef.current = true;
-          coverApp();
-        }
-        const needsUnlock = coverNow || (awayLong && await deviceLockEnrolled());
-        if (awayLong && !needsUnlock) isAuthenticating = false;
-        if (needsUnlock && !coverNow) {
-          // Cover Main before the Keychain/network awaits below. Offline refresh
-          // must never leave the previous authenticated screen interactive.
-          resumeAuthenticationRef.current = true;
-          coverApp();
-        }
+        // The stored session: its tokens, 'gone' when there is none, or null
+        // when it cannot be read or parsed (which is not the same as gone).
+        const readSession = async (): Promise<{ accessToken: string; refreshToken: string } | 'gone' | null> => {
+          try {
+            const creds = await getSessionCredentials();
+            if (!creds || !creds.password) return 'gone';
+            const tokens = JSON.parse(creds.password);
+            if (!tokens.accessToken || !tokens.refreshToken) return null;
+            return { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken };
+          } catch (readError) {
+            console.warn('[AuthContext] Could not read the session on resume:', readError);
+            return null;
+          }
+        };
+        let refreshing: Promise<void> = Promise.resolve();
+        let unlocked = false;
         try {
-          const creds = await getSessionCredentials();
-          if (!creds || !creds.password) return;
-          const tokens = JSON.parse(creds.password);
-          const at = tokens.accessToken;
-          const rt = tokens.refreshToken;
-          if (!at || !rt) return;
-          const decoded: any = jwtDecode(at);
-          const now = Math.floor(Date.now() / 1000);
-          if ((decoded?.exp ?? 0) <= now + 30) {
-            // Retrieve current active context to preserve session state
-            let contextArgs = {};
+          if (coverNow) {
+            beginResumeUnlock();
+            coverApp();
+          }
+          const needsUnlock = coverNow || (awayLong && await deviceLockEnrolled());
+          if (needsUnlock && !coverNow) {
+            // Cover Main before the Keychain awaits and the prompt below: the
+            // previous authenticated screen must never stay interactive.
+            beginResumeUnlock();
+            coverApp();
+          }
+          const session = await readSession();
+          // Started now and not waited for, as at startup, so the unlock
+          // prompt below never waits on the network. The token is usually
+          // fresh by the time the prompt has been answered; when it is not,
+          // Main can show a moment before the stored token is current.
+          refreshing = (async () => {
             try {
-              const activeCtx = await AuthService.getInstance().getActiveAccountContext();
-              if (activeCtx) {
-                contextArgs = {
-                  accountType: activeCtx.type,
-                  accountIndex: activeCtx.index,
-                  businessId: activeCtx.businessId
-                };
-              }
-            } catch (err) {
+              if (!session || session === 'gone') return;
+              const decoded: any = jwtDecode(session.accessToken);
+              if ((decoded?.exp ?? 0) > Math.floor(Date.now() / 1000) + 30) return;
+              // The shared refresh: bounded by a deadline, one request per
+              // session however many callers ask, and it re-checks the session
+              // right before writing, so a sign-out or account switch that
+              // landed meanwhile is not overwritten with this token. It asks
+              // for the account the token itself names, as every request does.
+              await refreshAccessToken(session);
+            } catch (e) {
+              // Retried by the next request or resume; a session that changed
+              // meanwhile is one the shared refresh declines to write over.
+              console.warn('[AuthContext] Resume refresh did not complete:', e);
             }
-
-            const { data } = await apolloClient.mutate({
-              mutation: REFRESH_TOKEN,
-              variables: {
-                refreshToken: rt,
-                ...contextArgs
-              },
-              context: { skipAuth: true },
-            });
-            const newAccess = data?.refreshToken?.token;
-            if (newAccess) {
-              await Keychain.setGenericPassword(
-                AUTH_KEYCHAIN_USERNAME,
-                JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
-                {
-                  service: AUTH_KEYCHAIN_SERVICE,
-                  username: AUTH_KEYCHAIN_USERNAME,
-                  accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
-                }
-              );
-            }
-          }
-
-          // Require biometric on resume if user was away for a bit
-          if (needsUnlock) {
-            {
-              isAuthenticating = true;
-              lastPromptedCycle = currentCycle;
-              const ok = await deviceUnlock();
-              isAuthenticating = false;
-
-              if (!ok) return;
-              lastBiometricSuccessRef.current = Date.now();
-              setIsLocked(false);
-              setTimeout(processEntryWork, 1000);
-            }
-          }
-        } catch (e) {
-          isAuthenticating = false;
-          console.error('[AuthContext] Refresh-on-resume failed:', e);
+          })();
+          // A session that ended while away gets no prompt: the session
+          // monitor takes the person to login.
+          if (needsUnlock) unlocked = session !== 'gone' && await deviceUnlock();
+        } catch (unlockError) {
+          console.error('[AuthContext] Resume unlock failed:', unlockError);
         } finally {
-          isAuthenticating = false;
-          if (needsUnlock) resumeAuthenticationRef.current = false;
+          if (awayLong) isAuthenticating = false;
+          // This attempt is over: from here the lock screen's own button
+          // retries and sign-out is allowed, whatever the refresh is still
+          // doing. (Only this attempt's own promise is cleared.)
+          if (resumeUnlock) {
+            if (resumeUnlockRef.current === resumeUnlock) resumeUnlockRef.current = null;
+            settleResumeUnlock(unlocked);
+          }
         }
+        if (unlocked) {
+          lastBiometricSuccessRef.current = Date.now();
+          setIsLocked(false);
+          setTimeout(processEntryWork, 1000);
+        }
+        await refreshing;
       }
     });
     return () => sub.remove();
-  }, [apolloClient, isAuthenticated]);
+  }, [isAuthenticated]);
 
   // Enforce biometric enrollment on supported devices; returns if enrollment is ready
   // Opening the app uses the phone's own biometric / PIN / pattern. Confío
@@ -1499,12 +1497,29 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   // Retry the device-auth gate from the lock screen. Goes through the full
-  // (non-skip) enrollment check so a permanently invalidated key (biometrics
-  // changed in device settings) is re-enrolled behind a fresh device-auth
-  // prompt rather than leaving the user stuck on the lock screen.
+  // (non-skip) enrollment check so a guard that is void (biometrics changed
+  // in device settings) or missing altogether is re-enrolled behind a fresh
+  // device-auth prompt rather than leaving the user stuck on the lock screen.
   // The lock screen shows its own inline error, so enrollment runs silently.
   const unlockApp = async (): Promise<boolean> => {
-    if (resumeAuthenticationRef.current) return false;
+    // A resume's own unlock attempt is still open (its prompt is coming, is
+    // up, or will be skipped): its outcome is this tap's answer, and it
+    // uncovers Main itself on success.
+    const resumePrompt = resumeUnlockRef.current;
+    if (resumePrompt) {
+      // Bounded only so the button never spins without end: past the wait
+      // this tap answers "no" and the resume attempt stays the owner (a
+      // second prompt beside it would mean two prompts at once and the
+      // entry work run twice). The resume still uncovers Main itself if
+      // its prompt passes later.
+      let giveUp: ReturnType<typeof setTimeout> | undefined;
+      const waited = new Promise<boolean>(resolve => { giveUp = setTimeout(() => resolve(false), RESUME_PROMPT_WAIT_MS); });
+      try {
+        return await Promise.race([resumePrompt, waited]);
+      } finally {
+        clearTimeout(giveUp);
+      }
+    }
     const result = await enforceBiometricEnrollment({ silent: true });
     if (!result.ok) return false;
     lastBiometricSuccessRef.current = Date.now();
@@ -1533,9 +1548,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   const signOut = async () => {
-    // Resume can still be refreshing/persisting this account's tokens. Do not
-    // let an account switch race that work and resurrect the old session.
-    if (resumeAuthenticationRef.current) {
+    // A resume's unlock prompt is still up or about to show: refuse until it
+    // has answered. (The token refresh running beside it needs no such guard:
+    // it re-checks the session right before it writes.)
+    if (resumeUnlockRef.current) {
       alertAboveLock('Verificación en curso', 'Espera a que termine la verificación para cambiar de cuenta.');
       return;
     }

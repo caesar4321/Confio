@@ -330,6 +330,18 @@ class BiometricAuthService {
         this.lastSuccessTime = Date.now();
         this.lastError = null;
         this.lastLockout = false;
+      } else if (authResult === false) {
+        // The library resolves `false`, with no prompt and no error, when the
+        // keychain reports no guard item (iOS errSecItemNotFound, Android no
+        // stored entry); a cancel, a failed match or a lockout all reject.
+        // The "enabled" preference can outlive the guard; how a phone gets
+        // there is not established (a restore, or a phone set up from another
+        // one, are candidates). Say so, or every retry fails silently forever.
+        // Should the keychain ever report a guard missing that is there, the
+        // cost is one re-enrollment behind the same device prompt. (As with
+        // an invalidated key, cancelling that re-enrollment prompt leaves the
+        // protection off until it is set up again, which startup demands.)
+        this.lastError = 'key not found';
       }
       return success;
     } catch (error: any) {
@@ -357,7 +369,9 @@ class BiometricAuthService {
   /**
    * Whether the last failure means the stored guard key is genuinely gone —
    * the user removed or changed their enrolled biometrics, so the Keystore
-   * key was invalidated and re-enrollment is the only way forward.
+   * key was invalidated, or the guard item is simply absent (authenticate()
+   * records that as 'key not found') — and re-enrollment is the only way
+   * forward.
    *
    * Everything else authenticate() reports as false — the user tapping
    * Cancel, a sensor lockout, a transient Keystore error, a re-entrant call
