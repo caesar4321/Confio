@@ -206,6 +206,41 @@ def cap_allows(cap, read, total, amount, breakdown_lines):
     return sorted(products) == sorted(expected)
 
 
+NO_ADDRESS_TRIES = 3
+
+
+def _place(value):
+    """An address as words: case, accents, spacing and punctuation aside."""
+    return ' '.join(re.findall(r'[a-z0-9]+', guard.fold(str(value or ''))))
+
+
+def same_place(read, approved):
+    """The approved address is, word for word, within what the reader copied as the delivery address now."""
+    read, approved = _place(read), _place(approved)
+    return bool(approved) and f' {approved} ' in f' {read} '
+
+
+def specific(address):
+    """Enough to tell one place from another: a number and more than a name ("Ana Pérez", "CDMX" are not)."""
+    words = _place(address).split()
+    return any(ch.isdigit() for ch in ''.join(words)) and len(words) >= 3
+
+
+def confirmed_before(task, address):
+    """A fact: the person approved an order to this very address on a card of an earlier purchase (never one
+    approved by "Elegir" alone, which never showed it). Only a specific address: a name or a city alone could
+    stand for another street. Case, accents, spacing and punctuation aside."""
+    from .models import AgentTask
+    squeeze = _place
+    wanted = squeeze(address)
+    if not wanted or not specific(address):
+        return False
+    earlier = AgentTask.objects.filter(user_id=task.user_id).exclude(pk=task.pk).exclude(
+        order__confirmed_address='').filter(order__has_key='confirmed_address').order_by('-pk')
+    return any(squeeze((order or {}).get('confirmed_address')) == wanted
+               for order in earlier.values_list('order', flat=True)[:200])
+
+
 def figure_on(page_text, amount):
     """A fact, not a reading: that amount is written on the page."""
     return amount is not None and any(amount_of(found.group(0)) == amount
@@ -560,10 +595,21 @@ def _order(step, browser, reader, seen, element, label, args):
         return step.remember('ready_to_order', f'refused: {why}')
     # Where it goes: what the second model copied, kept only if the page really writes it. Once approved,
     # the approved address stands while the page still writes it (a model never words it twice the same).
-    if approved.get('address') and written_on(seen.text, approved.get('address')):
+    # It stands only as whole words of what the reader sees as the delivery address now ("Calle 1" is not
+    # "Calle 12"; an approved address left in a list of saved ones is not the selected one).
+    if approved.get('address') and same_place(read['ship_to'], approved['address']) \
+            and written_on(seen.text, read['ship_to']):
         address = approved['address']
     else:
         address = read['ship_to'] if written_on(seen.text, read['ship_to']) else ''
+    if not address:
+        # Founder, 2026-11-26: no order goes to an address the person never saw. Where it is delivered must be
+        # written on the page that places it, so the card can show it. A store that never shows it: not bought.
+        if count(task, 'no_address') >= NO_ADDRESS_TRIES:
+            return step.stop('cannot_do')
+        return step.remember('ready_to_order', 'refused: the page must show where it is delivered (the address or '
+                                               'pick-up point): show that part of the checkout, never change it',
+                             counts=counted(task, 'no_address'))
     where = step.fingerprint(seen.url)
     order = {'item': item, 'total': total, 'amount': format(amount, 'f'), 'button': label, 'page': where,
              'image': picked.get('image', '') or (cart[0].get('image', '') if cart else ''), 'address': address,
@@ -591,7 +637,10 @@ def _order(step, browser, reader, seen, element, label, args):
         return step.hand_over('subscribe', order={**order, 'approved': None}, body=notes.say(
             notes.NEEDS_PERSON['subscribe'], task) + notes.breakdown_text(order))
     if not approved and mode != 'manual' and cap.get('item') == item \
-            and cap_allows(cap, read, total, amount, order.get('breakdown') or []):
+            and cap_allows(cap, read, total, amount, order.get('breakdown') or []) \
+            and confirmed_before(task, address):
+        # Only to an address they confirmed on an earlier order card: "Elegir" is tapped before the
+        # checkout shows where it goes, so a new address is always asked.
         # "Elegir" approved this item up to its top total (spec decision 42): at or under it, no second tap.
         approved = {'total': total, 'item': item, 'manual': False, 'address': address, 'by_cap': True}
     # What the person approves is the purchase: this item, this total, this address, who pays.
@@ -602,6 +651,8 @@ def _order(step, browser, reader, seen, element, label, args):
         # what the store wrote is shown only on the card.
         return step.hand_over('approve', order=order, body=notes.say(
             notes.NEEDS_PERSON['approve_manual' if mode == 'manual' else 'approve'], task) + notes.breakdown_text(order))
+    # The address the person saw on the card and approved stays with the order, for confirmed_before.
+    order = {**order, 'confirmed_address': '' if approved.get('by_cap') else approved.get('address') or ''}
     if rail is not None and rail.pay_before_order:
         # Venezuela: nothing is pressed now. The step's Pago Móvil data is read and paid; the reference then
         # places the order (pagomovil.py).

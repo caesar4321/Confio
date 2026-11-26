@@ -1351,8 +1351,12 @@ CHECKOUT = f'{BASE}/checkout/review'
 DONE = snap('Pedido confirmado. Gracias por tu compra.', f'{BASE}/checkout/congrats')
 
 
-def checkout_page(total='R$ 189,00', url=CHECKOUT, method='Pix', extra=''):
-    return snap(f'Resumo do pedido Chocolate Ibarra {extra} Total {total}', url, elements=[
+ADDRESS = 'Rua das Flores 12, Sao Paulo'   # where the store already delivers: the card shows it
+
+
+def checkout_page(total='R$ 189,00', url=CHECKOUT, method='Pix', extra='', address=ADDRESS):
+    ship = f' Entregar em {address}' if address else ''
+    return snap(f'Resumo do pedido Chocolate Ibarra {extra} Total {total}{ship}', url, elements=[
         element(method, ref=0, role='radio', tag='div', checked=True),
         element('Confirmar pedido', ref=1),
         element('Ajuda', ref=2, tag='a', href='https://evil.com/help'),
@@ -1525,7 +1529,7 @@ class CheckoutTests(StepBase):
 
     def test_on_the_last_page_an_unknown_button_is_named_for_approval_never_pressed(self):
         # "Procesar pago" carries no final word: on the page with the total and the method it is the person's.
-        page = snap('Resumen Chocolate Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
+        page = snap(f'Resumen Chocolate Forma de pagamento Pix Total do pedido R$ 189,00 Entregar em {ADDRESS}', CHECKOUT, elements=[
             element('Pix', ref=0, role='radio', tag='div', checked=True), element('Procesar pago', ref=1),
             element('Cambiar', ref=2), element('Continuar', ref=3)])
         task = self.make_task(phase='ordering', goal='chocolate')
@@ -1588,12 +1592,12 @@ class CheckoutTests(StepBase):
                                    'Seguir al vendedor': False, 'Cerrar': True, 'Ir al carrito': True})
 
     def test_the_delivery_address_is_part_of_the_approval(self):
-        page = checkout_page(extra='Enviar a Ana Pérez, Calle 1 #23, CDMX Cambiar')
+        page = checkout_page(extra='Enviar a Ana Pérez, Calle 1 #23, CDMX Cambiar', address='')
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
         self.assertIn('calle 1', task.order['address'])
         task = service.approve(self.account, self.user, task.internal_id)
-        moved = checkout_page(extra='Enviar a Otra Persona, Av 9, GDL Cambiar')
+        moved = checkout_page(extra='Enviar a Otra Persona, Av 9, GDL Cambiar', address='')
         task = self.step(task, moved)
         self.reader.click.assert_not_called()   # another address: asked again
         self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
@@ -1739,7 +1743,7 @@ class CheckoutTests(StepBase):
 
     def test_an_approved_button_that_was_only_a_way_on_leads_to_the_stores_final_one_once(self):
         # A payment step's "Continuar" on the page with the total and the method, approved; then the review.
-        page = snap('Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
+        page = snap(f'Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00 Entregar em {ADDRESS}', CHECKOUT, elements=[
             element('Pix', ref=0, role='radio', tag='input', type='radio', checked=True), element('Continuar', ref=1)])
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
@@ -1764,7 +1768,7 @@ class CheckoutTests(StepBase):
         self.reader.click.assert_called_once()
 
     def test_after_the_order_another_total_or_a_card_is_never_pressed_under_its_approval(self):
-        page = snap('Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00', CHECKOUT, elements=[
+        page = snap(f'Chocolate Ibarra Forma de pagamento Pix Total do pedido R$ 189,00 Entregar em {ADDRESS}', CHECKOUT, elements=[
             element('Pix', ref=0, role='radio', tag='input', type='radio', checked=True), element('Continuar', ref=1)])
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate Ibarra', 'total': 'R$ 189,00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
@@ -2016,14 +2020,15 @@ class CheckoutTests(StepBase):
 
     def test_a_change_link_beside_the_method_does_not_hide_it(self):
         text = ('Revisar pedido Chocolate Alterar forma de pagamento Forma de pagamento Pix Alterar '
-                'Total R$ 189,00')
+                f'Total R$ 189,00 Entregar em {ADDRESS}')
         page = snap(text, CHECKOUT, elements=checkout_page().elements)
         self.operate.return_value = ('ready_to_order', {'ref': 1, 'item': 'Chocolate', 'total': 'R$ 189,00'})
         task = self.step(self.make_task(phase='ordering', goal='chocolate'), page)
         self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
 
     def test_amazons_review_page_states_the_method_as_text(self):
-        text = ('Revisar pedido Chocolate Abuelita 6 tabletas Método de pago Transferencia SPEI Cambiar '
+        text = ('Enviar a Ana Pérez, Calle 1 #23, CDMX Cambiar '
+                'Revisar pedido Chocolate Abuelita 6 tabletas Método de pago Transferencia SPEI Cambiar '
                 'Total del pedido: $1,249.00 '
                 'Tarjetas de regalo y promociones Meses sin intereses con tarjetas participantes')
         page = snap(text, 'https://www.amazon.com.mx/gp/buy/spc/handlers/display.html', elements=[
@@ -2040,7 +2045,7 @@ class CheckoutTests(StepBase):
         self.assertIn('payment method', task.history[-1]['result'])
 
     def test_the_total_is_the_figure_after_the_last_total_label(self):
-        page = snap('Chocolate Total (2 productos) R$ 150,00 Frete R$ 39,00 Total R$ 189,00', CHECKOUT,
+        page = snap(f'Chocolate Total (2 productos) R$ 150,00 Frete R$ 39,00 Total R$ 189,00 Entregar em {ADDRESS}', CHECKOUT,
                     elements=checkout_page().elements)
         for figure in ('R$ 39,00', 'R$ 150,00', 'R$ 2,00'):    # shipping, the products' total, the count
             AgentTask.objects.filter(user=self.user).update(state='cancelled')
@@ -2194,7 +2199,12 @@ class CheckoutTests(StepBase):
             'lines': [{'kind': 'products', 'amount': products}, {'kind': 'shipping', 'amount': shipping}]}
         return checkout_page(extra=f'Produtos {products} Frete {shipping}')
 
+    def confirmed_earlier(self, address=ADDRESS):
+        """An earlier purchase whose order card showed this address and the person approved it."""
+        return self.make_task(state='stopped', reason='done', order={'confirmed_address': address})
+
     def test_within_the_top_total_chosen_with_elegir_the_order_is_placed_with_no_second_tap(self):
+        self.confirmed_earlier('rua das flores 12,  são paulo')   # case, accents and spacing aside
         self.operate.return_value = self.ORDER   # R$ 189,00
         task = self.step(self.cap_task('200'), self.priced())
         self.reader.click.assert_called_once()
@@ -2202,6 +2212,50 @@ class CheckoutTests(StepBase):
         said = self.post.call_args.args[1]
         self.assertIn('Estoy haciendo tu pedido', said)   # never "done" before the store confirms it
         self.assertIn('dentro del máximo que aprobaste al elegir (R$ 200,00)', said)
+        self.assertEqual(task.order['confirmed_address'], '')   # Elegir alone never showed it
+
+    def test_elegir_to_an_address_never_confirmed_on_a_card_brings_the_order_card(self):
+        # Founder, 2026-11-26: "Elegir" is tapped before the checkout shows where it goes.
+        from django.contrib.auth import get_user_model
+        from agent_tasks.schema import task_type
+        self.confirmed_earlier('Av. Paulista 900, Sao Paulo')            # another address
+        self.make_task(state='stopped', order={'confirmed_address': ''})   # one placed by Elegir alone
+        other = get_user_model().objects.create_user(username='other-buyer', email='o@example.test', password='x',
+                                                     firebase_uid='fb-other-buyer')
+        AgentTask.objects.filter(pk=self.confirmed_earlier().pk).update(user=other)   # someone else's
+        self.operate.return_value = self.ORDER
+        task = self.step(self.cap_task('200'), self.priced())
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.assertEqual(task_type(task).order.address, ADDRESS.lower())
+        self.reader.click.assert_not_called()
+        # Approved on the card: pressed, and that address is confirmed for the next "Elegir".
+        task = service.approve(self.account, self.user, task.internal_id, total='R$ 189,00')
+        task = self.step(task, self.priced())
+        self.reader.click.assert_called_once()
+        self.assertEqual(task.order['confirmed_address'], ADDRESS.lower())
+        self.assertTrue(operate.confirmed_before(self.make_task(state='cancelled'), ADDRESS))
+
+    def test_an_order_whose_page_does_not_show_where_it_goes_is_never_offered(self):
+        page = checkout_page()
+        page = snap(page.text.replace(f'Entregar em {ADDRESS}', ''), CHECKOUT, elements=page.elements)
+        task = self.named(page)
+        self.assertEqual(task.state, 'working')
+        self.assertIn('must show where it is delivered', task.history[-1]['result'])
+        for _ in range(operate.NO_ADDRESS_TRIES):   # a store that never shows it: stopped, not looped
+            task = self.step(task, page)
+        self.assertEqual((task.state, task.reason), ('stopped', 'cannot_do'))
+        self.reader.click.assert_not_called()
+
+    def test_an_address_is_the_same_place_word_for_word_and_only_a_specific_one_is_remembered(self):
+        self.assertTrue(operate.same_place('Ana Pérez, Calle 1 #23, CDMX', 'ana perez calle 1 23 cdmx'))
+        self.assertFalse(operate.same_place('Ana Pérez, Calle 12 #23, CDMX', 'Calle 1'))
+        self.assertFalse(operate.same_place('', 'Calle 1'))
+        self.assertTrue(operate.specific(ADDRESS))
+        for vague in ('Ana Pérez', 'CDMX', 'Retiro en sucursal', '12'):
+            with self.subTest(vague=vague):
+                self.assertFalse(operate.specific(vague))
+        self.confirmed_earlier('Ana Pérez')
+        self.assertFalse(operate.confirmed_before(self.make_task(state='cancelled'), 'Ana Pérez'))
 
     def test_anything_elegir_did_not_prove_brings_the_order_card(self):
         # Chosen before subscribing; more than the chosen price in products (two units, an add-on); no
@@ -2254,6 +2308,7 @@ class CheckoutTests(StepBase):
         return checkout_page(total=total, extra=f'Cafe Pilao 2x {written}')
 
     def test_a_chosen_cart_within_its_top_total_is_placed_with_no_second_tap(self):
+        self.confirmed_earlier()
         # 2 × R$ 50 + 1 × R$ 30 = R$ 130 in products, as one subtotal line or as one line per product.
         for lines in ([{'kind': 'products', 'amount': 'R$ 130,00'}, {'kind': 'shipping', 'amount': 'R$ 59,00'}],
                       [{'kind': 'products', 'amount': 'R$ 100,00'}, {'kind': 'products', 'amount': 'R$ 30,00'},
