@@ -567,7 +567,8 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
                 confirmed_tool = 'categorize_transactions:confirmed'
                 if confirmed is None:
                     confirmed = confirm_pending_watch(conversation, viewer, clean, pending_watch, user_message)
-                    confirmed_tool = 'smart_account_alerts:confirmed'
+                    confirmed_tool = ('notify_rail:confirmed' if (pending_watch or {}).get('notice_rail')
+                                      else 'smart_account_alerts:confirmed')
                 if confirmed is not None:
                     applied, reply_text = confirmed
                     reply = _append(conversation, sender_type='AGENT', body=reply_text, metadata={'ai': True})
@@ -751,8 +752,10 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
     line = ''
     if remembered is not None:
         # In the language of the reply it goes beside: code's own lines are Spanish, a question is in theirs.
+        from .engine import NOTICE_LEAD
+        # The notice's lead is said in their language below (pending_watch), so its line follows them too.
         line = memory.said_by_code(remembered, (result.pending_action or {}).get('lang') or confirm.language(
-            [result.reply if _written_by_code(result) else clean]))
+            [result.reply if _written_by_code(result) and result.reply != NOTICE_LEAD else clean]))
     if line and _written_by_code(result):
         body = f'{line}\n\n{body}'
     if result.pending_categorization:
@@ -762,6 +765,9 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         body = f'{body}\n\n{confirmation_question(result.pending_categorization)}'
     elif result.pending_watch:
         result.pending_watch['lang'] = confirm.language([clean])
+        from .engine import NOTICE_LEAD
+        if result.reply == NOTICE_LEAD and result.pending_watch['lang'] in _NOTICE_LEADS:
+            body = body.replace(NOTICE_LEAD, _NOTICE_LEADS[result.pending_watch['lang']])
         body = f'{body}\n\n{watch_confirmation_question(result.pending_watch)}'
     metadata = {'ai': True, 'actions': result.actions}
     # Her kept WhatsApp messages were read for this answer, so it may quote them: tagged, to go with that link
@@ -1007,9 +1013,9 @@ def _attach(intent_id, reply, line='', lang='es', also=''):
 
 def _written_by_code(result):
     """The reply holds none of the model's words (so none of what a note asked it to say)."""
-    from .engine import CUT_EMPTY, DONE_REPLY, PAYMENT_PREPARED_REPLY, SAVED_CHANGES_REPLY
+    from .engine import CUT_EMPTY, DONE_REPLY, NOTICE_LEAD, PAYMENT_PREPARED_REPLY, SAVED_CHANGES_REPLY
     return bool(result.pending_action) or result.reply in {
-        PAYMENT_PREPARED_REPLY, DONE_REPLY, SAVED_CHANGES_REPLY, CUT_EMPTY,
+        PAYMENT_PREPARED_REPLY, DONE_REPLY, SAVED_CHANGES_REPLY, CUT_EMPTY, NOTICE_LEAD,
         *([result.payment_refusal] if result.payment_refusal else [])}
 
 
@@ -1222,7 +1228,33 @@ def _watch_terms(draft):
                                action=draft.get('action') or None)
 
 
+_NOTICE_QUESTION = {'es': '¿Te aviso aquí cuando esté disponible? Responde "sí" para anotarte.',
+                    'pt': 'Aviso você aqui quando estiver disponível? Responda "sim" para eu anotar.',
+                    'en': 'Shall I let you know here when it is available? Reply "yes" to sign up.'}
+_NOTICE_JOINED = {'es': 'Listo, te anoté: te aviso cuando esté disponible. Todavía no hay fecha.',
+                  'pt': 'Pronto, anotei: aviso você quando estiver disponível. Ainda não há data.',
+                  'en': "Done, you're on the list: I'll let you know when it's available. There's no date yet."}
+_NOTICE_LEADS = {'pt': 'Por enquanto não está disponível, e ainda não há data.',
+                 'en': "It isn't available yet, and there's no date."}
+_NOTICE_UPDATE = {'es': 'Ya está disponible: actualiza Confío desde la tienda para usarlo.',
+                  'pt': 'Já está disponível: atualize o Confío na loja para usar.',
+                  'en': "It's available now: update Confío from the store to use it."}
+_NOTICE_OTHER = {'es': 'Ya no hace falta anotarte: pregúntame por ese medio y te digo cómo está para ti.',
+                 'pt': 'Não precisa mais anotar: me pergunte por esse meio e eu digo como está para você.',
+                 'en': "There's nothing to sign up for anymore: ask me about it and I'll tell you where it stands "
+                       'for you.'}
+_NOTICE_UNKNOWN = {'es': 'No pude anotarte ahora. Pídemelo otra vez en un rato.',
+                   'pt': 'Não consegui anotar agora. Peça de novo daqui a pouco.',
+                   'en': "I couldn't sign you up right now. Ask me again in a bit."}
+_NOTICE_OPEN = {'es': 'Ya está disponible, así que no hace falta anotarte: pregúntame cómo usarlo.',
+                'pt': 'Já está disponível, então não precisa anotar: me pergunte como usar.',
+                'en': "It's available already, so there's nothing to sign up for: ask me how to use it."}
+
+
 def watch_confirmation_question(draft):
+    if draft.get('notice_rail'):
+        # A payment method's "Próximamente" notice (pay_rails.notify): the same yes path as an alert.
+        return _NOTICE_QUESTION.get(draft.get('lang'), _NOTICE_QUESTION['es'])
     terms = _watch_terms(draft)
     if draft.get('lang') == 'pt':
         return f'Salvo este alerta? {terms} Responda "sim" para salvar.'
@@ -1249,14 +1281,25 @@ def confirm_pending_watch(conversation, viewer, text, draft, user_message):
     (saved, reply) or None."""
     if draft is None or draft.get('user_id') != viewer.user.pk or _not_typed(user_message):
         return None
-    yes, no = is_affirmative(text, 'alert'), confirm.is_no(text)
+    yes, no = is_affirmative(text, 'notice' if draft.get('notice_rail') else 'alert'), confirm.is_no(text)
     if not yes and not no:
         return None
     previous = confirm.previous_message(conversation, user_message)     # a server notice is nobody's words
     if previous != draft.get('reply_id'):
         return None
+    if no and draft.get('notice_rail'):
+        return 0, {'pt': 'Certo, não anotei.', 'en': "OK, I didn't sign you up."}.get(draft.get('lang'),
+                                                                                    'Listo, no te anoté.')
     if no:
         return 0, _SAVED_NOTHING.get(draft.get('lang'), _SAVED_NOTHING['es'])
+    if draft.get('notice_rail'):
+        from . import pay_rails
+        lang = draft.get('lang') if draft.get('lang') in ('pt', 'en') else 'es'
+        joined = pay_rails.join(viewer, draft['notice_rail'])
+        if joined == 'joined':
+            return 1, _NOTICE_JOINED[lang]
+        return 0, {'open': _NOTICE_OPEN, 'update': _NOTICE_UPDATE, 'other': _NOTICE_OTHER}.get(
+            joined, _NOTICE_UNKNOWN)[lang]
     from smart_account import watches
     from smart_account.assistant_ops import OpsRefused
     try:

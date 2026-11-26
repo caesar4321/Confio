@@ -611,7 +611,18 @@ def portfolio_data(viewer: Viewer):
     if why_not:
         result['motivo_no_disponible'] = why_not
     if not address:
-        result.update(confio_dollar_usd='desconocido', confio_dollar_plus_usd='desconocido', acciones='desconocido')
+        # Accounts whose app never registered their BNB Smart Chain address hold
+        # nothing there that can be read. "La herramienta no pudo consultar tus
+        # saldos" was the answer (2026-11-26): an internal failure, to someone
+        # whose only reason was that.
+        result.update(confio_dollar_usd='desconocido', confio_dollar_plus_usd='desconocido', acciones='desconocido',
+                      motivo_saldos=('Su cuenta todavía no tiene registrada su dirección de la red nueva (BNB Smart '
+                                     'Chain), así que desde este chat no ves su saldo en dólares, Confío Dollar+ ni '
+                                     'acciones. Dile que lo vea en Inicio y que, si ahí no aparece, actualice Confío '
+                                     'desde la tienda y vuelva a abrirla. No digas que es 0, que hubo un error ni '
+                                     'que una herramienta falló.'
+                                     + (' El antiguo Confío Dollar sí aparece abajo: ese lo puedes decir.'
+                                        if _legacy_cusd(viewer.account) else '')))
     else:
         from blockchain.bsc_balance_service import BscBalanceService
 
@@ -3053,6 +3064,9 @@ def _run_tool(belt, result, name, args):
                                                if name == 'read_public_document' else 12000)])
 
 
+NOTICE_LEAD = 'Por ahora no está disponible, y todavía no hay fecha.'
+
+
 def _finish(result):
     if not result.reply:
         if result.pending_action:
@@ -3062,6 +3076,9 @@ def _finish(result):
             result.reply = PAYMENT_PREPARED_REPLY
         elif result.actions:
             result.reply = DONE_REPLY
+        elif (result.pending_watch or {}).get('notice_rail'):
+            # "avísame cuando esté" answered only with the tool: code's question goes under this line.
+            result.reply = NOTICE_LEAD
         else:
             raise AssistantUnavailable('empty reply')
     return result

@@ -145,8 +145,9 @@ def _line(rail, current, identity_needed=False):
         return f'- {rail.name} ({rail.country}): disponible; {how}.'
     text = STATES[current]
     extra = f' {rail.off_note}' if current in ('off', 'paused') and rail.off_note else ''
-    probe = (' Ofrécele avisarle cuando esté («¿Te aviso cuando esté?») y, si dice que sí, llama `notify_rail` '
-             f'(`{rail.key}`).') if current in ('off', 'paused') and rail.probe else ''
+    probe = (' Para ofrecerle avisarle cuando esté, llama `notify_rail` '
+             f'(`{rail.key}`): el servidor agrega la pregunta debajo de tu respuesta y la anota si dice que sí. No '
+             'escribas tú «¿Te aviso?».') if current in ('off', 'paused') and rail.probe else ''
     return f'- {rail.name} ({rail.country}): {text}.{extra}{probe}'
 
 
@@ -185,8 +186,9 @@ def notify_spec():
     return {
         'type': 'function',
         'name': NOTIFY,
-        'description': ('Anota a la persona para avisarle cuando un medio de pago que hoy no está disponible se '
-                        'abra («Sí, avísame»). Solo cuando ella lo pidió o dijo que sí a tu oferta de avisarle.'),
+        'description': ('Le ofrece avisarle cuando un medio de pago que hoy no está disponible se abra: el '
+                        'servidor agrega «¿Te aviso…?» debajo de tu respuesta y la anota si responde que sí. '
+                        'Llámala cuando ella pide que le avisen o cuando quieras ofrecérselo.'),
         'parameters': {'type': 'object',
                        'properties': {'rail': {'type': 'string', 'enum': [r.key for r in RAILS if r.probe]}},
                        'required': ['rail'], 'additionalProperties': False},
@@ -195,19 +197,50 @@ def notify_spec():
 
 
 def notify(belt, rail):
-    """Join that rail's "Próximamente" waitlist, as its "Sí, avísame" does (users.rail_waitlist_schema)."""
+    """Offer the rail's "Próximamente" notice: code asks under the reply and joins on the person's "sí".
+
+    The model wrote «¿Te aviso cuando esté?» itself and, when the answer was a
+    bare "Si", repeated its last answer instead of calling the tool (2026-11-26):
+    the person believed they were on the list and were not. The question and the
+    join are now code's (service.confirm_pending_watch), like an alert's."""
     found = BY_KEY.get(rail)
     viewer = belt.viewer
     if found is None or not found.probe or viewer.user is None or getattr(viewer, 'is_employee', False):
         return {'ok': False, 'error': 'Ese medio no tiene lista de aviso.'}
     if state(found, viewer, belt) not in ('off', 'paused'):
         return {'ok': False, 'motivo': 'Ese medio ya está disponible o depende de otro paso: dile cómo usarlo.'}
+    from users.models_rail_waitlist import LocalRailWaitlistEntry
+    if LocalRailWaitlistEntry.objects.filter(user=viewer.user, rail_id=found.probe).exists():
+        return {'ok': True, 'ya_anotada': True,
+                'nota': 'Ya está anotada: dile que le avisaremos cuando esté, sin fecha. No le preguntes otra vez.'}
+    from . import confirm
+    if confirm.busy(belt.result, count_writes=False):
+        return {'ok': False, '_denied': True, 'motivo': 'Ya hay otra pregunta en esta respuesta.'}
+    belt.result.pending_watch = {'notice_rail': found.key, 'rail_name': found.name}
+    return {'pendiente_de_confirmacion': True,
+            'instruccion': ('Todavía NO está anotada. El servidor agrega debajo de tu respuesta la pregunta exacta '
+                            '«¿Te aviso cuando esté?»: responde lo demás y no hagas tú esa pregunta ni otra.')}
+
+
+def join(viewer, rail_key):
+    """The person said yes to that offer: join the waitlist, as the app's "Sí, avísame" does
+    (users.rail_waitlist_schema). 'joined'; 'open' when the rail opened meanwhile ('update' when only a newer
+    app has it, 'other' when it opened but needs something of the person); '' when that is unknown
+    (no list, or its state could not be read): never told it opened on a failed read."""
+    found = BY_KEY.get(rail_key)
+    if found is None or not found.probe or viewer.user is None or getattr(viewer, 'is_employee', False):
+        return ''
+    current = state(found, viewer)
+    if current in ('on', 'screen', 'update', 'verify', 'document', 'not_for_you'):
+        return 'update' if current == 'update' else 'open' if current in ('on', 'screen') else 'other'
+    if current not in ('off', 'paused'):
+        return ''
     from users.models_rail_waitlist import KIND_COMING_SOON, LocalRailWaitlistEntry, parse_rail_id
     direction, country = parse_rail_id(found.probe)
     LocalRailWaitlistEntry.objects.get_or_create(
         user=viewer.user, rail_id=found.probe,
         defaults={'direction': direction, 'country': country, 'kind': KIND_COMING_SOON})
-    return {'ok': True, 'nota': 'Quedó anotada: dile que le avisaremos cuando esté, sin fecha.'}
+    return 'joined'
 
 
 # The QR each country's people scan at a shop, for what Pagar's scanner can pay there.

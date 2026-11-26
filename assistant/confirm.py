@@ -70,7 +70,12 @@ _ENGLISH = frozenset("""i want sell buy send my the yes please shares dollars to
 much many thanks keep alert invest every monthly weekly daily month week day between drops drop rises rise falls in
 fall if when goes below above of and it ready have make set split share stock""".split())
 _SPANISH = frozenset("""quiero quisiera enviale envialo mandale mi mis el los las al unos vendela compralo cuanto cuantos
-puedes hola gracias olvida recuerda tambien haz pon hazme ponme un y en con si""".split())
+puedes hola gracias olvida recuerda tambien haz pon hazme ponme un y en con si acciones accion ahora quieres vendeme
+comprame""".split())
+# Words that are never English: a newest message with one of them is not answered in English, whatever came
+# before it ("Vamos a vender todo Tesla" after English requests). Shared by Spanish and Portuguese, so they
+# never pick between those two.
+_NOT_ENGLISH = frozenset("""vamos todo toda todos todas tudo vender comprar quiero quero ahora agora""".split())
 # The symbols a yes may carry. Any other ("sí ❌", "ok 🤔", "sí ❓") and it is not a yes.
 _YES_SYMBOLS = frozenset('👍👌✅🙏' + '\U0001F3FB\U0001F3FC\U0001F3FD\U0001F3FE\U0001F3FF')
 # A question that asks for it ("¿puedes enviarle 20 dólares a @ana?"), never "¿cuánto serían 20?".
@@ -126,15 +131,40 @@ def _portuguese_marked(text):
 
 
 def language(texts):
-    """'es', 'pt' or 'en': the language of the question code writes. Spanish unless the words say otherwise."""
+    """'es', 'pt' or 'en': the language of the question code writes. Spanish unless the words say otherwise.
+
+    The newest message decides when its own words do: "Vamos a vender todo
+    Tesla", said after a few English requests, was asked and answered in
+    English (2026-11-25), and so were the trade's notices."""
+    texts = list(texts)
+    if len(texts) > 1:
+        newest, scores = _scores(texts[:1])
+        ranked = sorted(scores.values(), reverse=True)
+        if ranked[0] and ranked[0] > ranked[1]:
+            return max(scores, key=scores.get)          # a strict win: a tie is left to the whole window
+    whole = _language_of(texts) or 'es'
+    newest_words = _scores(texts[:1])[0] if texts else set()
+    # Only a newest message with no English of its own: "add it to my todo list" stays English.
+    if whole == 'en' and newest_words & (_ROMANCE | _NOT_ENGLISH) and len(newest_words & _ENGLISH) < 2:
+        newest_scores = _scores(texts[:1])[1]
+        return 'pt' if newest_scores['pt'] > newest_scores['es'] else 'es'
+    return whole
+
+
+def _language_of(texts):
+    scores = _scores(texts)[1]
+    best = max(('es', 'pt', 'en'), key=lambda key: scores[key])
+    return best if scores[best] else ''
+
+
+def _scores(texts):
     words = {word for text in texts for word in plain(_without_names(text)).split()}
     scores = {'es': len(words & _SPANISH), 'pt': len(words & _PORTUGUESE), 'en': len(words & _ENGLISH)}
     scores['pt'] += 2 * sum(_portuguese_marked(text) for text in texts)
     # English needs two of its words and no Spanish or Portuguese function word around them.
     if scores['en'] < 2 or words & _ROMANCE:
         scores['en'] = 0
-    best = max(('es', 'pt', 'en'), key=lambda key: scores[key])
-    return best if scores[best] else 'es'
+    return words, scores
 
 
 def requests(texts):
@@ -316,6 +346,9 @@ _SAVE_VERBS = {
 guarde crearla creala activala activa save salva salvar""".split()),
     'category': frozenset("""guardala guardalo guardalas guardalos guardar guarda guarde clasificalo clasificalos
 clasificala clasificalas clasificar save salva salvar""".split()),
+    # A payment method's "Próximamente" notice (pay_rails.notify).
+    'notice': frozenset("""avisame avisenme avisa avise avisas avisar anotame anotalo anota anotas anotar notify
+me""".split()),
 }
 _SAVE_COURTESY = frozenset("""por favor porfa porfis gracias muchas de senor senora que asi es esta bien la alerta lo
 quiero claro eso fa please thanks it go ahead do obrigado obrigada mesmo favor correcto supuesto""".split())
@@ -341,7 +374,8 @@ def is_save_yes(text, kind):
         return True
     if re.fullmatch('si+', words[0]) and len(words) > 1 and words[1] in ('es', 'esta'):
         return False        # "si es así…" is "if"
-    return any(word in _SAVE_YES or word in verbs or re.fullmatch('si+', word) for word in words)
+    # "me" ("sí, me avisas") is allowed beside a yes, never a yes alone.
+    return any(word in _SAVE_YES or (word in verbs and word != 'me') or re.fullmatch('si+', word) for word in words)
 
 
 def ask(result, kind, question, data, lang):

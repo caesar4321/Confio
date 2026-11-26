@@ -105,16 +105,25 @@ class PayRailStateTests(TestCase):
         belt.viewer.account_type = 'business'
         self.assertFalse(belt._pay_rails_offered())
 
-    def test_notify_joins_the_waitlist_only_while_off(self):
+    def test_notify_offers_and_the_yes_joins_the_waitlist_only_while_off(self):
+        # The model asked «¿Te aviso?» itself and a bare "Si" got its last answer repeated, with nobody
+        # added (2026-11-26): the offer is now code's question, and the yes joins in code.
         belt = self._belt()
         with override_settings(BOLIVIA_QR_SEND_ENABLED=False, BOLIVIA_QR_TEST_USER_IDS=''):
             out = belt.call('notify_rail', {'rail': 'bo_qr'})
-        self.assertTrue(out['ok'])
+            self.assertTrue(out['pendiente_de_confirmacion'])
+            self.assertEqual(belt.result.pending_watch['notice_rail'], 'bo_qr')
+            self.assertFalse(LocalRailWaitlistEntry.objects.filter(user=self.user).exists())
+            self.assertEqual(pay_rails.join(belt.viewer, 'bo_qr'), 'joined')
         row = LocalRailWaitlistEntry.objects.get(user=self.user, rail_id='send_bo_qr')
         self.assertEqual((row.direction, row.country), ('send', 'BO'))
+        with override_settings(BOLIVIA_QR_SEND_ENABLED=False, BOLIVIA_QR_TEST_USER_IDS=''):
+            again = self._belt().call('notify_rail', {'rail': 'bo_qr'})
+        self.assertTrue(again['ya_anotada'])
         with override_settings(BOLIVIA_QR_SEND_ENABLED=True, BOLIVIA_QR_SEND_MIN_APP_VERSION='5.2.9'):
-            self.assertFalse(belt.call('notify_rail', {'rail': 'bo_qr'})['ok'])
-        self.assertFalse(belt.call('notify_rail', {'rail': 'nope'})['ok'])
+            self.assertFalse(self._belt().call('notify_rail', {'rail': 'bo_qr'})['ok'])
+            self.assertIn(pay_rails.join(belt.viewer, 'bo_qr'), ('open', 'update'))
+        self.assertFalse(self._belt().call('notify_rail', {'rail': 'nope'})['ok'])
 
 
 class PaymentGuidanceInPromptTests(TestCase):
