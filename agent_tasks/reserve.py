@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 MAX_BOOKINGS = 2
 MAX_TYPED = 30
 MAX_GUEST_FILLS = 6
+MAX_ESCAPES = 6
+# A card's holder field is a card's, whatever it is called beside it.
+_CARD_HOLDER = re.compile(r'holder|cc[-_ ]?name|card[-_ ]?name|nombre (en|de) la tarjeta|nome (no|do) cartao|titular (de|da) (la )?(tarjeta|cartao)')
 GUEST_KEYS = ('first_name', 'last_name', 'full_name', 'email', 'phone', 'document', 'birth_date', 'nationality',
               'address', 'city', 'state', 'postal_code', 'country')
 _TYPED_KINDS = ('', 'text', 'search', 'number', 'date', 'time', 'tel')
@@ -81,6 +84,12 @@ def step(st, browser, reader, seen):
     if name == 'wait':
         st.delay = 2
         return st.remember('wait', 'ok')
+    if name == 'close_popup':
+        if count(task, 'escapes') >= MAX_ESCAPES:
+            return st.remember('close_popup', 'refused: it did not close it; press its own close button or give up')
+        browser.escape()
+        browser.pump(1)
+        return st.remember('close_popup', 'Escape pressed', counts=counted(task, 'escapes'))
     if name == 'give_up':
         reason = args.get('reason')
         why = notes.reason_text(args.get('why'))
@@ -447,9 +456,11 @@ def fill_guest(st, reader, seen, args):
             refused.append(f'{key}: no such field')
             continue
         auto = str(element.get('autocomplete') or '')
-        words = guard.fold(f"{element.get('name')} {element.get('label')}")
-        if auto.startswith('cc-') or element.get('type') == 'password' or element.get('secret_form') \
-                or _PAYMENT_FIELD.search(words):
+        # The field itself, by what it says to the person (a framework's internal name, "passengerCardForm", is
+        # not a card), never its neighbours: a passenger form often holds a loyalty sign-in too.
+        words = guard.fold(str(element.get('label') or ''))
+        if auto.startswith('cc-') or element.get('type') == 'password' or _PAYMENT_FIELD.search(words) \
+                or _CARD_HOLDER.search(guard.fold(f"{element.get('name')} {element.get('label')}")):
             return st.remember('fill_guest', f'refused: "{_label(element)}" is a payment or secret field')
         if element.get('tag') not in ('input', 'select', 'textarea') or (element.get('tag') == 'input' and (
                 element.get('type') or '') not in ('', 'text', 'email', 'tel', 'date')):

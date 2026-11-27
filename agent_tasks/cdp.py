@@ -360,6 +360,12 @@ class Page:
                 'type': kind, 'key': 'Enter', 'code': 'Enter', 'windowsVirtualKeyCode': 13,
                 'nativeVirtualKeyCode': 13, **({'text': '\r'} if kind == 'keyDown' else {})})
 
+    def escape(self):
+        """The Escape key: closes a popup or a picker. It sends nothing."""
+        for kind in ('keyDown', 'keyUp'):
+            self.call('Input.dispatchKeyEvent', {'type': kind, 'key': 'Escape', 'code': 'Escape',
+                                                 'windowsVirtualKeyCode': 27, 'nativeVirtualKeyCode': 27})
+
     def evaluate(self, expression):
         out = self.call('Runtime.evaluate', {'expression': expression, 'returnByValue': True, 'awaitPromise': True})
         if out.get('exceptionDetails'):

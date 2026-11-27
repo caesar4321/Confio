@@ -408,6 +408,8 @@ RESERVE_TOOLS = [
           {'text': _TEXT}),
     _tool('sign_in', 'The site asks the person to sign in, or for the code it sent them, on this page.'),
     _tool('wait', 'The page is still loading: look again.'),
+    _tool('close_popup', 'A popup, a language or cookie banner or an open picker covers what you need and has no '
+                         'button you can press: press the Escape key.'),
     _tool('give_up', 'It cannot be booked here.', {
         'reason': {'type': 'string', 'enum': ['not_found', 'needs_card', 'cannot_do']},
         'why': {'type': 'string', 'description': 'In a few plain Spanish words, the reason, as the page shows it '
@@ -439,7 +441,12 @@ How to work:
   the best options and their prices: the person can book them herself.
 - When the form asks for the guest (name, e-mail, phone, document, birth date, nationality, address, city,
   state, postal code, country), call fill_guest with all its fields at once; never type those yourself. A field
-  fill_guest refused because Confío does not have it: if the site requires it, call give_up with cannot_do. If it asks for something Confío does not have (another guest's
+  fill_guest refused because Confío does not have it: if the site requires it, call give_up with cannot_do.
+- A fact about the person the form needs (gender, who travels): if <goal> says it, choose or type it with her
+  words; if not, call answer asking her exactly that (with the options the form offers), and stop. Never guess
+  a fact about her.
+- A preference she did not state (a seat, a meal, an exact time within what she asked for): pick a sensible one
+  yourself (a free window seat, no paid extras, the time closest to what she said) and go on; never stop to ask. If it asks for something Confío does not have (another guest's
   details, a passport photo), call give_up with cannot_do saying what.
 - Never accept a paid extra, insurance, a newsletter or an account; never create an account. Decline extras.
 - When the button that makes the reservation is on the page, call ready_to_book with it; never press it. After

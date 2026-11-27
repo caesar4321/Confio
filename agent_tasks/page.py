@@ -14,6 +14,7 @@ import base64
 import io
 import json
 import re
+import time
 from dataclasses import dataclass, field
 
 from .cdp import CdpError
@@ -45,7 +46,8 @@ _READ = r'''(() => {
     if (tag !== 'input' && tag !== 'textarea') parts.push(el.innerText);
     for (const a of ['aria-label', 'title', 'placeholder', 'alt']) parts.push(el.getAttribute(a));
     for (const id of clean(el.getAttribute('aria-labelledby')).split(' ')) {
-      const by = id && el.ownerDocument.getElementById(id);
+      const root = el.getRootNode && el.getRootNode();
+      const by = id && ((root && root.getElementById) ? root.getElementById(id) : el.ownerDocument.getElementById(id));
       if (by) parts.push(by.innerText);
     }
     if (buttonInput(el)) parts.push(el.value);
@@ -64,8 +66,11 @@ _READ = r'''(() => {
     // Only these send their form; a type=button beside the buy button does not.
     const sends = !!form && (tag === 'button' ? (type === '' || type === 'submit')
       : tag === 'input' ? !['button', 'reset', 'checkbox', 'radio'].includes(type) : false);
-    const nested = !!(el.parentElement && el.parentElement.closest(
-      'a[href],button,label,summary,[role=button],[role=link],[onclick]'));
+    const nested = (() => {
+      for (let n = el.parentNode || el.host; n && n.nodeType !== 9; n = n.parentNode || n.host)
+        if (n.nodeType === 1 && n.matches('a[href],button,label,summary,[role=button],[role=link],[onclick]')) return true;
+      return false;
+    })();
     return {
       tag, type, role: el.getAttribute('role') || '', nested,
       name: clean([el.getAttribute('name'), el.id].join(' ')).slice(0, 120),
@@ -137,6 +142,17 @@ _READ = r'''(() => {
   if (__FRAMES__) for (const f of document.querySelectorAll('iframe')) {
     try { const d = f.contentDocument; if (d && d.body && seen(f)) docs.push(d); } catch (e) {}
   }
+  // A reservation site built of web components (an airline's search): their open shadow roots, read as the page.
+  const shadows = [];
+  if (__FRAMES__) {
+    const walk = root => {
+      for (const host of root.querySelectorAll('*')) {
+        if (host.shadowRoot && shadows.length < 200) { shadows.push(host.shadowRoot); walk(host.shadowRoot); }
+      }
+    };
+    for (const d of [...docs]) walk(d);
+    docs.push(...shadows);
+  }
   const found = docs.flatMap(d => [...d.querySelectorAll('a[href],button,input:not([type=hidden]),div[role=button],span[role=button],' +
       'select,label[for],[role=radio],[role=checkbox],[role=option],[role=tab]' +
       // A reservation's suggestion lists and calendars: menu items and day cells.
@@ -156,7 +172,11 @@ _READ = r'''(() => {
     const on_screen = r.right > 0 && r.left < innerWidth && !el.closest('[inert],[aria-hidden=true]');
     return {ref, on_screen, ...describe(el)};
   });
-  let text = docs.map(d => d.body ? d.body.innerText.replace(/\u0000/g, '') : '').join('\n');
+  const textOf = d => d.body ? d.body.innerText : [...d.children]
+    .filter(c => !['STYLE', 'SCRIPT', 'TEMPLATE', 'LINK'].includes(c.tagName) &&
+      (!c.checkVisibility || c.checkVisibility({opacityProperty: true, visibilityProperty: true})))
+    .map(c => c.innerText || '').join('\n');
+  let text = docs.map(d => textOf(d).replace(/\u0000/g, '')).join('\n');
   for (const el of docs.flatMap(d => [...d.querySelectorAll('[contenteditable]:not([contenteditable=false])')])) {
     const typed = el.innerText.trim();
     if (typed.length > 2) text = text.split(typed).join('[campo]');  // typed by the person, like a field's value
@@ -226,24 +246,44 @@ _POINT = '(() => {' + _SAME + _FRAME_ORIGIN + r'''
   const doc = el.ownerDocument;
   const frame = doc !== document ? (doc.defaultView && doc.defaultView.frameElement) : null;
   if (doc !== document && !frame) return 'gone';
-  if (frame) frame.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
-  el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
-  const r = el.getBoundingClientRect();
-  const fr = frameOrigin(frame);
-  if (!fr) return 'covered';   // a scaled or transformed frame: the click would not land where it is checked
-  const lx = r.left + r.width / 2, ly = r.top + r.height / 2;
-  const x = lx + fr.left, y = ly + fr.top;
-  if (frame && document.elementFromPoint(x, y) !== frame) return 'covered';
-  // What a click there would really hit: a banner or a widget over it is not this control.
-  const hit = doc.elementFromPoint(lx, ly);
-  if (!hit || !(hit === el || el.contains(hit) || (hit.closest && hit.closest('label') && el.labels &&
-      [...el.labels].includes(hit.closest('label'))))) return 'covered';
-  // Inside this control, another button or link would take the click (a tab or a row that holds the final button).
-  const inner = hit.closest && hit.closest('button, a[href], input[type=submit], input[type=button], [role=button]');
-  if (inner && inner !== el && el.contains(inner)) return 'covered';
-  // Nor a control that sits inside a button or link: the click would be that one's.
-  const outer = el.parentElement && el.parentElement.closest('button, a[href], [role=button]');
-  if (outer) return 'covered';
+  // What is really under a point, through open shadow roots (web components), and whether it is this control.
+  const deep = (d, px, py) => {
+    let h = d.elementFromPoint(px, py);
+    while (h && h.shadowRoot) {
+      const inner = h.shadowRoot.elementFromPoint(px, py);
+      if (!inner || inner === h) break;
+      h = inner;
+    }
+    return h;
+  };
+  const inside = h => { for (let n = h; n; n = n.parentNode || n.host) if (n === el) return true; return false; };
+  const reaches = h => !!h && (inside(h) || (h.closest && h.closest('label') && el.labels &&
+      [...el.labels].includes(h.closest('label'))));
+  let r, fr, lx, ly, x, y, hit, used = '';
+  // Centered first; a sticky bar of the page's own (a calendar's "Confirm") may sit over the center, so the top
+  // and the bottom of the view are tried too. Whatever covers it in all three still covers it.
+  for (const block of __BLOCKS__) {
+    if (frame) frame.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+    el.scrollIntoView({block, inline: 'center', behavior: 'instant'});
+    r = el.getBoundingClientRect();
+    fr = frameOrigin(frame);
+    if (!fr) return 'covered';   // a scaled or transformed frame: the click would not land where it is checked
+    lx = r.left + r.width / 2; ly = r.top + r.height / 2;
+    x = lx + fr.left; y = ly + fr.top;
+    // What a click there would really hit: a banner or a widget over it is not this control.
+    hit = deep(doc, lx, ly);
+    if ((!frame || document.elementFromPoint(x, y) === frame) && reaches(hit)) { used = block; break; }
+    hit = null;
+  }
+  if (!hit) return 'covered';
+  // Inside this control, another button or link would take the click (a tab or a row that holds the final button),
+  // walked through shadow roots too (an icon component inside a "Comprar" button).
+  const ACTS = 'button, a[href], input[type=submit], input[type=button], [role=button]';
+  for (let n = hit; n && n !== el; n = n.parentNode || n.host)
+    if (n.nodeType === 1 && n.matches(ACTS)) return 'covered';
+  // Nor a control that sits inside a button or link, across shadow roots: the click would be that one's.
+  for (let n = el.parentNode || el.host; n && n.nodeType !== 9; n = n.parentNode || n.host)
+    if (n.nodeType === 1 && n.matches('button, a[href], [role=button]')) return 'covered';
   // A label clicks its control: never one that is a button.
   if (el.tagName === 'LABEL' && el.control && (el.control.tagName === 'BUTTON' ||
       ['submit', 'button', 'image'].includes((el.control.type || '').toLowerCase()))) return 'covered';
@@ -253,7 +293,7 @@ _POINT = '(() => {' + _SAME + _FRAME_ORIGIN + r'''
     el.dispatchEvent(new Event('input', {bubbles: true}));
     el.focus();
   }
-  return {x, y};
+  return {x, y, block: used};
 })()'''
 
 # Where a control is on screen, for a picture of it. 'secret' when a password, a one-time code or a card
@@ -271,7 +311,11 @@ _BOX = '(() => {' + _SAME + _FRAME_ORIGIN + r'''
   for (const f of document.querySelectorAll('iframe')) {
     try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {}
   }
-  const fields = docs.flatMap(d => [...d.querySelectorAll('input')]);
+  const roots = [...docs];
+  const walk = root => { for (const host of root.querySelectorAll('*')) if (host.shadowRoot && roots.length < 300) {
+    roots.push(host.shadowRoot); walk(host.shadowRoot); } };
+  for (const d of docs) walk(d);
+  const fields = roots.flatMap(d => [...d.querySelectorAll('input')]);
   for (const field of fields) {
     const r = field.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth)) continue;
@@ -293,7 +337,10 @@ _FOCUSED = r'''(() => {
   if (!el) return false;
   const doc = el.ownerDocument;
   const frame = doc !== document ? (doc.defaultView && doc.defaultView.frameElement) : null;
-  return doc.activeElement === el && (doc === document || (!!frame && document.activeElement === frame)) &&
+  // The focus through open shadow roots: a web component's own field.
+  let active = doc.activeElement;
+  while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
+  return active === el && (doc === document || (!!frame && document.activeElement === frame)) &&
     (!__SECRET__ || el.type === 'password');
 })()'''
 
@@ -358,7 +405,8 @@ _DATED = '(() => {' + _SAME + r'''
 
 
 def _script(template, **values):
-    values = {'MAX_ELEMENTS': MAX_ELEMENTS, 'MAX_TEXT': MAX_TEXT, 'MAX_LABEL': MAX_LABEL, 'FRAMES': False, **values}
+    values = {'MAX_ELEMENTS': MAX_ELEMENTS, 'MAX_TEXT': MAX_TEXT, 'MAX_LABEL': MAX_LABEL, 'FRAMES': False,
+              'BLOCKS': ['center'], **values}
     # One pass: a page's words that look like a slot ("__URL__") are never filled in.
     return re.sub(r'__([A-Z]+(?:_[A-Z]+)*)__',
                   lambda slot: json.dumps(values[slot.group(1)]) if slot.group(1) in values else slot.group(0),
@@ -400,6 +448,7 @@ class Reader:
         if not isinstance(data, dict):
             raise CdpError('page could not be read')
         self._url = data.get('url') or ''
+        self._frames = bool(frames)
         return Snapshot(**{key: data[key] for key in Snapshot.__dataclass_fields__ if key in data})
 
     def _run(self, expression, *, gesture=False, seconds=None):
@@ -426,9 +475,29 @@ class Reader:
         return self._act(_PRESS, element)
 
     def _point(self, element, clear=False):
-        at = self._run(_script(_POINT, REF=element['ref'], URL=self._url, CLEAR=bool(clear),
+        # A reservation's page (read with frames) may keep a sticky bar over a control's centered place: its top
+        # and bottom places are tried too. A purchase is clicked centered only.
+        blocks = ['center', 'start', 'end'] if getattr(self, '_frames', False) else ['center']
+        at = self._run(_script(_POINT, REF=element['ref'], URL=self._url, CLEAR=bool(clear), BLOCKS=blocks,
                                WAS={key: element[key] for key in BOUND if key in element}), gesture=True)
-        return at if isinstance(at, dict) and 'x' in at else str(at or 'changed')
+        if not (isinstance(at, dict) and 'x' in at):
+            return str(at or 'changed')
+        if at.get('block') not in ('', 'center'):
+            # Moved to an edge: the page reacts to that scroll (a header that sticks, a bar that slides in). Looked
+            # at again once it has, at the same place; anything over it then is over it.
+            time.sleep(0.6)   # longer than a sticky bar's slide-in
+            again = self._run(_script(_POINT, REF=element['ref'], URL=self._url, CLEAR=False, BLOCKS=[at['block']],
+                                      WAS={key: element[key] for key in BOUND if key in element}), gesture=True)
+            if not (isinstance(again, dict) and abs(again.get('x', -1e9) - at['x']) <= 1
+                    and abs(again.get('y', -1e9) - at['y']) <= 1):
+                return 'covered'
+            if clear:
+                cleared = self._run(_script(_POINT, REF=element['ref'], URL=self._url, CLEAR=True, BLOCKS=[at['block']],
+                                            WAS={key: element[key] for key in BOUND if key in element}), gesture=True)
+                if not (isinstance(cleared, dict) and abs(cleared.get('x', -1e9) - at['x']) <= 1
+                        and abs(cleared.get('y', -1e9) - at['y']) <= 1):
+                    return 'covered'
+        return at
 
     def click(self, element) -> str:
         """'' when the control was clicked for real, else why not."""
