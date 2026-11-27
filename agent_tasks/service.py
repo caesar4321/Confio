@@ -591,14 +591,19 @@ def store_paid(task_pk, *, reference, paid_ves, origin_bank='', paid_at=''):
         except Exception:  # noqa: BLE001
             logger.exception('agent store_paid alert failed')
         return False
-    runner.close_session(task)
+    # A booking reports on the tab that holds its form, while that session lasts; anything else on a fresh one.
+    keep = pagomovil.keeps_session(task) and pagomovil.session_alive(task)
+    if not keep:
+        runner.close_session(task)
+    session = {} if keep else {'session_id': '', 'connect_url': '', 'session_expires_at': None}
     counts = {**(task.counts or {}), 'report_tries': 0, 'report_steps': 0}
     try:
         with transaction.atomic():
             moved = AgentTask.objects.filter(pk=task.pk, phase='paying', state__in=('payment_ready', 'stopped')).update(
-                order={**{key: value for key, value in order.items() if key != 'pay_hold'}, 'paid': paid},
+                order={**{key: value for key, value in order.items() if key != 'pay_hold'}, 'paid': paid,
+                       'kept_tab': keep},
                 phase='report', state='queued', reason='', wait_until=None,
-                session_id='', connect_url='', session_expires_at=None, lease=None, lease_until=None, failures=0,
+                lease=None, lease_until=None, failures=0, **session,
                 counts=counts, updated_at=timezone.now())
             if moved:
                 runner.kick(task.pk)
@@ -782,8 +787,8 @@ def live_view(account, user, task_id):
     if not conf.get('AGENT_TASKS_ENABLED'):
         raise TaskRefused('unavailable')
     task = get(account, user, task_id)
-    if task.state != 'needs_person' or not task.session_id or not task.wait_until:
-        raise TaskRefused('not_open')
+    if task.state != 'needs_person' or not task.session_id or not task.wait_until or task.reason == 'account_wait':
+        raise TaskRefused('not_open')   # a purchase waiting for the account is not the person's screen to use
     seconds = int((task.wait_until - timezone.now()).total_seconds())
     if seconds < LIVE_VIEW_MIN_SECONDS:
         raise TaskRefused('not_open')  # the vendor's shortest link would outlive the turn
@@ -907,6 +912,10 @@ def _sweep():
           .exclude(lease_until__gt=now).order_by('updated_at'), rerun, 'lost steps')
 
     def release(task):
+        from . import pagomovil
+        if task.state == 'payment_ready' and task.phase == 'paying' and pagomovil.keeps_session(task) \
+                and task.session_expires_at and task.session_expires_at > now:
+            return   # a booking being paid keeps the tab that holds its form, for the reference
         if task.session_expires_at and task.session_expires_at <= now:
             AgentTask.objects.filter(pk=task.pk).update(session_id='', connect_url='')  # ended at the vendor by itself
         else:

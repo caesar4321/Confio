@@ -99,6 +99,12 @@ RESERVE_STOPPED = {
                         'de reservar otra vez.'),
     'declined': 'Listo, no reservé nada en {site}.',
     'not_found': 'No encontré disponibilidad para lo que pediste en {site}.',
+    # Venezuela (pagomovil.py), before anything was paid.
+    'payer_data': ('{site} pide, para confirmar un pago por Pago Móvil, datos de quien paga (su teléfono, banco o '
+                   'cédula) u otros que no sean la referencia, y Confío todavía no puede dárselos. No pagué ni '
+                   'reservé nada. Puedes reservarlo tú directamente en {site}.'),
+    'pay_unread': ('No pude leer con seguridad los datos de Pago Móvil de {site} para tu reserva, así que no pagué '
+                   'ni reservé nada.'),
 }
 # How a request ended when it did not end well: never purchase words ("compra tú"), never "nothing happened"
 # after it was sent.
@@ -186,6 +192,12 @@ def shortfall_line(task, intent):
 def stopped_text(task, reason):
     if getattr(task, 'kind', 'buy') == 'reserve':
         submitted = (task.order or {}).get('submitted')
+        order = task.order or {}
+        if task.phase == 'report':
+            # Paid by Pago Móvil and not reported to the site: what reports it (pagomovil.py).
+            return paid_words(task, REPORT_UNCLEAR if (order.get('report') or {}).get('pressed') else REPORT_FAILED)
+        if order.get('pay_first') and task.phase == 'paying':
+            return say(STORE_UNPAID if order.get('unpaid_why') else PAY_FIRST_NOT_PAID, task)
         if reason == 'answered':
             text = STOPPED['answered']
         elif task.checkout_at:
@@ -297,6 +309,54 @@ REPORT_UNCLEAR = ('Pagué tu pedido en {site} por Pago Móvil y le envié la ref
                   'confirmara. Revisa tus pedidos en {site}; si no aparece, repórtalo con estos datos: referencia '
                   '{{reference}}, {{amount}} pagados el {{date}} a {{payee}}. El equipo de Confío ya está al tanto.')
 
+# A booking paid by Pago Móvil before it exists (reserve.pay → pagomovil.pay_first): the same notes, said as one.
+BOOKING_WORDS = {
+    PAY_FIRST_NOT_PAID: 'No pagué tu reserva en {site} por Pago Móvil y no la hice: no salió dinero de tu cuenta.',
+    STORE_UNPAID: ('El pago por Pago Móvil a {site} no se completó, así que no hice la reserva. Lo que se haya tomado '
+                   'de tu Cuenta inteligente para pagarla vuelve a ella: revísalo en tu actividad.'),
+    PAID_REPORTING: ('Pagué {{amount}} por Pago Móvil a {site} (referencia {{reference}}). Ahora le paso la referencia '
+                     'al sitio para que haga tu reserva.'),
+    REPORTED: 'Tu reserva en {site} está hecha: el sitio recibió la referencia {{reference}} de tu pago por Pago Móvil.',
+    REPORTED_PUSH: 'Tu reserva en {site} está hecha.',
+    REPORT_FAILED: ('Pagué tu reserva en {site} por Pago Móvil, pero no pude pasarle la referencia al sitio. Repórtala '
+                    'tú en {site} con estos datos: referencia {{reference}}, {{amount}} pagados el {{date}} a '
+                    '{{payee}}. El equipo de Confío ya está al tanto.'),
+    PAID_BY_ACCOUNT: ('Tu Cuenta inteligente está pagando tu reserva en {site}: {{total}}, {{usd}} con la comisión '
+                      'de salida de 0,9%, dentro de tu límite de «Compras con Confío IA». No tienes que firmar nada; '
+                      'sigue el pago en tu actividad.'),
+    PAID_BY_ACCOUNT_PUSH: 'Tu Cuenta inteligente está pagando tu reserva en {site}.',
+    ACCOUNT_NOT_PAID: ('No pude pagar tu reserva en {site} desde tu Cuenta inteligente y no salió dinero de ella. '
+                       'Puede que la reserva esté hecha y esperando el pago: revísala en {site} o en tu correo.'),
+    ACCOUNT_PAUSED: ('Ahora no puedo pagar desde tu Cuenta inteligente, así que no pagué tu reserva en {site} y no '
+                     'salió dinero. Puede que la reserva esté hecha y esperando el pago: revísala en {site} o en tu '
+                     'correo.'),
+    ACCOUNT_WAIT_TAIL: (' Tu reserva espera sin pagarse hasta {{hours}} horas; no la pago desde tu cuenta personal. '
+                        'Cuando lo hagas, toca «Ya lo hice: pagar».'),
+    ACCOUNT_WAIT_PUSH: 'Tu reserva en {site} espera a tu Cuenta inteligente.',
+    ACCOUNT_WAIT_EXPIRED: ('Dejé de esperar a tu Cuenta inteligente para pagar tu reserva en {site}, y no salió dinero '
+                           'de ninguna de tus cuentas. Puede que la reserva haya quedado hecha sin pagar: revísala en '
+                           '{site} o en tu correo.'),
+    ACCOUNT_UNREAD: ('No pude confirmar que tu Cuenta inteligente pudiera pagar tu reserva en {site}, así que no la '
+                     'pagué y no salió dinero. Puede que la reserva esté hecha y esperando el pago: revísala en {site} '
+                     'o en tu correo.'),
+    REPORT_UNCLEAR: ('Pagué tu reserva en {site} por Pago Móvil y le envié la referencia, pero no vi que el sitio la '
+                     'confirmara. Revisa tu correo o tus reservas en {site}; si no aparece, repórtala con estos datos: '
+                     'referencia {{reference}}, {{amount}} pagados el {{date}} a {{payee}}. El equipo de Confío ya '
+                     'está al tanto.'),
+}
+
+# Venezuela pays a booking before it exists: when it was not paid, nothing was booked either.
+_NOT_BOOKED = ' No hice la reserva: Venezuela se paga antes de reservar.'
+PAY_FIRST_BOOKING = {
+    ACCOUNT_NOT_PAID: 'No pude pagar tu reserva en {site} desde tu Cuenta inteligente y no salió dinero de ella.' + _NOT_BOOKED,
+    ACCOUNT_PAUSED: ('Ahora no puedo pagar desde tu Cuenta inteligente, así que no pagué tu reserva en {site} y no '
+                     'salió dinero.' + _NOT_BOOKED),
+    ACCOUNT_WAIT_EXPIRED: ('Dejé de esperar a tu Cuenta inteligente para pagar tu reserva en {site}, y no salió dinero '
+                           'de ninguna de tus cuentas.' + _NOT_BOOKED),
+    ACCOUNT_UNREAD: ('No pude confirmar que tu Cuenta inteligente pudiera pagar tu reserva en {site}, así que no la '
+                     'pagué y no salió dinero.' + _NOT_BOOKED),
+}
+
 
 def _ves(value):
     try:
@@ -350,8 +410,11 @@ def breakdown_text(order):
 
 
 def say(text, task):
-    """A note's words for this task's store and its country's rail."""
+    """A note's words for this task's store and its country's rail. A booking's Pago Móvil notes say a booking."""
     from . import countries
+    if getattr(task, 'kind', 'buy') == 'reserve':
+        first = (getattr(task, 'order', None) or {}).get('pay_first')
+        text = (PAY_FIRST_BOOKING.get(text) if first else None) or BOOKING_WORDS.get(text, text)
     rail = countries.rail(task.country)
     return text.format(site=task.site, pay=rail.name if rail else 'el pago',
                        qr=rail.qr if rail else 'el QR de pago',

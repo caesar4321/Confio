@@ -336,8 +336,10 @@ class Step:
                 vendor.delete_profile(external)
                 profile = AgentProfile.objects.get(user=task.user, site=task.site, provider=vendor.name)
         profile.save(update_fields=['last_used_at'])
-        session = vendor.open(profile_id=profile.external_id, country=_proxy_country(task),
-                              seconds=conf.get('AGENT_TASKS_SESSION_SECONDS'))
+        # A booking may be paid by Pago Móvil on its own tab (pagomovil.keeps_session): a longer session.
+        seconds = conf.get('AGENT_TASKS_RESERVE_SESSION_SECONDS' if getattr(task, 'kind', 'buy') == 'reserve'
+                           else 'AGENT_TASKS_SESSION_SECONDS')
+        session = vendor.open(profile_id=profile.external_id, country=_proxy_country(task), seconds=seconds)
         try:
             self.save(provider=vendor.name, session_id=session.id, connect_url=session.connect_url,
                       session_expires_at=session.expires_at)
@@ -398,6 +400,10 @@ class Step:
 
     def before_checkout(self, browser):
         task = self.task
+        if task.state == 'queued' and task.phase == 'report' and (task.order or {}).get('kept_tab'):
+            # A booking paid on its own tab: the Pago Móvil step with its form is still there (pagomovil.py).
+            return self.remember('back on the paid booking', 'ok', state='working',
+                                 order={**(task.order or {}), 'kept_tab': False})
         if task.state == 'queued':
             browser.goto(f'https://{task.site}/')
             if browser.refused_document is True:
@@ -681,6 +687,11 @@ class Step:
         rail = countries.rail(task.country)
         if rail is None or rail.kind == 'manual' or not held.get('code'):
             return self.stop('unpaid', body=notes.say(notes.ACCOUNT_NOT_PAID, task))
+        from . import pagomovil
+        if pagomovil.keeps_session(task) and not pagomovil.session_alive(task, pagomovil.pay_window()):
+            # A booking paid before it exists: its form lives only in its session, which could end before the
+            # payout lands. Never paid now.
+            return self.stop('unpaid', body=notes.say(notes.ACCOUNT_NOT_PAID, task))
         return self.pay_read(rail, str(held['code']), dict(held.get('extra') or {}), held=held)
 
     def pay_read(self, rail, code, extra, held=None):
@@ -693,6 +704,10 @@ class Step:
         # Asked again now: an account opened since the order card pays it.
         mode, offer = service.pay_mode(task, app_meta(task))
         first = rail.pay_before_order
+        from . import pagomovil
+        if first and pagomovil.keeps_session(task) and not pagomovil.session_alive(task, pagomovil.pay_window()):
+            # A booking's form lives only in its session: paid only while it outlasts the slowest payout.
+            return self.stop('unpaid', body=notes.say(notes.PAY_FIRST_NOT_PAID, task))
         if mode == 'manual' and first:
             # Never the person's own bank nor their card for a store paid before its order: nothing moved.
             return self.stop('unpaid', body=notes.say(notes.PAY_FIRST_NOT_PAID, task))

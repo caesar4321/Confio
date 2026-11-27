@@ -436,8 +436,10 @@ How to work:
   what is included) and stop: the person will choose.
 - Payment. Prefer what needs no payment now and no card: "pagar en el alojamiento", "sin tarjeta", "reserva
   sin pago", a restaurant table, a request to book; then use ready_to_book. If it must be paid now and <pay>
-  names a way (Pix, transferencia SPEI, QR), choose exactly that way on the site, never a card, and use
-  ready_to_pay. If it must be paid with a card (even as a guarantee) or <pay> is "none", call cannot_pay with
+  names a way (Pix, transferencia SPEI, QR, Pago Móvil), choose exactly that way on the site, never a card, and
+  use ready_to_pay. With Pago Móvil the site shows its own Pago Móvil data (bank, phone, cédula or RIF, the
+  bolívares) and a form for the payment's reference before the booking exists: on that page, name its button
+  with ready_to_pay. It is pressed only after Confío paid, with the reference typed for you. If it must be paid with a card (even as a guarantee) or <pay> is "none", call cannot_pay with
   the best options and their prices: the person can book them herself.
 - When the form asks for the guest (name, e-mail, phone, document, birth date, nationality, address, city,
   state, postal code, country), call fill_guest with all its fields at once; never type those yourself. A field
@@ -701,6 +703,12 @@ Answer with pago_movil:
 Say why in a few words."""
 
 
+PAGOMOVIL_BOOKING = """
+This is a booking: the guest's own details (who stays or travels: name, e-mail, phone, document) were already
+filled in its form and are not fields of the payment report; leave them out. A field that asks who PAID is still
+payer_phone, payer_bank, payer_document or payer_name."""
+
+
 def _light(text):
     """The payment step is read with its store's phone and document: only e-mails and card-sized numbers hidden."""
     text = str(text or '')
@@ -718,7 +726,8 @@ def read_pagomovil(task, page, text, meter):
     safe = lambda value: str(value).replace('<', '‹').replace('>', '›')  # noqa: E731
     content = (f'<store>{task.site}</store>\n<page>\naddress: {safe(_bare_url(page.url))}\ntitle: {safe(page.title)}'
                f'\n\n{safe(body)}\n\nelements:\n{safe(_elements(page)[:MAX_ELEMENTS_CHARS])}\n</page>')
-    name, args = _call(conf.get('AGENT_TASKS_JUDGE_MODEL') or conf.get('AGENT_TASKS_MODEL'), system=PAGOMOVIL,
+    system = PAGOMOVIL + (PAGOMOVIL_BOOKING if getattr(task, 'kind', 'buy') == 'reserve' else '')
+    name, args = _call(conf.get('AGENT_TASKS_JUDGE_MODEL') or conf.get('AGENT_TASKS_MODEL'), system=system,
                        content=content, tools=PAGOMOVIL_TOOLS, meter=meter, user_id=task.user_id, max_output=800)
     if name != 'pago_movil':
         raise AgentUnavailable('no reading')

@@ -53,11 +53,11 @@ def reserving(task):
 
 
 def payable_rail(task):
-    """The way Confío pays this site's bookings now (Pix, SPEI, a Bolivian QR), or None: the site's country's
-    rail when it is paid after the booking is made (Venezuela's Pago Móvil, paid before, is not)."""
+    """The way Confío pays this site's bookings now (Pix, SPEI, a Bolivian QR, Venezuela's Pago Móvil), or None:
+    the site's country's rail, never one the person pays by hand."""
     from . import countries
     rail = countries.rail(task.country)
-    return rail if rail is not None and not rail.pay_before_order and rail.kind != 'manual' else None
+    return rail if rail is not None and rail.kind != 'manual' else None
 
 
 def step(st, browser, reader, seen):
@@ -382,11 +382,13 @@ def _field_is(key, element):
     return bool(re.search(_FIELD_WORDS[key], words))
 
 
-def _hide(seen, task):
-    """Her typed details, wherever the page echoes them, become [dato]: the models and the trace never see them."""
-    keys = (task.order or {}).get('guest_typed') or ()
+def guest_pattern(task):
+    """What matches her typed details however a page writes them, or None (none were typed)."""
+    if getattr(task, 'kind', 'buy') != 'reserve':
+        return None
+    keys = (getattr(task, 'order', None) or {}).get('guest_typed') or ()
     if not isinstance(keys, (list, tuple)) or not keys:
-        return
+        return None
     from django.contrib.auth import get_user_model
     user = get_user_model().objects.filter(pk=task.user_id).first()
     details = guest_details(user) if user is not None else {}
@@ -395,7 +397,7 @@ def _hide(seen, task):
     values = [str(details[name]) for key in keys for name in parts.get(key, (key,))
               if name in hidden and name in details and len(str(details[name])) >= 3]
     if not values:
-        return
+        return None
     pieces = []
     for value in sorted(values, key=len, reverse=True):
         digits = re.sub(r'\D', '', value)
@@ -404,7 +406,14 @@ def _hide(seen, task):
             pieces.append(r'[^\w\s]{0,2}\s?'.join(digits[-8:]) if len(digits) > 8 else r'[\s.()-]{0,2}'.join(digits))
         else:
             pieces.append(rf'(?<!\w){re.escape(value)}(?!\w)')
-    pattern = re.compile('|'.join(pieces), re.I)
+    return re.compile('|'.join(pieces), re.I)
+
+
+def _hide(seen, task):
+    """Her typed details, wherever the page echoes them, become [dato]: the models and the trace never see them."""
+    pattern = guest_pattern(task)
+    if pattern is None:
+        return
     seen.text = pattern.sub('[dato]', seen.text or '')
     seen.title = pattern.sub('[dato]', seen.title or '')
     for element in seen.elements:
@@ -548,6 +557,10 @@ def pay(st, reader, browser, seen, element, label, where, args):
     if read is None:
         return st.remember('ready_to_pay', f'refused: {why}')
     mode, offer = service.pay_mode(task, st.app_meta())
+    if rail.pay_before_order and mode == 'manual':
+        # Venezuela pays before the booking exists, by the Cuenta inteligente only: never her own bank.
+        return st.remember('ready_to_pay', 'refused: Confío cannot pay this booking now; call cannot_pay with the '
+                                           'options and their prices')
     new = {'item': item, 'total': total, 'amount': format(amount, 'f'), 'button': label, 'page': where,
            'address': '', 'image': '', 'breakdown': breakdown(read, seen.text, amount), 'manual': mode == 'manual',
            'offer': offer, 'booking': True, 'seen_clabes': order.get('seen_clabes') or []}
@@ -561,6 +574,12 @@ def pay(st, reader, browser, seen, element, label, where, args):
         return st.hand_over('approve', order={**order, **new, 'approved': None}, body=notes.say(
             notes.NEEDS_PERSON['approve_booking_manual' if mode == 'manual' else 'approve_booking'], task)
             + notes.breakdown_text(new))
+    if rail.pay_before_order:
+        # Venezuela: nothing is pressed now. The site's Pago Móvil data on this page is read and paid; the
+        # reference typed into its form then makes the booking (pagomovil.py), as for a purchase.
+        from . import pagomovil
+        return pagomovil.pay_first(st, browser, seen, {**order, **new, 'booked_button': label[:60]}, approved, amount,
+                                   again='ready_to_pay')
     # Used once, and written down first: an answer lost on the way is never a second booking.
     st.save(order={**order, **new, 'approved': None, 'pressed': True, 'pressed_at': [st.same_page(seen.url)],
                    'submitted': (order.get('submitted') or 0) + 1, 'booked_button': label[:60]},

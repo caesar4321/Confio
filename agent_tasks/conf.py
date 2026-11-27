@@ -69,6 +69,8 @@ DEFAULTS = {
     'AGENT_TASKS_RESERVE_MAX_STEPS': 70,
     'AGENT_TASKS_RESERVE_MAX_COST_USD': '1.50',
     'AGENT_TASKS_SESSION_SECONDS': 1500,
+    # Long enough to search, ask the person and still outlast a Venezuelan payout (pagomovil.pay_window).
+    'AGENT_TASKS_RESERVE_SESSION_SECONDS': 14400,
     # One guarded connection works this long: a late redirect is still checked.
     'AGENT_TASKS_HOLD_SECONDS': 50,
     'AGENT_TASKS_PERSON_WAIT_SECONDS': 300,

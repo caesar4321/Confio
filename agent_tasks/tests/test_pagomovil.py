@@ -297,3 +297,131 @@ class ReportTests(VenezuelaBase):
         self.vendor.open.return_value = browsers.Session('s-3', 'wss://b', timezone.now() + timedelta(minutes=20))
         task = self.step(AgentTask.objects.get(pk=task.pk))
         self.assertEqual((task.state, task.session_id), ('working', 's-3'))
+
+
+class BookingTests(VenezuelaBase):
+    """A Venezuelan booking paid now: the same Pago Móvil flow as a purchase, said as a booking, and her typed
+    details never read by a model on the way."""
+    BOOKING = ('Resumen de tu reserva', 'Posada Los Frailes, 3 al 5 de enero, 2 adultos', 'Huésped: Ana Pérez',
+               'Total Bs. 1.234,56', 'Paga con Pago Móvil', 'Banco: Banesco (0134)', 'Teléfono: 0414-1234567',
+               'RIF: J-12345678-9', 'Titular: Tienda Ejemplo CA', 'Monto: Bs. 1.234,56', 'Número de referencia')
+
+    def setUp(self):
+        super().setUp()
+        self.reserve = self.patch('agent_tasks.agent.reserve', return_value=(
+            'ready_to_pay', {'ref': 1, 'what': 'Posada Los Frailes, 3 al 5 de enero, 2 adultos', 'total': 'Bs. 1.234,56'}))
+        self.reader._run.return_value = []
+        self.user.first_name, self.user.last_name = 'Ana', 'Pérez'
+        self.user.save()
+        self.browser.capture.return_value = (picture(url=URL, text=self.BOOKING), picture(url=URL, text=self.BOOKING))
+
+    def booking(self):
+        return self.make_ve(kind='reserve', goal='reserva en la Posada Los Frailes del 3 al 5 de enero, 2 personas',
+                            order={'guest_typed': ['full_name']},
+                            session_expires_at=timezone.now() + timedelta(hours=3))
+
+    def test_it_is_approved_as_a_booking_paid_exactly_and_nothing_is_pressed(self):
+        from agent_tasks import reserve
+        self.assertEqual(reserve.payable_rail(self.booking()).method_id, 've_pagomovil_send')
+        AgentTask.objects.all().delete()
+        shown = page(self.BOOKING)
+        task = self.step(self.booking(), shown)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.assertIn('Tu reserva en', self.post.call_args.args[1])
+        task = self.step(service.approve(self.account, self.user, task.internal_id), shown)
+        self.reader.click.assert_not_called()
+        self.reader.type.assert_not_called()
+        self.assertEqual((task.phase, task.order['pay_first'], task.order['booked_button']),
+                         ('paying', True, 'Confirmar pago'))
+        self.assertIsNotNone(task.checkout_at)
+        self.assertEqual(self.prepare.call_args.kwargs['request']['amount_local'], '1234.56')
+        self.pay.assert_called_once()
+        # Her name was on the form: the Pago Móvil reader never saw it.
+        read_text = ' '.join(call.args[2] for call in self.reading_model.call_args_list)
+        self.assertNotIn('Ana Pérez', read_text)
+        self.assertIn('[dato]', read_text)
+
+    def test_without_the_account_it_shows_the_options_instead(self):
+        self.patch('agent_tasks.service.pay_mode', return_value=('manual', ''))
+        task = self.step(self.booking(), page(self.BOOKING))
+        self.assertIn('cannot_pay', task.history[-1]['result'])
+        self.reader.click.assert_not_called()
+        self.prepare.assert_not_called()
+
+    def test_its_notes_say_a_booking(self):
+        from agent_tasks import notes
+        task = self.booking()
+        AgentTask.objects.filter(pk=task.pk).update(phase='report', checkout_at=timezone.now(), state='stopped',
+                                                    reason='report_failed', order={
+            'pay_first': True, 'pagomovil': {'bank_code': '0134', 'phone': '584141234567', 'cedula': 'J123456789'},
+            'paid': {'reference': REFERENCE, 'paid_ves': '1234.56', 'paid_at': '2026-11-25T14:00:00+00:00'}})
+        task.refresh_from_db()
+        said = notes.stopped_text(task, 'report_failed')
+        self.assertIn('Pagué tu reserva', said)
+        self.assertIn(REFERENCE, said)
+        self.assertIn('Tu reserva en', notes.reported_text(task))
+        self.assertIn('no hice la reserva', notes.say(notes.STORE_UNPAID, task))
+        self.assertIn('ni reservé nada', notes.stopped_text(task._meta.model(kind='reserve', site=SITE, country='VE',
+                                                                             order={}), 'pay_unread'))
+
+    def paid_booking(self, minutes_left=40):  # the payout came back: only the report needs the session
+        return self.make_ve(kind='reserve', state='payment_ready', reason='account', phase='paying',
+                            checkout_at=timezone.now(), session_id='s-1',
+                            session_expires_at=timezone.now() + timedelta(minutes=minutes_left), order={
+                                'pay_first': True, 'amount': '1234.56', 'total': 'Bs. 1.234,56',
+                                'item': 'Posada Los Frailes', 'address': '', 'guest_typed': ['full_name'],
+                                'pagomovil': {'bank_code': '0134', 'phone': '584141234567', 'cedula': 'J123456789',
+                                              'amount_ves': '1234.56', 'asks': ['reference']}})
+
+    def test_a_paid_booking_reports_on_its_own_tab_while_its_session_lasts(self):
+        task = self.paid_booking()
+        self.assertTrue(service.store_paid(task.pk, reference=REFERENCE, paid_ves='1234.56'))
+        task.refresh_from_db()
+        self.assertEqual((task.state, task.phase, task.session_id, task.order['kept_tab']),
+                         ('queued', 'report', 's-1', True))
+        self.vendor.close.assert_not_called()
+        # Its first step stays on the tab with the form: never the site's home page.
+        task = self.step(task, page(self.BOOKING))
+        self.browser.goto.assert_not_called()
+        self.assertEqual((task.state, task.order['kept_tab']), ('working', False))
+
+    def test_a_session_about_to_end_reports_on_a_fresh_one_as_a_purchase_does(self):
+        task = self.paid_booking(minutes_left=5)
+        self.assertTrue(service.store_paid(task.pk, reference=REFERENCE, paid_ves='1234.56'))
+        task.refresh_from_db()
+        self.assertEqual((task.session_id, task.order['kept_tab']), ('', False))
+
+    def test_a_held_booking_whose_session_ended_is_never_paid(self):
+        task = self.paid_booking(minutes_left=5)
+        AgentTask.objects.filter(pk=task.pk).update(state='awaiting_code', reason='', order={
+            **task.order, 'pay_hold': {'code': 'pagomovil:0134:584141234567:J123456789', 'extra': {},
+                                       'since': timezone.now().isoformat(),
+                                       'until': (timezone.now() + timedelta(hours=1)).isoformat()}})
+        task.refresh_from_db()
+        task = self.step(task, page(self.BOOKING))
+        self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'))
+        self.prepare.assert_not_called()
+        self.pay.assert_not_called()
+        self.assertIn('No hice la reserva', self.post.call_args.args[1])
+
+    def test_a_booking_is_paid_only_while_its_session_outlasts_the_slowest_payout(self):
+        from agent_tasks import pagomovil
+        self.assertGreaterEqual(pagomovil.pay_window(), timedelta(minutes=120))
+        AgentTask.objects.all().delete()
+        task = self.booking()
+        AgentTask.objects.filter(pk=task.pk).update(session_expires_at=timezone.now() + timedelta(minutes=60))
+        task.refresh_from_db()
+        shown = page(self.BOOKING)
+        task = self.step(task, shown)
+        task = self.step(service.approve(self.account, self.user, task.internal_id), shown)
+        self.assertEqual((task.state, task.reason), ('stopped', 'unpaid'))
+        self.prepare.assert_not_called()
+        self.pay.assert_not_called()
+        self.assertIn('no salió dinero', self.post.call_args.args[1])
+
+    def test_the_sweep_leaves_a_booking_being_paid_its_tab(self):
+        task = self.paid_booking()
+        AgentTask.objects.filter(pk=task.pk).update(updated_at=timezone.now() - timedelta(hours=1))
+        service._sweep()
+        self.assertEqual(AgentTask.objects.get(pk=task.pk).session_id, 's-1')
+        self.vendor.close.assert_not_called()

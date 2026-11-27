@@ -260,7 +260,9 @@ def pay(step, intent, *, code='', extra=None, held=None) -> bool:
         logger.warning('agent task %s: purchase pull broadcast unclear: %s', task.internal_id, type(exc).__name__)
         return unsent(step, bridge, rail=intent.rail_method_id)
     task.refresh_from_db()
-    close_session(task)
+    from . import pagomovil
+    if not pagomovil.keeps_session(task):
+        close_session(task)   # a booking keeps its tab, with its form, for the reference
     text = paid_text(task)
     notes.post(task, text, 'payment', push='payment', push_body=notes.say(notes.PAID_BY_ACCOUNT_PUSH, task))
     return True
@@ -348,7 +350,9 @@ def wait(step, intent, found, held) -> bool:
     order = {**(task.order or {}), 'pay_hold': held, 'account_wait': shown}
     step.remember('account_wait', found.code, state='needs_person', reason='account_wait', wait_until=until,
                   order=order)
-    close_session(task)
+    from . import pagomovil
+    if not pagomovil.keeps_session(task):
+        close_session(task)
     if found.code != previous or asked:
         # Said again when it changed, or when the person said they had done it and it still cannot pay.
         hours = int(held.get('hours') or conf.get('AGENT_TASKS_ACCOUNT_WAIT_HOURS'))
@@ -376,6 +380,8 @@ def retry_later(step, intent, held, why) -> bool:
     held.pop('asked', None)
     step.remember('account_retry', str(why)[:60], state='awaiting_code', reason='', wait_until=None,
                   order={**(task.order or {}), 'pay_hold': held})
-    close_session(task)
+    from . import pagomovil
+    if not pagomovil.keeps_session(task):
+        close_session(task)
     step.delay = OFF_DELAY_SECONDS
     return True

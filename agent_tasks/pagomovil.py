@@ -24,7 +24,7 @@ No word of a store's is matched to decide anything here: models read, code check
 import logging
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
@@ -105,6 +105,13 @@ def read(task, seen, shots, meter):
     here: the caller holds it against what the person approved, or what was paid."""
     if not shots or len(shots) < 2:
         return None, 'screen'
+    from .reserve import guest_pattern
+    hidden = guest_pattern(task)
+    if hidden is not None:
+        # A booking's form holds her details: the reader sees each picture's words without them.
+        from dataclasses import replace
+        shots = [replace(shot, text=tuple(hidden.sub('[dato]', str(node)) for node in shot.text))
+                 if shot.text is not None else shot for shot in shots]
     if not sites.within(shots[0].url, task.site, house=True):
         return None, 'offsite'
     try:
@@ -135,8 +142,9 @@ def code_of(details):
 
 # ------------------------------------------------------------------ before the order: read, then pay
 
-def pay_first(step, browser, seen, order, approved, amount):
-    """The approved order's final button is on screen and is NOT pressed: its Pago Móvil step is read and paid."""
+def pay_first(step, browser, seen, order, approved, amount, again='ready_to_order'):
+    """The approved order's final button is on screen and is NOT pressed: its Pago Móvil step is read and paid.
+    `again` is the tool the driver names it with (a booking's is ready_to_pay)."""
     from .runner import same_page
     task = step.task
     rail = countries.rail(task.country)
@@ -146,9 +154,9 @@ def pay_first(step, browser, seen, order, approved, amount):
     if why:
         if operate.count(task, 'unread') >= operate.MAX_UNREAD:
             return step.stop('pay_unread')
-        return step.remember('ready_to_order', f'refused: the store\'s Pago Móvil data for exactly this total is not '
-                                               f'readable on this page ({why}). Choose Pago Móvil so the store shows '
-                                               'its data, then call ready_to_order again',
+        return step.remember(again, f'refused: the store\'s Pago Móvil data for exactly this total is not '
+                                    f'readable on this page ({why}). Choose Pago Móvil so the store shows its '
+                                    f'data, then call {again} again',
                              counts=operate.counted(task, 'unread'), order={**order, 'approved': approved})
     shown = {key: value for key, value in details.items() if key != 'refs'}
     if set(details['asks']) - REPORTABLE:
@@ -166,6 +174,27 @@ def pay_first(step, browser, seen, order, approved, amount):
 
 # ------------------------------------------------------------------ after paying: report the reference
 
+# A booking's dates, room and guest form live only in its browser session: kept open from the Pago Móvil step
+# through the payment, so the reference is typed on that very tab. A payment that outlives it is not made.
+SESSION_LEFT = timedelta(minutes=10)
+
+
+def keeps_session(task):
+    return getattr(task, 'kind', 'buy') == 'reserve' and bool((task.order or {}).get('pay_first'))
+
+
+def pay_window():
+    """How long a booking's session must still last when it is paid: the slowest payout the funding leg waits for
+    (settled, then parked for review: each up to VE_PURCHASE_PAYOUT_WAIT_MINUTES), and the report after it."""
+    from payment_accounts import purchase_funding_ve
+    return 2 * purchase_funding_ve._payout_wait() + timedelta(minutes=20)
+
+
+def session_alive(task, left=SESSION_LEFT):
+    return bool(task.session_id) and task.session_expires_at is not None \
+        and task.session_expires_at > timezone.now() + left
+
+
 def reporting(task):
     return task.phase == 'report'
 
@@ -174,7 +203,13 @@ def report_step(step, browser, reader, seen):
     task = step.task
     order = task.order or {}
     step.operating = True
-    seen.look = reader.picture
+    if (order.get('guest_typed') or ()) and getattr(task, 'kind', 'buy') == 'reserve':
+        # A booking's form holds her details: no model reads them, in the text, a control or a picture.
+        from .reserve import _hide
+        _hide(seen, task)
+        seen.look = None
+    else:
+        seen.look = reader.picture
     operate._trace(step, seen)
     if operate.count(task, 'report_steps') >= int(conf.get('AGENT_TASKS_REPORT_STEPS')):
         return retry(step, 'too_long')
@@ -337,7 +372,8 @@ def retry(step, why):
     close_session(task)
     try:
         step.save(state='queued', reason='', wait_until=None, session_id='', connect_url='', session_expires_at=None,
-                  counts={**(task.counts or {}), 'report_tries': tries, 'report_steps': 0})
+                  counts={**(task.counts or {}), 'report_tries': tries, 'report_steps': 0},
+                  order={**(task.order or {}), 'kept_tab': False})   # a fresh session opens the site again
     except Lost:
         raise
     step.delay = 30
