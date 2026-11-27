@@ -76,6 +76,13 @@ class TurnResult:
     cost_usd: Decimal = Decimal('0')
     google_cost_usd: Decimal = Decimal('0')  # the part of cost_usd Google bills (Gemini); the rest is OpenAI
     writes: list = field(default_factory=list)
+    # What web searches returned this turn, and the phone numbers this reply shows that came from them: the only
+    # numbers a later WhatsApp card may go to that she never typed (web_numbers, kept on the reply's metadata).
+    web_texts: list = field(default_factory=list)
+    web_numbers: list = field(default_factory=list)
+    # Text the turn already had before searching (her messages, notices, earlier answers, the query): a number in
+    # it never becomes a web number, or a WhatsApp message could launder its number through a search.
+    web_known: list = field(default_factory=list)
     # categorize_transactions proposal awaiting the user's "sí".
     pending_categorization: dict | None = None
     # Cuenta inteligente rule proposal (steps the app opens prefilled; one per reply).
@@ -242,6 +249,60 @@ def payment_texts(history, *, spoken=False):
 
 
 STORE_TASK_WINDOW = timedelta(minutes=15)
+
+
+SHOWN_MAX = 12
+WEB_THEN_WHATSAPP = (
+    'Su WhatsApp está conectado. Si la persona quiere reservar, cotizar o preguntar algo a un negocio de estos, da '
+    'su WhatsApp con código de país (+…) y termina preguntándole si les escribes tú; cuando acepte, en su próximo '
+    'mensaje, le preparas el mensaje para que lo revise y lo envíe. No le digas que lo copie ni que conecte '
+    'WhatsApp, y no empieces por lo que no puedes hacer.')
+
+
+_PLUS_NUMBER = re.compile(r'\+\d[\d \t().-]{6,}\d')
+_ANY_NUMBER = re.compile(r'\+?\d[\d \t().-]{6,}\d')
+
+
+_DATE = re.compile(r'\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}')
+
+
+def _runs(text):
+    """Digit runs of 8-15 digits in text (phone-like), as (digits, written with +). Dates are not phones."""
+    for match in _ANY_NUMBER.finditer(_DATE.sub(' ', str(text or ''))):
+        digits = re.sub(r'\D', '', match.group(0))
+        if 8 <= len(digits) <= 15:
+            yield digits, match.group(0).startswith('+')
+
+
+def found_numbers(reply, web_texts, known=()):
+    """The phone numbers this reply shows (written with +country code) that a web search this turn returned:
+    the same digits, or the same local number found there without its country code. Never one only the model
+    wrote, and never from a WhatsApp message or a mail: those never reach a web turn's search results."""
+    found = {run for text in web_texts or () for run in _runs(text)}
+    had = {digits for text in known or () for digits, _ in _runs(text)}
+    numbers = []
+    for match in _PLUS_NUMBER.finditer(_DATE.sub(' ', str(reply or ''))):
+        digits = re.sub(r'\D', '', match.group(0))
+        if not 8 <= len(digits) <= 15 or digits in numbers:
+            continue
+        if any(digits.endswith(old) or old.endswith(digits) for old in had):
+            continue  # it was in the conversation or the query before the search: not found on the web
+        if any(digits == seen or (not plus and digits.endswith(seen) and len(digits) - len(seen) <= 4)
+               for seen, plus in found):
+            numbers.append(digits)
+    return numbers
+
+
+def shown_numbers(history):
+    """Numbers Confío IA's own recent answers showed her from a web search (a posada, a bus line, a tattoo artist):
+    stored on those answers' metadata when they were written (TurnResult.web_numbers), never read from text."""
+    numbers = []
+    for m in list(history)[-SHOWN_MAX:]:
+        metadata = m.metadata or {}
+        if m.sender_type != 'AGENT' or not metadata.get('ai') or context_rules.is_team(m):
+            continue
+        numbers.extend(str(n) for n in metadata.get('web_numbers') or () if str(n).isdigit())
+    return numbers
 
 
 def store_task_words(history):
@@ -2162,6 +2223,12 @@ class Toolbelt:
         if found.get('encontrado'):
             # Web text is untrusted: the answer that follows gets no tools.
             self.saw_web = True
+            self.result.web_texts.append(found.get('resumen_no_verificado') or '')
+            self.result.web_known.extend([str(query or ''), *[str(getattr(m, 'body', '') or '')
+                                                              for m in getattr(self, 'turn_history', None) or []]])
+            if self.whatsapp_ready():
+                # No tool now, but her WhatsApp is linked: writing to a place found here is her next message.
+                found['siguiente_paso'] = WEB_THEN_WHATSAPP
         return found
 
     # ── Shopping in a cloud browser: the owner confirms and pays, see agent_tasks/ ──
@@ -2261,7 +2328,10 @@ class Toolbelt:
         # words it from what she said (typed or in a voice note); a voice note may start it, but nothing leaves
         # until she taps Enviar on the card, which shows the exact text and where it goes.
         if self.saw_web:
-            return {'ok': False, '_denied': True, 'motivo': 'No preparo mensajes por lo que leí en internet.'}
+            # A business found on the web is written to on her NEXT message ("sí, escríbeles"), from the number
+            # the answer showed her: never in the turn that read the page.
+            return {'ok': False, '_denied': True,
+                    'motivo': 'Muéstrale el número y pregúntale si les escribes; lo preparas cuando ella acepte.'}
         # One card per reply (confirm.busy): never beside a payment, a proposal, code's question or a purchase.
         from . import confirm
         if confirm.busy(self.result):
@@ -2269,13 +2339,15 @@ class Toolbelt:
         if 'prepare_whatsapp_reply' in self.paid_used:
             return {'ok': False, '_denied': True, 'motivo': 'Una respuesta de WhatsApp por mensaje.'}
         # Her own words this turn (typed, or said in a voice note): a number or a link on the card counts only if
-        # it is in them, never one a WhatsApp message or the model brought.
+        # it is in them, never one a WhatsApp message or the model brought. The one other number it may go to: a
+        # business an earlier answer found on the web and showed her (shown_numbers).
         own = getattr(self, 'store_texts', None) or self.payment_texts
         if not own:
             return {'ok': False, '_denied': True, 'motivo': 'Pídeme la respuesta con tus palabras.'}
         self.paid_used.add('prepare_whatsapp_reply')
         from whatsapp_link import assistant_tool as whatsapp_tool
-        answer = whatsapp_tool.call(self.viewer, chat_name=chat, phone=phone, text=text, own_words=own)
+        answer = whatsapp_tool.call(self.viewer, chat_name=chat, phone=phone, text=text, own_words=own,
+                                    shown_numbers=shown_numbers(getattr(self, 'turn_history', None) or []))
         if answer.get('ok'):
             # Its card is in the conversation: nothing else to approve joins this reply (confirm.busy).
             self.result.whatsapp_card = True
@@ -3362,6 +3434,8 @@ def _finish(result):
             result.reply = NOTICE_LEAD
         else:
             raise AssistantUnavailable('empty reply')
+    if result.web_texts:
+        result.web_numbers = found_numbers(result.reply, result.web_texts, result.web_known)
     return result
 
 

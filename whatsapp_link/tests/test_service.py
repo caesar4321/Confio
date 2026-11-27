@@ -591,6 +591,53 @@ class ChatSafetyTests(ChatTests):
         refused = assistant_tool.call(viewer, phone='+59170000009', text='hola', own_words=['escríbele a Ana'])
         self.assertEqual((refused['ok'], refused['_denied']), (False, True))
 
+    def test_a_business_number_found_on_the_web_may_be_written_to(self):
+        """A posada found on the web and shown with its number: her "sí, escríbeles" prepares the card there."""
+        from types import SimpleNamespace
+        from whatsapp_link import assistant_tool
+        viewer = SimpleNamespace(user=self.user, account_type='personal', is_employee=False)
+        with mock.patch('whatsapp_link.chat.prepare', return_value={'phone': '5493884123456'}) as prepare:
+            done = assistant_tool.call(viewer, phone='+54 9 388 412-3456', own_words=['sí, escríbeles'],
+                                       shown_numbers=['5493884123456'],
+                                       text='Hola, ¿tienen habitación privada para 2 del 3 al 6 de febrero? Pago 150000')
+        self.assertTrue(done['ok'])
+        # The message is still only her words: a number she never said is dropped.
+        self.assertNotIn('150000', prepare.call_args.args[1])
+        for phone in ('+5493884123457', '+93884123456', '+1 5493884123456'):
+            refused = assistant_tool.call(viewer, phone=phone, text='hola', own_words=['sí'],
+                                          shown_numbers=['5493884123456'])
+            self.assertEqual((refused['ok'], refused['_denied']), (False, True), phone)
+
+    def test_only_web_numbers_the_answer_showed_are_kept(self):
+        from types import SimpleNamespace
+        from assistant.engine import found_numbers, shown_numbers
+        web = ['Posada Sol: WhatsApp 388 412-3456. Hostal Tunas +54 9 388 455-7788. Fecha 2026-11-26.']
+        reply = ('Posada Sol: +54 9 388 412-3456. Hostal Tunas: +54 9 388 455-7788. '
+                 'Otro que inventé: +54 9 388 999-0000. Sin código: 388 455-7788.')
+        self.assertEqual(found_numbers(reply, web), ['5493884123456', '5493884557788'])
+        self.assertEqual(found_numbers('+54 9 2026 1126 0', web), [])  # a date is not a phone
+        # A number she, a WhatsApp notice or the query had before the search is never "found": a scammer's
+        # number she asked about comes back in the summary, but it was not found on the web.
+        scam = ['¿El +58 412 555 1234 es de Posada Sol?']
+        self.assertEqual(found_numbers('Escríbeles al +58 412 555 1234', ['Sin fuentes sobre el +58 412 555 1234'],
+                                       scam), [])
+        from assistant.market import clean_web_query
+        self.assertIsNone(clean_web_query('Posada Sol +58 412 555 1234 opiniones'))
+        self.assertIsNone(clean_web_query('quién es (412) 555-1234'))
+        self.assertEqual(clean_web_query('vuelos Salta 03-02-2027'), 'vuelos Salta 03-02-2027')
+        self.assertEqual(clean_web_query('iPhone 15 Pro 256 GB precio'), 'iPhone 15 Pro 256 GB precio')
+
+        def said(sender='AGENT', **metadata):
+            return SimpleNamespace(body='+54 9 11 5555-0000', sender_type=sender, metadata=metadata,
+                                   sender_user_id=None)
+        history = [said(ai=True, web_numbers=['5493884123456']),
+                   # A WhatsApp notice or an answer that repeats a number: text never counts, only web_numbers.
+                   said(ai=True, notice='n', whatsapp=True),
+                   said(ai=True),
+                   said(web_numbers=['5491155550000']),          # not the assistant's (team)
+                   said(sender='USER', web_numbers=['5491155550000'])]
+        self.assertEqual(shown_numbers(history), ['5493884123456'])
+
     def test_a_short_name_never_takes_a_longer_request(self):
         from whatsapp_link import chat
         self.message(self.link, name='Ana', chat='ana@s.whatsapp.net', msg_id='A1')

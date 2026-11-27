@@ -786,6 +786,9 @@ def ask(user, account, business, jwt_context, body=None, *, audio=None, screen='
         else:
             body = _with_line(line, _WHATSAPP_UNLINKED.get(confirm.language([clean]), _WHATSAPP_UNLINKED['es']))
             result.actions = metadata['actions'] = []
+    if getattr(result, 'web_numbers', None) and (result.reply or '') in body:
+        # Numbers this answer showed from a web search: a WhatsApp card may go to them later (engine.shown_numbers).
+        metadata['web_numbers'] = list(result.web_numbers)
     if getattr(result, 'gmail_read', False):
         # Her Gmail or calendar was read for this answer, so it may quote them: tagged, to go with the connection
         # (gmail.chat.erase on disconnect).

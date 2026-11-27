@@ -195,15 +195,17 @@ WEB_INSTRUCTIONS = (
 WEB_QUERY_MAX_CHARS = 200
 # A public question never needs these; a query carrying them could leak account
 # data or make the hosted search fetch an address the model was steered to.
+_QUERY_DATE = re.compile(r'\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]\d{4}\b')
 _PRIVATE_IN_QUERY = re.compile(
-    r'https?://|www\.|[\w.-]+\.(com|net|org|io|lat|app|me|co|xyz)\b|@|\b0x[0-9a-f]{6,}|\d{5,}', re.I)
+    r'https?://|www\.|[\w.-]+\.(com|net|org|io|lat|app|me|co|xyz)\b|@|\b0x[0-9a-f]{6,}|\d{5,}'
+    r'|\+?\d(?:[ \t().-]*\d){6,}', re.I)  # a phone written with spaces or dashes too
 
 
 def clean_web_query(query):
     """One short public line, or None when it is empty or carries an address,
     an email, a wallet or a long number (an account, phone or amount)."""
     query = re.sub(r'\s+', ' ', str(query or '')).strip()[:WEB_QUERY_MAX_CHARS]
-    if not query or _PRIVATE_IN_QUERY.search(query):
+    if not query or _PRIVATE_IN_QUERY.search(_QUERY_DATE.sub(' ', query)):
         return None
     return query
 
