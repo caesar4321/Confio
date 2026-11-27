@@ -515,6 +515,8 @@ def _decode_stock_call(call: dict, *, historical: bool = False) -> dict | None:
         'kind': action,
         'asset': asset.lower(),
         'quantity': quantity,
+        # Ondo's signed price per share (1e18 = US$1) for this trade.
+        'price': price,
         'shares': shares if action == 'stock_buy' else None,
         # Dollar value removed from savings on buy, or returned on sell.
         # Receipt events replace this calldata estimate with exact values.

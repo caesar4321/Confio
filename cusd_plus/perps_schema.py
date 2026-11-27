@@ -246,22 +246,35 @@ def _triggers(position) -> tuple[float | None, float | None, bool]:
     return tp, sl, True
 
 
-def _position_type(position, live: dict | None, contexts: dict, free_usd=Decimal(0)) -> PerpPositionType:
-    from . import perps_catalog
-
-    view = perps_catalog.view(position.market)
-    ctx = contexts.get(position.market.coin) or {}
+def margin_put_in(position) -> tuple[Decimal, Decimal]:
+    """(margin + top-ups that left dollars, top-ups Relay refunded net of the
+    entry fee): the money the Futuros screens count as put in."""
     put_in = Decimal(position.margin_usd) + sum(
         (Decimal(c.amount_usd) for c in position.margin_changes.all()
          if c.direction == 'add' and c.state not in ('quoted', 'failed', 'cancelled')), Decimal(0))
-    result = None
     # Refunded top-ups came back too (net of the entry, as Comunidad counts them).
     from .perps_portfolio import _after_entry_fee
     refunded = sum((_after_entry_fee(Decimal(int((c.flow or {}).get('refund_wei') or 0)) / Decimal(10 ** 18))
                     for c in position.margin_changes.all() if c.direction == 'add' and c.state == 'refunded'),
                    Decimal(0))
+    return put_in, refunded
+
+
+def position_result_usd(position, put_in: Decimal, refunded: Decimal) -> Decimal | None:
+    """Done: dollars back - dollars put in (all costs included); None before."""
     if position.state == 'done' and position.returned_usd is not None and position.open_batch_id:
-        result = float(Decimal(position.returned_usd) + refunded - put_in)
+        return Decimal(position.returned_usd) + refunded - put_in
+    return None
+
+
+def _position_type(position, live: dict | None, contexts: dict, free_usd=Decimal(0)) -> PerpPositionType:
+    from . import perps_catalog
+
+    view = perps_catalog.view(position.market)
+    ctx = contexts.get(position.market.coin) or {}
+    put_in, refunded = margin_put_in(position)
+    result = position_result_usd(position, put_in, refunded)
+    result = float(result) if result is not None else None
     cum = ((live or {}).get('cumFunding') or {}).get('sinceOpen')
     triggers = _triggers(position)
     intent = (position.flow or {}).get('order') or {}

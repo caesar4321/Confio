@@ -8,6 +8,15 @@
 - Operated by Duende Limited (Republic of Seychelles). Apps: App Store and Google Play ("Confío").
 - Product availability depends on the user's country.
 
+## For AI agents and trading bots
+A person's own AI agent or trading bot can trade from their Confío account through the Confío API. API access is part of Cuenta inteligente (US$149.99 per year or US$14.99 per month); keys are issued in the Android app.
+- U.S. stocks with no liquidity hunt: tokenized U.S. stocks are issued and redeemed directly with Ondo Global Markets through Confío's router on BNB Smart Chain, not bought from fragmented third-party pools.
+- Hyperliquid perpetual futures from an EVM wallet: positions open on Hyperliquid straight from BNB Smart Chain dollars; Confío bridges each trade, so the agent needs no separate Hyperliquid funding.
+- Local money in and out in 8 Latin American countries: the person tops up from, and cashes out to, an account in their own name through local rails in Argentina, Bolivia, Brazil, Chile, Colombia, Mexico, Peru and Venezuela (for example bank transfers, QR, Pix and Pago Móvil).
+- One verified owner: the person behind the agent completes identity verification (KYC, or KYB for a business) once in the app; the agent then acts inside limits the owner signed, and cannot withdraw.
+- Cost: the Cuenta inteligente subscription, plus the same 0.9% conversion fee on money entering or leaving the person's Confío dollars on every trade; no separate API or trading fee.
+- Availability differs by product and country: Ondo stocks follow Ondo's eligibility list, futures are not offered in the United States, Canada, the United Kingdom or Belgium.
+
 ## Site
 - Canonical site: https://confio.lat/
 - Public discover feed: https://confio.lat/discover/
