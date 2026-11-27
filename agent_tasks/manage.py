@@ -158,20 +158,27 @@ _LINKS = re.compile(r'(https?://\S+|www\.\S+|\b[\w-]+\.(com|net|org|ly|io|me|co|
 _PHONE = re.compile(r'\+?\d[\d\s().-]{7,}\d')
 
 
-def answer(st, text, seen=None):
-    """What the person asked, as the store's page says it: ends the task, in the chat. No link, phone, handle
-    or formatting survives (a seller's message is on that page too), and every number in it must be the
-    page's own."""
+def clean_answer(text, seen=None):
+    """(text, '') safe to show in the chat, or ('', why not): no link, phone, handle or formatting survives (a
+    seller's message is on that page too), and every number in it must be the page's own."""
     text = agent.redact(str(text or ''))
     text = _PHONE.sub('', _LINKS.sub(lambda m: m.group(3) or '', text))
     text = guard.clean(' '.join(text.split()), 400).replace('<', '‹').replace('>', '›')
     if not text:
-        return st.remember('answer', 'refused: say it in one or two sentences, with only what this page shows')
+        return '', 'say it in one or two sentences, with only what this page shows'
     if seen is not None:
         page = re.sub(r'\s+', ' ', guard.fold(seen.text[:100000]))
         missing = [n for n in re.findall(r'\d[\d.,/:-]*\d|\d', text) if n not in page]
         if missing:
-            return st.remember('answer', f'refused: {missing[0]} is not on this page; say only what it shows')
+            return '', f'{missing[0]} is not on this page; say only what it shows'
+    return text, ''
+
+
+def answer(st, text, seen=None):
+    """What the person asked, as the store's page says it: ends the task, in the chat."""
+    text, why = clean_answer(text, seen)
+    if not text:
+        return st.remember('answer', f'refused: {why}')
     task = st.task
     body = notes.say(notes.MANAGED, task).replace('{text}', text)
     if (task.order or {}).get('submitted'):

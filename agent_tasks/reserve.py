@@ -16,8 +16,8 @@ import re
 
 from django.utils import timezone
 
-from . import agent, guard, notes
-from .manage import answer as _answer
+from . import agent, guard, notes, sites
+from .manage import answer as _answer, clean_answer
 from .operate import (NOT_A_FORM, REFUSED, MAX_SAME_PRESS, _PAYMENT_FIELD, _identity, _label, _trace, count,
                       counted, sign_in)
 
@@ -49,6 +49,14 @@ def reserving(task):
     return getattr(task, 'kind', 'buy') == 'reserve'
 
 
+def payable_rail(task):
+    """The way Confío pays this site's bookings now (Pix, SPEI, a Bolivian QR), or None: the site's country's
+    rail when it is paid after the booking is made (Venezuela's Pago Móvil, paid before, is not)."""
+    from . import countries
+    rail = countries.rail(task.country)
+    return rail if rail is not None and not rail.pay_before_order and rail.kind != 'manual' else None
+
+
 def step(st, browser, reader, seen):
     """One step of a reservation."""
     task = st.task
@@ -61,6 +69,14 @@ def step(st, browser, reader, seen):
     else:
         seen.look = reader.picture   # what the judge sees: the page, with the control boxed
     _trace(st, seen)
+    rail = payable_rail(task)
+    if rail is not None and rail.method_id == 'mx_clabe':
+        # Accounts written on pages before the booking is paid are never its own (spei._by_facts), as for an order.
+        from . import spei
+        known = (task.order or {}).get('seen_clabes') or []
+        found = spei.clabes_in([seen.text]) - set(known)
+        if found:
+            st.save(order={**(task.order or {}), 'seen_clabes': [*known, *sorted(found)][-40:]})
     name, args = agent.reserve(task, seen, st.meter)
     if name == 'wait':
         st.delay = 2
@@ -82,6 +98,15 @@ def step(st, browser, reader, seen):
         return st.remember('sign_in', 'refused: no sign-in form on this page') if done is NOT_A_FORM else done
     if name == 'answer':
         return _answer(st, args.get('text'), seen)
+    if name == 'cannot_pay':
+        # Found, but Confío cannot pay it here (a card, or a way it does not pay): the options, and stop.
+        if (task.order or {}).get('submitted'):
+            # Something was sent already: never "nothing was booked".
+            return st.stop('request_unclear')
+        text, why = clean_answer(args.get('text'), seen)
+        if not text:
+            return st.remember('cannot_pay', f'refused: {why}')
+        return st.stop('needs_card', order={**(task.order or {}), 'answer': text})
     if name == 'fill_guest':
         return fill_guest(st, reader, seen, args)
     element = seen.element(args.get('ref'))
@@ -89,21 +114,23 @@ def step(st, browser, reader, seen):
         return st.remember(f'{name}'[:30], 'refused: no such control on this page')
     label = _label(element)
     where = st.fingerprint(seen.url)
-    if name in ('type', 'choose') and (task.order or {}).get('request_approved'):
+    if name in ('type', 'choose') and ((task.order or {}).get('request_approved') or (task.order or {}).get('approved')):
         # A field changed after the person approved: what is booked may have changed, so it is asked again.
-        st.save(order={**(task.order or {}), 'request_approved': None})
+        st.save(order={**(task.order or {}), 'request_approved': None, 'approved': None})
     if name == 'type':
         return type_search(st, reader, seen, element, label, args.get('text'))
     if name == 'choose':
         return choose(st, reader, element, label, args.get('text'))
     if name == 'ready_to_book':
         return book(st, reader, browser, seen, element, label, where, args)
+    if name == 'ready_to_pay':
+        return pay(st, reader, browser, seen, element, label, where, args)
     if name != 'press':
         return st.remember(f'{name}'[:30], 'refused')
     did = f'press "{label}"'
-    if (task.order or {}).get('request_approved'):
+    if (task.order or {}).get('request_approved') or (task.order or {}).get('approved'):
         # Anything pressed after the person approved may change what is booked: asked again.
-        st.save(order={**(task.order or {}), 'request_approved': None})
+        st.save(order={**(task.order or {}), 'request_approved': None, 'approved': None})
     if _judged(st, seen, element, label, did) is REFUSED:
         return None
     if sum(entry.get('at') == where and entry.get('did') == did[:120] for entry in (task.history or [])[-8:]) \
@@ -172,6 +199,29 @@ def _plausible(date):
     return 2020 <= year <= 2035 and 1 <= first <= 31 and 1 <= second <= 31 and min(first, second) <= 12
 
 
+def as_field_value(text, kind):
+    """'2026-12-10' from '2026-12-10', '10/12/2026' or '10-12-26'; '21:00' from '21:00', '21h' or '9:30'. '' when it
+    is not one (a date input takes only its ISO form)."""
+    text = str(text or '').strip().lower()
+    if kind == 'time':
+        found = re.fullmatch(r'(\d{1,2})(?::(\d{2}))?\s*(?:hs?|h)?', text)
+        if not found or int(found.group(1)) > 23 or int(found.group(2) or 0) > 59:
+            return ''
+        return f'{int(found.group(1)):02d}:{int(found.group(2) or 0):02d}'
+    found = re.fullmatch(r'(\d{4})-(\d{1,2})-(\d{1,2})', text)
+    if found:
+        year, month, day = (int(part) for part in found.groups())
+    else:
+        found = re.fullmatch(r'(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})', text)
+        if not found:
+            return ''
+        day, month, year = (int(part) for part in found.groups())
+        year = year + 2000 if year < 100 else year
+    if not (2020 <= year <= 2035 and 1 <= month <= 12 and 1 <= day <= 31):
+        return ''
+    return f'{year:04d}-{month:02d}-{day:02d}'
+
+
 def searchable(text, goal):
     """Text the model may type itself: words of the person's own request, dates, times and counts. Never a
     number of five digits or more that is not a date, and never a word she did not say."""
@@ -210,6 +260,15 @@ def type_search(st, reader, seen, element, label, text):
     if not value:
         return st.remember('type', 'refused: type only the person\'s own words, dates, times or counts')
     counts = counted(task, 'typed')
+    kind = (element.get('type') or '').lower()
+    if kind in ('date', 'time'):
+        # The phone's own picker: its value is set as the field takes it (keys never reach it).
+        value = as_field_value(value, kind)
+        if not value:
+            return st.remember('type', f'refused: write the {kind} as {"2026-12-10" if kind == "date" else "21:00"}',
+                               counts=counts)
+        done = reader.set_date(element, value)
+        return st.remember(f'type "{label}"'[:60], f'refused: {done}' if done else f'set "{value}"', counts=counts)
     done = reader.type(element, value)
     return st.remember(f'type "{label}"'[:60], f'refused: {done}' if done else f'typed "{value}"', counts=counts)
 
@@ -441,9 +500,69 @@ def fill_guest(st, reader, seen, args):
     # From now on no model sees this page's echo of them, nor a picture of the form (step, _hide). Only the keys
     # are kept on the task; the values are read again from her account when needed.
     order = dict(st.task.order or {})
-    if order.get('request_approved'):
-        order['request_approved'] = None   # the form changed after an approval of the booking
+    if order.get('request_approved') or order.get('approved'):
+        order.update(request_approved=None, approved=None)   # the form changed after an approval of the booking
     return st.remember('fill_guest', result[:160], counts=counts, order=order)
+
+
+# ------------------------------------------------------------------ a booking paid now, by the country's rail
+
+def pay(st, reader, browser, seen, element, label, where, args):
+    """A booking that must be paid now, paid the way Confío pays this country's stores: read like an order by a
+    second model (paid with the rail and nothing else, its total on the page, this booking), approved on the
+    order card, pressed once; its payment is then read off the site and paid as any order's (runner.after_checkout)."""
+    from . import service
+    from .operate import _reviewed, amount_of, breakdown
+    task = st.task
+    rail = payable_rail(task)
+    if rail is None:
+        return st.remember('ready_to_pay', 'refused: Confío cannot pay bookings on this site; call cannot_pay with '
+                                           'the options and their prices')
+    try:
+        service.require_payable(task.account, task.user, task.country, st.app_meta())
+    except service.TaskRefused as exc:
+        return st.stop('no_rail' if exc.code == 'country' else 'cannot_pay')
+    order = dict(task.order or {})
+    if (order.get('submitted') or 0) >= MAX_BOOKINGS or task.checkout_at:
+        return st.remember('ready_to_pay', 'refused: the booking was already sent; find its payment page')
+    approved = order.get('approved') or {}
+    what = guard.clean(agent.redact(str(args.get('what') or '')), 160)
+    # The booking the person approved stands (a model never words it twice the same); the reader checks it.
+    item = approved.get('item') if approved.get('button') == label and approved.get('page') == where else what
+    if not item:
+        return st.remember('ready_to_pay', 'refused: say what it books')
+    total = guard.clean(agent.redact(args.get('total')), 40)
+    amount = amount_of(total)
+    read, why = _reviewed(st, seen, element, item, amount)
+    if read is None:
+        return st.remember('ready_to_pay', f'refused: {why}')
+    mode, offer = service.pay_mode(task, st.app_meta())
+    new = {'item': item, 'total': total, 'amount': format(amount, 'f'), 'button': label, 'page': where,
+           'address': '', 'image': '', 'breakdown': breakdown(read, seen.text, amount), 'manual': mode == 'manual',
+           'offer': offer, 'booking': True, 'seen_clabes': order.get('seen_clabes') or []}
+    if not service.subscribed(task.user):
+        # Paying for the person is Cuenta inteligente's (spec decision 37), as for a purchase.
+        return st.hand_over('subscribe', order={**order, **new, 'approved': None}, body=notes.say(
+            notes.NEEDS_PERSON['subscribe_booking'], task) + notes.breakdown_text(new))
+    if not approved or amount_of(approved.get('total')) != amount or {
+            key: approved.get(key) for key in ('item', 'manual', 'address', 'button', 'page')} != {
+            'item': item, 'manual': mode == 'manual', 'address': '', 'button': label, 'page': where}:
+        return st.hand_over('approve', order={**order, **new, 'approved': None}, body=notes.say(
+            notes.NEEDS_PERSON['approve_booking_manual' if mode == 'manual' else 'approve_booking'], task)
+            + notes.breakdown_text(new))
+    # Used once, and written down first: an answer lost on the way is never a second booking.
+    st.save(order={**order, **new, 'approved': None, 'pressed': True, 'pressed_at': [st.same_page(seen.url)],
+                   'submitted': (order.get('submitted') or 0) + 1, 'booked_button': label[:60]},
+            phase='ordered', checkout_at=timezone.now(),
+            history=[*(task.history or []), {'did': 'pressed the booking\'s pay button', 'result': total}
+                     ][-st.HISTORY_KEPT:], steps=task.steps + 1, failures=0)
+    refused = reader.click(element)
+    if refused:
+        return st.save(order={**order, **new, 'approved': approved}, phase='', checkout_at=None,
+                       history=[*(task.history or []), {'did': 'the pay button', 'result': f'not pressed: {refused}'}
+                                ][-st.HISTORY_KEPT:])
+    browser.pump(4)
+    return None
 
 
 # ------------------------------------------------------------------ the button that books
@@ -454,6 +573,8 @@ _CARD_TEXT = re.compile(
     r'|ending in \d{4}|[•*]{3,}\s?\d{4}|(garantia|garantizar|garantizamos|guarantee)\w*'
     r'[^.]{0,60}(tarjeta|card|cartao)|(tarjeta|card|cartao)[^.]{0,60}(garantia|guarantee)'
     r'|tarjeta de (credito|debito) (para|como)|\b(visa|mastercard|amex|american express)\b[^.]{0,30}\d{4}')
+# A booking this page pays now (a local rail's words): never pressed as one that needs no payment.
+_PAID_NOW = re.compile(r'\bpix\b|\bspei\b|\bclabe\b|qr de pago|pagar con qr|pago movil')
 _CONFIRMED = re.compile(r'reserva (confirmada|realizada|hecha|registrada)|(numero|codigo|n°|nro) de (reserva|confirmacion)'
                         r'|booking (confirmed|number|reference)|confirmation (number|code)|reserva confirmada'
                         r'|tu reserva esta confirmada|your booking is confirmed|reserva efetuada|reserva confirmada')
@@ -497,6 +618,10 @@ def book(st, reader, browser, seen, element, label, where, args):
     """The button that makes the booking: no card on the page, read as booking by the judge, approved by
     the person in the chat as the card showed it, pressed once."""
     task = st.task
+    if any(element.get('checked') and _PAID_NOW.search(guard.fold(str(element.get('label') or '')))
+           for element in seen.elements):
+        # The way to pay it now is chosen on this page (Pix, SPEI, a QR): it is paid, never booked as free.
+        return st.remember('ready_to_book', 'refused: this page pays it now; use ready_to_pay, or cannot_pay')
     if card_on_page(seen, reader):
         return st.stop('needs_card', order={**(task.order or {}), 'why': 'la reserva pide una tarjeta'})
     try:

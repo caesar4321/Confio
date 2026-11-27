@@ -35,7 +35,7 @@ _READ = r'''(() => {
   const buttonInput = el => el.tagName === 'INPUT' && ['button', 'submit', 'reset', 'image'].includes(el.type);
   const searchNames = ['q', 'as_word', 'search', 'query', 'busca', 'buscar', 'k', 'field-keywords', 's', 'term', 'search_key', 'keyword', 'keywords'];
   const address = v => {
-    try { return new URL(v, document.baseURI).href; } catch (e) { return 'invalid:'; }
+    try { return new URL(v, document.baseURI).href; } catch (e) { return 'invalid:'; }   // the top's: frames below use their own
   };
   // Prototype methods: a field named "getAttribute" shadows the form's own.
   const attr = (el, name) => Element.prototype.getAttribute.call(el, name);
@@ -45,12 +45,19 @@ _READ = r'''(() => {
     if (tag !== 'input' && tag !== 'textarea') parts.push(el.innerText);
     for (const a of ['aria-label', 'title', 'placeholder', 'alt']) parts.push(el.getAttribute(a));
     for (const id of clean(el.getAttribute('aria-labelledby')).split(' ')) {
-      const by = id && document.getElementById(id);
+      const by = id && el.ownerDocument.getElementById(id);
       if (by) parts.push(by.innerText);
     }
     if (buttonInput(el)) parts.push(el.value);
     if (el.labels) for (const l of el.labels) parts.push(l.innerText);
     for (const img of el.querySelectorAll('img[alt]')) parts.push(img.getAttribute('alt'));
+    if (__FRAMES__ && ['input', 'select', 'textarea'].includes(tag) && !parts.map(clean).some(Boolean)) {
+      // A reservation form whose field says what it is only in the words around it ("Origen", "Destino").
+      for (let box = el.parentElement, depth = 0; box && depth < 4; box = box.parentElement, depth += 1) {
+        const near = clean(box.innerText);
+        if (near) { if (near.length <= 40) parts.push(near); break; }
+      }
+    }
     const label = [...new Set(parts.map(clean).filter(Boolean))].join(' | ');
     const form = el.form || (['input', 'button'].includes(tag) ? null : el.closest('form'));
     const type = (attr(el, 'type') || '').toLowerCase();
@@ -96,7 +103,7 @@ _READ = r'''(() => {
         return '';
       })(),
       // getAttribute, not form.action: a field named "action" would shadow the property.
-      action: sends ? address(attr(el, 'formaction') || attr(form, 'action') || document.baseURI) : '',
+      action: sends ? address(attr(el, 'formaction') || attr(form, 'action') || el.ownerDocument.baseURI) : '',
       method: sends ? String(attr(el, 'formmethod') || attr(form, 'method') || 'get').toLowerCase() : '',
       // Attributes a generic delegated script turns into a request.
       // On it or on anything around it: delegated scripts read their orders from ancestors too.
@@ -111,7 +118,7 @@ _READ = r'''(() => {
       // A form with no target of its own opens where the page's <base target> says.
       // The agent's tab is top-level: _top and _parent are that same tab.
       new_window: !!sends && !['', '_self', '_top', '_parent'].includes(String(attr(el, 'formtarget') || attr(form, 'target') ||
-        (document.querySelector('base[target]') || {getAttribute: () => ''}).getAttribute('target') || '').toLowerCase()),
+        (el.ownerDocument.querySelector('base[target]') || {getAttribute: () => ''}).getAttribute('target') || '').toLowerCase()),
       secret_form: !!(form && Element.prototype.querySelector.call(form, 'input[type=password],input[autocomplete^="cc-"]')),
       disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
       // A chosen option (a payment method, an address): what the checkout will use.
@@ -124,8 +131,16 @@ _READ = r'''(() => {
         /^(search[-_]?input|searchbox|search[-_]?bar|search[-_]?field)$/i.test(el.id || '')),
     };
   };
-  const found = [...document.querySelectorAll('a[href],button,input:not([type=hidden]),div[role=button],span[role=button],' +
-      'select,label[for],[role=radio],[role=checkbox],[role=option],[role=tab]')]
+  // A reservation's step drawn in a frame of the same site (a bus's seat map): read and acted on as part of the
+  // page. Only same-origin frames: any other one's document cannot be read at all.
+  const docs = [document];
+  if (__FRAMES__) for (const f of document.querySelectorAll('iframe')) {
+    try { const d = f.contentDocument; if (d && d.body && seen(f)) docs.push(d); } catch (e) {}
+  }
+  const found = docs.flatMap(d => [...d.querySelectorAll('a[href],button,input:not([type=hidden]),div[role=button],span[role=button],' +
+      'select,label[for],[role=radio],[role=checkbox],[role=option],[role=tab]' +
+      // A reservation's suggestion lists and calendars: menu items and day cells.
+      (__FRAMES__ ? ',[role=menuitem],[role=menuitemradio],[role=gridcell],li[tabindex]' : ''))])
     .filter(seen);
   let picked = found;
   if (found.length > __MAX_ELEMENTS__) {
@@ -141,21 +156,21 @@ _READ = r'''(() => {
     const on_screen = r.right > 0 && r.left < innerWidth && !el.closest('[inert],[aria-hidden=true]');
     return {ref, on_screen, ...describe(el)};
   });
-  let text = document.body ? document.body.innerText.replace(/\u0000/g, '') : '';
-  for (const el of document.querySelectorAll('[contenteditable]:not([contenteditable=false])')) {
+  let text = docs.map(d => d.body ? d.body.innerText.replace(/\u0000/g, '') : '').join('\n');
+  for (const el of docs.flatMap(d => [...d.querySelectorAll('[contenteditable]:not([contenteditable=false])')])) {
     const typed = el.innerText.trim();
     if (typed.length > 2) text = text.split(typed).join('[campo]');  // typed by the person, like a field's value
   }
-  const solved = [...document.querySelectorAll(
-    'textarea[name=g-recaptcha-response],textarea[name=h-captcha-response],input[name=cf-turnstile-response]')]
+  const solved = docs.flatMap(d => [...d.querySelectorAll(
+    'textarea[name=g-recaptcha-response],textarea[name=h-captcha-response],input[name=cf-turnstile-response]')])
     .some(el => !!el.value);
-  const captcha = !solved && [...document.querySelectorAll('iframe')].some(f => {
+  const captcha = !solved && docs.flatMap(d => [...d.querySelectorAll('iframe')]).some(f => {
     const r = f.getBoundingClientRect();
     return r.width > 120 && r.height > 60 && seen(f) && !/size=invisible/.test(f.src) &&
       /recaptcha\/(api2|enterprise)\/(anchor|bframe)|hcaptcha\.com|challenges\.cloudflare\.com|arkoselabs|funcaptcha|captcha-delivery/i.test(f.src);
   });
-  const secret = [...document.querySelectorAll(
-    'input[type=password],input[autocomplete="one-time-code"]')].some(seen);
+  const secret = docs.some(d => [...d.querySelectorAll(
+    'input[type=password],input[autocomplete="one-time-code"]')].some(seen));
   return {url: location.href, title: clean(document.title).slice(0, 200), text: text.slice(0, __MAX_TEXT__),
           elements, captcha, secret};
 })()'''
@@ -191,14 +206,36 @@ _PRESS = '(() => {' + _SAME + r'''
   return '';
 })()'''
 
+# Where a frame's content starts on the page (its border and padding inside its box), or null when the frame is
+# scaled or transformed: then no point inside it can be checked where a click lands.
+_FRAME_ORIGIN = r'''
+  const frameOrigin = frame => {
+    if (!frame) return {left: 0, top: 0};
+    const box = frame.getBoundingClientRect();
+    if (Math.abs(box.width - frame.offsetWidth) > 1 || Math.abs(box.height - frame.offsetHeight) > 1) return null;
+    const style = getComputedStyle(frame);
+    return {left: box.left + frame.clientLeft + parseFloat(style.paddingLeft || 0),
+            top: box.top + frame.clientTop + parseFloat(style.paddingTop || 0)};
+  };
+'''
+
 # Where a control is on screen, for a real click (a checkout's and a sign-in's
 # controls answer scripts, not forms). `clear` empties a field first.
-_POINT = '(() => {' + _SAME + r'''
+_POINT = '(() => {' + _SAME + _FRAME_ORIGIN + r'''
+  // A control in a same-site frame (read with frames): its frame first, then it, and the click lands through both.
+  const doc = el.ownerDocument;
+  const frame = doc !== document ? (doc.defaultView && doc.defaultView.frameElement) : null;
+  if (doc !== document && !frame) return 'gone';
+  if (frame) frame.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
   el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
   const r = el.getBoundingClientRect();
-  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const fr = frameOrigin(frame);
+  if (!fr) return 'covered';   // a scaled or transformed frame: the click would not land where it is checked
+  const lx = r.left + r.width / 2, ly = r.top + r.height / 2;
+  const x = lx + fr.left, y = ly + fr.top;
+  if (frame && document.elementFromPoint(x, y) !== frame) return 'covered';
   // What a click there would really hit: a banner or a widget over it is not this control.
-  const hit = document.elementFromPoint(x, y);
+  const hit = doc.elementFromPoint(lx, ly);
   if (!hit || !(hit === el || el.contains(hit) || (hit.closest && hit.closest('label') && el.labels &&
       [...el.labels].includes(hit.closest('label'))))) return 'covered';
   // Inside this control, another button or link would take the click (a tab or a row that holds the final button).
@@ -221,11 +258,21 @@ _POINT = '(() => {' + _SAME + r'''
 
 # Where a control is on screen, for a picture of it. 'secret' when a password, a one-time code or a card
 # field is on screen: those are never pictured.
-_BOX = '(() => {' + _SAME + r'''
+_BOX = '(() => {' + _SAME + _FRAME_ORIGIN + r'''
   const vv = window.visualViewport;
   if (vv && Math.abs(vv.scale - 1) > 0.01) return 'zoomed';
-  if (__SCROLL__) el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
-  for (const field of document.querySelectorAll('input')) {
+  const doc = el.ownerDocument;
+  const frame = doc !== document ? (doc.defaultView && doc.defaultView.frameElement) : null;
+  if (__SCROLL__) {
+    if (frame) frame.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+    el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+  }
+  const docs = [document];
+  for (const f of document.querySelectorAll('iframe')) {
+    try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {}
+  }
+  const fields = docs.flatMap(d => [...d.querySelectorAll('input')]);
+  for (const field of fields) {
     const r = field.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth)) continue;
     const type = (field.getAttribute('type') || '').toLowerCase();
@@ -233,7 +280,9 @@ _BOX = '(() => {' + _SAME + r'''
     if (type === 'password' || auto.includes('one-time-code') || auto.startsWith('cc-')) return 'secret';
   }
   const r = el.getBoundingClientRect();
-  return {x: r.left, y: r.top, w: r.width, h: r.height, vw: innerWidth, vh: innerHeight};
+  const fr = frameOrigin(frame);
+  if (!fr) return 'zoomed';
+  return {x: r.left + fr.left, y: r.top + fr.top, w: r.width, h: r.height, vw: innerWidth, vh: innerHeight};
 })()'''
 PICTURE_WIDTH = 1280   # wide enough to read a checkout's small print
 PICTURE_SECONDS = 5    # a picture is a help: never worth a step's time
@@ -241,7 +290,11 @@ PICTURE_SECONDS = 5    # a picture is a help: never worth a step's time
 # After the click that focuses a field: it, and nothing else, has the focus (and a password goes only into a password field).
 _FOCUSED = r'''(() => {
   const el = (globalThis.picked || [])[__REF__];
-  return !!el && document.activeElement === el && (!__SECRET__ || el.type === 'password');
+  if (!el) return false;
+  const doc = el.ownerDocument;
+  const frame = doc !== document ? (doc.defaultView && doc.defaultView.frameElement) : null;
+  return doc.activeElement === el && (doc === document || (!!frame && document.activeElement === frame)) &&
+    (!__SECRET__ || el.type === 'password');
 })()'''
 
 _SEARCH = '(() => {' + _SAME + r'''
@@ -289,8 +342,23 @@ _CHOOSE = '(() => {' + _SAME + r'''
 })()'''
 
 
+# A date or time field the phone draws itself (input type=date/time): keys never reach it, its value does.
+_DATED = '(() => {' + _SAME + r'''
+  if (el.tagName !== 'INPUT' || el.disabled || el.readOnly) return 'not_a_field';
+  const type = (el.type || '').toLowerCase();
+  const value = __TEXT__;
+  const shape = {date: /^\d{4}-\d{2}-\d{2}$/, time: /^\d{2}:\d{2}$/, 'datetime-local': /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/,
+                 month: /^\d{4}-\d{2}$/}[type];
+  if (!shape || !shape.test(value)) return 'not_a_date_field';
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, value);
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return el.value === value ? '' : 'refused_by_page';
+})()'''
+
+
 def _script(template, **values):
-    values = {'MAX_ELEMENTS': MAX_ELEMENTS, 'MAX_TEXT': MAX_TEXT, 'MAX_LABEL': MAX_LABEL, **values}
+    values = {'MAX_ELEMENTS': MAX_ELEMENTS, 'MAX_TEXT': MAX_TEXT, 'MAX_LABEL': MAX_LABEL, 'FRAMES': False, **values}
     # One pass: a page's words that look like a slot ("__URL__") are never filled in.
     return re.sub(r'__([A-Z]+(?:_[A-Z]+)*)__',
                   lambda slot: json.dumps(values[slot.group(1)]) if slot.group(1) in values else slot.group(0),
@@ -325,9 +393,10 @@ class Reader:
         self._context = self.page.call(
             'Page.createIsolatedWorld', {'frameId': frame, 'worldName': WORLD})['executionContextId']
 
-    def read(self) -> Snapshot:
+    def read(self, frames=False) -> Snapshot:
+        """The page. `frames`: same-site frames' controls too (a reservation's seat map), as part of the page."""
         self._world()
-        data = self._run(_script(_READ))
+        data = self._run(_script(_READ, FRAMES=bool(frames)))
         if not isinstance(data, dict):
             raise CdpError('page could not be read')
         self._url = data.get('url') or ''
@@ -435,6 +504,10 @@ class Reader:
         # JSON shown as a page opens with {" or [{ / [" / [1: "[Promoção] Frete" is text.
         bare_json = re.match(r'\s*(\{\s*["}]|\[\s*([\[{"\]\d-]|true|false|null))', start)
         return content_type == 'text/html' and not bare_json and not error
+
+    def set_date(self, element, value) -> str:
+        """'' when a date/time field the phone draws itself now holds `value` (2026-12-10, 21:00), else why not."""
+        return self._act(_DATED, element, TEXT=value)
 
     def choose(self, element, text) -> str:
         """'' when the option of that <select> whose words are `text` was chosen, else why not."""

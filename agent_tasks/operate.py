@@ -365,6 +365,11 @@ def checkout(step, browser, reader, seen):
     step.operating = True
     after = ordered(task)
     seen.look = reader.picture   # what the second readers see: the page, with the control boxed
+    if getattr(task, 'kind', 'buy') == 'reserve' and (task.order or {}).get('guest_typed'):
+        # A booking paid now (reserve.pay): her details may be on its pages; no model reads them.
+        from .reserve import _hide
+        _hide(seen, task)
+        seen.look = None
     if not ordering(task) and task.phase != 'paying':   # a Venezuelan store being paid keeps its phase
         try:
             # Nobody is asked to approve an order they could not pay here.

@@ -228,9 +228,17 @@ def task_type(task):
             reason = 'approve_manual'   # the card they confirm on says they pay it themselves
         if reason == 'address' and not (task.order or {}).get('addresses'):
             reason = 'address_new'   # none saved at the store: the card asks for a new one
+        if getattr(task, 'kind', 'buy') == 'reserve' and reason in ('approve', 'approve_manual', 'subscribe'):
+            reason = {'approve': 'approve_booking', 'approve_manual': 'approve_booking_manual',
+                      'subscribe': 'subscribe_booking'}[reason]   # a booking is said as one
+        if getattr(task, 'kind', 'buy') == 'reserve' and reason == 'act' \
+                and ((task.order or {}).get('request') or {}).get('kind') in ('book', 'guest'):
+            reason = 'guest' if task.order['request']['kind'] == 'guest' else (
+                'book_again' if (task.order or {}).get('submitted') else 'book')
         message = notes.say(notes.NEEDS_PERSON.get(reason, notes.NEEDS_PERSON['choice']), task).replace(
             '{step}', str(((task.order or {}).get('ask_step') or {}).get('label') or '')[:80]).replace(
-            '{what}', str(((task.order or {}).get('request') or {}).get('what') or '')[:120])
+            '{what}', str(((task.order or {}).get('request') or {}).get('what') or '')[:160]).replace(
+            '{button}', str((task.order or {}).get('booked_button') or '')[:60])
         if task.reason in ('approve', 'subscribe'):
             message += notes.breakdown_text(task.order)   # what the total is made of: today's app shows this text
     elif task.state == 'payment_ready' and task.reason == 'manual':

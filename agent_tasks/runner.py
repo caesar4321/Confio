@@ -433,7 +433,8 @@ class Step:
                                  f'set that quantity and add it to the cart, then '
                                  f'{"next_product" if left else "go to the cart"}')
         reader = pages.Reader(browser)
-        seen = reader.read()
+        from . import reserve as reserving
+        seen = reader.read(frames=reserving.reserving(task))
         self.seen_url = seen.url
         from . import operate
         inside = sites.within(seen.url, task.site)
@@ -472,8 +473,9 @@ class Step:
         from . import manage, reserve
         if manage.managing(task):
             return manage.step(self, browser, reader, seen)   # an order already placed
-        if reserve.reserving(task):
+        if reserve.reserving(task) and not operate.ordered(task):
             return reserve.step(self, browser, reader, seen)  # a room, a table, a seat: no card
+        # A booking paid now (reserve.pay) goes on as an order: its payment page, read and paid.
         if guard.is_checkout(seen) or operate.ordering(task):
             return operate.checkout(self, browser, reader, seen)
         name, args = agent.decide(task, seen, self.meter)

@@ -402,7 +402,8 @@ def approve(account, user, task_id, total=None, address=None):
         # order card follows with who pays and the balance: this tap approves nothing.
         if not subscribed(user):
             raise TaskRefused('subscribe')
-        entry = {'did': 'the person has Cuenta inteligente now', 'result': 'call ready_to_order again'}
+        again = 'ready_to_pay' if getattr(task, 'kind', 'buy') == 'reserve' else 'ready_to_order'
+        entry = {'did': 'the person has Cuenta inteligente now', 'result': f'call {again} again'}
         return _answered(account, user, task_id, 'subscribe',
                          history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
     order = dict(task.order or {})
@@ -417,7 +418,8 @@ def approve(account, user, task_id, total=None, address=None):
     # Bound to that item, that total, that button, on that page; used once (operate._order).
     order['approved'] = {key: order.get(key) for key in ('total', 'button', 'page', 'item', 'address')}
     order['approved']['manual'] = bool(order.get('manual'))   # who pays it, as their card said
-    entry = {'did': 'the person approved the order', 'result': 'call ready_to_order again: it is pressed for you'}
+    again = 'ready_to_pay' if getattr(task, 'kind', 'buy') == 'reserve' else 'ready_to_order'
+    entry = {'did': 'the person approved the order', 'result': f'call {again} again: it is pressed for you'}
     return _answered(account, user, task_id, 'approve', order=order,
                      history=[*(task.history or []), entry][-runner.Step.HISTORY_KEPT:])
 

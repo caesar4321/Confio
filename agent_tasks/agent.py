@@ -392,6 +392,16 @@ RESERVE_TOOLS = [
                            'dates or time, how many people and the price and how it is paid, as the page shows '
                            'them. The person approves it first; if <done> says they approved, call it again and '
                            'it is pressed for you.', {'ref': _REF, 'what': _TEXT}),
+    _tool('ready_to_pay', 'The booking must be paid now, and <pay> names how Confío pays on this site: that way is '
+                          'selected (never a card) and the button that books and pays is on this page. Name it (you '
+                          'cannot press it): its number, what it books in Spanish (place, room/seat, dates or time, '
+                          'people) and the whole total as the page writes it. The person approves it first; if '
+                          '<done> says they approved, call it again and it is pressed for you; then find the page '
+                          'that shows how to pay.', {'ref': _REF, 'what': _TEXT, 'total': _TEXT}),
+    _tool('cannot_pay', 'The booking must be paid in a way Confío cannot use here (a card, or <pay> is "none" and '
+                        'it must be paid now). List in Spanish the two or three best options you found, each with '
+                        'its name and price as the page shows them, in one to three sentences; nothing is booked.',
+          {'text': _TEXT}),
     _tool('answer', 'The reservation was made and the page shows its confirmation, or there is something the '
                     'person must choose or know first (for example the options available when <goal> does not '
                     'say which one). Say it in one to three short Spanish sentences, only what this page shows.',
@@ -414,12 +424,19 @@ How to work:
 - Search on the site with the place, dates or time and number of people of <goal>: type them with type, choose
   them with choose, or press them in its calendar and counters. If <goal> lacks a date, a time or how many
   people and the site needs it, call answer asking for exactly that.
+- Dates: a date field of the phone itself (its type is date) takes the date typed as 2026-12-10 and a time
+  field as 21:00. Many other sites ignore a typed date. Open the calendar, move month by month with its next/previous arrow
+  ("›", "Próximo mês", "Siguiente") until the month of <goal> shows, and press the day. Check the dates the
+  results show; if they are not those of <goal>, fix them before going on (a results page has its own date
+  tabs or arrows: press the right day there). Never give up over a date before trying its calendar.
 - Pick what matches <goal> best. If <goal> names one place, book that one. If it only describes what they want
   and several options fit, call answer with the two or three best (name, price for the whole stay or visit,
   what is included) and stop: the person will choose.
-- Only options that need no card at all: "pagar en el alojamiento", "sin tarjeta", "reserva sin pago", a
-  restaurant table, a request to book. Prefer them. If every way to book asks for a card (even as a guarantee)
-  or a payment now, call give_up with needs_card.
+- Payment. Prefer what needs no payment now and no card: "pagar en el alojamiento", "sin tarjeta", "reserva
+  sin pago", a restaurant table, a request to book; then use ready_to_book. If it must be paid now and <pay>
+  names a way (Pix, transferencia SPEI, QR), choose exactly that way on the site, never a card, and use
+  ready_to_pay. If it must be paid with a card (even as a guarantee) or <pay> is "none", call cannot_pay with
+  the best options and their prices: the person can book them herself.
 - When the form asks for the guest (name, e-mail, phone, document, birth date, nationality, address, city,
   state, postal code, country), call fill_guest with all its fields at once; never type those yourself. A field
   fill_guest refused because Confío does not have it: if the site requires it, call give_up with cannot_do. If it asks for something Confío does not have (another guest's
@@ -428,6 +445,7 @@ How to work:
 - When the button that makes the reservation is on the page, call ready_to_book with it; never press it. After
   the person approved and it was pressed, read the confirmation and call answer with its number or code and
   what was booked.
+- A page with no controls or no text yet is still loading: call wait (a few times) before anything else.
 - If an action was refused, do something different; do not repeat it. Elements are numbered afresh every step."""
 
 
@@ -440,7 +458,9 @@ def reserve(task, page, meter):
     seen = redact(f'address: {_bare_url(page.url)}\ntitle: {page.title}\n\n{text}\n\n'
                   f'elements:\n{_elements(page)[:MAX_ELEMENTS_CHARS]}').replace('<', '‹')
     done = '\n'.join(f"- {entry.get('did')}: {entry.get('result')}" for entry in (task.history or [])[-16:])
-    content = (f'<site>{task.site}</site>\n<goal>{redact(task.goal)}</goal>\n'
+    from .reserve import payable_rail
+    rail = payable_rail(task)
+    content = (f'<site>{task.site}</site>\n<pay>{rail.name if rail else "none"}</pay>\n<goal>{redact(task.goal)}</goal>\n'
                f'<done>\n{done.replace("<", "‹") or "- nothing yet"}\n</done>\n<page>\n{seen}\n</page>')
     system = RESERVE.replace('{today}', timezone.localdate().isoformat())
     return _call(conf.get('AGENT_TASKS_MODEL'), system=system, content=content, tools=RESERVE_TOOLS, meter=meter,

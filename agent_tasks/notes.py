@@ -21,6 +21,13 @@ NEEDS_PERSON = {
     'act': 'En {site} está lista tu solicitud: «{{what}}». ¿La envío?',
     # A reservation (reserve.py): the booking, and before it the guest's details, each approved first.
     'book': 'En {site} está lista tu reserva: «{{what}}». No pide tarjeta. ¿La confirmo?',
+    'approve_booking': ('Tu reserva en {site} está lista, a pagar con {pay}. Revísala en la tarjeta y confírmala: la '
+                        'hago y la pago yo.'),
+    'approve_booking_manual': ('Tu reserva en {site} está lista. Esta vez no puedo pagarla yo: cuando la haga, te '
+                               'muestro {qr} y la pagas tú desde tu banco con {pay}. Si puedes pagarla así, '
+                               'confírmala en la tarjeta.'),
+    'subscribe_booking': ('Tu reserva en {site} está lista. Para que la haga y la pague yo, activa Cuenta inteligente; '
+                          'después vuelve aquí y te la muestro para confirmarla.'),
     'book_again': ('Ya presioné «{{button}}» una vez en {site} y ahora pide confirmar otra vez: «{{what}}». Revisa que '
                    'no sea una segunda reserva. ¿La confirmo?'),
     'guest': 'Para reservar en {site} necesito escribir tus datos en su formulario (los ves en la tarjeta). ¿Los escribo?',
@@ -78,6 +85,16 @@ RESERVE_ENDED = 'No pude hacer la reserva en {site} y no reservé nada.'
 RESERVE_STOPPED = {
     'needs_card': ('{site} pide una tarjeta para esta reserva y yo no uso tarjetas, así que no reservé nada. Si '
                    'quieres, le escribo al lugar por WhatsApp para reservar sin tarjeta.'),
+    # Found, and Confío cannot pay it there (reserve.py cannot_pay): what it found, as with a store it cannot pay.
+    'options': ('Esto encontré en {site}: {{text}} Para reservar ahí hay que pagar de una forma que todavía no '
+                'puedo usar por ti (como una tarjeta), así que no reservé nada. Puedes reservarlo tú directamente en '
+                '{site} o, si quieres, le escribo al lugar por WhatsApp.'),
+    'no_rail': ('Encontré disponibilidad en {site}, pero todavía no puedo pagar reservas de {{country}}, así que no '
+                'reservé nada. Puedes reservarlo tú directamente en {site}.'),
+    'cannot_pay': 'Ahora no puedo pagar una reserva así desde tu cuenta, así que no reservé nada.',
+    # Paid now (reserve.pay): pressed, so a booking may exist and wait for its payment.
+    'unpaid': ('Hice la reserva en {site}, pero no pude preparar su pago desde aquí. Puede estar esperando el pago: '
+               'revísala en {site} o en tu correo antes de reservar otra vez.'),
     'request_unclear': ('Envié tu reserva en {site}, pero no alcancé a ver su confirmación. Revisa tu correo antes '
                         'de reservar otra vez.'),
     'declined': 'Listo, no reservé nada en {site}.',
@@ -141,6 +158,7 @@ def reason_text(text):
 AFTER_CHECKOUT = (' Si ya confirmaste el pedido, sigue en tus compras de {site}: para pagarlo, {paste}.')
 TASK_ACTION = {'type': 'task', 'label': 'Ver la compra'}
 PUSH = {'person': 'Tu compra te espera', 'payment': 'Revisa tu pago', 'check': 'Revisa tu compra'}
+PUSH_BOOKING = {'person': 'Tu reserva te espera', 'payment': 'Revisa el pago de tu reserva', 'check': 'Revisa tu reserva'}
 
 
 def balance_line(task):
@@ -170,6 +188,10 @@ def stopped_text(task, reason):
         submitted = (task.order or {}).get('submitted')
         if reason == 'answered':
             text = STOPPED['answered']
+        elif task.checkout_at:
+            text = RESERVE_STOPPED['unpaid']   # paid now and pressed: a booking may wait for its payment
+        elif reason == 'needs_card' and (task.order or {}).get('answer'):
+            text = RESERVE_STOPPED['options']
         elif submitted:
             text = RESERVE_STOPPED['request_unclear']   # sent: never "nothing was booked"
         else:
@@ -177,7 +199,8 @@ def stopped_text(task, reason):
             why = str((task.order or {}).get('why') or '') if reason in ('cannot_do', 'not_found') else ''
             if why:
                 text = text.rstrip(' .') + '. Motivo: ' + why.replace('{', '(').replace('}', ')') + '.'
-        return say(text, task).replace('{text}', str((task.order or {}).get('answer') or ''))
+        return say(text, task).replace('{text}', str((task.order or {}).get('answer') or '')).replace(
+            '{country}', COUNTRY_NAMES.get(task.country or '', 'ese país'))
     if getattr(task, 'kind', 'buy') == 'manage':
         text = STOPPED[reason] if reason in ('answered', 'declined', 'request_unclear') else MANAGE_ENDED
         if (task.order or {}).get('submitted') and reason not in ('answered', 'declined'):
@@ -364,7 +387,8 @@ def _push(task, body, kind):
         from notifications.models import NotificationType
         from notifications.utils import create_notification
         create_notification(
-            user=task.user, account=task.account, notification_type=NotificationType.SYSTEM, title=PUSH[kind],
+            user=task.user, account=task.account, notification_type=NotificationType.SYSTEM,
+            title=(PUSH_BOOKING if getattr(task, 'kind', 'buy') == 'reserve' else PUSH)[kind],
             message=body, data={'type': 'agent_task', 'task_id': str(task.internal_id), 'screen': 'AssistantThread'})
     except Exception as exc:  # noqa: BLE001
         logger.warning('agent task push was not sent: %s', type(exc).__name__)

@@ -1,6 +1,7 @@
 """A reservation (reserve.py): no card ever, the guest's details typed by code after the person approved them
 for that site, the booking pressed once after the person approved exactly it."""
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from agent_tasks import notes, reserve, service, stores
 from agent_tasks.tests.base import BASE, element, snap
@@ -26,6 +27,15 @@ class SearchableTests(SimpleTestCase):
         for value in ('4111 1111 1111 1111', '1234-5678', 'A1B2C3D4', '4111-11-1111 1111-11-1111'):
             self.assertEqual(reserve.searchable(value, 'reserva para 2 a1b2c3d4'), '', value)
         self.assertEqual(reserve.searchable('21hs', 'mesa a las 21'), '21hs')
+
+    def test_dates_and_times_in_the_form_a_phone_field_takes(self):
+        self.assertEqual(reserve.as_field_value('10/12/2026', 'date'), '2026-12-10')
+        self.assertEqual(reserve.as_field_value('2026-12-10', 'date'), '2026-12-10')
+        self.assertEqual(reserve.as_field_value('3-2-27', 'date'), '2027-02-03')
+        self.assertEqual(reserve.as_field_value('21h', 'time'), '21:00')
+        self.assertEqual(reserve.as_field_value('9:30', 'time'), '09:30')
+        for bad, kind in (('31/13/2026', 'date'), ('tomorrow', 'date'), ('25:00', 'time')):
+            self.assertEqual(reserve.as_field_value(bad, kind), '', bad)
 
     def test_guest_and_payment_fields_are_never_typed_by_the_model(self):
         for label, over in (('Correo electrónico', {}), ('Nombre', {}), ('Número de tarjeta', {}),
@@ -129,6 +139,19 @@ class ReserveTests(StepBase):
         self.assertIn('no reservé nada', notes.stopped_text(task, 'declined'))
         self.reader.type.assert_not_called()
 
+    def test_a_phone_date_field_gets_its_value_set(self):
+        self.reader.set_date.return_value = ''
+        page = snap('Data da ida', self.FORM, elements=[field('Data da ida', 0, 'date')])
+        self.reserve.return_value = ('type', {'ref': 0, 'text': '10/12/2026'})
+        task = self.step(self.task(), page)
+        self.reader.set_date.assert_called_once()
+        self.assertEqual(self.reader.set_date.call_args.args[1], '2026-12-10')
+        self.reader.type.assert_not_called()
+
+    def test_a_reservation_reads_the_sites_own_frames(self):
+        self.step(self.task(), snap('Escolha seu assento', self.FORM, elements=[]))
+        self.reader.read.assert_called_with(frames=True)
+
     def test_the_model_never_types_a_guest_field_itself(self):
         self.reserve.return_value = ('type', {'ref': 1, 'text': 'ana@example.com'})
         task = self.step(self.task(), self.guest_form())
@@ -185,6 +208,73 @@ class ReserveTests(StepBase):
         task = self.step(task, page)
         self.assertEqual((task.state, task.reason), ('needs_person', 'act'))
         self.reader.click.assert_not_called()
+
+    def test_a_booking_paid_now_goes_through_pix_like_an_order(self):
+        page = snap('Resumo da reserva Hotel Copacabana 3 a 6 fev 2 adultos Total R$ 600,00', self.FORM, elements=[
+            element('Pix', ref=0, role='radio', tag='div', checked=True), element('Confirmar e pagar', ref=1)])
+        self.reserve.return_value = ('ready_to_pay', {'ref': 1, 'what': 'Hotel Copacabana, 3 a 6 fev, 2 adultos',
+                                                      'total': 'R$ 600,00'})
+        task = self.step(self.task(), page)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'approve'))
+        self.assertIn('Tu reserva en', self.post.call_args.args[1])
+        self.reader.click.assert_not_called()
+        task = self.step(service.approve(self.account, self.user, task.internal_id), page)
+        self.reader.click.assert_called_once()
+        self.assertEqual((task.phase, task.order['amount']), ('ordered', '600.00'))
+        self.assertIsNotNone(task.checkout_at)
+        # From here it is an order: its payment page is found and read as any order's.
+        self.reserve.reset_mock()
+        self.step(task, page)
+        self.reserve.assert_not_called()
+        self.operate.assert_called()
+
+    def test_a_site_confio_cannot_pay_shows_the_options_and_stops(self):
+        task = self.task(country='', site='booking.com')
+        page = snap('Hotel A US$ 120 Hotel B US$ 150 Pagar ahora con tarjeta', 'https://booking.com/s', elements=[
+            element('Pagar ahora', ref=0)])
+        self.reserve.return_value = ('ready_to_pay', {'ref': 0, 'what': 'Hotel A', 'total': 'US$ 120'})
+        task = self.step(task, page)
+        self.assertIn('cannot_pay', task.history[-1]['result'])
+        self.reserve.return_value = ('cannot_pay', {'text': 'Hotel A por US$ 120 y Hotel B por US$ 150.'})
+        task = self.step(task, page)
+        self.assertEqual((task.state, task.reason), ('stopped', 'needs_card'))
+        said = notes.stopped_text(task, 'needs_card')
+        self.assertIn('Hotel A por US$ 120', said)
+        self.assertIn('reservarlo tú directamente', said)
+        self.reader.click.assert_not_called()
+
+    def test_options_after_a_press_never_say_nothing_was_booked(self):
+        task = self.task()
+        task.order = {'submitted': 1}
+        task.save()
+        self.reserve.return_value = ('cannot_pay', {'text': 'Hotel A por US$ 120.'})
+        task = self.step(task, snap('Hotel A US$ 120 tarjeta', self.FORM, elements=[]))
+        self.assertEqual(task.reason, 'request_unclear')
+        self.assertNotIn('no reservé nada', notes.stopped_text(task, task.reason))
+
+    def test_a_pix_page_is_never_booked_as_one_that_needs_no_payment(self):
+        page = snap('Pague com Pix R$ 600,00', self.FORM, elements=[
+            element('Reservar', ref=0), element('Pix', ref=1, role='radio', tag='div', checked=True)])
+        self.reserve.return_value = ('ready_to_book', {'ref': 0, 'what': 'Hotel'})
+        task = self.step(self.task(), page)
+        self.assertIn('ready_to_pay', task.history[-1]['result'])
+        task.delete()
+        # A footer that only says it accepts Pix is no payment due now.
+        self.judge.side_effect = None
+        self.judge.return_value = ('places_order', 'it books')
+        free = snap('Mesa para 2 sexta 20h. Aceitamos Pix', self.FORM, elements=[element('Solicitar reserva', ref=0)])
+        self.reserve.return_value = ('ready_to_book', {'ref': 0, 'what': 'Mesa para 2 sexta 20h'})
+        task = self.step(self.task(), free)
+        self.assertEqual((task.state, task.reason), ('needs_person', 'act'))
+
+    def test_after_the_pay_press_her_details_stay_hidden_from_the_order_readers(self):
+        task = self.task(phase='ordered', checkout_at=timezone.now())
+        task.order = {'guest_typed': ['email'], 'pressed': True}
+        task.save()
+        self.step(task, snap('Reserva de ana@example.com, pague com Pix', self.FORM, elements=[]))
+        shown = self.operate.call_args.args[1]
+        self.assertNotIn('ana@example.com', shown.text)
+        self.assertIsNone(shown.look)
 
     def test_a_card_on_the_page_stops_it_with_nothing_booked(self):
         self.judge.side_effect = None
