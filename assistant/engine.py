@@ -3124,7 +3124,7 @@ def _without_promises(reply):
         kept = [part for part in parts if not _CARD_PROMISE.search(part)]
         if len(kept) == len(parts):
             lines.append(line)
-        elif kept:
+        elif kept and not _LIST_MARK.match(' '.join(kept)):  # never a bare "2." left behind
             lines.append(' '.join(kept))
     return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
 
@@ -3157,6 +3157,95 @@ def _keep_card_promise(belt, result):
         kept = _without_promises(reply)
         if kept:
             result.reply = kept
+
+
+# "Puedes crear tu recarga aquí mismo en este formulario:" with no form under it
+# (Pedro, 2026-11-27, twice). A form the reply promises, said as one; or a reply
+# that ends on "aquí mismo:" with nothing after it.
+_FORM_PROMISE = re.compile(
+    r'(?i)\bformularios?\b[^.!?\n]{0,40}\b(?:de abajo|aqu[ií] abajo|m[aá]s abajo)\b'
+    r'|\ben\s+este\s+formulario\s*:'
+    r'|\bte\s+dej[oéa]\w*\s+(?:aqu[ií]\s+|abajo\s+)?(?:el|un)\s+formulario\b')
+_DANGLING = re.compile(r'(?i)(?:\baquí(?:\s+mismo|\s+abajo)?|\bformulario)\s*:$')
+_LIST_MARK = re.compile(r'^\s*(?:\d+[.)]|[-*•])\s*$')
+# Which form a promise means, by its words; only a form this person can be handed counts.
+_FORM_WORDS = (
+    ('topup', re.compile(r'(?i)\brecarg|\bdeposit')),
+    ('pagomovil_payment', re.compile(r'(?i)\b(?:envi|pag)\w*\b[^.!?\n]{0,40}\bpago\s+m[oó]vil\b')),
+    ('agenda_pagomovil', re.compile(r'(?i)\bagenda\b')),
+    ('investor_bio', re.compile(r'(?i)\bdescripci[oó]n\b')),
+    ('profile_name', re.compile(r'(?i)\bcambi\w*\s+(?:tu|su)\s+(?:nombre|apellido)\b')),
+)
+
+
+def _form_promises(reply, dangling_counts=True):
+    """The sentences of `reply` that promise a form: (line index, part index) pairs."""
+    lines = reply.split('\n')
+    last = max((i for i, line in enumerate(lines) if line.strip()), default=-1)
+    found = []
+    for i, line in enumerate(lines):
+        parts = re.split(r'(?<=[.!?])[ \t]+', line)
+        for j, part in enumerate(parts):
+            dangling = (dangling_counts and i == last and j == len(parts) - 1
+                        and _DANGLING.search(part.strip()) and not _CARD_PROMISE.search(part))
+            if _FORM_PROMISE.search(part) or dangling:
+                found.append((i, j))
+    return found
+
+
+def _keep_form_promise(belt, result):
+    """A reply that promises a form the turn never made. Code makes the one form
+    the promise names when this person can be handed it; otherwise the promise
+    is taken out of the reply."""
+    from . import here
+    from .confirm import busy
+
+    reply = result.reply or ''
+    if any(a.get('type') == 'form' for a in result.actions if isinstance(a, dict)):
+        return
+    # A card under the reply (any kind) keeps an "aquí mismo:"; only a form said by name is still unkept then.
+    found = _form_promises(reply, dangling_counts=not result.actions and not busy(result, count_writes=False))
+    if not found:
+        return
+    lines = reply.split('\n')
+    promised = ' '.join(re.split(r'(?<=[.!?])[ \t]+', lines[i])[j] for i, j in found)
+    # "¿Quieres recargar desde tu banco? Puedes hacerlo aquí mismo:": the form is offered just before, as a
+    # question. Never a plain sentence before it ("Tu recarga de ayer llegó."), which may be about anything.
+    before = ' '.join(part for part in (re.split(r'(?<=[.!?])[ \t]+', lines[i])[j - 1] for i, j in found if j > 0)
+                      if part.rstrip().endswith('?'))
+    # While the team has the case, no here tool runs (Toolbelt.call): no form either.
+    if not result.actions and not busy(result, count_writes=False) and not getattr(belt, 'waiting_for_team', False):
+        try:
+            offered = here.forms_for(belt.viewer, belt) if here.specs(belt.viewer, belt) else []
+        except Exception:  # noqa: BLE001 - no form then; the promise goes
+            logger.warning('Confio Assistant: forms unavailable for a promised form', exc_info=True)
+            offered = []
+        # Only the promise's own words pick the form: the rest of the reply may be about anything.
+        keys = [key for key, words in _FORM_WORDS if key in offered and words.search(promised)]
+        if not keys and before:
+            keys = [key for key, words in _FORM_WORDS if key in offered and words.search(before)]
+        if len(keys) == 1:
+            (key,) = keys
+            result.actions.append({'type': 'form', 'target': key, 'label': here.FORMS[key][0]})
+            result.tools.append({'name': 'ask_details:auto', 'ok': True, 'args': {'form': key}})
+            # A card it also promised won't come now (one thing under a reply): that promise goes.
+            if _CARD_PROMISE.search(reply):
+                kept = _without_promises(reply)
+                if kept:
+                    result.reply = kept
+            return
+    drop = set(found)
+    kept_lines = []
+    for i, line in enumerate(lines):
+        parts = re.split(r'(?<=[.!?])[ \t]+', line)
+        kept = [part for j, part in enumerate(parts) if (i, j) not in drop]
+        if len(kept) == len(parts):
+            kept_lines.append(line)
+        elif kept and not _LIST_MARK.match(' '.join(kept)):
+            kept_lines.append(' '.join(kept))
+    kept_reply = re.sub(r'\n{3,}', '\n\n', '\n'.join(kept_lines)).strip()
+    if kept_reply:
+        result.reply = kept_reply
 
 
 def _add_cards(belt, result):
@@ -3262,6 +3351,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
             done = _run_turn(belt, result, viewer, history, first_name=first_name, account_label=account_label,
                              country=country)
         _open_claimed_screen(belt, done)
+        _keep_form_promise(belt, done)
         _keep_card_promise(belt, done)
         return done
     except AssistantUnavailable as exc:
