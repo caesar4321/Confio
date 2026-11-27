@@ -2198,12 +2198,32 @@ class Toolbelt:
         'ask_my_mail', 'get_my_calendar',
     })
 
+    def _names_a_contact(self, query) -> bool:
+        """A contact's name she keeps in memory in a query that would leave for the web: every word of it, or any
+        word of four letters or more, glued or not. Refuses more than it must ("Farmacia Luis" blocks "farmacia"):
+        never leaks."""
+        from . import memory_rules
+
+        names = getattr(getattr(self, 'context', None), 'contact_names', ()) or ()
+        asked = memory_rules.words_of(query).split()
+        glued = ''.join(asked)
+        for name in names:
+            words = memory_rules.words_of(name).split()
+            # Glued only when long enough not to sit inside ordinary words ("Ana" is in "semana").
+            if words and (set(words) <= set(asked) or (len(words) > 1 and ''.join(words) in glued)
+                          or any(len(word) >= 4 and word in glued for word in words)):
+                return True
+        return False
+
     def search_web(self, query, language='español'):
         if _photo_seen_by_this_pass(self):
             return _NO_SEARCH_WITH_A_PHOTO
         if any(str(t.get('name', '')).split(':')[0] in self.PERSONAL_DATA_TOOLS for t in self.result.tools):
             return {'disponible': False, '_denied': True,
                     'motivo': 'No busco en internet en el mismo mensaje en que revisé tu cuenta. Pregúntamelo aparte.'}
+        if self._names_a_contact(query):
+            return {'disponible': False, '_denied': True,
+                    'motivo': 'No busco en internet a sus contactos. Busca solo la pregunta general.'}
         if market.clean_web_query(query) is None or language not in market.LANGUAGES:
             # Refused before a slot is claimed: a bad query never costs a search.
             return {'disponible': False, '_denied': True,

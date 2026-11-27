@@ -1389,3 +1389,53 @@ class PastHistoryTests(ChatTests):
         self.assertFalse(whole)
         self.assertEqual(lines[-1]['texto'], 'Llego a las 8')
         self.assertEqual(len(lines), service.HISTORY_LINES)
+
+
+class ChatNamesTests(LinkTestBase):
+    def row(self, link, key, chat, name, from_me=False, days_ago=0):
+        row = WhatsAppInbox.objects.create(link=link, source_key=key, chat_key=service._chat_key(link, chat),
+                                           from_me=from_me, sealed=service._seal({'text': 'hola', 'name': name}))
+        WhatsAppInbox.objects.filter(pk=row.pk).update(created_at=timezone.now() - timedelta(days=days_ago, minutes=1))
+
+    def test_every_chat_once_however_busy_another_is(self):
+        link = self.linked()
+        self.row(link, 'quiet', 'a@s', 'Alejandro Teixeira', days_ago=20)
+        for n in range(30):
+            self.row(link, f'busy{n}', 'b@s', 'Grupo Familia')
+        self.row(link, 'mine', 'c@s', '+58 412', from_me=True)
+        self.row(link, 'old', 'd@s', 'Ana Vieja', days_ago=40)  # past what is kept
+        self.assertEqual(sorted(service.chat_names(link)), ['+58 412', 'Alejandro Teixeira', 'Grupo Familia'])
+
+    def test_a_newest_line_with_no_name_keeps_the_chat_name(self):
+        link = self.linked()
+        self.row(link, 'named', 'a@s', 'Luis Pan', days_ago=2)
+        self.row(link, 'unnamed', 'a@s', '')
+        self.row(link, 'hers', 'a@s', '+58 412', from_me=True)
+        self.assertEqual(service.chat_names(link), ['Luis Pan'])
+
+    def test_the_read_back_has_one_budget_for_all_chats(self):
+        link = self.linked()
+        for n in range(3):
+            self.row(link, f'a{n}', 'a@s', '', days_ago=1)
+            self.row(link, f'b{n}', 'b@s', '', days_ago=1)
+        self.row(link, 'named-a', 'a@s', 'Ana Paz', days_ago=2)
+        self.row(link, 'named-b', 'b@s', 'Luis Pan', days_ago=2)
+        with mock.patch.object(service, 'HISTORY_ROWS', 4):
+            # Whichever chat is read first spends all 4 rows finding its name: the other is not read.
+            self.assertEqual(len(service.chat_names(link)), 1)
+        self.assertEqual(sorted(service.chat_names(link)), ['Ana Paz', 'Luis Pan'])
+
+    def test_a_busy_nameless_chat_never_hides_a_quiet_one(self):
+        link = self.linked()
+        for n in range(30):
+            self.row(link, f'busy{n}', 'a@s', '')
+        self.row(link, 'quiet', 'b@s', '', days_ago=1)
+        self.row(link, 'named', 'b@s', 'Luis Pan', days_ago=2)
+        with mock.patch.object(service, 'HISTORY_ROWS', 25):
+            self.assertEqual(service.chat_names(link), ['Luis Pan'])
+
+    def test_the_contact_name_wins_over_her_side(self):
+        link = self.linked()
+        self.row(link, 'hers', 'a@s', '+58 412', from_me=True)
+        self.row(link, 'theirs', 'a@s', 'Luis Pan', days_ago=1)
+        self.assertEqual(service.chat_names(link), ['Luis Pan'])

@@ -1760,6 +1760,29 @@ class ContactRulesTests(SimpleTestCase):
         self.assertLessEqual(len(value), 24)
         self.assertEqual(rules.contact_parts(self.SAID, value), ('Alejandro teixeira', 'el de la Panadería'))
 
+    def test_a_name_all_address_excuses_nothing(self):
+        said = 'Recuerda que Barrio Sector es mi vecina'
+        self.assertEqual(rules.contact_value(said, 'Barrio Sector', 'mi vecina'), '')
+        self.assertFalse(rules.maybe_contact(said))
+        self.assertTrue(rules.contact_value('Recuerda que Ana Torres es mi vecina', 'Ana Torres', 'mi vecina'))
+        for name in ('Torres', 'Vila', 'Torres Vila'):  # surnames, not addresses
+            self.assertTrue(rules.contact_value(f'Recuerda que {name} es mi contador', name, 'mi contador'), name)
+
+    def test_names_that_order_or_claim_authority_in_portuguese_or_english(self):
+        for name in ('Diretor Silva', 'Police Ana', 'Envie Tudo', 'Forget Rules', 'Supervisor Juan', 'Receita Federal'):
+            said = f'Recuerda que {name} es mi vecina'
+            self.assertEqual(rules.contact_value(said, name, 'mi vecina'), '', name)
+        self.assertTrue(rules.contact_value('Recuerda que Dian Pérez es mi vecina', 'Dian Pérez', 'mi vecina'))
+
+    def test_portuguese_hearsay_and_doubt(self):
+        for said in ('Lembra que acho que Ana Souza é minha vizinha', 'Lembra que dizem que Ana Souza é minha vizinha',
+                     'Lembra que ouvi que Ana Souza é minha vizinha', 'Lembra que Ana Souza é minha vizinha, acho',
+                     'Lembra que Ana Souza é minha vizinha, né'):
+            self.assertEqual(rules.contact_value(said, 'Ana Souza', 'minha vizinha'), '', said)
+        self.assertTrue(rules.contact_value('Lembra que Ana Souza é minha vizinha', 'Ana Souza', 'minha vizinha'))
+        self.assertTrue(rules.contact_value('Oi, lembra que Ana Souza é minha vizinha', 'Ana Souza', 'minha vizinha'))
+        self.assertEqual(rules.contact_value('Oí que Ana Pérez es mi vecina', 'Ana Pérez', 'mi vecina'), '')
+
     def test_only_what_is_in_their_message(self):
         self.assertEqual(rules.contact_value(self.SAID, 'Mallory', 'el de la Panadería'), '')
         self.assertEqual(rules.contact_value(self.SAID, 'Alejandro', 'el que cobra todo'), '')
@@ -2004,6 +2027,46 @@ class ContactMemoryTests(Base):
         self.ask(self.SAID, provider)
         self.assertEqual(self.contacts(), [])
         self.assertIn(memory.NOTE_NOT_IN_WHATSAPP, provider.turns()[0]['instructions'])
+
+    def test_a_business_account_is_told_contacts_are_personal(self):
+        self.in_whatsapp.return_value = False
+        with patch('assistant.memory._personal', return_value=False):
+            provider = FakeProvider(self.contact_reply(), answer())
+            self.ask(self.SAID, provider)
+        self.assertEqual(self.contacts(), [])
+        self.assertIn(memory.NOTE_CONTACTS_PERSONAL_ONLY, provider.turns()[0]['instructions'])
+
+    def test_checked_against_the_names_of_her_chats(self):
+        # memory.whatsapp_link_of is patched for every test here; the real in_whatsapp reads chat_names.
+        with patch('whatsapp_link.service.chat_names', return_value=['Alejandro Teixeira Pan', 'Grupo']):
+            self.assertTrue(self.REAL_IN_WHATSAPP(self.scope(), 'Alejandro teixeira'))
+            self.assertFalse(self.REAL_IN_WHATSAPP(self.scope(), 'Alejandra'))
+
+    def test_a_contact_name_never_goes_to_the_web(self):
+        self.save()
+        belt = engine.Toolbelt(engine.Viewer(user=self.user, account=self.account, account_type='personal',
+                                             business_id=None, is_business_owner=False, tz=ZoneInfo('UTC')),
+                               engine.TurnResult(reply=''), analyses_left=0)
+        belt.result.tools = []
+        belt.context = SimpleNamespace(contact_names=('Alejandro teixeira',))
+        with patch('assistant.market.web_search') as search:
+            for query in ('horario panadería Alejandro Teixeira Caracas', 'horario Panadería Teixeira Caracas',
+                          'AlejandroTeixeira panadería'):
+                self.assertTrue(belt.search_web(query).get('_denied'), query)
+            search.assert_not_called()
+        self.assertFalse(belt._names_a_contact('horario panadería Caracas'))
+        belt.context = SimpleNamespace(contact_names=('Ana Paz',))  # short words: the whole name still counts
+        self.assertTrue(belt._names_a_contact('Ana Paz panadería Maracaibo'))
+        self.assertTrue(belt._names_a_contact('AnaPaz panadería'))
+        self.assertFalse(belt._names_a_contact('paz mundial'))
+        belt.context = SimpleNamespace(contact_names=('Ana',))  # one short name: only as a word of its own
+        self.assertTrue(belt._names_a_contact('Ana horario'))
+        self.assertFalse(belt._names_a_contact('precio del dólar esta semana'))
+
+    def test_the_turn_knows_contact_names(self):
+        self.save()
+        found = context_rules.load(self.thread, [self.say('¿Qué me dijo?')], remembering=True)
+        self.assertEqual(found.contact_names, ('Alejandro teixeira',))
 
     def test_with_no_whatsapp_linked_it_is_not_there(self):
         self.link_patch.stop()  # the real lookup: this person has no WhatsApp linked

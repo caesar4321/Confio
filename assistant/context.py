@@ -107,6 +107,7 @@ class TurnContext:
     raw_quotes: list = field(default_factory=list)
     # Who her contacts are, in the instructions of every pass (begin leaves it out for who can be operated for).
     contacts: str = ''
+    contact_names: tuple = ()
     # Where the person's forget stood when the turn began (memory.after_reply).
     forgot: tuple | None = None
     used_data: bool = False
@@ -209,6 +210,7 @@ def load(conversation, history, memory_note='', answering=None, *, remembering=F
                 notes=state.note + memory_note,
                 style=state.style,
                 contacts=state.contacts,
+                contact_names=state.contact_names,
                 extra=not in_view <= {m.id for m in plain},
                 topics=state.topics,
                 quotes=state.older_quotes(in_view),

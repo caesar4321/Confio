@@ -755,6 +755,44 @@ def _excerpt(text, folded, where, terms):
     return ('…' if start else '') + text[start:start + HISTORY_CHARS] + ('…' if start + HISTORY_CHARS < len(text) else '')
 
 
+CHAT_NAME_SHALLOW = 20  # lines of each nameless chat read before any is read deeper
+
+
+def chat_names(link) -> list:
+    """The name of each chat kept for her (HISTORY_DAYS), as history() calls it: the contact's newest name, else
+    her own side's. Two rows a chat, however many messages it or any other chat holds. Unsealed for this answer,
+    stored nowhere else."""
+    since = _history_since()
+    rows = (WhatsAppInbox.objects.filter(link=link, created_at__gte=since)
+            .order_by('chat_key', 'from_me', '-created_at', '-pk').distinct('chat_key', 'from_me')
+            .values_list('chat_key', 'from_me', 'sealed'))
+    names, nameless = {}, set()
+    for chat_key, from_me, sealed in rows:
+        name = _unseal(sealed, {}).get('name') or ''
+        if name and (not from_me or chat_key not in names):
+            names[chat_key] = name
+        elif not name and not from_me:
+            nameless.add(chat_key)
+    # Like history(): the newest of the contact's lines that carries a name, not just the newest line, read back
+    # as far as history() reads: HISTORY_ROWS for all of them together.
+    # A few lines of every chat first, then deep: one busy chat never spends it all.
+    budget = HISTORY_ROWS
+    for depth in (CHAT_NAME_SHALLOW, None):
+        for chat_key in sorted(nameless):
+            if budget <= 0:
+                break
+            older = (WhatsAppInbox.objects.filter(link=link, chat_key=chat_key, from_me=False, created_at__gte=since)
+                     .order_by('-created_at', '-pk').values_list('sealed', flat=True)[:min(budget, depth or budget)])
+            for sealed in older.iterator(chunk_size=HISTORY_PAGE):
+                budget -= 1
+                name = _unseal(sealed, {}).get('name') or ''
+                if name:
+                    names[chat_key] = name
+                    nameless.discard(chat_key)
+                    break
+    return list(names.values())
+
+
 def history(link, *, chat=None, words=None, days=None) -> tuple:
     """What she asks about her own kept messages (HISTORY_DAYS, both sides): of one chat or of all, holding the
     words she asks about, oldest first: ([{chat, de, texto, at}], whole). `whole` is False when what is told is not

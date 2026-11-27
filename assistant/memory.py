@@ -222,6 +222,8 @@ class TurnState:
     style: str = ''
     # Who her contacts are (CONTACTS_NOTE): apart, so context.begin can leave it out.
     contacts: str = ''
+    # Their names, which no web search carries (engine.Toolbelt.search_web).
+    contact_names: tuple = ()
 
     @property
     def forgot(self):
@@ -319,6 +321,7 @@ def state_for_turn(conversation, history, *, remembering=False) -> TurnState:
         note=note,
         style=style,
         contacts=contacts_note,
+        contact_names=tuple(name for name, _ in contacts),
     )
 
 
@@ -369,6 +372,11 @@ def remember(scope, items, source_message):
     """Save values from the lists. Returns the labels of those that are saved now."""
     pairs = [value for kind, value in items if kind == rules.CONTACT]
     checked, missing = _checked_contacts(scope, pairs, source_message) if pairs else ([], False)
+    try:
+        personal = not missing or _personal(scope)
+    except Exception as exc:  # noqa: BLE001 - unknown: the general note
+        logger.warning('assistant memory: account check failed (%s)', type(exc).__name__)
+        personal = True
     with transaction.atomic():
         row = _locked(scope)
         # A forget or wipe that landed while the request was being read wins.
@@ -391,12 +399,14 @@ def remember(scope, items, source_message):
         now_saved = {(fact.kind, fact.value) for fact in live_facts(row)}
         out = Saved([rules.label(kind, value) for kind, value in asked if (kind, value) in now_saved] + saved_contacts)
         out.not_in_whatsapp = missing and not saved_contacts
+        out.not_personal = out.not_in_whatsapp and not personal
         return out
 
 
 class Saved(list):
     """What remember() saved; `not_in_whatsapp` when a contact was asked and none is a chat of hers."""
     not_in_whatsapp = False
+    not_personal = False  # and it was asked from a business or other non-personal account
 
 
 _DETERMINER = re.compile(r'^(?:(?:a|o|as|os) )?(?:el|la|los|las|mi|mis|un|una|o|a|os|as|meu|minha|meus|minhas|'
@@ -418,17 +428,22 @@ class WhatsAppCheckFailed(Exception):
     """Her WhatsApp could not be read now: nothing is saved, and she is told to try again."""
 
 
+def _personal(scope) -> bool:
+    """Her personal account: the only one whose WhatsApp a contact is checked against."""
+    from users.models import Account
+
+    if scope.business_id is not None:
+        return False
+    return scope.account_id is None or Account.objects.filter(pk=scope.account_id, account_type='personal').exists()
+
+
 def whatsapp_link_of(scope):
     """Her WhatsApp as the WhatsApp tool takes it (whatsapp_link.assistant_tool._link): linked, ready, its note
     written, on her personal account. None otherwise."""
-    from users.models import Account
     from whatsapp_link import service as whatsapp
     from whatsapp_link.models import WhatsAppLink
 
-    if scope.business_id is not None or not whatsapp.enabled():
-        return None
-    if scope.account_id is not None and not Account.objects.filter(pk=scope.account_id,
-                                                                     account_type='personal').exists():
+    if not whatsapp.enabled() or not _personal(scope):
         return None
     link = WhatsAppLink.objects.filter(user_id=scope.user_id, state=WhatsAppLink.State.LINKED).exclude(
         reason='unlinking').first()
@@ -446,12 +461,12 @@ def in_whatsapp(scope, name) -> bool:
         link = whatsapp_link_of(scope)
         if link is None:
             return False
-        lines, _ = whatsapp.history(link, chat=name)
+        chats = whatsapp.chat_names(link)
     except Exception as exc:  # noqa: BLE001 - by type: an error can quote a chat
         logger.warning('assistant memory: WhatsApp check failed (%s)', type(exc).__name__)
         raise WhatsAppCheckFailed from exc
     wanted = set(rules.words_of(name).split())
-    return any(wanted <= set(rules.words_of(line.get('chat')).split()) for line in lines)
+    return any(wanted <= set(rules.words_of(chat).split()) for chat in chats)
 
 
 def _checked_contacts(scope, pairs, source_message):
@@ -721,6 +736,9 @@ NOTE_NOT_IN_WHATSAPP = ('\nCon este mensaje NO se guardó nada en memoria: solo 
                         'WhatsApp vinculado a Confío, y ese no apareció en sus chats de los últimos 30 días. Díselo con '
                         'amabilidad en una frase; si no vinculó su WhatsApp, puede hacerlo en Confío IA, en «WhatsApp, '
                         'correo y calendario». No digas que lo recordarás.\n')
+NOTE_CONTACTS_PERSONAL_ONLY = ('\nCon este mensaje NO se guardó nada en memoria: quién es un contacto solo se recuerda '
+                               'en su cuenta personal, con su WhatsApp vinculado a Confío. Díselo con amabilidad en '
+                               'una frase y no digas que lo recordarás.\n')
 NOTE_NOT_KEPT = ('\nCon este mensaje NO se guardó nada en memoria: no se guardan claves, documentos, números, '
                  'direcciones, montos ni temas sensibles. Si pidió recordarlo, díselo con amabilidad, en una frase, y no '
                  'digas que lo recordarás.\n')
@@ -877,7 +895,8 @@ def handle_message(conversation, message, text):
             items = [item for item in items if item[0] == rules.CONTACT]
         saved = remember(scope, items, message) if action == 'remember' else []
         if not saved and getattr(saved, 'not_in_whatsapp', False):
-            turn.note, turn.line = NOTE_NOT_IN_WHATSAPP, unknown
+            turn.note = NOTE_CONTACTS_PERSONAL_ONLY if getattr(saved, 'not_personal', False) else NOTE_NOT_IN_WHATSAPP
+            turn.line = unknown
             return turn
         if saved and also_asks:
             turn.note, turn.line, turn.saved = NOTE_SAVED, 'saved', list(saved)

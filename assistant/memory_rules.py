@@ -427,6 +427,14 @@ _NAME_STAFF = _any(
     r'developers?', r'owner', r'kyc', r'didit', r'koywe', r'infinia', r'asist\w*', r'admi', r'sys', r'payments?',
     r'wallets?', r'billetera\w*', r'transferencia\w*', r'pagador\w*', r'cobranza\w*', r'cobrar', r'remesa\w*',
     r'envios?', r'ejecuta', r'sigue', r'dale', r'ok', r'si', r'dile',
+    # orders in Portuguese and English
+    r'envie', r'mande', r'transfira', r'aprove', r'esqueca', r'apague', r'responda', r'fale', r'diga', r'abra',
+    r'compartilhe', r'execute', r'siga', r'aceite', r'forget', r'delete', r'reply', r'respond', r'transfer', r'tell',
+    r'say', r'share', r'follow', r'accept', r'obey', r'always', r'ignore', r'confirme', r'autorize',
+    # a voice with authority
+    r'policia', r'police', r'gobierno', r'governo', r'government', r'ministerio', r'fiscalia', r'tribunal',
+    r'juzgado', r'sunat', r'receita', r'manager', r'director\w*', r'diretor\w*', r'supervisor\w*',
+    r'presidente', r'official', r'officer', r'authority', r'autoridad\w*', r'autoridade\w*', r'legal', r'juridico',
     # a negation: "Juan no es mi jefe" is no description of Juan
     r'no', r'nao', r'not', r'ya', r'tampoco', r'jamas', r'never',
 )
@@ -468,13 +476,20 @@ def _contact_label_ok(label) -> bool:
 
 _BEFORE_NAME = re.compile(r"(?:^|\b(?:que|q|that)\s+(?:(?:el|la|o|a)\s+)?|[,;]\s*|\s(?:y|e|and)\s+)$", re.IGNORECASE)
 _NEGATION = _any(r'no', r'nao', r'not', r'nunca', r'jamas', r'tampoco', r'never', r'mentira', r'falso', r'falsa',
-                 r'dudo', r'duda', r'dudas', r'incierto', r'quizas?', r'tal vez', r'talvez', r'acaso')
+                 r'dudo', r'duda', r'dudas', r'incierto', r'quizas?', r'tal vez', r'talvez', r'acaso', r'nem',
+                 r'duvido', r'maybe', r'perhaps')
 # What she says before the name is hers, not what someone else said or a "what if".
 _HEARSAY = _any(r'dijo', r'dijeron', r'dice', r'dicen', r'disse', r'cree', r'creen', r'creo', r'imagina\w*',
-                r'supon\w*', r'supongamos', r'piensa\w*', r'parece', r'segun', r'oi', r'escuche', r'contaron')
+                r'supon\w*', r'supongamos', r'piensa\w*', r'parece', r'segun', r'oi que', r'escuche', r'contaron',
+                # Portuguese and English
+                r'acho', r'achamos', r'acha', r'acham', r'dizem', r'diz', r'disseram', r'ouvi', r'falaram', r'falou',
+                r'contou', r'suponho', r'imagino', r'pensei', r'penso', r'acredito', r'acreditam',
+                r'said', r'says', r'heard', r'think', r'guess', r'suppose')
 # "…es mi jefa, pero ya no", "…y ya no lo es", "…, o era": undone in the words right after it.
 _UNDONE = re.compile(r'^(?:\w+ ){0,3}(?:ya no|no|nao|mentira|era|fue|falso)\b')
-_AFTER_DOUBT = _any(r'creo', r'supongo', r'dice', r'dicen', r'dijeron', r'verdad', r'cierto', r'segun', r'eso dice')
+_AFTER_DOUBT = _any(r'creo', r'supongo', r'dice', r'dicen', r'dijeron', r'verdad', r'cierto', r'segun', r'eso dice',
+                    r'acho', r'dizem', r'diz', r'disseram', r'ne', r'nao e', r'suponho', r'acredito',
+                    r'i think', r'i guess', r'right')
 _IS = re.compile(r'\s+(?:es|é|is)\s+(?:(?:a|o)\s+)?', re.IGNORECASE)  # "é a minha vizinha" read as "minha vizinha"
 _CLAUSE_END = re.compile(r'\s*(?:$|[.,;:!?)]|(?:y|e|and)\s)', re.IGNORECASE)
 # Shaped like "… que <name> es <description>": read by the model even when gate 2 refuses the whole message,
@@ -487,10 +502,18 @@ _MAYBE_CONTACT = re.compile(r"\b(?:que|q)\s+(?:(?:el|la|o|a)\s+)?(?P<name>[^\W\d
 _CLAUSE_STOP = re.compile(r'\s*[.,;:!?)]|\s+(?:y|e|and)\s|\s*$', re.IGNORECASE)
 
 
+# Address words that are also surnames: a chat called "Torres" or "Torres Vila" is a person.
+_SURNAME_ADDRESS = _any(r'torres?', r'vila', r'moro', r'vivo')
+
+
 def _gate_two_with_name(raw, start, end) -> bool:
     """Gate 2 on her whole message, the name included, less only the single words of an address in the name
     ("Torres", "Calle Sucre" are names of chats). True when it refuses."""
     name = raw[start:end]
+    words = [words_of(word) for word in re.findall(r'[^\W\d_]+', name)]
+    if words and all(ADDRESS_WORDS.fullmatch(word) for word in words) and not all(
+            _SURNAME_ADDRESS.fullmatch(word) for word in words):
+        return request_never_kept(raw)  # all of it an address ("Barrio Sector"): no chat name, nothing excused
     kept = re.sub(r'[^\W\d_]+', lambda m: ' ' if ADDRESS_WORDS.fullmatch(words_of(m.group())) else m.group(), name)
     return request_never_kept(raw[:start] + kept + raw[end:])
 
