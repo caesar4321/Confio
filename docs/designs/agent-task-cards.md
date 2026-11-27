@@ -1,6 +1,9 @@
 # Agent task cards: one general card, filled by the server
 
-**Status:** proposal (2026-11-27). Needs a decision from Julian before an app build.
+**Status:** decided B (Julian, 2026-11-27). Built: the server composes `agentTaskCard` (agent_tasks/cards.py) for
+orders, subscribe, requests (manage and bookings), steps and Sí, avísame; one mutation `answerAgentCard`. The app's
+`TaskCard` draws it in place of those older branches; products, sign-in, codes, addresses, the account wait and the
+payment card stay native.
 
 ## The problem
 

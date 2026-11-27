@@ -3,7 +3,7 @@
 // the store sent, and the order to approve. The person never goes to the
 // store: everything they are asked is asked here.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useApolloClient } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -17,9 +17,10 @@ import { colors } from '../config/theme';
 import { saveImageToGallery } from '../utils/saveImageToGallery';
 import { PurchaseDone } from './PurchaseDone';
 import { PurchaseJourney } from './PurchaseJourney';
+import { drawable, Photo, TaskCard } from './TaskCard';
 import {
-  ACTIVE, ADD_AGENT_ADDRESS, AgentNewAddress, ANSWER_AGENT_NOTIFY, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
-  CANCEL_AGENT_TASK, CHANGE_AGENT_ADDRESS, CHOOSE_AGENT_ADDRESS, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GIVE_AGENT_CODE, RESUME_AGENT_PAYMENT, SIGN_IN_AGENT_STORE,
+  ACTIVE, ADD_AGENT_ADDRESS, AgentCard, AgentNewAddress, ANSWER_AGENT_CARD, ANSWER_AGENT_NOTIFY, ANSWER_AGENT_REQUEST, ANSWER_AGENT_STEP, APPROVE_AGENT_ORDER, AgentAnswer, AgentOption, AgentOrder, AgentTask,
+  CANCEL_AGENT_TASK, CHANGE_AGENT_ADDRESS, CHOOSE_AGENT_ADDRESS, CHOOSE_AGENT_OPTIONS, GET_AGENT_TASK, GET_AGENT_TASK_CARD, GIVE_AGENT_CODE, RESUME_AGENT_PAYMENT, SIGN_IN_AGENT_STORE,
 } from './api';
 import { CapRule, cartTop } from './helpers';
 
@@ -27,24 +28,16 @@ const POLL_MS = 2500;
 // A tap whose answer never comes stops holding the card after this; the next refresh shows what it did.
 const TAP_DEADLINE_MS = 30_000;
 
-const https = (uri: string) => (/^https:\/\//.test(uri) ? uri : '');
 // What the person approves is the order on the card: its total and where it is delivered.
 const approval = (order: AgentOrder) => ({ total: order.total, address: order.address || '' });
-
-function Photo({ uri, size }: { uri: string; size: number }) {
-  const [failed, setFailed] = useState(false);
-  const box = { width: size, height: size };
-  if (!https(uri) || failed) {
-    return <View style={[styles.photo, styles.photoEmpty, box]}><Icon name="package" size={size / 3} color="#9CA3AF" /></View>;
-  }
-  return <Image source={{ uri }} style={[styles.photo, box]} resizeMode="contain" onError={() => setFailed(true)} />;
-}
 
 export function PurchaseCard({ taskId, onStores, onOpen }: {
   taskId: string; onStores?: () => void; onOpen?: (screen: string, params?: Record<string, unknown>) => void;
 }) {
   const client = useApolloClient();
   const [task, setTask] = useState<AgentTask | null | undefined>(undefined);
+  // The general card the server composed for this task as it is now (TaskCard), or null: the older drawing.
+  const [card, setCard] = useState<AgentCard | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [tapping, setTapping] = useState<string | null>(null);
   // Each answered tap starts a new epoch: a refresh that left before it is dropped.
@@ -57,6 +50,24 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
   const celebrate = useRef(false);
   useEffect(() => () => { alive.current = false; }, []);
 
+  // Asked only when the task waits for the person or stopped; its own query, so a server without it (or a
+  // failure) leaves the older drawing.
+  const cardFor = useCallback(async (shown: AgentTask | null | undefined): Promise<AgentCard | null> => {
+    if (!shown || !(shown.status === 'needs_person' || shown.status === 'stopped')) {
+      return null;
+    }
+    try {
+      const result = await client.query({
+        query: GET_AGENT_TASK_CARD, variables: { id: taskId }, fetchPolicy: 'no-cache',
+        context: { queryDeduplication: false },
+      });
+      const found: AgentCard | null = result.data?.agentTaskCard ?? null;
+      return drawable(found) ? found : null;
+    } catch {
+      return null;
+    }
+  }, [client, taskId]);
+
   const load = useCallback(async () => {
     if (!alive.current) {
       return;
@@ -68,8 +79,12 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
         query: GET_AGENT_TASK, variables: { id: taskId }, fetchPolicy: 'no-cache',
         context: { queryDeduplication: false },
       });
+      const shown: AgentTask | null = result.data?.agentTask ?? null;
+      const general = await cardFor(shown);
+      // The task and its card are drawn together, from the same refresh.
       if (alive.current && epoch.current === mine && !busy.current) {
-        setTask(result.data?.agentTask ?? null);
+        setTask(shown);
+        setCard(general);
       }
     } catch {
       // The next refresh tries again.
@@ -78,7 +93,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
         pending.current = null;
       }
     }
-  }, [client, taskId]);
+  }, [client, taskId, cardFor]);
   useEffect(() => { load(); }, [load]);
   const polling = task === undefined || (!!task && ACTIVE.has(task.status));
   useEffect(() => {
@@ -116,10 +131,12 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
       const result = await client.mutate({ mutation, variables: { id: taskId, ...variables }, fetchPolicy: 'no-cache' });
       const answer: AgentAnswer | undefined = result.data?.[field];
       ok = !!answer?.success;
+      const general = answer?.task ? await cardFor(answer.task) : null;
       if (alive.current && !expired) {
         epoch.current += 1;
         if (answer?.task) {
           setTask(answer.task);
+          setCard(general);
         }
         if (!ok) {
           setNote(answer?.errors?.[0] || 'No pude hacerlo. Inténtalo de nuevo.');
@@ -159,6 +176,11 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
   // An order already placed (its state, a cancellation, a return): no purchase journey.
   const managing = task.kind === 'manage';
   const answered = managing && task.status === 'stopped' && task.reason === 'answered';
+  // A general card replaces the older drawing of the questions it composes (an order, a request, a step,
+  // Sí, avísame); the native ones (products, sign-in, a code, an address, the account wait, paying) stay.
+  // Asked apart from the task, so it may be a moment newer or older: drawn only when it is this task's state.
+  const shownCard = card && card.status === task.status && card.reason === task.reason ? card : null;
+  const legacy = shownCard === null;
   // The order became done while this card was watching: its moment plays once. A card that
   // opens on an order already done (an old message scrolled back) shows it quietly.
   if (task.status !== watched.current) {
@@ -198,7 +220,12 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
       {waiting && task.reason === 'otp' ? (
         <Code sending={tapping === 'code'} onSend={(code) => act('code', GIVE_AGENT_CODE, { code }, 'giveAgentCode')} />
       ) : null}
-      {waiting && (task.reason === 'approve' || task.reason === 'subscribe') && task.order ? (
+      {shownCard ? (
+        <TaskCard card={shownCard} tapping={tapping} onOpen={onOpen}
+          onAnswer={(one) => { act(`card:${one.id}`, ANSWER_AGENT_CARD, { action: one.id, binding: shownCard.binding },
+            'answerAgentCard'); }} />
+      ) : null}
+      {legacy && waiting && (task.reason === 'approve' || task.reason === 'subscribe') && task.order ? (
         <View style={styles.order}>
           <Photo uri={task.order.image} size={72} />
           <View style={styles.orderText}>
@@ -224,7 +251,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           </View>
         </View>
       ) : null}
-      {waiting && task.reason === 'act' && task.request ? (
+      {legacy && waiting && task.reason === 'act' && task.request ? (
         <View style={styles.request}>
           <Icon name="alert-circle" size={16} color={colors.onHeroField} />
           <View style={styles.requestBody}>
@@ -235,7 +262,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           </View>
         </View>
       ) : null}
-      {waiting && task.reason === 'act' ? (
+      {legacy && waiting && task.reason === 'act' ? (
         <View style={styles.stepRow}>
           <Button title="Sí, envíala" loading={tapping === 'act:yes'}
             onPress={() => act('act:yes', ANSWER_AGENT_REQUEST, { yes: true, what: task.request }, 'answerAgentRequest')} />
@@ -247,7 +274,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
         </View>
       ) : null}
       {/* Found and picked, but this country's stores cannot be paid yet: the intent probe for paying them. */}
-      {task.status === 'stopped' && (task.reason === 'no_rail' || task.reason === 'payer_data') ? (
+      {legacy && task.status === 'stopped' && (task.reason === 'no_rail' || task.reason === 'payer_data') ? (
         task.notify === 'yes' ? (
           <Text style={styles.message}>¡Anotado! Te aviso apenas pueda pagar {task.reason === 'payer_data' ? 'esta tienda' : 'tiendas de aquí'}.</Text>
         ) : task.notify === 'no' ? null : (
@@ -281,7 +308,7 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
             onSend={(address) => act('new_address', ADD_AGENT_ADDRESS, { address }, 'addAgentAddress')} />
         </View>
       ) : null}
-      {waiting && task.reason === 'step' ? (
+      {legacy && waiting && task.reason === 'step' ? (
         <View style={styles.stepRow}>
           <Button title="Sí, hazlo" loading={tapping === 'step:yes'}
             onPress={() => act('step:yes', ANSWER_AGENT_STEP, { yes: true }, 'answerAgentStep')} />
@@ -291,13 +318,13 @@ export function PurchaseCard({ taskId, onStores, onOpen }: {
           </Pressable>
         </View>
       ) : null}
-      {waiting && task.reason === 'approve' && task.order ? (
+      {legacy && waiting && task.reason === 'approve' && task.order ? (
         <Button title="Confirmar pedido" loading={tapping === 'approve'}
           onPress={() => { act('approve', APPROVE_AGENT_ORDER, approval(task.order!), 'approveAgentOrder'); }} />
       ) : null}
       {/* Buying and paying is Cuenta inteligente's (spec decision 37): the offer instead of a confirm. Back
           subscribed, "seguir" resumes and the ordinary order card follows (who pays, the balance). */}
-      {waiting && task.reason === 'subscribe' && task.order ? (
+      {legacy && waiting && task.reason === 'subscribe' && task.order ? (
         <View style={styles.stepRow}>
           {onOpen ? (
             <Button title="Activar Cuenta inteligente"
@@ -686,8 +713,6 @@ const styles = StyleSheet.create({
     width: 156, padding: 10, borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB',
     backgroundColor: colors.background, gap: 6,
   },
-  photo: { borderRadius: 10, backgroundColor: '#FFFFFF', alignSelf: 'center' },
-  photoEmpty: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.neutralDark },
   title: { fontSize: 14, lineHeight: 19, color: colors.text.primary },
   price: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
   cap: { fontSize: 12, color: '#6B7280', marginTop: 2 },

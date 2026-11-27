@@ -327,6 +327,62 @@ def _account_wait(found):
                                 or None, until=task.wait_until)
 
 
+class AgentCardLineType(graphene.ObjectType):
+    """One labelled line of a general card (the label may be empty: the value alone)."""
+    label = graphene.String(required=True)
+    value = graphene.String(required=True)
+
+
+class AgentCardTotalType(graphene.ObjectType):
+    label = graphene.String(required=True)
+    value = graphene.String(required=True)
+    note = graphene.String(required=True, description='One short line under the total, or empty')
+
+
+class AgentCardActionType(graphene.ObjectType):
+    """A button: sent back with answerAgentCard (its id and the card's binding), or, with `screen`, a screen the
+    app opens itself (never sent)."""
+    id = graphene.String(required=True)
+    label = graphene.String(required=True)
+    style = graphene.String(required=True, description='primary | link')
+    screen = graphene.String(description='A screen the app opens instead of answering; unknown ones are skipped')
+
+
+class AgentCardType(graphene.ObjectType):
+    """The general card (cards.py): every question the agent asks, composed from these blocks. A build draws a
+    `version` it knows, skips an icon, block or screen it does not know, and still has the task's message."""
+    version = graphene.Int(required=True)
+    icon = graphene.String(required=True, description='bag | package | calendar | bed | bus | plane | table | user '
+                                                       '| help | bell; unknown ones: a generic icon')
+    title = graphene.String(required=True)
+    subtitle = graphene.String(required=True)
+    image = graphene.String(required=True, description='An https picture, or empty')
+    lines = graphene.List(graphene.NonNull(AgentCardLineType), required=True)
+    total = graphene.Field(AgentCardTotalType)
+    notice = graphene.String(required=True, description='One short line, or empty')
+    actions = graphene.List(graphene.NonNull(AgentCardActionType), required=True)
+    binding = graphene.String(required=True, description='Sent back with answerAgentCard: a tap approves only '
+                                                          'the card that was seen')
+    status = graphene.String(required=True, description="The task's status this card was built for: drawn only "
+                                                         "with a task in that status and reason")
+    reason = graphene.String(required=True)
+
+
+def _card_type(task):
+    from . import cards
+    found = cards.card(task)
+    if found is None:
+        return None
+    total = found.get('total')
+    return AgentCardType(
+        version=found['version'], icon=found['icon'], title=found['title'], subtitle=found['subtitle'],
+        image=found['image'], notice=found['notice'], binding=found['binding'], status=found['status'],
+        reason=found['reason'],
+        lines=[AgentCardLineType(**line) for line in found['lines']],
+        total=AgentCardTotalType(**total) if total else None,
+        actions=[AgentCardActionType(**one) for one in found['actions']])
+
+
 class AgentOfferType(graphene.ObjectType):
     """One store's offer from a search across stores (offers.py): its words and picture are the web's."""
     title = graphene.String(required=True)
@@ -362,6 +418,8 @@ class Query(graphene.ObjectType):
     agent_offers = graphene.Field(AgentOffersType, id=graphene.UUID(required=True))
     agent_account_wait = graphene.Field(AgentAccountWaitType, id=graphene.UUID(required=True))
     agent_task = graphene.Field(AgentTaskType, id=graphene.UUID(required=True))
+    # Its own query (not a field of agentTask): a build that asks for it never breaks the task's card.
+    agent_task_card = graphene.Field(AgentCardType, id=graphene.UUID(required=True))
     agent_active_task = graphene.Field(AgentTaskType)
     agent_stores = graphene.List(graphene.NonNull(graphene.String),
                                  description="Stores that keep the person's sign-in, each deletable")
@@ -375,6 +433,9 @@ class Query(graphene.ObjectType):
 
     def resolve_agent_task(self, info, id):
         return _read(lambda: task_type(service.get(*_owner(info), id)))
+
+    def resolve_agent_task_card(self, info, id):
+        return _read(lambda: _card_type(service.get(*_owner(info), id)))
 
     def resolve_agent_active_task(self, info):
         return _read(lambda: task_type(service.active(*_owner(info))))
@@ -662,6 +723,22 @@ class AnswerAgentNotify(_Result):
             return _failure(cls, exc)
 
 
+class AnswerAgentCard(_Result):
+    """A tap on the general card: the action's id and the card's binding, so it answers that card only."""
+    class Arguments:
+        id = graphene.UUID(required=True)
+        action = graphene.String(required=True)
+        binding = graphene.String(required=True)
+
+    @classmethod
+    def mutate(cls, root, info, id, action, binding):
+        from . import cards
+        try:
+            return cls(success=True, errors=[], task=task_type(cards.answer(*_owner(info), id, action, binding)))
+        except Exception as exc:  # noqa: BLE001
+            return _failure(cls, exc)
+
+
 class CancelAgentTask(_ById):
     class Arguments:
         id = graphene.UUID(required=True)
@@ -733,5 +810,6 @@ class Mutation(graphene.ObjectType):
     add_agent_address = AddAgentAddress.Field()
     answer_agent_request = AnswerAgentRequest.Field()
     answer_agent_notify = AnswerAgentNotify.Field()
+    answer_agent_card = AnswerAgentCard.Field()
     open_agent_live_view = OpenAgentLiveView.Field()
     forget_agent_store = ForgetAgentStore.Field()

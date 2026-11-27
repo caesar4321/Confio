@@ -233,6 +233,45 @@ export type AgentTask = {
   order?: AgentOrder | null;
 };
 
+// The general card (server: agent_tasks/cards.py): every question the agent asks, composed by the server from
+// these blocks. Its own query, so a server without it fails this card alone and the older drawing stays.
+export const AGENT_CARD_VERSION = 1;
+
+export type AgentCardAction = { id: string; label: string; style: string; screen?: string | null };
+export type AgentCard = {
+  version: number;
+  icon: string;
+  title: string;
+  subtitle: string;
+  image: string;
+  lines: { label: string; value: string }[];
+  total?: { label: string; value: string; note: string } | null;
+  notice: string;
+  actions: AgentCardAction[];
+  binding: string;
+  // The task's status and reason it was built for: drawn only with a task in that state.
+  status: string;
+  reason: string;
+};
+
+export const GET_AGENT_TASK_CARD = gql`
+  query GetAgentTaskCard($id: UUID!) {
+    agentTaskCard(id: $id) {
+      version icon title subtitle image notice binding status reason
+      lines { label value }
+      total { label value note }
+      actions { id label style screen }
+    }
+  }
+`;
+
+// A tap on the general card: the button's id and the card's binding, so it answers the card that was seen.
+export const ANSWER_AGENT_CARD = gql`
+  mutation AnswerAgentCard($id: UUID!, $action: String!, $binding: String!) {
+    answerAgentCard(id: $id, action: $action, binding: $binding) { ${RESULT} }
+  }
+`;
+
 export type AgentAnswer = { success?: boolean; errors?: string[]; errorCode?: string | null; task?: AgentTask | null };
 
 /** prepareAgentAccountWait for the shared signing flow (useSignFlow). Nothing is signed here, so a failure is
