@@ -322,6 +322,15 @@ class KoyweFundingPrecisionTests(SimpleTestCase):
         self.assertIn('Los retiros en COP', schema._format_koywe_error(
             KoyweError('Operation type OffRamp is not supported for currency COP in country COL')))
 
+    def test_address_country_error_says_to_change_the_address(self):
+        # Pedro, 2026-11-27: a Venezuelan address while topping up in Chile.
+        from ramps.koywe_client import KoyweError
+        exc = KoyweError('"address.addressCountry" must be one of [MEX, CHL, COL, PER, ARG, BRA, BOL, USA]')
+        on = schema._format_koywe_error(exc, 'ON_RAMP')
+        self.assertIn('no podemos recargar', on)
+        self.assertIn('Perfil → Dirección y teléfono', on)
+        self.assertIn('no podemos retirar', schema._format_koywe_error(exc, 'OFF_RAMP'))
+
     def test_ticker_unsupported_error_names_direction(self):
         # Prod 2026-11-02: USDT BSC lost all currencies at Koywe.
         from ramps.koywe_client import KoyweError

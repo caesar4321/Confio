@@ -2915,6 +2915,10 @@ _NOT_NOW = re.compile(r'\?|\b(si|cuando|cuanto|una vez que|despu[eé]s|luego|ma�
                       r'apenas|en un rato|m[aá]s tarde|siempre que|a menos que|en caso de|tambi[eé]n)\b|mejor no',
                       re.I)
 _ANY_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _SCREEN_WORDS))
+# A promised card may also name Verificación ("Te dejo aquí el acceso a Verificación:"); kept out of
+# _SCREEN_WORDS so a claim like "Te abro Perfil → Verificación" still opens Perfil.
+_PROMISE_SCREEN_WORDS = {**_SCREEN_WORDS, 'Verificación': 'verification'}
+_PROMISE_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _PROMISE_SCREEN_WORDS))
 # "Abro la pantalla para recargar" names Recargar by its verb (Carlos, 2026-11-26: told it was
 # opening, nothing opened). Only right after "pantalla para/de": elsewhere the verb is just a verb.
 _SCREEN_VERB = re.compile(r'(?i)\bpantalla (?:para|de) (recargar|retirar|enviar|recibir|pagar|invertir)\b')
@@ -3105,6 +3109,12 @@ _CARD_PROMISE = re.compile(
     r'|\btarjetas?\b[^.!?\n]{0,30}\b(?:de abajo|aqu[ií] abajo|m[aá]s abajo)\b'
     r'|\bte\s+dej[oéa]\w*\s+(?:aqu[ií]\s+|abajo\s+)?(?:la|las|una|unas)\s+tarjetas?\b'
     r'|\btarjetas?\s+que\s+te\s+dej[eé]\b'
+    # "Te dejo aquí el acceso directo a Recibir:" with nothing under it (Pedro, 2026-11-27, twice).
+    # First person only, pointing at an app screen or "abajo", never at a web link in the same sentence.
+    r'|(?<![Nn]o )(?<![Nn]unca )(?<![Jj]amás )(?<![Jj]amas )\bte\s+dej(?:o|é)\s+(?:aqu[ií]\s+|abajo\s+)?(?:el|un)\s+'
+    r'(?:acceso|atajo|bot[oó]n|enlace)\b(?![^.!?\n]*(?:https?://|www\.|\]\())'
+    # Only a screen's capitalised name counts: "para pagar" is a verb, "Pagar" the screen.
+    r'(?=[^.!?\n]{0,40}(?:(?-i:\b(?:' + '|'.join(re.escape(word) for word in _PROMISE_SCREEN_WORDS) + r')\b)|\babajo\b))'
     # English and Portuguese (Julian, 2026-11-26: "open it directly from the card below", no card).
     # Only a card said to be below: "tap the card" alone is also a bank card at a terminal.
     r'|\bthe\s+card\s+(?:below|down below|right below)\b'
@@ -3144,9 +3154,10 @@ def _keep_card_promise(belt, result):
     sentences = [part for line in reply.split('\n') for part in re.split(r'(?<=[.!?])[ \t]+', line)]
     promised = [sentence for sentence in sentences if _CARD_PROMISE.search(sentence)]
     if conversation_home(belt.viewer.request_meta):  # older builds open a screen at once: there, no card is made
-        named = set(_ANY_SCREEN.findall(' '.join(promised))) or set(_ANY_SCREEN.findall(reply))
+        # The promise itself may name Verificación; elsewhere in a reply it is usually just the word.
+        named = set(_PROMISE_SCREEN.findall(' '.join(promised))) or set(_ANY_SCREEN.findall(reply))
         named.discard('Inicio')  # there Inicio is this conversation, not a screen
-        keys = {_SCREEN_WORDS[word] for word in named}
+        keys = {_PROMISE_SCREEN_WORDS[word] for word in named}
         if len(keys) == 1:
             (key,) = keys
             if key in belt.destinations and belt.navigate(key, open_now=False).get('ok'):

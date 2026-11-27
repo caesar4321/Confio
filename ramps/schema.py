@@ -245,6 +245,12 @@ def _format_koywe_error(exc: 'KoyweError', direction: str = '') -> str:
     if match:
         action = 'retiros' if direction == 'OFF_RAMP' else 'recargas'
         return _koywe_unavailable_message(action, match.group(1))
+    if 'address.addressCountry' in text:
+        # The saved address is in a country Koywe does not serve (Pedro, 2026-11-27: a Venezuelan address
+        # while topping up in Chile; he read the English text as "my country must be Chile").
+        action = 'retirar' if direction == 'OFF_RAMP' else 'recargar'
+        return (f'Tu dirección guardada está en un país donde no podemos {action} con este medio. Cámbiala en '
+                'Perfil → Dirección y teléfono por la dirección donde vives ahora y vuelve a intentarlo.')
     return text
 
 

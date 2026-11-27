@@ -48,8 +48,19 @@ class CardPromiseInOtherLanguagesTests(SimpleTestCase):
                      'Bring your boarding card.', 'Card games are fun.', 'Tap the card on the POS terminal to pay.',
                      'Press the card firmly against the reader.', 'Click the card number field and type it.',
                      'The cards below have no annual fee:', 'Toque o cartão na maquininha para pagar.',
-                     'Aperte o botão e aproxime o cartão.'):
+                     'Aperte o botão e aproxime o cartão.', 'El acceso a tu cuenta está protegido.',
+                     'Te dejó un mensaje en WhatsApp.', 'No te dejo el acceso a tu clave.',
+                     'Te dejo el enlace oficial: https://www.sat.gob.mx/registro.',
+                     'Te dejo el enlace de la reserva: https://booking.com/x',
+                     'Si te dejaron un enlace por SMS, no lo abras.', 'Nunca te dejo un enlace por WhatsApp.',
+                     'Confío nunca te deja un enlace por WhatsApp.', 'El banco te deja un enlace de pago por correo.',
+                     'Te dejo el enlace de [la reserva](https://booking.com/x) abajo.',
+                     'Te dejo el enlace para enviar a tu amigo.', 'Te dejo el enlace para pagar:',
+                     'Jamás te dejo un enlace para pagar.'):
             self.assertFalse(_CARD_PROMISE.search(said), said)
+        for said in ('Te dejo aquí el acceso directo a Recibir:', 'Te dejo el acceso a Verificación.',
+                     'Te dejé abajo un botón para abrir Retirar.'):
+            self.assertTrue(_CARD_PROMISE.search(said), said)
 
     def test_an_unkept_english_promise_is_taken_out(self):
         from .engine import _without_promises

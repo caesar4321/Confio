@@ -184,6 +184,28 @@ class CardPassTests(TestCase):
         openai.assert_not_called()
         self.assertIn('navigate:auto', [tool['name'] for tool in AssistantTurn.objects.get().tools])
 
+    def test_an_access_left_here_is_a_promised_card(self):
+        # Pedro, 2026-11-27: "Te dejo aquí el acceso directo a Recibir:" and nothing under it, twice.
+        answer = ('Puedes comprar USDT en un exchange y enviarlos desde Recibir → Avanzado. '
+                  'Te dejo aquí el acceso directo a Recibir:')
+        with self.gemini_says(answer), patch('assistant.engine._openai_responses') as openai:
+            outcome = self.ask('¿cómo pongo dólares?')
+        self.assertEqual(outcome.actions, [{'type': 'card', 'destination': 'receive'}])
+        self.assertEqual(outcome.reply_message.body, answer)
+        openai.assert_not_called()
+
+    def test_verificacion_is_a_screen_a_promise_can_name(self):
+        answer = 'Puedes agregar otro documento. Te dejo aquí el acceso a Verificación:'
+        with self.gemini_says(answer), patch('assistant.engine._openai_responses') as openai:
+            outcome = self.ask('¿puedo cambiar mi documento?')
+        self.assertEqual(outcome.actions, [{'type': 'card', 'destination': 'verification'}])
+        openai.assert_not_called()
+
+    def test_verificacion_elsewhere_in_the_reply_names_no_card(self):
+        from .engine import _PROMISE_SCREEN, _SCREEN_WORDS
+        self.assertNotIn('Verificación', _SCREEN_WORDS)  # "Te abro Perfil → Verificación" still opens Perfil
+        self.assertEqual(_PROMISE_SCREEN.findall('Te dejo aquí el acceso a Verificación:'), ['Verificación'])
+
     def test_an_unclear_promise_goes_to_the_card_model(self):
         answer = 'Puedes recargar o recibir dólares. Puedes tocar cualquiera de estas tarjetas.'
         with self.gemini_says(answer), patch('assistant.engine._openai_responses', return_value=call_response(
