@@ -80,6 +80,9 @@ class FollowupTests(LinkTestBase):
         self.assertEqual(followups.run(TOLD + timedelta(hours=4)), 1)
         self.assertEqual(followups.run(TOLD + timedelta(hours=5)), 1)
         self.assertEqual(followups.run(TOLD + timedelta(hours=6)), 0)  # the third waits for tomorrow
+        # Posts carry the real clock: put them on the day they were made, or "today" is whenever this runs.
+        SupportMessage.objects.filter(metadata__notice__startswith='whatsapp-followup:').update(
+            created_at=TOLD + timedelta(hours=5))
         self.assertEqual(followups.run(TOLD + timedelta(hours=21)), 1)  # 07:00 the next day
 
     def test_never_at_night_and_never_past_a_day_and_a_half(self):

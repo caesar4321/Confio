@@ -65,8 +65,8 @@ NOTE = (
     'herramientas.\n'
     '- Solo ves las fotos más recientes de esta conversación; si pregunta por una anterior que ya no ves, '
     'pídele que la envíe otra vez.\n'
-    '- Mientras ves una foto no tienes búsqueda en internet ni noticias de mercado. Si la persona necesita '
-    'eso, responde con lo que sabes y dile que te lo pida de nuevo en unos minutos, en un mensaje sin foto.\n'
+    '- En el mensaje que trae una foto no tienes búsqueda en internet ni noticias de mercado. Si la persona '
+    'necesita eso, responde con lo que ves y dile que te lo pida en su próximo mensaje, sin foto: ese ya sirve.\n'
 )
 
 

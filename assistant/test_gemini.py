@@ -48,6 +48,8 @@ class TransportTests(SimpleTestCase):
                                       'tool_choice': {'type': 'function', 'name': 'navigate'}})
         self.assertEqual(forced['toolConfig']['functionCallingConfig'],
                          {'mode': 'ANY', 'allowedFunctionNames': ['navigate']})
+        anything = gemini.request_body({'model': 'm', 'input': 'x', 'tools': [spec], 'tool_choice': 'required'})
+        self.assertEqual(anything['toolConfig']['functionCallingConfig'], {'mode': 'ANY'})
 
     def test_answers_calls_citations_and_stops(self):
         shaped = gemini.responses_shape({'candidates': [{'content': {'parts': [

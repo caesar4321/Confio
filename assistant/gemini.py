@@ -97,6 +97,8 @@ def request_body(payload):
         choice = payload.get('tool_choice')
         if choice == 'none':
             body['toolConfig'] = {'functionCallingConfig': {'mode': 'NONE'}}
+        elif choice == 'required':
+            body['toolConfig'] = {'functionCallingConfig': {'mode': 'ANY'}}
         elif isinstance(choice, dict) and choice.get('name'):
             body['toolConfig'] = {'functionCallingConfig': {'mode': 'ANY', 'allowedFunctionNames': [choice['name']]}}
     return body

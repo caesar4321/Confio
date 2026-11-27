@@ -3941,13 +3941,43 @@ class PhotoTests(TestCase):
         offered = lambda call: {t.get('name') for t in post.call_args_list[call].args[0]['tools']}  # noqa: E731
         self.assertFalse(offered(0) & photos.TOOLS_OFF_WITH_A_PHOTO)
         self.assertIn('no tienes búsqueda en internet', post.call_args_list[0].args[0]['instructions'])
-        # Still in view on the follow-up; back once the photo is no longer held.
+        # Offered again on the follow-up: asking for it starts the turn over without the picture.
         self.ask('¿y abajo?')
-        self.assertFalse(offered(1) & photos.TOOLS_OFF_WITH_A_PHOTO)
+        self.assertTrue(photos.TOOLS_OFF_WITH_A_PHOTO <= offered(1))
         from django.core.cache import cache
         cache.clear()
         self.ask('¿Qué pasó hoy en las noticias?')
         self.assertTrue(photos.TOOLS_OFF_WITH_A_PHOTO <= offered(2))
+
+    @patch('assistant.engine._openai_post')
+    def test_a_follow_up_that_wants_the_web_is_answered_without_the_picture(self, post):
+        """Luis, 2026-11-26: a minute after a screenshot of a token, «La app se llama livo» got no search."""
+        def call(name, args):
+            return {'output': [{'type': 'function_call', 'name': name, 'call_id': 'c1',
+                                'arguments': json.dumps(args)}]}
+        found = {'encontrado': True, 'resumen_no_verificado': 'Platino Token es de BilleteraP2P.', 'fuentes': []}
+        post.side_effect = [text_response('Una app con un token PLT Platino.'),
+                            call('search_web', {'query': 'PLT Platino livo', 'language': 'español'}),
+                            call('search_web', {'query': 'livo antigua billetera p2p', 'language': 'español'}),
+                            text_response('Platino Token es de BilleteraP2P.')]
+        self.ask('¿Conoces esto?', photo=(_photo(), 'image/jpeg'))
+        with patch('assistant.market.web_search', return_value=found) as search:
+            outcome = self.ask('La app se llama livo antigua billetera p2p')
+        self.assertEqual(outcome.reply_message.body, 'Platino Token es de BilleteraP2P.')
+        # The search was written by a pass that never saw the image, and was made to search.
+        search.assert_called_once()
+        self.assertEqual(search.call_args.args[0], 'livo antigua billetera p2p')
+        redo = post.call_args_list[2].args[0]
+        users = [i for i in redo['input'] if i.get('role') == 'user']
+        self.assertTrue(all(isinstance(i['content'], str) for i in users))
+        self.assertTrue(users[0]['content'].startswith('[Foto que ya no puedes ver]'))
+        # What was answered about the photo may repeat the image's words: that pass never reads it.
+        said = json.dumps(redo['input'], ensure_ascii=False)
+        self.assertNotIn('PLT Platino', said)
+        self.assertIn('[Tu respuesta sobre una foto que ya no ves]', said)
+        self.assertEqual(redo['tool_choice'], 'required')
+        self.assertIn('# Busca en internet', redo['instructions'])
+        self.assertNotIn('# Fotos', redo['instructions'])
 
     @patch('assistant.engine._openai_post')
     def test_a_photo_is_never_read_for_someone_with_no_turns_left_or_while_another_is_being_read(self, post):

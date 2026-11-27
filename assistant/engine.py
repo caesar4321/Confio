@@ -2160,6 +2160,8 @@ class Toolbelt:
         return result
 
     def search_market_news(self, topic, timeframe='esta semana', language='español'):
+        if _photo_seen_by_this_pass(self):
+            return _NO_SEARCH_WITH_A_PHOTO
         if market.resolve_topic(topic) is None:
             return {'encontrado': False, '_denied': True,
                     'motivo': 'Solo puedo buscar noticias de una empresa, ticker, índice, oro o Bitcoin.'}
@@ -2197,6 +2199,8 @@ class Toolbelt:
     })
 
     def search_web(self, query, language='español'):
+        if _photo_seen_by_this_pass(self):
+            return _NO_SEARCH_WITH_A_PHOTO
         if any(str(t.get('name', '')).split(':')[0] in self.PERSONAL_DATA_TOOLS for t in self.result.tools):
             return {'disponible': False, '_denied': True,
                     'motivo': 'No busco en internet en el mismo mensaje en que revisé tu cuenta. Pregúntamelo aparte.'}
@@ -2891,6 +2895,9 @@ _NOT_NOW = re.compile(r'\?|\b(si|cuando|cuanto|una vez que|despu[eé]s|luego|ma�
                       r'apenas|en un rato|m[aá]s tarde|siempre que|a menos que|en caso de|tambi[eé]n)\b|mejor no',
                       re.I)
 _ANY_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _SCREEN_WORDS))
+# "Abro la pantalla para recargar" names Recargar by its verb (Carlos, 2026-11-26: told it was
+# opening, nothing opened). Only right after "pantalla para/de": elsewhere the verb is just a verb.
+_SCREEN_VERB = re.compile(r'(?i)\bpantalla (?:para|de) (recargar|retirar|enviar|recibir|pagar|invertir)\b')
 
 
 def _ve_rail(viewer, country, direction):
@@ -3004,6 +3011,12 @@ RETRY_NOTES = {
     'search_whatsapp_messages': ('\n# Busca antes de contestar\nBusca con search_whatsapp_messages lo que pregunta y '
                                  'contesta solo con lo que encuentre, o di tal cual que no lo encontró. Nunca digas lo '
                                  'que hay o no hay en sus chats sin buscarlo.\n'),
+    'search_web': ('\n# Busca en internet\nBusca con search_web lo que pide, con las palabras que la persona '
+                   'escribió (la foto ya no la ves). Si también pide un precio o un tipo de cambio, llama '
+                   'get_stock_quote o get_exchange_rate en el mismo paso. Contesta con lo que encuentres.\n'),
+    'search_market_news': ('\n# Busca las noticias\nBusca con search_market_news lo que pide (la foto ya no la '
+                           'ves). Si también pide un precio, llama get_stock_quote en el mismo paso. Contesta con lo '
+                           'que encuentres.\n'),
     'ask_my_mail': ('\n# Busca antes de contestar\nLee su correo con ask_my_mail para lo que pregunta y contesta solo '
                     'con lo que encuentre. Nunca digas lo que hay o no hay en su correo sin leerlo.\n'),
 }
@@ -3071,7 +3084,11 @@ _CARD_PROMISE = re.compile(
     r'(?i)(?:\b(?:toc[aáeo]\w*|puls[ae]\w*|presion[ae]\w*)\b[^.!?\n]{0,40}\btarjetas?\b'
     r'|\btarjetas?\b[^.!?\n]{0,30}\b(?:de abajo|aqu[ií] abajo|m[aá]s abajo)\b'
     r'|\bte\s+dej[oéa]\w*\s+(?:aqu[ií]\s+|abajo\s+)?(?:la|las|una|unas)\s+tarjetas?\b'
-    r'|\btarjetas?\s+que\s+te\s+dej[eé]\b)')
+    r'|\btarjetas?\s+que\s+te\s+dej[eé]\b'
+    # English and Portuguese (Julian, 2026-11-26: "open it directly from the card below", no card).
+    # Only a card said to be below: "tap the card" alone is also a bank card at a terminal.
+    r'|\bthe\s+card\s+(?:below|down below|right below)\b'
+    r'|\b(?:o|no|do|pelo)\s+cart(?:ão|ao)\s+(?:abaixo|aqui embaixo|logo abaixo)\b)')
 
 
 def _has_card(result):
@@ -3164,7 +3181,7 @@ def _open_claimed_screen(belt, result):
         return
     named = set()
     for sentence in re.split(r'(?<=[.!?:;])\s+', reply):
-        sentence = sentence.strip()
+        sentence = _SCREEN_VERB.sub(lambda m: f'pantalla de {m.group(1).capitalize()}', sentence.strip())
         if not re.search(r'(?i)\b(abro|abrir[eé]|llevo)\b', sentence):
             continue
         screens = set(_ANY_SCREEN.findall(sentence))
@@ -3247,9 +3264,86 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
         raise
 
 
-def _run_turn(belt, result, viewer, history, **who):
+class PhotoFreePass(Exception):
+    """A follow-up to a photo wants the web: the turn starts over without the
+    picture, so text inside an image can never write a search."""
+
+    def __init__(self, tool):
+        super().__init__(tool)
+        self.tool = tool
+
+
+# Never a search from a model that sees a photo (photos.TOOLS_OFF_WITH_A_PHOTO).
+_NO_SEARCH_WITH_A_PHOTO = {'disponible': False, '_denied': True,
+                           'motivo': 'En esta respuesta no puedo buscar en internet. Responde con lo que sabes.'}
+
+
+def _photo_ids(belt, history):
+    """Every photo message this turn's model could read about: in the raw
+    messages or in the wider window, held in the cache or not. A reply after
+    one may repeat what the image said."""
+    from . import photos as photo_rules
+    shown = list(history) + list(context_rules.model_messages(belt, history))
+    return {m.id for m in shown if getattr(m, 'sender_type', '') == 'USER' and photo_rules.is_photo(m)}
+
+
+def _photo_seen_by_this_pass(belt):
+    """A photo, or an answer given after one, is in what this pass reads."""
+    return bool(getattr(belt, 'photos', None)
+                or (getattr(belt, 'photo_ids', None) and not getattr(belt, 'photo_free_ids', None)))
+
+
+def _photo_in_this_message(belt, history):
+    """Did the person's newest message bring one of the photos in view?"""
+    last = next((m for m in reversed(list(history)) if getattr(m, 'sender_type', '') == 'USER'), None)
+    return last is not None and last.id in (getattr(belt, 'photos', None) or {})
+
+
+def _photo_free_pass(belt, result, names):
+    """Before a step runs: a search asked for by a model that sees an earlier
+    photo starts the turn over without it (Luis, 2026-11-26: "en unos
+    minutos", and a minute later no search). Only while nothing has run yet
+    this pass; afterwards the search tool itself refuses."""
+    from . import photos as photo_rules
+    if (not _photo_seen_by_this_pass(belt) or belt.force_tool or getattr(belt, 'shrunk', False)
+            or getattr(belt, 'photo_now', False)):
+        return  # the message with the photo: a search it was never offered is refused like any unknown tool
+    wanted = [name for name in names if name in photo_rules.TOOLS_OFF_WITH_A_PHOTO]
+    ran = [str(t.get('name', '')) for t in result.tools if not str(t.get('name', '')).startswith('context:')]
+    # After reads only (a quote, the portfolio) it starts over too, and drops them as a raw pass does.
+    # After anything that writes, the search tool refuses: what was done is never thrown away.
+    if wanted and all(name.split(':')[0] in context_rules.SAFE_WITH_CONTEXT for name in ran):
+        raise PhotoFreePass(wanted[0])
+
+
+def _start_photo_free(belt, result, tool):
+    """The pass that follows sees no photo, nor what was answered while one was in view."""
+    belt.photo_free_ids = set(getattr(belt, 'photo_ids', None) or ()) | set(belt.photos)
+    belt.photos = {}  # the history still says a photo was there, now one it cannot see
+    belt.force_tool = belt.photo_free_tool = tool
+    belt.tool_chars = 0
+    result.reply = ''
+    # Only reads ran (_photo_free_pass): their cards and documents belong to the dropped pass.
+    result.actions[:] = []
+    if getattr(belt, 'docs_read', None) is not None:
+        belt.docs_read.clear()
+    for entry in result.tools:
+        if not str(entry.get('name', '')).startswith('context:'):
+            entry['name'] = f"context:{entry.get('name', '')}"
+
+
+def _photo_safe_pass(belt, result, viewer, history, **who):
+    """_run_turn_once, started over at most once without the photos (PhotoFreePass)."""
     try:
         return _run_turn_once(belt, result, viewer, history, **who)
+    except PhotoFreePass as again:
+        _start_photo_free(belt, result, again.tool)
+    return _run_turn_once(belt, result, viewer, history, **who)
+
+
+def _run_turn(belt, result, viewer, history, **who):
+    try:
+        return _photo_safe_pass(belt, result, viewer, history, **who)
     except context_rules.RawPass:
         # It wanted to act after seeing stored context: only a pass that saw
         # nothing but the raw messages may.
@@ -3259,7 +3353,34 @@ def _run_turn(belt, result, viewer, history, **who):
             raise
         context_rules.start_raw_pass(belt, result)
     # Nothing is live in the raw pass, so it never asks to start over.
-    return _run_turn_once(belt, result, viewer, history, **who)
+    return _photo_safe_pass(belt, result, viewer, history, **who)
+
+
+class _ReplyAboutAPhoto:
+    """An answer given after a photo, as a pass without it reads it: it may
+    repeat what the image says, and nothing written in an image may reach a
+    search. Only the words change."""
+
+    def __init__(self, message):
+        self._message = message
+        self.body = '[Tu respuesta sobre una foto que ya no ves]'
+
+    def __getattr__(self, name):
+        return getattr(self._message, name)
+
+
+def _model_history(belt, history):
+    """The messages the model reads (context_rules.model_messages), less what
+    answered a photo once a pass is photo-free (_start_photo_free)."""
+    shown = context_rules.model_messages(belt, history)
+    photo_ids = getattr(belt, 'photo_free_ids', None)
+    if not photo_ids:
+        return shown
+    first = min(photo_ids)
+    # The team never sees photos (photos.TEAM_CANNOT_SEE): its words stay. An empty row is skipped as before.
+    return [_ReplyAboutAPhoto(m) if (getattr(m, 'sender_type', '') != 'USER' and (getattr(m, 'id', None) or 0) > first
+                                    and (m.body or '').strip() and not context_rules.is_team(m)) else m
+            for m in shown]
 
 
 def _post_fitting(belt, payload, input_items):
@@ -3323,7 +3444,11 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
     model = conf.get('CONFIO_ASSISTANT_MODEL')
     effort = conf.get('CONFIO_ASSISTANT_REASONING_EFFORT')
     specs = belt.specs()
-    if seen_photos:
+    belt.photo_ids = _photo_ids(belt, history)
+    belt.photo_now = bool(seen_photos) and _photo_in_this_message(belt, history)
+    if belt.photo_now:
+        # The message that brings a photo gets no search. A later one does: asking
+        # starts the turn over without the picture (_photo_free_pass).
         specs = [spec for spec in specs if spec.get('name') not in photo_rules.TOOLS_OFF_WITH_A_PHOTO]
     if model.startswith('claude-'):
         return _run_turn_claude(belt, result, history, system, model, effort, specs)
@@ -3336,7 +3461,7 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
         'model': model,
         'instructions': system,
         'input': context_rules.closing(belt, context_rules.leading(
-            belt, history_items(context_rules.model_messages(belt, history), photos=seen_photos))),
+            belt, history_items(_model_history(belt, history), photos=seen_photos))),
         'tools': specs,
         # Kept at 2000: a longer reply can outrun the request timeout. A cut
         # reply says so (_with_cut_note) and the person asks to continue.
@@ -3350,6 +3475,10 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
         payload['reasoning'] = {'effort': effort}
     if belt.force_tool:
         payload['tool_choice'] = {'type': 'function', 'name': belt.force_tool}
+        if getattr(belt, 'photo_free_ids', None) and belt.force_tool == getattr(belt, 'photo_free_tool', None):
+            # Any tool, not only the search: a quote asked beside the news runs in the same first step,
+            # before web text in view turns the tools off.
+            payload['tool_choice'] = 'required'
     belt.card_input = list(payload['input'])
 
     input_items = list(payload['input'])
@@ -3361,6 +3490,7 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
         if not calls:
             result.reply = _with_cut_note(_output_text(data), _hit_output_limit(data))
             break
+        _photo_free_pass(belt, result, [call.get('name') for call in calls])
         context_rules.before_tools(belt, [call.get('name') for call in calls])
         # store=False: carry the whole transcript forward instead of previous_response_id.
         input_items.extend(item for item in output if item.get('type') in {'function_call', 'reasoning'})
@@ -3375,7 +3505,7 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
                 'output': _run_tool(belt, result, call.get('name'), args),
             })
         payload = {**payload, 'input': input_items}
-        if isinstance(payload.get('tool_choice'), dict):
+        if isinstance(payload.get('tool_choice'), dict) or payload.get('tool_choice') == 'required':
             del payload['tool_choice']  # the forced call is the first step only
         if belt.saw_web or getattr(belt, 'saw_whatsapp', False) or getattr(belt, 'saw_mail', False):
             payload['tool_choice'] = 'none'
@@ -3501,7 +3631,7 @@ def _run_turn_claude(belt, result, history, system, model, effort, specs):
     import anthropic
 
     client = _claude_client()
-    shown = context_rules.leading(belt, history_items(context_rules.model_messages(belt, history),
+    shown = context_rules.leading(belt, history_items(_model_history(belt, history),
                                                       photos=getattr(belt, 'photos', None) or {}))
     messages = [{'role': item['role'], 'content': _claude_content(item['content'])} for item in shown]
     while messages and messages[0]['role'] != 'user':
@@ -3551,6 +3681,7 @@ def _run_turn_claude(belt, result, history, system, model, effort, specs):
         if not calls:
             result.reply = _with_cut_note(text_of(response), response.stop_reason == 'max_tokens')
             break
+        _photo_free_pass(belt, result, [call.name for call in calls])
         context_rules.before_tools(belt, [call.name for call in calls])
         messages.append({'role': 'assistant', 'content': response.content})
         messages.append({'role': 'user', 'content': [
