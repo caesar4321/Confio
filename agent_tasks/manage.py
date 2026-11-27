@@ -176,5 +176,6 @@ def answer(st, text, seen=None):
     body = notes.say(notes.MANAGED, task).replace('{text}', text)
     if (task.order or {}).get('submitted'):
         # Sent: said in code's words; the page's own reading follows, never instead.
-        body = notes.say(notes.SENT, task) + ' ' + body
+        sent = notes.BOOKED if getattr(task, 'kind', 'buy') == 'reserve' else notes.SENT
+        body = notes.say(sent, task) + ' ' + body
     return st.stop('answered', body=body, order={**(task.order or {}), 'answer': text})

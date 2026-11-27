@@ -105,7 +105,24 @@ def latest_country(texts):
     return ''
 
 
-def choose(pointer, texts, country=None):
+def _joined(mark, text):
+    """A brand written as consecutive words of the text, one of them a name ("Hostal Las Tunas" for
+    hostallastunas): two words or more, at least one capitalized, so ordinary words ("una habitación") never
+    make a site."""
+    text = str(text or '')
+    found = [(match.group(0), match.start()) for match in re.finditer(r'[^\W_]+', text)]
+    # A capital that opens the message or a sentence is the keyboard's, not a name's.
+    # Anything but a letter or digit right before it (a new line, a colon, an emoji) opens a sentence too.
+    named = [word[:1].isupper() and bool(re.search(r'[^\W_],?[ \t]+$', text[:at])) for word, at in found]
+    folded = [guard.fold(word) for word, _ in found]
+    for start in range(len(found)):
+        for end in range(start + 2, min(start + 6, len(found)) + 1):
+            if ''.join(folded[start:end]) == mark:
+                return any(named[start:end])
+    return False
+
+
+def choose(pointer, texts, country=None, joined=False):
     """The store for a task (texts: the person's own messages, newest first). The newest message that names
     a store decides; an older one never overrides it (2026-11-25: "Farmatodo" after an earlier "Mercado Livre
     Brasil" went to Mercado Livre). The model's pointer counts when it is a store the person named: a known
@@ -118,7 +135,9 @@ def choose(pointer, texts, country=None):
     mark = brand(store) if store and store not in KNOWN else ''
     for text in texts:
         theirs = named([text]) | written([text])
-        if mark and re.search(rf'(?<!\w){re.escape(mark)}(?!\w)', guard.fold(text)):
+        if mark and (re.search(rf'(?<!\w){re.escape(mark)}(?!\w)', guard.fold(text))
+                     # A reservation: "Hostal Las Tunas" for hostallastunas.com, the brand written with spaces.
+                     or (joined and len(mark) >= 8 and _joined(mark, text))):
             theirs.add(store)
         if not theirs:
             continue

@@ -174,7 +174,7 @@ def start(account, user, *, goal, site, meta=None, kind='buy', first_page='', ch
     this store, opened right after its home (an offer picked across stores, offers.py), and `chosen`
     the product's name as that offer wrote it; a page outside the store or one that acts is dropped.
     `country`: only for a store whose address does not say it (offers.country_of), never over its own."""
-    kind = 'manage' if kind == 'manage' else 'buy'
+    kind = kind if kind in ('manage', 'reserve') else 'buy'
     if (not conf.get('AGENT_TASKS_ENABLED') or not qr.available() or not conf.browserbase_api_key()
             or not worker_alive()):
         raise TaskRefused('unavailable')
@@ -439,9 +439,10 @@ def answer_request(account, user, task_id, yes, what=None):
         task.refresh_from_db()
         return task
     order['request_approved'] = request
+    again = {'guest': 'call fill_guest with those fields again', 'book': 'call ready_to_book with it again'}.get(
+        request.get('kind'), 'call submit_request with it again')
     return _answered(account, user, task_id, 'act', order=order,
-                     history=[*(task.history or []), {'did': 'the person approved the request',
-                                                      'result': 'call submit_request with it again'}
+                     history=[*(task.history or []), {'did': 'the person approved the request', 'result': again}
                               ][-runner.Step.HISTORY_KEPT:])
 
 

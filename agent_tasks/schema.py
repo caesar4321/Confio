@@ -182,12 +182,19 @@ REPORTING = 'Pasándole a {site} la referencia de tu pago…'
 STAGES = ('search', 'cart', 'checkout', 'pay', 'done', 'manage')
 
 
+def _app_kind(task):
+    """A reservation is drawn as an order being managed (no purchase journey, the same approval card): the
+    app knows 'buy' and 'manage'."""
+    kind = getattr(task, 'kind', 'buy') or 'buy'
+    return 'manage' if kind == 'reserve' else kind
+
+
 def stage_of(task):
     """Where the purchase is, for the card's journey: search, cart, checkout, pay, done. Where it
     stopped stays where it was."""
     from . import guard
-    if getattr(task, 'kind', 'buy') == 'manage':
-        return 'manage'   # an order already placed: no purchase journey
+    if getattr(task, 'kind', 'buy') in ('manage', 'reserve'):
+        return 'manage'   # an order already placed, or a reservation: no purchase journey
     if task.state == 'payment_ready':
         return 'done'
     if task.phase == 'ordered' or task.state == 'awaiting_code' or task.checkout_at is not None:
@@ -249,7 +256,7 @@ def task_type(task):
                      for d in ((task.order or {}).get('pay_details') or []) if isinstance(d, dict)]
         if task.state == 'payment_ready' else [],
         open_account_method=str((task.order or {}).get('offer') or '') or None,
-        created_at=task.created_at, stage=stage, kind=getattr(task, 'kind', 'buy') or 'buy',
+        created_at=task.created_at, stage=stage, kind=_app_kind(task),
         notify=str((task.order or {}).get('notify') or '') if task.reason in ('no_rail', 'payer_data') else '',
         request=str(((task.order or {}).get('request') or {}).get('what') or '') or None
         if task.state == 'needs_person' and task.reason == 'act' else None,

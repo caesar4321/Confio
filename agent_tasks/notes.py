@@ -19,6 +19,11 @@ NEEDS_PERSON = {
     # Fixed words: what the store wrote (the item, the total) is shown only on the card.
     # A request about an order already placed (manage.py), named and approved before it is sent.
     'act': 'En {site} está lista tu solicitud: «{{what}}». ¿La envío?',
+    # A reservation (reserve.py): the booking, and before it the guest's details, each approved first.
+    'book': 'En {site} está lista tu reserva: «{{what}}». No pide tarjeta. ¿La confirmo?',
+    'book_again': ('Ya presioné «{{button}}» una vez en {site} y ahora pide confirmar otra vez: «{{what}}». Revisa que '
+                   'no sea una segunda reserva. ¿La confirmo?'),
+    'guest': 'Para reservar en {site} necesito escribir tus datos en su formulario (los ves en la tarjeta). ¿Los escribo?',
     # The click judge could not tell: never a dead end, the person says yes or no.
     'step': '{site} pide «{{step}}» para seguir. No sé si conviene: ¿lo hago?',
     'approve': 'Tu pedido en {site} está listo, a pagar con {pay}. Revísalo en la tarjeta y confírmalo: lo hago yo.',
@@ -67,6 +72,17 @@ PAYMENT_READY = ('Preparé el pago con {qr} que se veía en {site}. {vouches} An
 # An order already placed (manage.py).
 MANAGED = 'Esto muestra {site}: {{text}}'
 SENT = 'Envié tu solicitud en {site}; revísala en tus pedidos de {site}.'
+BOOKED = 'Envié tu reserva en {site}.'
+# How a reservation ended when it did not end well (reserve.py): never "compra tú", never that it was booked.
+RESERVE_ENDED = 'No pude hacer la reserva en {site} y no reservé nada.'
+RESERVE_STOPPED = {
+    'needs_card': ('{site} pide una tarjeta para esta reserva y yo no uso tarjetas, así que no reservé nada. Si '
+                   'quieres, le escribo al lugar por WhatsApp para reservar sin tarjeta.'),
+    'request_unclear': ('Envié tu reserva en {site}, pero no alcancé a ver su confirmación. Revisa tu correo antes '
+                        'de reservar otra vez.'),
+    'declined': 'Listo, no reservé nada en {site}.',
+    'not_found': 'No encontré disponibilidad para lo que pediste en {site}.',
+}
 # How a request ended when it did not end well: never purchase words ("compra tú"), never "nothing happened"
 # after it was sent.
 MANAGE_ENDED = 'No pude terminarlo en {site} y no envié ninguna solicitud. Puedes revisarlo en tus pedidos de {site}.'
@@ -150,6 +166,18 @@ def shortfall_line(task, intent):
 
 
 def stopped_text(task, reason):
+    if getattr(task, 'kind', 'buy') == 'reserve':
+        submitted = (task.order or {}).get('submitted')
+        if reason == 'answered':
+            text = STOPPED['answered']
+        elif submitted:
+            text = RESERVE_STOPPED['request_unclear']   # sent: never "nothing was booked"
+        else:
+            text = RESERVE_STOPPED.get(reason, RESERVE_ENDED)
+            why = str((task.order or {}).get('why') or '') if reason in ('cannot_do', 'not_found') else ''
+            if why:
+                text = text.rstrip(' .') + '. Motivo: ' + why.replace('{', '(').replace('}', ')') + '.'
+        return say(text, task).replace('{text}', str((task.order or {}).get('answer') or ''))
     if getattr(task, 'kind', 'buy') == 'manage':
         text = STOPPED[reason] if reason in ('answered', 'declined', 'request_unclear') else MANAGE_ENDED
         if (task.order or {}).get('submitted') and reason not in ('answered', 'declined'):

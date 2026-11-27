@@ -128,9 +128,16 @@ def _whole(page_text, figure):
 
 def max_steps(task):
     """The step budget: more for a cart of several products (each is opened, added and set to its quantity)."""
+    if getattr(task, 'kind', 'buy') == 'reserve':
+        return conf.get('AGENT_TASKS_RESERVE_MAX_STEPS')   # a calendar, counters and a guest form
     cart = (task.order or {}).get('cart')
     extra = max(len(cart) - 1, 0) if isinstance(cart, list) else 0
     return conf.get('AGENT_TASKS_MAX_STEPS') + extra * conf.get('AGENT_TASKS_STEPS_PER_EXTRA_PRODUCT')
+
+
+def max_cost(task):
+    return Decimal(str(conf.get('AGENT_TASKS_RESERVE_MAX_COST_USD' if getattr(task, 'kind', 'buy') == 'reserve'
+                                else 'AGENT_TASKS_MAX_COST_USD')))
 
 
 def app_meta(task):
@@ -296,7 +303,7 @@ class Step:
             return self.stop('busy')
         # The ceilings are the agent's. After the hand-over reading a code costs no model.
         if not task.checkout_at and task.phase != 'report' and (task.steps >= max_steps(task)
-                                     or task.cost_usd >= Decimal(str(conf.get('AGENT_TASKS_MAX_COST_USD')))):
+                                     or task.cost_usd >= max_cost(task)):
             return self.stop('too_long')
         if task.state == 'awaiting_code' and (task.order or {}).get('pay_hold'):
             # A purchase waiting for the Cuenta inteligente: its payment is read from what was kept, no browser.
@@ -373,15 +380,15 @@ class Step:
             # An order already placed is worked with real clicks, under the same lines (manage.py).
             self.only_get, self.delay = False, 0
             self.operating = (operate.ordering(task) or task.phase == 'report'
-                              or getattr(task, 'kind', 'buy') == 'manage')
+                              or getattr(task, 'kind', 'buy') in ('manage', 'reserve'))
             browser.refused_document = browser.refused_send = False
             self.before_checkout(browser)
             if task.state != 'working' or time.monotonic() >= until:
                 return
             if not conf.get('AGENT_TASKS_ENABLED'):
                 return self.stop('busy')
-            if task.phase != 'report' and (task.steps >= max_steps(task) or task.cost_usd + self.meter.usd >= Decimal(
-                    str(conf.get('AGENT_TASKS_MAX_COST_USD')))):
+            if task.phase != 'report' and (task.steps >= max_steps(task)
+                                           or task.cost_usd + self.meter.usd >= max_cost(task)):
                 return self.stop('too_long')
             if task.session_expires_at <= timezone.now() + SESSION_MARGIN:
                 return
@@ -462,9 +469,11 @@ class Step:
             # Paid by Pago Móvil before the order: back to its step, to type the reference (pagomovil.py).
             from . import pagomovil
             return pagomovil.report_step(self, browser, reader, seen)
-        from . import manage
+        from . import manage, reserve
         if manage.managing(task):
             return manage.step(self, browser, reader, seen)   # an order already placed
+        if reserve.reserving(task):
+            return reserve.step(self, browser, reader, seen)  # a room, a table, a seat: no card
         if guard.is_checkout(seen) or operate.ordering(task):
             return operate.checkout(self, browser, reader, seen)
         name, args = agent.decide(task, seen, self.meter)

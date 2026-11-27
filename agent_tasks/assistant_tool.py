@@ -60,10 +60,17 @@ def spec():
             '`store` la tienda si la nombró, o null y se usa la de su última compra). Con "manage" el agente '
             'revisa su pedido en la tienda, le responde aquí con lo que muestra la tienda, y una cancelación, '
             'devolución o reembolso lo envía solo cuando ella lo aprueba aquí. Di que lo estás revisando, nunca '
-            'que ya se canceló, se devolvió o se reembolsó.'),
+            'que ya se canceló, se devolvió o se reembolsó. '
+            '"reserve" para reservar (una habitación de hotel u hospedaje, una mesa de restaurante, un pasaje de '
+            'bus o de avión, un turno) en el sitio que ella nombró (Booking, Airbnb, la web del hotel, de la empresa '
+            'de buses o del restaurante: `store` es su dominio): `what` es qué reservar con sus palabras (lugar, '
+            'fechas u hora, cuántas personas). El agente busca disponibilidad, llena el formulario y, antes de '
+            'escribir sus datos y antes de reservar, se lo pide a ella aquí; solo reserva lo que no pide tarjeta. '
+            'Di que lo estás buscando, nunca que ya reservaste. Si no nombró ningún sitio, pregúntale dónde '
+            'reservar o, si el lugar se atiende por WhatsApp, ofrécele escribirle.'),
         'parameters': {'type': 'object',
                        'properties': {'what': {'type': 'string'}, 'store': {'type': ['string', 'null']},
-                                      'kind': {'type': 'string', 'enum': ['buy', 'manage', 'compare']}},
+                                      'kind': {'type': 'string', 'enum': ['buy', 'manage', 'compare', 'reserve']}},
                        'required': ['what', 'store', 'kind'], 'additionalProperties': False},
     }
 
@@ -112,7 +119,7 @@ def call(viewer, texts, *, saw_web, store=None, recent=None, what=None, kind='bu
                 'motivo': 'No empiezo compras en un mensaje en que busqué en internet. Pídemelo aparte.'}, None
     if not texts or len(texts[0]) > service.MAX_GOAL_CHARS:
         return {'ok': False, '_denied': True, 'motivo': 'Pídele que escriba en una frase qué quiere comprar.'}, None
-    kind = kind if kind in ('manage', 'compare') else 'buy'
+    kind = kind if kind in ('manage', 'compare', 'reserve') else 'buy'
     words = goal_of(texts, recent)
     what = ' '.join(str(what or '').split())[:200]
     # What to buy, in few words: the model's wording of what the person said, or their own messages.
@@ -127,11 +134,15 @@ def call(viewer, texts, *, saw_web, store=None, recent=None, what=None, kind='bu
             return compare(viewer, what if said else texts[0], country)
         kind = 'buy'
     else:
-        site = stores.choose(store, newest_first, country=country)
+        site = stores.choose(store, newest_first, country=country, joined=kind == 'reserve')
     if site is None and kind == 'manage':
         site = _last_store(viewer)   # "¿dónde está mi pedido?": the store of their last purchase
     if site is None and kind == 'buy' and offers.available():
         return compare(viewer, what if said else texts[0], country)
+    if site is None and kind == 'reserve':
+        return {'ok': False, '_denied': True,
+                'motivo': ('Pregúntale en qué sitio reservar (Booking, Airbnb, la web del lugar) o que escriba su '
+                           'dirección; o, si el lugar se atiende por WhatsApp, ofrécele escribirle.')}, None
     if site is None:
         return {'ok': False, '_denied': True,
                 'motivo': 'Pregúntale en qué tienda, o que escriba la dirección de la tienda.'}, None
@@ -143,6 +154,11 @@ def call(viewer, texts, *, saw_web, store=None, recent=None, what=None, kind='bu
     except Exception:  # noqa: BLE001 - an honest no
         logger.exception('agent task was not started')
         return {'ok': False, 'motivo': 'No pude empezar la compra ahora.'}, None
+    if kind == 'reserve':
+        return {'ok': True, 'sitio': site, 'estado': 'empezando',
+                'instruccion': ('Todavía no reservó nada y puede no lograrlo. Di en una frase que estás buscando '
+                                'disponibilidad en ese sitio y que antes de escribir sus datos y antes de reservar '
+                                'se lo pedirás aquí; solo reservas lo que no pide tarjeta. No la mandes al sitio.')}, task
     if kind == 'manage':
         # About an order already made: never "nothing was bought" (the order exists; the agent looks it up).
         return {'ok': True, 'tienda': site, 'estado': 'empezando',

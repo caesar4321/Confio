@@ -65,6 +65,9 @@ DEFAULTS = {
     'AGENT_TASKS_MAX_STEPS': 45,
     'AGENT_TASKS_STEPS_PER_EXTRA_PRODUCT': 8,   # a cart of several products: open, add, set its quantity
     'AGENT_TASKS_MAX_COST_USD': '1.00',
+    # A reservation: a calendar, guest counters and a guest form take more steps than a cart.
+    'AGENT_TASKS_RESERVE_MAX_STEPS': 70,
+    'AGENT_TASKS_RESERVE_MAX_COST_USD': '1.50',
     'AGENT_TASKS_SESSION_SECONDS': 1500,
     # One guarded connection works this long: a late redirect is still checked.
     'AGENT_TASKS_HOLD_SECONDS': 50,
