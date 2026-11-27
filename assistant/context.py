@@ -12,6 +12,10 @@ Four rules, each enforced in code (docs/designs/assistant-memory.md):
    prefill, no label of the model's).
    Who can be operated for (a Cuenta inteligente with Confío IA+: its tools
    take less than the owner's words) never gets older messages at all.
+   One exception, by design: who her contacts are («el de la panadería»,
+   from her own messages, memory.CONTACTS_NOTE) is in the instructions of
+   every pass, so a WhatsApp card can use it. It cannot move money (rule 1),
+   and it is left out for who can be operated for.
 4. A reply that used stored data is never replayed to a model
    (`RECALLED_REPLY`), so it cannot carry that data into a later turn that acts.
 """
@@ -101,6 +105,8 @@ class TurnContext:
     quotes: list = field(default_factory=list)
     # The same with no older message in view (begin, for who can be operated for).
     raw_quotes: list = field(default_factory=list)
+    # Who her contacts are, in the instructions of every pass (begin leaves it out for who can be operated for).
+    contacts: str = ''
     # Where the person's forget stood when the turn began (memory.after_reply).
     forgot: tuple | None = None
     used_data: bool = False
@@ -202,6 +208,7 @@ def load(conversation, history, memory_note='', answering=None, *, remembering=F
                 compaction, window, plain,
                 notes=state.note + memory_note,
                 style=state.style,
+                contacts=state.contacts,
                 extra=not in_view <= {m.id for m in plain},
                 topics=state.topics,
                 quotes=state.older_quotes(in_view),
@@ -246,6 +253,8 @@ def begin(belt, context):
         # Its tools take less than the owner's words (an alert's or a target's
         # deletion, a rule's cancel, an existing payee): today's window only.
         context.messages, context.quotes, context.extra = context.plain, context.raw_quotes, False
+    if context is not None and context.contacts and _operated_for(belt):
+        context.contacts = ''  # a label could pick an existing payee or a rule there
     belt.context = context
     belt.context_live = bool(context and context.extra)
     belt.context_raw = False
@@ -310,7 +319,7 @@ def notes(belt) -> str:
     context = _context(belt)
     if context is None:
         return ''
-    return (context.notes + (RECALL_NOTE if recall_offered(belt) else '')
+    return (context.notes + context.contacts + (RECALL_NOTE if recall_offered(belt) else '')
             + (RAW_NOTE if belt.context_raw else '') + context.style)
 
 

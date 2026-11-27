@@ -52,7 +52,7 @@ def payload(scope):
     row = scope.row()
     can_remember, can_recall = memory.facts_allowed(scope.user_id), memory.summary_allowed(scope.user_id)
     # Shown whatever the switches say: what is stored can always be seen and deleted.
-    facts = [(f.pk, memory_rules.label(f.kind, f.value)) for f in memory.live_facts(row)]
+    facts = [(f.pk, memory.fact_text(f, scope.user_id)) for f in memory.live_facts(row)]
     quotes = memory.summary_messages(scope, row)
     return AssistantMemoryType(
         opened_for=opened_for(scope),

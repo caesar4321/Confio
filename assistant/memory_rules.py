@@ -1,7 +1,10 @@
 """What may be remembered, as pure rules: no database, no model.
 
-A preference is a value from a closed list. There is no free text, not even a
-name. The summary is ids of the person's own messages, and a message gets
+A preference is a value from a closed list, with no free text. The one kind
+that holds words is who one of the person's contacts is to them («Ana es mi
+contadora»): nothing is copied, only where the name and the description are in
+the person's own message, and both pass the gates below every time they are
+read. The summary is ids of the person's own older messages, and a message gets
 there through three gates, each failing closed:
 
 1. it is shaped like a statement about the person's own plans, studies,
@@ -50,6 +53,12 @@ VALUES = {
 KINDS = tuple(VALUES)
 MANY = frozenset({GOAL, FAMILY, INTEREST})
 MANY_MAX = 3
+
+# Who a contact is to the person, said by them. Its value is where the two parts are in their message: "a-b-c-d".
+CONTACT = 'contact'
+CONTACT_MAX = 20
+CONTACT_NAME_MAX = 40
+CONTACT_LABEL_MAX = 40
 
 # How to answer is said to the model in these sentences, written here and picked by value.
 STYLE = {
@@ -353,6 +362,228 @@ def command(text) -> str:
         theirs = _TOLD.search(plain) or SENSITIVE.search(plain)
         return 'forget' if theirs or not _NOT_MEMORY.search(plain) else ''
     return 'remember' if _REMEMBER.match(plain) else ''
+
+
+# ── A contact's description ─────────────────────────────────────────────────
+
+# Letters, at most four words: a person or a chat as it is saved. Never a digit, a sign or another alphabet.
+_CONTACT_NAME = re.compile(r"[a-z]+(?:[ '-][a-z]+){0,3}")
+# The part as written, after NFC: letters of Latin-1 (á, ñ, ç…) and one space, apostrophe or hyphen between words.
+# No combining mark survives here, so nothing hidden can sit inside a word.
+_WRITTEN_NAME = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ][a-zß-öø-ÿ]*(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ][a-zß-öø-ÿ]*){0,3}")
+_WRITTEN_LABEL = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+(?: [A-Za-zÀ-ÖØ-öø-ÿ]+){1,7}")
+# What they are to the person, from an allow-list that fails closed: a role from everyday life ("mi contadora",
+# "la dueña del local", "a minha vizinha"), or the place or trade they are from ("el de la panadería", "o da
+# padaria"). A partner, a health, legal or religious role, a lender, staff, anything not here: not kept.
+_DET = r'(?:el|la|los|las|mi|mis|un|una|o|a|os|as|meu|minha|meus|minhas|nuestro|nuestra|nosso|nossa)'
+_OF = r'(?:de|del|da|do|das|dos)(?: (?:la|las|los|el|a|o|as|os))?'
+_ROLE = (r'(?:vecin[oa]s?|vizinh[oa]s?|contador(?:a|as|es)?|jef[ea]s?|chefe|client[ea]s?|proveedor(?:a|as|es)?|'
+         r'fornecedor(?:a|as|es)?|duen[oa]s?|soci[oa]s?|colegas?|amig[oa]s?|'
+         r'profesor(?:a|as|es)?|professor(?:a|as|es)?|maestr[oa]s?|entrenador(?:a|as|es)?|mecanic[oa]s?|plomer[oa]s?|'
+         r'encanador(?:a|es)?|electricistas?|chofer(?:es)?|motoristas?|taxistas?|mototaxistas?|repartidor(?:a|as|es)?|'
+         r'entregador(?:a|as|es)?|peluquer[oa]s?|cabeleireir[oa]s?|barber[oa]s?|costurer[oa]s?|cociner[oa]s?|'
+         r'cozinheir[oa]s?|nineras?|babas?|emplead[oa]s?|empregad[oa]s?|encargad[oa]s?|vendedor(?:a|as|es)?|'
+         r'cajer[oa]s?|panader[oa]s?|carnicer[oa]s?|albaniles|albanil|pedreiros?|pintor(?:a|as|es)?|jardiner[oa]s?|'
+         r'carpinter[oa]s?|panas?|parcer[oa]s?)')
+_ROLE_FROM = r'(?:companer[oa]s?|chamos?|chamas?|don[oa]s?)'  # only with where they are from
+_FAMILY_TITLE = (r'(?:madre|padre|mama|papa|mae|pai|herman[oa]s?|irmaos?|irmas?|ti[oa]s?|sobrin[oa]s?|cunad[oa]s?|'
+                 r'cunhad[oa]s?|suegr[oa]s?|sogr[oa]s?|hij[oa]s?|filh[oa]s?|abuel[oa]s?|avo|avos|avoa|niet[oa]s?|net[oa]s?|'
+                 r'prim[oa]s?)')  # family: only after her own possessive
+_POSSESSIVE = r'(?:mi|meu|minha|(?:a|o) (?:minha|meu))'
+_PLACE = (r'(?:panaderia|padaria|taller|oficina|tienda|loja|bodega|abasto|kiosco|quiosque|carniceria|acougue|'
+          r'verduleria|fruteria|ferreteria|peluqueria|barberia|salao|lavanderia|mercado|supermercado|super|restaurante|'
+          r'cafeteria|cafe|pizzeria|arepera|arepas|empanadas|pan|pao|pollos?|hamburguesas|tacos|comida|delivery|gas|'
+          r'agua|hielo|mudanzas?|carros?|motos?|taxi|gimnasio|gym|academia|escuela|colegio|liceo|universidad|facultad|'
+          r'faculdade|cursos?|clases?|aulas?|futbol|futebol|trabajo|trabalho|empresa|local|obra|papeleria|imprenta|'
+          r'floristeria|joyeria|zapateria|sastreria|costura|unas|mecanica|internet|cable|plomeria|electricidad|'
+          r'cerrajeria|envios|encomiendas|feria|puesto)')
+_CONTACT_LABEL = re.compile(rf'{_DET} (?:(?:minha|meu|minhas|meus) )?(?:{_ROLE}(?: {_OF} {_PLACE}(?: {_OF} {_PLACE})?)?'
+                            rf'|{_ROLE_FROM} {_OF} {_PLACE}(?: {_OF} {_PLACE})?|{_OF} {_PLACE}(?: {_OF} {_PLACE})?)'
+                            rf'|{_POSSESSIVE} {_FAMILY_TITLE}')
+
+# A name is one of the person's own WhatsApp chats (memory.py checks that it is), so it tells Confío nothing her
+# linked WhatsApp has not. What it must never do is read as staff, a system or an order, since it sits in the
+# instructions. Checked word by word, with words joined, with letters said once, and inside glued words.
+_NAME_STAFF = _any(
+    r'soportes?', r'suportes?', r'support', r'staff', r'admin\w*', r'sistemas?', r'system\w*', r'confi[oa]', r'equipos?',
+    r'equipe', r'team', r'oficial\w*', r'moderador\w*', r'moderac\w*', r'mod', r'bots?', r'asistente\w*', r'assistent\w*',
+    r'assistant', r'gemini', r'claude', r'openai', r'chatgpt', r'gpt', r'ia', r'ai', r'seguridad', r'seguranca',
+    r'security', r'atencion', r'atendimento', r'ayuda', r'help', r'servicios?', r'verificador\w*', r'bancos?', r'bank',
+    r'notificac\w*', r'alertas?', r'customer', r'desk', r'agentes?', r'gerente\w*', r'fundador\w*', r'ceo', r'app',
+    r'apps', r'olvid\w*', r'ignor\w*', r'disregard', r'manda\w*', r'envia\w*', r'transfier\w*', r'paga', r'pagar\w*',
+    r'pague\w*', r'aprueb\w*', r'aprob\w*', r'approve\w*', r'deposit\w*', r'retir\w*', r'confirm\w*', r'autori[sz]\w*',
+    r'borra\w*', r'reglas?', r'rules?', r'instruc\w*', r'prompt\w*', r'orden\w*', r'escribe', r'habla', r'responde\w*',
+    r'cambia', r'muestra', r'firma', r'di', r'haz', r'llama', r'siempre', r'nunca', r'todo', r'everything', r'pay',
+    r'send', r'clave\w*', r'contrasen\w*', r'senhas?', r'passwords?', r'pins?', r'codigos?', r'otp', r'tokens?',
+    r'asistencia\w*', r'atencao', r'ajuda', r'suport\w*', r'soport\w*', r'tecnic\w*', r'atendente\w*', r'verified',
+    r'verificad\w*', r'meta', r'whatsapp', r'normas?', r'compra\w*', r'saca\w*', r'pasa', r'pasale', r'usa', r'bitcoin',
+    r'cripto\w*', r'plata', r'dinero', r'money', r'usdt',
+    r'operador\w*', r'asesor\w*', r'anthropic', r'google', r'robots?', r'noreply', r'root', r'dev', r'fraude\w*',
+    r'antifraude', r'compliance', r'gerencia', r'policias?', r'seniat', r'cofio', r'soprte', r'adm', r'admon',
+    r'pagos?', r'cobros?', r'reembols\w*', r'saldos?', r'cuentas?', r'tarjetas?', r'prestamos?', r'dolares', r'usdc',
+    r'binance', r'zelle', r'yape', r'nequi', r'paypal', r'acepta', r'procede', r'comparte', r'escribele', r'busca',
+    r'abre', r'urgente', r'importante',
+    r'helpdesk', r'operaciones', r'cumplimiento', r'auditoria\w*', r'tesoreria', r'facturacion', r'billing',
+    r'developers?', r'owner', r'kyc', r'didit', r'koywe', r'infinia', r'asist\w*', r'admi', r'sys', r'payments?',
+    r'wallets?', r'billetera\w*', r'transferencia\w*', r'pagador\w*', r'cobranza\w*', r'cobrar', r'remesa\w*',
+    r'envios?', r'ejecuta', r'sigue', r'dale', r'ok', r'si', r'dile',
+    # a negation: "Juan no es mi jefe" is no description of Juan
+    r'no', r'nao', r'not', r'ya', r'tampoco', r'jamas', r'never',
+)
+# Inside a glued word: only these, long enough that a real name does not hold one by chance.
+_NAME_STAFF_INSIDE = re.compile(r'soport|suport|support|staff|admin|admn|sistem|system|confio|konfio|confyo|whatsapp|'
+                                r'equipo|oficial|moderador|'
+                                r'asistente|assistant|seguridad|security|atencion|atendimento|ignor|disregard|instruc|'
+                                r'prompt|password|contrasen|transfier|aprueb|deposit|autoriz')
+# A name is how a chat is saved, never a description: it starts with neither "mi" nor "el".
+_CONTACT_NAME_START = re.compile(r'(?:el|la|los|las|mi|mis|un|una|meu|minha|my|the|tu|su)\b')
+
+
+def _joined(text) -> str:
+    """Words split by signs put back together ("Sopo-rte", "Sopo.-rte" are "soporte")."""
+    return re.sub(r"(?<=\w)[.'\-]+\s?(?=\w)", '', str(text or ''))
+
+
+def _contact_name_ok(name) -> bool:
+    if not (2 <= len(name) <= CONTACT_NAME_MAX and _WRITTEN_NAME.fullmatch(unicodedata.normalize('NFC', name))):
+        return False
+    words = words_of(name).split()
+    if not words or not _CONTACT_NAME.fullmatch(fold(name)) or _CONTACT_NAME_START.match(' '.join(words)):
+        return False
+    once = [re.sub(r'(.)\1+', r'\1', word) for word in words]  # "Soportee", "Stafff"
+    forms = {' '.join(words), ' '.join(once)} | {''.join(group[i:j]) for group in (words, once)
+                                               for i in range(len(group)) for j in range(i + 2, len(group) + 1)}
+    if any(_NAME_STAFF.search(form) or NOT_THEIR_STATEMENT.search(form) for form in forms):
+        return False
+    return not any(_NAME_STAFF_INSIDE.search(word) for word in {*words, *once, ''.join(words)})
+
+
+def _contact_label_ok(label) -> bool:
+    folded = fold(label)
+    plain = words_of(label)
+    return (3 <= len(label) <= CONTACT_LABEL_MAX and folded == plain
+            and bool(_WRITTEN_LABEL.fullmatch(unicodedata.normalize('NFC', label)))
+            and bool(_CONTACT_LABEL.fullmatch(plain)) and not never_kept(label))
+
+
+_BEFORE_NAME = re.compile(r"(?:^|\b(?:que|q|that)\s+(?:(?:el|la|o|a)\s+)?|[,;]\s*|\s(?:y|e|and)\s+)$", re.IGNORECASE)
+_NEGATION = _any(r'no', r'nao', r'not', r'nunca', r'jamas', r'tampoco', r'never', r'mentira', r'falso', r'falsa',
+                 r'dudo', r'duda', r'dudas', r'incierto', r'quizas?', r'tal vez', r'talvez', r'acaso')
+# What she says before the name is hers, not what someone else said or a "what if".
+_HEARSAY = _any(r'dijo', r'dijeron', r'dice', r'dicen', r'disse', r'cree', r'creen', r'creo', r'imagina\w*',
+                r'supon\w*', r'supongamos', r'piensa\w*', r'parece', r'segun', r'oi', r'escuche', r'contaron')
+# "…es mi jefa, pero ya no", "…y ya no lo es", "…, o era": undone in the words right after it.
+_UNDONE = re.compile(r'^(?:\w+ ){0,3}(?:ya no|no|nao|mentira|era|fue|falso)\b')
+_AFTER_DOUBT = _any(r'creo', r'supongo', r'dice', r'dicen', r'dijeron', r'verdad', r'cierto', r'segun', r'eso dice')
+_IS = re.compile(r'\s+(?:es|é|is)\s+(?:(?:a|o)\s+)?', re.IGNORECASE)  # "é a minha vizinha" read as "minha vizinha"
+_CLAUSE_END = re.compile(r'\s*(?:$|[.,;:!?)]|(?:y|e|and)\s)', re.IGNORECASE)
+# Shaped like "… que <name> es <description>": read by the model even when gate 2 refuses the whole message,
+# because the name may be what it refused ("Ana Torres"); the rest of the message must pass it (contact_parts).
+_MAYBE_CONTACT = re.compile(r"\b(?:que|q)\s+(?:(?:el|la|o|a)\s+)?(?P<name>[^\W\d_]+(?:[ '-][^\W\d_]+){0,3}?)\s+(?:es|é)\s+"
+                            r'(?:el|la|los|las|mi|un|una|o|a|meu|minha|nuestro|nuestra|nosso|nossa)\b', re.IGNORECASE)
+
+
+# Where her clause ends, searched forward: a sign, " y " / " e " / " and ", or the end.
+_CLAUSE_STOP = re.compile(r'\s*[.,;:!?)]|\s+(?:y|e|and)\s|\s*$', re.IGNORECASE)
+
+
+def _gate_two_with_name(raw, start, end) -> bool:
+    """Gate 2 on her whole message, the name included, less only the single words of an address in the name
+    ("Torres", "Calle Sucre" are names of chats). True when it refuses."""
+    name = raw[start:end]
+    kept = re.sub(r'[^\W\d_]+', lambda m: ' ' if ADDRESS_WORDS.fullmatch(words_of(m.group())) else m.group(), name)
+    return request_never_kept(raw[:start] + kept + raw[end:])
+
+
+def maybe_contact(text) -> bool:
+    """The one request gate 2 refusing the whole message still lets the closed-list model read: a contact that
+    would be kept as it stands (contact_parts: the allow-listed description, the shape, gate 2 on the rest), whose
+    name holds nothing gate 2 refuses but an address word ("Torres")."""
+    raw = str(text or '')
+    for found in _MAYBE_CONTACT.finditer(raw):
+        start, end = found.span('name')
+        name = found.group('name')
+        label_start = found.end() - len(found.group().split()[-1])
+        tail = _CLAUSE_STOP.search(raw, label_start)
+        label_end = tail.start() if tail else len(raw)
+        while label_end > label_start and raw[label_end - 1].isspace():
+            label_end -= 1
+        value = f'{start}-{end}-{label_start}-{label_end}'
+        if not _gate_two_with_name(raw, start, end) and contact_parts(raw, value):
+            return True
+    return False
+
+
+def request_never_kept(text) -> bool:
+    """Gate 2 on a request to remember, also with split words put back together."""
+    return never_kept(text) or never_kept(_joined(text))
+
+
+def contact_parts(text, value):
+    """(name, label) from the person's message and the stored positions, both through the gates; None if not."""
+    try:
+        a, b, c, d = (int(part) for part in str(value or '').split('-'))
+    except ValueError:
+        return None
+    raw = str(text or '')
+    if not (0 <= a < b <= len(raw) and 0 <= c < d <= len(raw)) or not (b <= c or d <= a):
+        return None
+    before, rest = words_of(raw[:a]), raw[:a] + ' ' + raw[b:]
+    if (not _CLAUSE_END.match(raw[d:]) or not _IS.fullmatch(raw[b:c]) or not _BEFORE_NAME.search(raw[:a])
+            or _NEGATION.search(before) or _HEARSAY.search(before) or NOT_THEIR_STATEMENT.search(before)
+            or _UNDONE.match(words_of(raw[d:])) or _HEARSAY.search(words_of(raw[d:]))
+            or _NEGATION.search(words_of(raw[d:])) or '?' in raw[d:] or _AFTER_DOUBT.search(words_of(raw[d:]))):
+        return None
+    # Gate 2 on all she said, the name too, less an address word in the name (a chat called "Ana Torres"), and no
+    # money in what she said around the two parts ("…y tengo 500 de saldo").
+    if _gate_two_with_name(raw, a, b) or MONEY.search(words_of(raw[:a] + ' ' + raw[d:])):
+        return None
+    name, label = ' '.join(visible(raw[a:b]).split()), ' '.join(visible(raw[c:d]).split())
+    return (name, label) if _contact_name_ok(name) and _contact_label_ok(label) else None
+
+
+def _folded_same_length(text) -> str:
+    """Lower case without accents, one character for each: positions in it are positions in `text`."""
+    out = []
+    for char in text:
+        base = ''.join(c for c in unicodedata.normalize('NFD', char.lower()) if unicodedata.category(c) != 'Mn')
+        out.append(base if len(base) == 1 else char)
+    return ''.join(out)
+
+
+def _span(raw, part):
+    """Where `part` is in `raw` as whole words ("Ana" is not in "Mariana"), any case."""
+    part = str(part or '').strip()
+    if not part:
+        return None
+    haystack, needle = (raw.lower(), part.lower()) if len(raw.lower()) == len(raw) else (raw, part)
+    if haystack.find(needle) < 0:
+        haystack, needle = _folded_same_length(raw), _folded_same_length(part)
+    start = haystack.find(needle)
+    while start >= 0:
+        end = start + len(part)
+        if (start == 0 or not raw[start - 1].isalnum()) and (end == len(raw) or not raw[end].isalnum()):
+            return start, end
+        start = haystack.find(needle, start + 1)
+    return None
+
+
+def contact_value(text, name, label) -> str:
+    """Where `name` and `label` are in the person's message, '' unless both are there, apart, and allowed."""
+    raw = str(text or '')
+    spans = [_span(raw, name), _span(raw, label)]
+    if None in spans:
+        return ''
+    value = '-'.join(str(n) for span in spans for n in span)
+    return value if contact_parts(raw, value) else ''
+
+
+def contact_text(name, label) -> str:
+    return f'{name}: {label}'
+
+
+# Shown on the Memoria screen for a contact that no longer passes: still there to be deleted.
+CONTACT_UNREADABLE = 'Un contacto guardado'
 
 
 def valid(kind, value) -> str:

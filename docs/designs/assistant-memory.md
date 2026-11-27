@@ -176,6 +176,35 @@ balances, rules). Memory never copies them. What it holds, all from closed lists
   deleted.
 - No nickname and no free notes ("mi perro se llama…"). The summary can quote those while recall is on.
 
+#### Who a contact is (added 2026-11-26)
+
+"Recuerda que Alejandro Teixeira es el de la panadería": the one kind that holds words, decided with Julian after a
+person was told memory could not keep it. It still stores no text:
+
+- The value is where the name and the description are in the person's own message (`a-b-c-d`). The closed-list
+  model names both, copied from the message; code finds them there, so a model cannot write one.
+- Only a chat of her linked WhatsApp (`memory.in_whatsapp`, at save): the name is then one Confío already holds
+  with her consent. Gate 2 still reads it with the whole message (only an address word in it, such as "Torres",
+  is excused). It must not read as staff, a system or an order,
+  since it sits in the instructions (`memory_rules._NAME_STAFF`, word by word, joined, letters said once, and
+  inside glued words). Written as Latin letters with one space, apostrophe or hyphen between words, a capital only
+  where a word starts, and no combining mark.
+- The description is an allow-list that fails closed (`_CONTACT_LABEL`): an everyday role ("mi contadora", "la
+  dueña del local"), the place or trade they are from ("el de la panadería"), or family as hers ("mi padre").
+  A partner, a health, legal or religious role, a lender or staff is simply not on it.
+- The shape is hers and plain: "… que <name> es <description>", with no negation or hearsay before it and nothing
+  undoing it after; the description ends her clause. Gate 2 reads all she said except the name. Deleting the
+  message deletes it (cascade), and the screen, "olvida quién es…", "olvida mis contactos" and a wipe delete it
+  like any preference. One per name, the newest wins, at most 20.
+- The model gets them as a block in the instructions, every pass, raw passes included: `CONTACTS_NOTE`. That is
+  the trade-off. Through `recall_memory` they would end the pass that writes the WhatsApp card ("escríbele al de la
+  panadería"), because a pass that read stored data never acts. A name and a description of the person's own
+  cannot move money: the payment guards still read only her raw words, and every card still shows the chat and
+  the exact text before she taps. It is left out for whoever can be operated for (Cuenta inteligente with
+  Confío IA+), whose tools accept an existing payee or a rule the owner did not name.
+- Parts are whole words of her message ("Ana" is not taken from "Mariana"). A contact that no longer passes shows
+  on the screen as «Un contacto guardado», to be deleted.
+
 ---
 
 ## 5. Invariants, and where each is enforced

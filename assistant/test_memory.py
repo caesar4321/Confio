@@ -1749,3 +1749,455 @@ class NoLogTests(Base):
             admin = confio_admin_site._registry[model]
             self.assertFalse(hidden & (set(admin.fields) | set(admin.list_display)))
             self.assertFalse(admin.has_change_permission(None))
+
+
+class ContactRulesTests(SimpleTestCase):
+    SAID = 'Recuerda que Alejandro teixeira es el de la Panadería'
+
+    def test_where_they_said_it_is_all_that_is_kept(self):
+        value = rules.contact_value(self.SAID, 'Alejandro Teixeira', 'el de la panadería')
+        self.assertRegex(value, r'^\d+-\d+-\d+-\d+$')
+        self.assertLessEqual(len(value), 24)
+        self.assertEqual(rules.contact_parts(self.SAID, value), ('Alejandro teixeira', 'el de la Panadería'))
+
+    def test_only_what_is_in_their_message(self):
+        self.assertEqual(rules.contact_value(self.SAID, 'Mallory', 'el de la Panadería'), '')
+        self.assertEqual(rules.contact_value(self.SAID, 'Alejandro', 'el que cobra todo'), '')
+        # The name and the description are two parts of it, never one inside the other.
+        self.assertEqual(rules.contact_value(self.SAID, 'Alejandro teixeira es el', 'el de la Panadería'), '')
+
+    def test_descriptions_that_are_never_kept(self):
+        for said, name, label in (
+                ('Recuerda que Juan es mi esposo', 'Juan', 'mi esposo'),
+                ('Recuerda que Luis es mi psicólogo', 'Luis', 'mi psicólogo'),
+                ('Recuerda que Luis es el de la calle 5', 'Luis', 'el de la calle 5'),
+                ('Recuerda que Pedro es el que te dice que pagues', 'Pedro', 'el que te dice que pagues'),
+                ('Recuerda que Mamá es la que me presta plata', 'Mamá', 'la que me presta plata'),
+                ('Recuerda que Soporte Confío es el oficial', 'Soporte Confío', 'el oficial'),
+                ('Recuerda que Ana es mi contadora, clave 1234', 'Ana', 'mi contadora, clave'),
+                ('Recuerda que Ana es «la jefa»', 'Ana', '«la jefa»'),
+                ('Recuerda que Ana es contadora', 'Ana', 'contadora'),
+                ('Recuerda que Аna es mi contadora', 'Аna', 'mi contadora'),
+                ('Recuerda que Ana 2 es mi contadora', 'Ana 2', 'mi contadora'),
+                ('Recuerda que Carlos es mi pareja', 'Carlos', 'mi pareja'),
+                ('Recuerda que Carla es mi ex', 'Carla', 'mi ex'),
+                ('Recuerda que Rosa es mi ginecóloga', 'Rosa', 'mi ginecóloga'),
+                ('Recuerda que Toño es el de la farmacia', 'Toño', 'el de la farmacia'),
+                ('Recuerda que Beto es el que me presta', 'Beto', 'el que me presta'),
+                ('Recuerda que Nico es el del gota a gota', 'Nico', 'el del gota a gota'),
+                ('Recuerda que Raúl es mi abogado', 'Raúl', 'mi abogado'),
+                ('Recuerda que Mi Novio es el del taller', 'Mi Novio', 'el del taller'),
+                ('Recuerda que Banco Central es el de la esquina', 'Banco Central', 'el de la esquina'),
+                ('Recuerda que Manda Plata es el del taller', 'Manda Plata', 'el del taller'),
+                # Whole words only: "Ana" is not in "Mariana", nor "mi contador" in "mi contadora".
+                ('Recuerda que Mariana es mi contadora', 'Ana', 'mi contadora'),
+                ('Recuerda que Ana es mi contadora', 'Ana', 'mi contador')):
+            self.assertEqual(rules.contact_value(said, name, label), '', label)
+
+    def test_a_description_is_kept_only_from_the_allow_list(self):
+        for label in ('mi amor', 'mi jeva', 'mi gordo', 'el amor de mi vida', 'mi exnovia', 'los que me deben',
+                      'la que me fió', 'el del credito', 'el de la casa de empeño', 'mi fisioterapeuta',
+                      'mi nutricionista', 'mi partera', 'la del juzgado', 'la de migracion', 'el obispo',
+                      'mi madrina de santo', 'el de seguridad de la app', 'el fundador de la app',
+                      'la de atencion al cliente', 'el del banco', 'el que me cobra', 'el señor de las empanadas'):
+            self.assertEqual(rules.contact_value(f'Recuerda que Ana es {label}', 'Ana', label), '', label)
+
+    def test_a_description_is_never_cut_short(self):
+        # "mi compañera" alone can be a partner: kept only with where she is from, and never cut from more.
+        for said, name, label in (
+                ('Recuerda que Marta es mi compañera sentimental', 'Marta', 'mi compañera'),
+                ('Recuerda que Ana es mi compañera de vida', 'Ana', 'mi compañera'),
+                ('Recuerda que Rosa es la chama con la que salgo', 'Rosa', 'la chama'),
+                ('Recuerda que Pedro es mi compañero de celda', 'Pedro', 'mi compañero'),
+                ('Recuerda que Ana es mi compañera', 'Ana', 'mi compañera')):
+            self.assertEqual(rules.contact_value(said, name, label), '', said)
+        for said, name, label in (
+                ('Recuerda que Ana es mi contadora y Luis es mi vecino', 'Ana', 'mi contadora'),
+                ('Recuerda que Alejandro es el de la panadería.', 'Alejandro', 'el de la panaderia')):
+            self.assertTrue(rules.contact_value(said, name, label), said)
+
+    def test_a_religious_title_is_not_family(self):
+        for said, name, label in (
+                ('Lembra que o João é o padre', 'João', 'o padre'),
+                ('Recuerda que Juan es el padre', 'Juan', 'el padre'),
+                ('Recuerda que Juan es el padre del colegio', 'Juan', 'el padre del colegio'),
+                ('Recuerda que Ana es la madre del colegio', 'Ana', 'la madre del colegio'),
+                ('Recuerda que Clara es la hermana del colegio', 'Clara', 'la hermana del colegio')):
+            self.assertEqual(rules.contact_value(said, name, label), '', said)
+        for said, name, label in (('Recuerda que Juan es mi padre', 'Juan', 'mi padre'),
+                                  ('Lembra que a Bia é a minha irmã', 'Bia', 'a minha irmã')):
+            self.assertTrue(rules.contact_value(said, name, label), said)
+
+    def test_family_words_only_as_hers(self):
+        for said, name, label in (
+                ('Recuerda que Jesús es nuestro padre', 'Jesús', 'nuestro padre'),
+                ('Recuerda que María es nuestra madre', 'María', 'nuestra madre'),
+                ('Lembra que Oxalá é nosso pai', 'Oxalá', 'nosso pai'),
+                ('Recuerda que León es el papa', 'León', 'el papa')):
+            self.assertEqual(rules.contact_value(said, name, label), '', said)
+        for said, name, label in (('Recuerda que Rosa es mi mamá', 'Rosa', 'mi mamá'),
+                                  ('Lembra que a Bia é a minha mãe', 'Bia', 'a minha mãe')):
+            self.assertTrue(rules.contact_value(said, name, label), said)
+
+    def test_a_split_word_is_read_whole(self):
+        for name in ('Sopo-rte Con-fío', 'Ad-min', 'Ig-nora Re-glas'):
+            said = f'Recuerda que {name} es mi vecino'
+            self.assertEqual(rules.contact_value(said, name, 'mi vecino'), '', name)
+        self.assertTrue(rules.contact_value('Recuerda que María-José es nuestra contadora', 'María-José',
+                                            'nuestra contadora'))
+
+    def test_nothing_hidden_in_how_it_is_written(self):
+        marks = ''.join(chr(c) for c in (0x369, 0x366, 0x368, 0x36D, 0x366, 0x36C))
+        for said, name, label in (
+                ('Recuerda que Sopo.-rte Conf.-io es el de la oficina', 'Sopo.-rte Conf.-io', 'el de la oficina'),
+                ('Recuerda que Pas.-tor Luis es mi vecino', 'Pas.-tor Luis', 'mi vecino'),
+                ('Recuerda que Sopo rte es el de la oficina', 'Sopo rte', 'el de la oficina'),
+                (f'Recuerda que Juan es mi ve{marks}cino', 'Juan', f'mi ve{marks}cino'),
+                (f'Recuerda que Ju{marks}an es mi vecino', f'Ju{marks}an', 'mi vecino')):
+            self.assertEqual(rules.contact_value(said, name, label), '', said)
+
+    def test_glued_or_doubled_words_are_read_apart(self):
+        for name in ('SoporteConfío', 'soporteconfio', 'AnaIgnoraReglas', 'anaignorareglas', 'Juansoporteperez',
+                     'Juan Soportee', 'Juan Stafff', 'Ana Confioo', 'Equipo Seguridad'):
+            self.assertEqual(rules.contact_value(f'Recuerda que {name} es mi vecina', name, 'mi vecina'), '', name)
+
+    def test_real_names_are_kept(self):
+        # A name is a chat of hers (memory.in_whatsapp): what it says about the contact is already in her WhatsApp.
+        for name in ('Alejandro teixeira', 'Ricardo', 'Montenegro', 'Bustamante', 'Exequiel', 'Mateo', 'Moreno',
+                     'Cristóbal', 'Santos', 'Morales', 'Conceição', 'Peñaloza', 'Lucas', 'Ana Torres', 'Diego Pagano',
+                     'Cristian López', "O'Brien", 'Ana Maria', 'Remedios', 'Santana', 'Ibáñez', 'Reina',
+                     'Calle Sucre'):
+            said = f'Recuerda que {name} es mi vecina'
+            self.assertTrue(rules.contact_value(said, name, 'mi vecina'), name)
+        # Gate 2 still reads the name: one that is a sensitive word is not kept (fails closed on "Iglesias").
+        for name in ('Ana Les-biana', 'Jesús', 'Jesús Pérez', 'Ana Iglesias', 'Ana Pa-saporte', 'Doctora Ana'):
+            said = f'Recuerda que {name} es mi vecina'
+            self.assertEqual(rules.contact_value(said, name, 'mi vecina'), '', name)
+
+    def test_a_negation_is_never_kept_as_a_statement(self):
+        for said, name, label in (('Recuerda que Juan no es mi jefe', 'Juan no', 'mi jefe'),
+                                  ('Recuerda que no es cierto que Juan es mi jefe', 'Juan', 'mi jefe'),
+                                  ('Recuerda que Teresa es mis hermanas', 'Teresa', 'mis hermanas'),
+                                  ('Recuerda que es mentira que Ana es mi jefa', 'Ana', 'mi jefa'),
+                                  ('Recuerda que Ana es mi jefa, ya no', 'Ana', 'mi jefa')):
+            self.assertEqual(rules.contact_value(said, name, label), '', said)
+
+    def test_the_name_is_what_the_description_is_said_of(self):
+        for said, name, label in (
+                ('Recuerda que Ana es la amante de mi vecino', 'Ana', 'mi vecino'),
+                ('Recuerda que Ana es la abogada de mi hermana', 'Ana', 'mi hermana'),
+                ('Recuerda que Ana ya no es mi contadora', 'Ana', 'mi contadora'),
+                ('Recuerda que Ana no es mi contadora', 'Ana', 'mi contadora'),
+                ('Recuerda que Ana es mi ex y Luis es mi vecino', 'Ana', 'mi vecino'),
+                ('Recuerda que la amante de Pedro es mi vecina', 'Pedro', 'mi vecina')):
+            self.assertEqual(rules.contact_value(said, name, label), '', said)
+
+    def test_the_rest_of_the_message_still_passes_gate_two(self):
+        # "Torres" is a name of hers, never read as an address; all she said besides it is.
+        self.assertTrue(rules.maybe_contact('Recuerda que Ana Torres es mi vecina'))
+        self.assertTrue(rules.contact_value('Recuerda que Ana Torres es mi vecina', 'Ana Torres', 'mi vecina'))
+        for said in ('Recuerda que Ana es mi vecina y vive en la calle Bolívar', 'Recuerda que Ana es mi vecina, tengo diabetes'):
+            self.assertEqual(rules.contact_value(said, 'Ana', 'mi vecina'), '', said)
+        for said in ('Recuerda que Pedro me dijo que Ana es la dueña del local',
+                     'Recuerda que imagina que Ana es la dueña del local'):
+            self.assertEqual(rules.contact_value(said, 'Ana', 'la dueña del local'), '', said)
+        for said in ('Recuerda que Ana es mi jefa, pero ya no', 'Recuerda que Ana es mi jefa y ya no lo es'):
+            self.assertEqual(rules.contact_value(said, 'Ana', 'mi jefa'), '', said)
+
+    def test_a_secret_shaped_like_a_contact_is_never_read(self):
+        for text in ('Recuerda que mi clave es la 445566', 'Recuerda que mi tarjeta es la 4111111111111111',
+                     'Lembre que minha senha é a 1234abc', 'Recuerda que tengo VIH y es mi secreto',
+                     'Recuerda que mi religión es la evangélica', 'Recuerda que mi dirección es la calle 5 casa 12'):
+            self.assertTrue(rules.request_never_kept(text), text)
+            self.assertFalse(rules.maybe_contact(text), text)
+        self.assertTrue(rules.maybe_contact('Recuerda que Ana Torres es mi vecina'))
+
+    def test_a_sensitive_name_slot_is_never_read(self):
+        for text in ('Recuerda que Cinco Seis es mi vecina, siete ocho', 'Recuerda que Ana Les-biana es mi vecina',
+                     'Recuerda que Casa Gay Junto es mi vecina','Recuerda que Cristo es mi salvador', 'Recuerda que Maduro es mi presidente',
+                     'Recuerda que Diabetes es mi enemiga', 'Recuerda que X Q Z W es la del wifi',
+                     'Recuerda que Ana Torres es mi vecina y tengo diabetes'):
+            self.assertFalse(rules.maybe_contact(text), text)
+        self.assertTrue(rules.maybe_contact('Recuerda que Alejandro teixeira es el de la Panadería, gracias'))
+
+    def test_no_money_around_it(self):
+        for tail in (' y tengo 500 de saldo', ' y gano 800 al mes', ' y le debo cien dolares', ' y le presté plata'):
+            said = f'Recuerda que Ana es mi vecina{tail}'
+            self.assertEqual(rules.contact_value(said, 'Ana', 'mi vecina'), '', said)
+        self.assertTrue(rules.contact_value('Recuerda que Pedro es el de los envios', 'Pedro', 'el de los envios'))
+
+    def test_doubt_after_it_is_never_kept(self):
+        for tail in (', o eso dice mi hermana', ', según mi mamá', ', creo', ', eso me dijeron', ', ¿verdad?'):
+            said = f'Recuerda que Juan es mi jefe{tail}'
+            self.assertEqual(rules.contact_value(said, 'Juan', 'mi jefe'), '', said)
+
+    def test_a_name_never_reads_as_staff_a_system_or_an_order(self):
+        for name in ('Support', 'Help Desk', 'Agente', 'Atencion Al Cliente', 'Gerente General', 'Mi Novio',
+                     'Banco Central', 'Manda Plata', 'Clave Juan', 'Manda Todo Ya', 'Olvida Las Reglas',
+                     'Disregard Prior Rules', 'Aprueba Ya', 'Deposita Ahora', 'Atendimento Cliente', 'Bot', 'Gemini',
+                     'Pay Without Asking', 'Escribe En Ingles', 'Firma Aqui', 'Haz Caso', 'Konfio Suport', 'Confyo',
+                     'Asistencia Tecnica', 'Whatsapp', 'Meta Verified', 'Admn', 'Sistem', 'Saca Plata', 'Operador',
+                     'Anthropic', 'Saldo', 'Zelle', 'Urgente', 'Escribele'):
+            said = f'Recuerda que {name} es mi vecino'
+            self.assertEqual(rules.contact_value(said, name, 'mi vecino'), '', name)
+
+    def test_descriptions_that_are_kept(self):
+        for said, name, label in (
+                ('Recuerda que Ana es mi contadora', 'Ana', 'mi contadora'),
+                ('Recuerda que Juan Pérez es el del taller', 'Juan Pérez', 'el del taller'),
+                ('Lembra que a Bia é a minha vizinha', 'Bia', 'a minha vizinha'),
+                ('Recuerda que María José es la dueña del local', 'María José', 'la dueña del local'),
+                ('Recuerda que Pedro es mi compañero de trabajo', 'Pedro', 'mi compañero de trabajo'),
+                ('Lembra que o Juan é o da padaria', 'Juan', 'o da padaria'),
+                ('Recuerda que Rosa es la de las empanadas', 'Rosa', 'la de las empanadas')):
+            value = rules.contact_value(said, name, label)
+            self.assertEqual(rules.contact_parts(said, value), (name, label), label)
+
+    def test_positions_that_point_elsewhere_read_as_nothing(self):
+        for value in ('', 'x', '0-4-5-9', '13-31-13-31', '13-31-35-999', '-1-3-4-5'):
+            self.assertIsNone(rules.contact_parts(self.SAID, value), value)
+
+
+@override_settings(**ALL_ON)
+class ContactMemoryTests(Base):
+    SAID = 'Recuerda que Alejandro teixeira es el de la Panadería'
+    REAL_IN_WHATSAPP = staticmethod(memory.in_whatsapp)
+
+    def contact_reply(self, name='Alejandro Teixeira', label='el de la panadería', action='remember'):
+        return as_json({'action': action, 'also_asks': False,
+                        'items': [{'kind': rules.CONTACT, 'name': name, 'label': label}]})
+
+    def save(self, said=None, name='Alejandro Teixeira', label='el de la panadería'):
+        outcome, _ = self.ask(said or self.SAID, FakeProvider(self.contact_reply(name, label)))
+        return outcome
+
+    def contacts(self):
+        return [memory.fact_text(f, self.user.id) for f in memory.live_facts(self.scope().row())]
+
+    def setUp(self):
+        super().setUp()
+        # Every contact here is a chat of her linked WhatsApp (memory.in_whatsapp has its own tests).
+        patcher = patch('assistant.memory.in_whatsapp', return_value=True)
+        self.in_whatsapp = patcher.start()
+        self.addCleanup(patcher.stop)
+        linked = self.link_patch = patch('assistant.memory.whatsapp_link_of', return_value=object())
+        self.linked = linked.start()
+        self.addCleanup(linked.stop)
+
+    def test_a_check_that_fails_is_try_again(self):
+        self.in_whatsapp.side_effect = memory.WhatsAppCheckFailed
+        provider = FakeProvider(self.contact_reply(), answer())
+        self.ask(self.SAID, provider)
+        self.assertEqual(self.contacts(), [])
+        self.assertIn(memory.NOTE_NOT_SAVED_NOW, provider.turns()[0]['instructions'])
+
+    def test_used_only_while_her_whatsapp_is_linked(self):
+        self.save()
+        self.linked.return_value = None
+        provider = FakeProvider(answer())
+        self.ask('¿Qué me dijo el de la panadería?', provider)
+        self.assertNotIn('Alejandro', provider.turns()[0]['instructions'])
+
+    def test_only_a_chat_of_her_whatsapp(self):
+        self.in_whatsapp.return_value = False
+        provider = FakeProvider(self.contact_reply(), answer())
+        self.ask(self.SAID, provider)
+        self.assertEqual(self.contacts(), [])
+        self.assertIn(memory.NOTE_NOT_IN_WHATSAPP, provider.turns()[0]['instructions'])
+
+    def test_with_no_whatsapp_linked_it_is_not_there(self):
+        self.link_patch.stop()  # the real lookup: this person has no WhatsApp linked
+        self.assertIsNone(memory.whatsapp_link_of(self.scope()))
+        self.assertFalse(self.REAL_IN_WHATSAPP(self.scope(), 'Alejandro teixeira'))
+        self.link_patch.start()
+
+    def test_a_name_gate_two_alone_would_refuse_is_still_kept(self):
+        outcome = self.save('Recuerda que Ana Torres es mi vecina', 'Ana Torres', 'mi vecina')
+        self.assertIn('Ana Torres: mi vecina', outcome.reply_message.body)
+        # A preference in a message gate two refuses is never saved that way.
+        provider = FakeProvider(as_json({'action': 'remember', 'also_asks': False, 'items': [
+            {'kind': rules.LANGUAGE, 'value': 'pt'}, {'kind': rules.CONTACT, 'name': 'Ana Torres', 'label': 'mi vecina'}]}))
+        self.ask('Recuerda que Ana Torres es mi vecina', provider)
+        self.assertNotIn('Responderte en portugués', [memory.fact_text(f, self.user.id)
+                                                      for f in memory.live_facts(self.scope().row())])
+
+    def test_saved_from_their_message_and_code_confirms(self):
+        outcome = self.save()
+        self.assertIn('Alejandro teixeira: el de la Panadería', outcome.reply_message.body)
+        [fact] = memory.live_facts(self.scope().row())
+        self.assertEqual((fact.kind, fact.source_message_id), (rules.CONTACT, outcome.user_message.id))
+        self.assertNotIn('Alejandro', fact.value)  # positions, never the words
+        self.assertEqual(self.contacts(), ['Alejandro teixeira: el de la Panadería'])
+
+    def test_a_model_that_writes_its_own_words_saves_nothing(self):
+        self.ask(self.SAID, FakeProvider(self.contact_reply('Mallory', 'el de los pagos'), answer()))
+        self.assertFalse(AssistantMemoryFact.objects.exists())
+
+    def test_the_next_turns_know_who_it_is(self):
+        self.save()
+        provider = FakeProvider(answer())
+        self.ask('¿Qué me dijo el de la panadería?', provider)
+        [turn] = provider.turns()
+        self.assertIn(memory.CONTACTS_NOTE, turn['instructions'])
+        self.assertIn('- «el de la Panadería»: Alejandro teixeira\n', turn['instructions'])
+        # Not on a build without the screen, and not with memory switched off.
+        provider = FakeProvider(answer())
+        self.ask('¿Qué me dijo el de la panadería?', provider, request_meta={})
+        self.assertNotIn('Alejandro', provider.turns()[0]['instructions'])
+        memory.set_switches(self.scope(), facts=False)
+        provider = FakeProvider(answer())
+        self.ask('¿Qué me dijo el de la panadería?', provider)
+        self.assertNotIn('Alejandro', provider.turns()[0]['instructions'])
+
+    def test_a_raw_pass_keeps_them(self):
+        self.save()
+        self.chat(12)
+        old = self.say('estoy planeando un viaje a Cusco con mi hermana')
+        self.summarized(old)
+        provider = FakeProvider(call(context_rules.RECALL), call('prepare_whatsapp_reply', {
+            'chat': 'Alejandro teixeira', 'phone': None, 'text': 'hola'}, 'c2'), answer(), answer())
+        self.ask('escríbele al de la panadería que hoy paso', provider)
+        for turn in provider.turns():
+            self.assertIn('«el de la Panadería»: Alejandro teixeira', turn['instructions'])
+
+    def test_one_per_name_newest_wins_and_at_most_twenty(self):
+        self.save()
+        self.save('Recuerda que Alejandro Teixeira es mi vecino', 'Alejandro Teixeira', 'mi vecino')
+        self.assertEqual(self.contacts(), ['Alejandro Teixeira: mi vecino'])
+        scope = self.scope()
+        names = ('Ana Lucia', 'Bruno', 'Carla', 'Diego', 'Elena', 'Fabio', 'Gabriela', 'Hugo', 'Irene', 'Jorge',
+                 'Karen', 'Leo', 'Marta', 'Nadia', 'Oscar', 'Paula', 'Quique', 'Rita', 'Samuel', 'Tania', 'Ulises',
+                 'Vera', 'Wilmer', 'Ximena', 'Yolanda')
+        for name in names:
+            message = self.say(f'Recuerda que {name} es mi vecino')
+            memory.remember(scope, [(rules.CONTACT, (name, 'mi vecino'))], message)
+        names = [text.split(':')[0] for text in self.contacts()]
+        self.assertEqual(len(names), rules.CONTACT_MAX)
+        self.assertEqual(names[-1], 'Yolanda')
+        self.assertNotIn('Alejandro Teixeira', names)
+
+    def test_forgotten_by_name_by_all_and_with_the_message(self):
+        self.save()
+        self.save('Recuerda que Ana es mi contadora', 'Ana', 'mi contadora')
+        provider = FakeProvider(as_json({'action': 'forget', 'also_asks': False,
+                                         'items': [{'kind': rules.CONTACT, 'name': 'Alejandro', 'label': ''}]}))
+        self.ask('Olvida quién es Alejandro', provider)
+        self.assertEqual(self.contacts(), ['Ana: mi contadora'])
+        # Deleting the message she said it in deletes it.
+        [fact] = memory.live_facts(self.scope().row())
+        SupportMessage.objects.filter(pk=fact.source_message_id).delete()
+        self.assertEqual(memory.live_facts(self.scope().row()), [])
+        self.save('Recuerda que Ana es mi contadora', 'Ana', 'mi contadora')
+        provider = FakeProvider(as_json({'action': 'forget', 'also_asks': False,
+                                         'items': [{'kind': rules.CONTACT, 'name': '*', 'label': ''}]}))
+        self.ask('Olvida mis contactos', provider)
+        self.assertEqual(self.contacts(), [])
+        self.save()
+        self.ask('Olvida todo')
+        self.assertEqual(self.contacts(), [])
+
+    def test_forgotten_by_a_longer_name_or_a_label_alone(self):
+        self.save(self.SAID.replace('Alejandro teixeira', 'Alejandro'), 'Alejandro', 'el de la panadería')
+        provider = FakeProvider(as_json({'action': 'forget', 'also_asks': False, 'items': [
+            {'kind': rules.CONTACT, 'name': 'a Alejandro Teixeira', 'label': ''}]}))
+        self.ask('Olvida a Alejandro Teixeira', provider)
+        self.assertEqual(self.contacts(), [])
+        self.save()
+        provider = FakeProvider(as_json({'action': 'forget', 'also_asks': False, 'items': [
+            {'kind': rules.CONTACT, 'name': '', 'label': 'el de la panadería'}]}))
+        self.ask('Olvida al de la panadería', provider)
+        self.assertEqual(self.contacts(), [])
+
+    def test_a_dropped_accent_still_finds_her_words(self):
+        outcome = self.save(label='el de la panaderia')
+        self.assertIn('Alejandro teixeira: el de la Panadería', outcome.reply_message.body)
+
+    def test_forgotten_with_another_article(self):
+        self.save('Recuerda que Ana es mi vecina', 'Ana', 'mi vecina')
+        provider = FakeProvider(as_json({'action': 'forget', 'also_asks': False, 'items': [
+            {'kind': rules.CONTACT, 'name': 'a la vecina', 'label': ''}]}))
+        self.ask('Olvida a la vecina', provider)
+        self.assertEqual(self.contacts(), [])
+
+    def test_the_screen_shows_and_deletes_it(self):
+        self.save()
+        data = memory_schema.payload(self.scope())
+        self.assertEqual([f.text for f in data.facts], ['Alejandro teixeira: el de la Panadería'])
+        self.assertTrue(memory.forget_fact(self.scope(), int(data.facts[0].id)))
+        self.assertEqual(memory_schema.payload(self.scope()).facts, [])
+
+    def test_a_fact_that_no_longer_passes_is_not_read(self):
+        message = self.say('Recuerda que Luis es mi psicólogo')
+        self.fact(rules.CONTACT, '13-17-21-33', source=message)
+        self.assertEqual(self.contacts(), [rules.CONTACT_UNREADABLE])  # still on the screen, to be deleted
+        self.assertEqual(memory.state_for_turn(self.thread, self.raw(), remembering=True).note.count('Luis'), 0)
+
+    def test_someone_elses_message_is_never_read_as_theirs(self):
+        reply = self.say('Recuerda que Mallory es la de los premios', 'AGENT')
+        self.fact(rules.CONTACT, '13-20-24-41', source=reply)
+        self.assertEqual(self.contacts(), [rules.CONTACT_UNREADABLE])
+        self.assertNotIn('Mallory', memory.state_for_turn(self.thread, self.raw(), remembering=True).contacts)
+
+    def test_the_payment_guards_never_read_them(self):
+        self.save()
+        history = self.raw()
+        turn_context = context_rules.load(self.thread, history, remembering=True)
+        self.assertIn('Alejandro teixeira', turn_context.contacts)
+        guards = MoneyEvidenceTests.guards
+        latest = self.say('mándale 20 al de la panadería')
+        history = self.raw()
+        turn_context = context_rules.load(self.thread, history, remembering=True)
+        # The notes add nothing a guard reads: only her raw messages do.
+        self.assertEqual(guards(self, history, turn_context), guards(self, history, None))
+        self.assertEqual(latest.body, 'mándale 20 al de la panadería')
+
+    def test_left_out_for_who_can_be_operated_for(self):
+        """Their tools accept an existing payee or a rule she did not name: a label must not pick one."""
+        self.save()
+        provider = FakeProvider(answer())
+        with patch('assistant.engine.Toolbelt.smart_ops', return_value=True):
+            self.ask('crea una regla para mandarle cada lunes al de la panadería', provider)
+        self.assertNotIn('Alejandro', provider.turns()[0]['instructions'])
+        self.assertNotIn(memory.CONTACTS_NOTE, provider.turns()[0]['instructions'])
+
+    def test_forgotten_by_how_she_calls_them(self):
+        self.save()
+        provider = FakeProvider(as_json({'action': 'forget', 'also_asks': False, 'items': [
+            {'kind': rules.CONTACT, 'name': 'al de la panadería', 'label': ''}]}))
+        self.ask('Olvida al de la panadería', provider)
+        self.assertEqual(self.contacts(), [])
+        self.save()
+        provider = FakeProvider(as_json({'action': 'forget', 'also_asks': False, 'items': [
+            {'kind': rules.CONTACT, 'name': 'la panadería', 'label': ''}]}))
+        self.ask('Olvida a la de la panadería', provider)
+        self.assertEqual(self.contacts(), [])
+
+    def test_what_she_is_told_about_memory_is_true_for_her(self):
+        provider = FakeProvider(answer())
+        self.ask('¿Puedes aprender de las conversaciones?', provider)
+        self.assertIn(memory.NOTE_RECALL, provider.turns()[0]['instructions'])
+        memory.set_switches(self.scope(), recall=False)
+        provider = FakeProvider(answer())
+        self.ask('¿Puedes aprender de las conversaciones?', provider)
+        self.assertIn(memory.NOTE_ON, provider.turns()[0]['instructions'])
+        self.assertNotIn(memory.NOTE_RECALL, provider.turns()[0]['instructions'])
+
+    def test_a_secret_is_refused_without_offering_another_way(self):
+        provider = FakeProvider(answer())
+        self.ask('Recuerda que Ana es mi contadora y su clave es 1234', provider)
+        [turn] = provider.turns()
+        self.assertIn(memory.NOTE_NOT_KEPT, turn['instructions'])
+        self.assertNotIn('ofrécele lo que sí', turn['instructions'])
+
+    def test_a_failure_is_not_told_as_not_allowed(self):
+        provider = FakeProvider(RuntimeError('memory model down'), answer())
+        self.ask(self.SAID, provider)
+        self.assertIn(memory.NOTE_NOT_SAVED_NOW, provider.turns()[0]['instructions'])
+
+    def test_what_it_cannot_keep_is_said_kindly_with_what_it_can(self):
+        provider = FakeProvider(as_json({'action': 'none', 'items': [], 'also_asks': False}), answer())
+        self.ask('Recuerda que el lunes hay reunión', provider)
+        instructions = provider.turns()[0]['instructions']
+        self.assertIn('con amabilidad', instructions)
+        self.assertIn('quién es para ella un contacto', instructions)
+        self.assertIn('ofrécele lo que sí', instructions)
