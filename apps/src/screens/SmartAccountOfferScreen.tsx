@@ -41,6 +41,7 @@ import {
 } from '../services/smartAccount';
 import { DEX_TRADING_UI_ENABLED } from '../config/features';
 import { logOfferStep, logSmartAccountFunnel } from '../services/paidOffers';
+import { useAskWhyOnSmartAccountLeave } from '../services/smartAccountExit';
 import type { MainStackParamList } from '../types/navigation';
 
 export { orderPlans } from '../components/smartAccount/PlanPicker';
@@ -98,6 +99,8 @@ const BLOCKED_FALLBACK = 'Todavía no puedes abrir tu Cuenta inteligente.';
 const STOCKS_ONLY_INVESTING = 'Compra acciones automáticamente, cada día, semana, quincena o mes.';
 
 const CTA_LABEL = 'Abrir mi Cuenta inteligente';
+// The one thing between an unverified person and the account: the button takes them there.
+const VERIFY_LABEL = 'Verificar mi identidad';
 
 /**
  * The hero and the benefits this app can keep. The hero is automation; the
@@ -169,6 +172,29 @@ export function SmartAccountOfferScreen() {
   const data = offer.data;
   const pitch = offerPitch(data);
   const canSubscribe = !!data?.available && !!data?.canSubscribe && plans.length > 0;
+  // Not verified yet (offer.subscribe_block 'identity'): the main button opens Verificación.
+  const needsVerify = !canSubscribe && !!data?.available && data?.blockedCode === 'identity';
+
+  // Coming back from Verificación (or anywhere) reads the offer again, so a
+  // person verified meanwhile can open the account without leaving the screen.
+  // Back on this screen, a later close is a new decision: the question may come again.
+  const stayed = useRef(false);
+  const returned = useRef(false);
+  useEffect(() => navigation.addListener('focus', () => {
+    if (returned.current) {
+      stayed.current = false;
+      void offer.reload();
+    }
+    returned.current = true;
+  }), [navigation, offer.reload]);
+
+  // "What made you wait?" once this screen closes, unless they went on or went to verify.
+  // Only someone who could act (sign, or verify first): a screen that blocked them for another
+  // reason (review, age, the network) is not a choice they made.
+  const exitContext = useRef({ needsVerify: false, plan: null as string | null, eligible: false });
+  exitContext.current = { needsVerify, plan: canSubscribe ? selected : null, eligible: canSubscribe || needsVerify };
+  if (hasAccount) stayed.current = true;
+  useAskWhyOnSmartAccountLeave(!!data, stayed, exitContext);
   const pendingInvite = (designations.data ?? []).find((d) => d.state === 'pending_acceptance');
   // The picture scales with the screen and never crowds a small phone.
   const artWidth = Math.min(260, Math.max(180, width - 120));
@@ -182,7 +208,13 @@ export function SmartAccountOfferScreen() {
       scroll.current?.scrollTo({ y: Math.max(0, acceptY.current - 120), animated: true });
       return;
     }
+    stayed.current = true;
     navigation.navigate('SmartAccountFund', { plan: selected });
+  };
+
+  const onVerify = () => {
+    stayed.current = true;
+    navigation.navigate('Verification');
   };
 
   return (
@@ -352,7 +384,11 @@ export function SmartAccountOfferScreen() {
           {canSubscribe && selectedPlan ? (
             <Text style={styles.barSummary} testID="offer-summary">{planSummary(selectedPlan)}</Text>
           ) : null}
-          <ActionButton label={CTA_LABEL} onPress={onContinue} disabled={!canSubscribe} testID="offer-continue" />
+          {needsVerify ? (
+            <ActionButton label={VERIFY_LABEL} onPress={onVerify} testID="offer-verify" />
+          ) : (
+            <ActionButton label={CTA_LABEL} onPress={onContinue} disabled={!canSubscribe} testID="offer-continue" />
+          )}
           {canSubscribe ? <Text style={styles.barNote}>No se cobra nada hasta que firmes.</Text> : null}
         </View>
       ) : null}

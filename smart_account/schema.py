@@ -595,6 +595,14 @@ class Query(graphene.ObjectType):
         # (canSubscribe, blockedReason), never what the offer shows.
         if block is None and personal and offer.subscribe_in_flight(user, own):
             block = 'opening'
+        if block == 'identity':
+            # Documents already with the reviewers: "verify" would send them to start again.
+            try:
+                from assistant.suggestions import waits_on_review
+                if waits_on_review(user):
+                    block = 'identity_review'
+            except Exception:  # noqa: BLE001 - the plain reason stands
+                logger.warning('smart account offer: review state unknown', exc_info=True)
         can_subscribe = block is None and not (own is not None and own.status in ('active', 'cancel_pending'))
         return SmartAccountOfferType(
             available=bool(personal and (offer.build_supported(meta) or has_account)),
@@ -1039,7 +1047,31 @@ class DeleteSmartAccountWatch(graphene.Mutation):
         return SmartAccountSimpleResultType(success=True)
 
 
+class SmartAccountExitReasonType(graphene.ObjectType):
+    success = graphene.Boolean()
+
+
+class RecordSmartAccountExitReason(graphene.Mutation):
+    """Why the person left the subscribe screen without opening the account,
+    one tap (smart_account.funnel.record_exit). Never an error to the user."""
+
+    class Arguments:
+        reason = graphene.String(required=True)
+        plan = graphene.String(required=False)
+
+    Output = SmartAccountExitReasonType
+
+    def mutate(self, info, reason, plan=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return SmartAccountExitReasonType(success=False)
+        from . import funnel
+        return SmartAccountExitReasonType(
+            success=funnel.record_exit(user, (reason or '').strip().lower(), plan=(plan or '').strip().lower()))
+
+
 class Mutation(graphene.ObjectType):
+    record_smart_account_exit_reason = RecordSmartAccountExitReason.Field()
     delete_smart_account_watch = DeleteSmartAccountWatch.Field()
     save_smart_account_pago_movil_destination = SaveSmartAccountPagoMovilDestination.Field()
     save_smart_account_clabe_destination = SaveSmartAccountClabeDestination.Field()

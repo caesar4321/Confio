@@ -251,6 +251,8 @@ BLOCKED = {
     'build': 'Actualiza Confío para abrir tu Cuenta inteligente.',
     'personal_only': 'La Cuenta inteligente solo está disponible para cuentas personales.',
     'identity': 'Verifica tu identidad para abrir tu Cuenta inteligente.',
+    # 'identity' while the documents wait on the reviewers (resolve_smart_account_offer): nothing to redo.
+    'identity_review': 'Tu verificación está en revisión. Podrás abrir tu Cuenta inteligente cuando termine.',
     'identity_hold': 'Tu cuenta está en revisión. Escríbenos por soporte para continuar.',
     'minor': 'La Cuenta inteligente está disponible para mayores de 18 años.',
     'chain_unavailable': 'No pudimos consultar la red. Inténtalo de nuevo en unos minutos.',

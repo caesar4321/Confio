@@ -72,6 +72,8 @@ export interface SmartAccountOffer {
   available: boolean;
   canSubscribe: boolean;
   blockedReason: string | null;
+  /** The server's reason code ('identity', 'identity_hold', 'build', ...), null when it can subscribe. */
+  blockedCode?: string | null;
   plans: SmartAccountPlan[];
   headline: string;
   benefits: SmartAccountBenefit[];
@@ -327,6 +329,7 @@ export const SMART_ACCOUNT_OFFER = gql`
       available
       canSubscribe
       blockedReason
+      blockedCode
       plans { key priceUsd periodDays nextPriceUsd nextPriceEffectiveAt isDefault }
       headline
       benefits { key title body }

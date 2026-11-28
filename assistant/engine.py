@@ -415,6 +415,23 @@ def _smart_account_open(viewer) -> bool:
         return False
 
 
+def _smart_account_needs_identity(viewer) -> bool:
+    """Verifying is what stands between this person and opening the account
+    (offer.subscribe_block 'identity'); False on any doubt."""
+    if viewer.user is None or not smart_account_real_screen(viewer):
+        return False
+    # Only someone with something to do: never a verified person (and never the chain read subscribe_block
+    # ends on for them), never one whose documents wait on the reviewers ("verify again" would confuse them).
+    if _identity_status(viewer) not in ('unverified', 'rejected', 'pending'):
+        return False
+    try:
+        from smart_account import offer
+        return offer.subscribe_block(viewer.user, personal_context=True, meta=viewer.request_meta) == 'identity'
+    except Exception:  # noqa: BLE001 - no line, never a failed turn
+        logger.warning('smart account identity check failed', exc_info=True)
+        return False
+
+
 def _phone_eligible(viewer):
     try:
         from cusd_plus.eligibility import is_ondo_eligible
@@ -3616,6 +3633,8 @@ def _run_turn_once(belt, result, viewer, history, *, first_name, account_label, 
             meta=viewer.request_meta, user_id=getattr(viewer.user, 'pk', None))),
         smart_account_open=('cuenta_inteligente' in belt.destinations and _smart_account_open(viewer)),
         smart_account_real=('cuenta_inteligente' in belt.destinations and smart_account_real_screen(viewer)),
+        smart_account_needs_identity=('cuenta_inteligente' in belt.destinations
+                                      and _smart_account_needs_identity(viewer)),
         identity=_identity_status(viewer),
         ve_topup=_ve_topup(viewer, country),
         ve_send=_ve_send(viewer, country),

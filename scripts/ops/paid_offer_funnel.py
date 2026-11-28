@@ -111,6 +111,15 @@ for stage in PAID_STAGES:
     print(f"  {stage:<20}{total:>6}" + ''.join(f"{len(paid_users[(stage, plan)]):>10}" for plan in plans)
           + f"   {pct(total, opened).strip()} of opened")
 
+# Why people left the subscribe screen (smart_account.funnel.record_exit), split by verified.
+exits = Counter()
+for props in paid.filter(properties__stage='exit_reason').values_list('properties', flat=True):
+    exits[((props or {}).get('reason') or '?', 'verified' if (props or {}).get('verified') else 'unverified')] += 1
+if exits:
+    print("\n=== Cuenta inteligente: why they left the subscribe screen ===")
+    for (reason, who), n in exits.most_common():
+        print(f"  {reason:<10}{who:<12}{n:>5}")
+
 both = (set(ProductWaitlistEntry.objects.filter(product='ia_plus').values_list('user_id', flat=True))
         & set(ProductWaitlistEntry.objects.filter(product='smart_account').values_list('user_id', flat=True))) - PREVIEW
 print(f"\nOn both waitlists: {len(both)}")

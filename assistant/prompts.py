@@ -270,6 +270,15 @@ PAID_OFFER_SECTIONS = {
 }
 
 
+# A person who opens the real screen but is not verified yet: the one thing
+# between them and the account (offer.subscribe_block 'identity'). 20 of the
+# first 41 who opened the subscribe screen were here, 2026-11-28.
+SMART_ACCOUNT_NEEDS_IDENTITY = (
+    '- Esta persona todavía no verificó su identidad, y sin eso no puede abrir su Cuenta inteligente. Cuando '
+    'pregunte por ella o quiera abrirla, dilo en una frase, ábrela como siempre y deja además la tarjeta de '
+    '`verification` (`navigate` con `open_now` false).\n')
+
+
 # Only where the person's pitch lists IA+ as a benefit and the standalone offer is off.
 IA_PLUS_IN_SMART_ACCOUNT = (
     ' Incluye Confío IA+: el asistente opera tu Cuenta inteligente por ti. Le dices "compra US$10 de bitcoin cada '
@@ -307,7 +316,8 @@ def _smart_account_rails():
     return f' a otras personas en Confío y a cuentas guardadas de {offer.join_es(names)}'
 
 
-def _paid_offer_sections(destinations, ia_plus_bundled=False, smart_account_open=False, smart_account_real=False):
+def _paid_offer_sections(destinations, ia_plus_bundled=False, smart_account_open=False, smart_account_real=False,
+                         smart_account_needs_identity=False):
     from users import paid_offers
 
     from .destinations import PAID_OFFERS
@@ -331,6 +341,9 @@ def _paid_offer_sections(destinations, ia_plus_bundled=False, smart_account_open
             bundled = (smart_account_open or smart_account_real or ia_plus_bundled) and 'ia_plus' not in destinations
             out += section.format(price=price, rails=_smart_account_rails(),
                                   ia_plus=IA_PLUS_IN_SMART_ACCOUNT if bundled else '')
+            if (smart_account_real and not smart_account_open and smart_account_needs_identity
+                    and 'verification' in destinations):
+                out += SMART_ACCOUNT_NEEDS_IDENTITY
         else:
             out += PAID_OFFER_SECTIONS[key].format(
                 price=f', por US${monthly} al mes' if monthly else '', ia_plus='')
@@ -506,13 +519,15 @@ def _identity_note(identity, country, ve_topup, local_account_topup):
 def build_system_prompt(*, first_name, account_label, country, screen, local_now, destinations, can_navigate=True,
                         ia_plus_bundled=False, identity=None, ve_topup=None, ve_send=None, dex=True,
                         local_account_topup='', bo_withdraw=None, smart_account_open=False,
-                        smart_account_real=False, smart_account_ops=False, conversation=False):
+                        smart_account_real=False, smart_account_ops=False, conversation=False,
+                        smart_account_needs_identity=False):
     described = {**DESTINATIONS, **CONVERSATION_DESTINATIONS} if conversation else DESTINATIONS
     lines = '\n'.join(f'- `{key}`: {described[key]}' for key in destinations)
     prompt = (SYSTEM_PROMPT.replace('{identity}', IDENTITY[bool(conversation)])
               .replace('{invest_rules}', INVEST_RULES_GUIDANCE)
               .replace('{faq}', faq_text(dex=dex, conversation=conversation))
-              + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open, smart_account_real)
+              + _paid_offer_sections(destinations, ia_plus_bundled, smart_account_open, smart_account_real,
+                                     smart_account_needs_identity)
               + (SMART_ACCOUNT_OPS_SECTION if smart_account_ops else '')
               + DESTINATIONS_SECTION.format(destinations=lines))
     if conversation and can_navigate:

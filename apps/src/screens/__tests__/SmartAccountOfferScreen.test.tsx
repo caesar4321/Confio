@@ -264,3 +264,116 @@ describe('Elige tu plan', () => {
     expect(text(tree)).toContain('Abrir mi Cuenta inteligente');
   });
 });
+
+describe('not verified yet (review 2026-11-28: 20 of 41 openers)', () => {
+  it('the main button opens Verificación instead of a dead Continuar', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({
+      canSubscribe: false, blockedCode: 'identity', blockedReason: 'Verifica tu identidad para abrir tu Cuenta inteligente.',
+    })));
+    await mount();
+    expect(hasTappable(tree, 'offer-continue')).toBe(false);
+    await tap(tree, 'offer-verify');
+    expect(nav.navigate).toHaveBeenCalledWith('Verification');
+  });
+
+  it('any other block keeps the disabled Continuar', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ canSubscribe: false, blockedCode: 'build', blockedReason: 'Actualiza.' })));
+    await mount();
+    expect(hasTappable(tree, 'offer-verify')).toBe(false);
+  });
+
+  it('reads the offer again when the person comes back to the screen', async () => {
+    const listeners: Array<() => void> = [];
+    (nav.addListener as jest.Mock).mockImplementation((_event: string, fn: () => void) => { listeners.push(fn); return () => {}; });
+    await mount();
+    const calls = api.fetchSmartAccountOffer.mock.calls.length;
+    await act(async () => { listeners.forEach((fn) => fn()); });  // first focus: the mount itself
+    expect(api.fetchSmartAccountOffer.mock.calls.length).toBe(calls);
+    await act(async () => { listeners.forEach((fn) => fn()); });
+    await flush();
+    expect(api.fetchSmartAccountOffer.mock.calls.length).toBe(calls + 1);
+  });
+});
+
+describe('"¿Qué te hizo esperar?" after leaving', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const exit = require('../../services/smartAccountExit');
+  let asks: Array<{ reasons: Array<[string, string]>; plan: string | null }>;
+  const START = 1_800_000_000_000;
+  let now = START;
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  const leave = async () => {
+    await act(async () => tree.unmount());
+    tree = null as unknown as renderer.ReactTestRenderer;
+    await settle();
+  };
+  beforeEach(() => {
+    now = START;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+    let stored = 0;
+    exit.resetSmartAccountExitForTests({ read: async () => stored, write: async (v: number) => { stored = v; } });
+    asks = [];
+    exit.subscribeSmartAccountExitQuestion((ask: never) => asks.push(ask));
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('asks after a real look, with the verify answer for someone told to verify', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ canSubscribe: false, blockedCode: 'identity', blockedReason: 'x' })));
+    await mount();
+    now += 5000;
+    await leave();
+    expect(asks).toHaveLength(1);
+    expect(asks[0].reasons.map(([id]) => id)).toContain('verify');
+    expect(asks[0].plan).toBeNull();
+  });
+
+  it('a quick back tap asks nothing', async () => {
+    await mount();
+    now += 1000;
+    await leave();
+    expect(asks).toHaveLength(0);
+  });
+
+  it('continuing asks nothing', async () => {
+    await mount();
+    now += 5000;
+    await tap(tree, 'accept-disclosures');
+    await tap(tree, 'offer-continue');
+    await leave();
+    expect(asks).toHaveLength(0);
+  });
+
+  it('going to verify asks nothing', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ canSubscribe: false, blockedCode: 'identity', blockedReason: 'x' })));
+    await mount();
+    now += 5000;
+    await tap(tree, 'offer-verify');
+    await leave();
+    expect(asks).toHaveLength(0);
+  });
+
+  it('someone the screen blocked for another reason is not asked', async () => {
+    for (const blockedCode of ['identity_review', 'minor', 'chain_unavailable']) {
+      api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ canSubscribe: false, blockedCode, blockedReason: 'x' })));
+      await mount();
+      now += 5000;
+      await leave();
+    }
+    expect(asks).toHaveLength(0);
+  });
+
+  it('documents in review get no verify button', async () => {
+    api.fetchSmartAccountOffer.mockResolvedValue(ok(offer({ canSubscribe: false, blockedCode: 'identity_review', blockedReason: 'En revisión.' })));
+    await mount();
+    expect(hasTappable(tree, 'offer-verify')).toBe(false);
+    expect(text(tree)).toContain('En revisión.');
+  });
+
+  it('someone who could subscribe is asked with the plan they had picked', async () => {
+    await mount();
+    now += 5000;
+    await leave();
+    expect(asks[0].plan).toBe('annual');
+    expect(asks[0].reasons.map(([id]) => id)).not.toContain('verify');
+  });
+});

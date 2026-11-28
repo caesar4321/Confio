@@ -1,4 +1,5 @@
 """Review of 2026-11-28: Spanish chips for a Brazilian, a «Muéstrame» button promised and not shown (Natane)."""
+from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -106,3 +107,43 @@ class AuditFindingsTests(PortugueseChipTests):
     def test_bold_and_single_quotes(self):
         for said in ('Abre Recibir. Toca el botón **Muéstrame** abajo.', "Abre Recibir. Puedes tocar 'Muéstrame'."):
             self.assertEqual(ShowMePromiseTests().guard(said), 'Abre Recibir.', said)
+
+
+class SmartAccountIdentityNoteTests(SimpleTestCase):
+    def sections(self, **kw):
+        from .prompts import _paid_offer_sections
+        with patch('users.paid_offers.price', return_value='14.99'), \
+                patch('assistant.prompts._smart_account_rails', return_value=''):
+            return _paid_offer_sections(['cuenta_inteligente', 'verification'], **kw)
+
+    def test_unverified_on_the_real_screen_gets_the_verification_card_line(self):
+        out = self.sections(smart_account_real=True, smart_account_needs_identity=True)
+        self.assertIn('tarjeta de `verification`', out)
+
+    def test_not_for_anyone_else(self):
+        for kw in ({'smart_account_real': True}, {'smart_account_real': True, 'smart_account_open': True,
+                                                  'smart_account_needs_identity': True},
+                   {'smart_account_needs_identity': True}):
+            self.assertNotIn('tarjeta de `verification`', self.sections(**kw), kw)
+        from .prompts import _paid_offer_sections
+        with patch('users.paid_offers.price', return_value='14.99'), \
+                patch('assistant.prompts._smart_account_rails', return_value=''):
+            no_card = _paid_offer_sections(['cuenta_inteligente'], smart_account_real=True,
+                                           smart_account_needs_identity=True)
+        self.assertNotIn('tarjeta de `verification`', no_card)
+
+    def test_only_people_with_something_to_do(self):
+        from .engine import _smart_account_needs_identity
+        viewer = Viewer(user=SimpleNamespace(pk=1), account=None, account_type='personal', business_id=None,
+                        is_business_owner=False, tz=ZoneInfo('UTC'))
+        for status in ('verified', 'in_review', None, 'other_country'):
+            with patch('assistant.engine.smart_account_real_screen', return_value=True), \
+                    patch('assistant.engine._identity_status', return_value=status), \
+                    patch('smart_account.offer.subscribe_block') as block:
+                self.assertFalse(_smart_account_needs_identity(viewer), status)
+            block.assert_not_called()
+        for status in ('unverified', 'rejected', 'pending'):
+            with patch('assistant.engine.smart_account_real_screen', return_value=True), \
+                    patch('assistant.engine._identity_status', return_value=status), \
+                    patch('smart_account.offer.subscribe_block', return_value='identity'):
+                self.assertTrue(_smart_account_needs_identity(viewer), status)

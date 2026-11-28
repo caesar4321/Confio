@@ -29,6 +29,7 @@ import { StocksListScreen } from '../screens/StocksListScreen';
 import { StockDetailScreen } from '../screens/StockDetailScreen';
 import { BuyStockScreen } from '../screens/BuyStockScreen';
 import { TopUpExitQuestionHost } from '../components/ramps/TopUpExitQuestionHost';
+import { SmartAccountExitQuestionHost } from '../components/smartAccount/SmartAccountExitQuestionHost';
 import { SellStockScreen } from '../screens/SellStockScreen';
 import { CryptoDetailScreen } from '../screens/CryptoDetailScreen';
 import { BuyCryptoScreen } from '../screens/BuyCryptoScreen';
@@ -958,6 +959,8 @@ export const MainNavigator = () => {
       <CommunityShareProvider />
       {/* "Why did you leave without topping up?", after any top-up screen closes (services/topUpExit). */}
       <TopUpExitQuestionHost />
+      {/* "What made you wait?", after the Cuenta inteligente subscribe screen closes (services/smartAccountExit). */}
+      <SmartAccountExitQuestionHost />
       <MigrationModal />
       <OnboardingModalCoordinator />
       {/* A beneficiary's pending claim on the viewer's Cuenta inteligente:
