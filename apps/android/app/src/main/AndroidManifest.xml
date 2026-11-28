@@ -17,6 +17,8 @@
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <!-- Portrait-locked activities (face liveness, Didit) otherwise imply this is required. -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
 
     <!-- Sharing a card straight to WhatsApp / Instagram (react-native-share
          checks the app is installed; Android 11+ hides packages otherwise). -->
