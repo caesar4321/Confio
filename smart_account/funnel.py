@@ -22,10 +22,42 @@ def record(user, stage: str, *, plan: str = '', key: str = '') -> None:
 
 
 # Why the person left the subscribe screen without opening the account: one
-# tap on a sheet the app shows right after the screen closes
-# (apps/src/services/smartAccountExit.ts, keys shared). 'skipped' = closed
-# without answering.
-EXIT_REASONS = frozenset({'later', 'money', 'value', 'plan', 'trust', 'verify', 'other', 'skipped'})
+# tap on a sheet the app shows right after the screen closes. The server owns
+# the question (smartAccountExitQuestion), so it can be reworded between app
+# releases; apps/src/services/smartAccountExit.ts keeps the same list only as
+# a fallback for a failed read. Each answer names one cause, never a second
+# way to say "not now" (Julian, 2026-11-28). 'skipped' = closed without answering.
+EXIT_TITLE = '¿Qué te hizo esperar?'
+EXIT_OPTIONS = (
+    ('money', 'Ahora no tengo ese dinero'),
+    ('price', 'Me parece caro para lo que ofrece'),
+    ('unclear', 'No entendí bien qué hace'),
+    ('no_need', 'No necesito pagos ni inversiones automáticas'),
+    ('move', 'No quiero mover mi dinero a otra cuenta'),
+    # Only for someone the screen asks to verify first (exit_question).
+    ('verify', 'Me falta verificarme'),
+    ('other', 'Otra cosa'),
+)
+EXIT_REASONS = frozenset({key for key, _label in EXIT_OPTIONS} | {'skipped'})
+
+
+def needs_verification(user) -> bool:
+    """Verifying is this person's next step: not verified, and no document
+    waiting on the reviewers. False on any doubt."""
+    try:
+        from assistant.suggestions import waits_on_review
+        from security.identity_status import is_identity_verified
+        return not is_identity_verified(user) and not waits_on_review(user)
+    except Exception:  # noqa: BLE001
+        logger.warning('smart account exit: identity unknown', exc_info=True)
+        return False
+
+
+def exit_question(user) -> dict:
+    """The sheet's title and its answers in order ('other' last); the app shuffles the rest."""
+    verify = needs_verification(user)
+    return {'title': EXIT_TITLE,
+            'options': [{'key': key, 'label': label} for key, label in EXIT_OPTIONS if key != 'verify' or verify]}
 # Only an answer about a visit that just happened: the subscribe screen opened
 # this recently and nothing was signed after it.
 EXIT_WINDOW_HOURS = 2

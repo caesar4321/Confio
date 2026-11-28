@@ -48,30 +48,47 @@ class ExitReasonTests(SmartAccountTestCase):
     def test_unknown_reason_and_once_a_day(self):
         self.opened()
         self.assertFalse(self.record(self.user, 'free text'))
-        self.assertTrue(self.record(self.user, 'later', plan='weird'))
-        self.assertTrue(self.record(self.user, 'value'))
+        self.assertTrue(self.record(self.user, 'unclear', plan='weird'))
+        self.assertTrue(self.record(self.user, 'price'))
         (props,) = self.answers()
-        self.assertEqual((props['reason'], props['plan']), ('later', ''))
+        self.assertEqual((props['reason'], props['plan']), ('unclear', ''))
 
     def test_mutation(self):
         self.opened()
         from types import SimpleNamespace
         from django.contrib.auth.models import AnonymousUser
         with self.captureOnCommitCallbacks(execute=True):
-            out = schema.RecordSmartAccountExitReason().mutate(self.info(self.user), ' Trust ', plan='monthly')
+            out = schema.RecordSmartAccountExitReason().mutate(self.info(self.user), ' Move ', plan='monthly')
         self.assertTrue(out.success)
-        self.assertEqual(self.answers()[0]['reason'], 'trust')
-        anon = schema.RecordSmartAccountExitReason().mutate(SimpleNamespace(context=SimpleNamespace(user=AnonymousUser())), 'trust')
+        self.assertEqual(self.answers()[0]['reason'], 'move')
+        anon = schema.RecordSmartAccountExitReason().mutate(SimpleNamespace(context=SimpleNamespace(user=AnonymousUser())), 'move')
         self.assertFalse(anon.success)
 
-    def test_keys_match_the_app(self):
+    def test_the_apps_fallback_is_the_servers_list(self):
         import re
         from pathlib import Path
         source = (Path(__file__).resolve().parents[2] / 'apps/src/services/smartAccountExit.ts').read_text()
-        block = source.split('SMART_ACCOUNT_EXIT_REASONS = [', 1)[1].split('] as const', 1)[0]
-        keys = set(re.findall(r"\['(\w+)',", block)) | {re.search(r"SMART_ACCOUNT_EXIT_SKIPPED = '(\w+)'", source).group(1)}
-        self.assertEqual(keys, set(funnel.EXIT_REASONS))
+        block = source.split('SMART_ACCOUNT_EXIT_REASONS:', 1)[1].split('];', 1)[0]
+        self.assertEqual(re.findall(r"\['(\w+)', '([^']+)'\]", block), list(funnel.EXIT_OPTIONS))
+        self.assertEqual(re.search(r"SMART_ACCOUNT_EXIT_TITLE = '([^']+)'", source).group(1), funnel.EXIT_TITLE)
+        self.assertIn(re.search(r"SMART_ACCOUNT_EXIT_SKIPPED = '(\w+)'", source).group(1), funnel.EXIT_REASONS)
 
+    def test_exit_question_offers_verify_only_as_the_next_step(self):
+        with mock.patch('smart_account.funnel.needs_verification', return_value=False):
+            keys = [o['key'] for o in funnel.exit_question(self.user)['options']]
+        self.assertNotIn('verify', keys)
+        self.assertEqual(keys[-1], 'other')
+        with mock.patch('smart_account.funnel.needs_verification', return_value=True):
+            keys = [o['key'] for o in funnel.exit_question(self.user)['options']]
+        self.assertIn('verify', keys)
+        with mock.patch('security.identity_status.is_identity_verified', return_value=False), \
+                mock.patch('assistant.suggestions.waits_on_review', return_value=True):
+            self.assertFalse(funnel.needs_verification(self.user))
+
+    def test_query(self):
+        result = schema.Query.resolve_smart_account_exit_question(None, self.info(self.user))
+        self.assertEqual(result.title, funnel.EXIT_TITLE)
+        self.assertTrue(all(o.key in funnel.EXIT_REASONS for o in result.options))
 
 class IdentityReviewCodeTests(SmartAccountTestCase):
     def test_documents_with_the_reviewers_are_not_told_to_verify(self):

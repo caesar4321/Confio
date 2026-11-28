@@ -14,36 +14,93 @@ export const RECORD_SMART_ACCOUNT_EXIT_REASON = gql`mutation RecordSmartAccountE
   recordSmartAccountExitReason(reason: $reason, plan: $plan) { success }
 }`;
 
+// The server owns the question (smartAccountExitQuestion, smart_account/funnel.py
+// EXIT_OPTIONS) so it can be reworded between releases. Its own query: an older
+// server without it only means this built-in copy of the same list is shown.
+export const SMART_ACCOUNT_EXIT_QUESTION = gql`query SmartAccountExitQuestion {
+  smartAccountExitQuestion { title options { key label } }
+}`;
+
 export const SMART_ACCOUNT_EXIT_TITLE = '¿Qué te hizo esperar?';
 
-/** One-tap answers; the keys are the server's (smart_account/funnel.py EXIT_REASONS). */
-export const SMART_ACCOUNT_EXIT_REASONS = [
-  ['later', 'La veo con calma más adelante'],
-  ['money', 'Ahora no me alcanza'],
-  ['value', 'No sé si la usaría'],
-  ['plan', 'No sé qué plan me conviene'],
-  ['trust', 'Quiero conocer mejor Confío primero'],
+/** Built-in answers, used only when the server's could not be read; one cause each. */
+export const SMART_ACCOUNT_EXIT_REASONS: ReadonlyArray<readonly [string, string]> = [
+  ['money', 'Ahora no tengo ese dinero'],
+  ['price', 'Me parece caro para lo que ofrece'],
+  ['unclear', 'No entendí bien qué hace'],
+  ['no_need', 'No necesito pagos ni inversiones automáticas'],
+  ['move', 'No quiero mover mi dinero a otra cuenta'],
   ['verify', 'Me falta verificarme'],
   ['other', 'Otra cosa'],
-] as const;
+];
 
 export const SMART_ACCOUNT_EXIT_SKIPPED = 'skipped';
 
-export type SmartAccountExitReason = (typeof SMART_ACCOUNT_EXIT_REASONS)[number];
-export type SmartAccountExitAsk = { reasons: SmartAccountExitReason[]; plan: string | null };
+export type SmartAccountExitReason = readonly [string, string];
+export type SmartAccountExitAsk = { title: string; reasons: SmartAccountExitReason[]; plan: string | null };
+type ServerQuestion = { title: string; reasons: SmartAccountExitReason[] };
 
-/**
- * The answers in a fresh random order ('other' last). "Me falta verificarme"
- * only for someone the screen told to verify first.
- */
-export function smartAccountExitReasons(needsVerify: boolean, random: () => number = Math.random): SmartAccountExitReason[] {
-  const rest = SMART_ACCOUNT_EXIT_REASONS.filter(([id]) => id !== 'other' && (needsVerify || id !== 'verify'));
-  const other = SMART_ACCOUNT_EXIT_REASONS.filter(([id]) => id === 'other');
+// The server's question for this person, once read (it already left out "Me falta verificarme"
+// when that is not their next step); null until then or when it could not be read.
+let serverQuestion: ServerQuestion | null = null;
+// Only the latest read may write: an older one answering late (another account's) never does.
+let questionRead = 0;
+
+const MAX_OPTIONS = 8;
+
+/** The server's answer, kept only when well formed. */
+export function parseExitQuestion(data: any): ServerQuestion | null {
+  const q = data?.smartAccountExitQuestion;
+  const title = typeof q?.title === 'string' ? q.title.trim() : '';
+  const seen = new Set<string>();
+  const valid = (Array.isArray(q?.options) ? q.options : [])
+    .filter((o: any) => o && typeof o.key === 'string' && /^[a-z_]{1,24}$/.test(o.key)
+      && typeof o.label === 'string' && o.label.trim() && !seen.has(o.key) && seen.add(o.key))
+    .map((o: any) => [o.key, o.label.trim()] as const);
+  // The cap never drops "Otra cosa".
+  const other = valid.filter(([id]: readonly [string, string]) => id === 'other');
+  const reasons = [...valid.filter(([id]: readonly [string, string]) => id !== 'other').slice(0, MAX_OPTIONS - other.length), ...other];
+  return title && reasons.length >= 2 ? { title, reasons } : null;
+}
+
+/** Read the server's question for this person; harmless to call again. */
+export async function preloadSmartAccountExitQuestion(): Promise<void> {
+  // Per person and per visit: never another account's (or an older) answer.
+  serverQuestion = null;
+  const mine = ++questionRead;
+  try {
+    const { apolloClient } = await import('../apollo/client');
+    const { data } = await apolloClient.query({ query: SMART_ACCOUNT_EXIT_QUESTION, fetchPolicy: 'network-only' });
+    const parsed = parseExitQuestion(data);
+    if (parsed && mine === questionRead) serverQuestion = parsed;
+  } catch {
+    // The built-in list stands.
+  }
+}
+
+/** Shuffled, 'other' kept last, so no answer wins by its place. */
+function shuffled(list: ReadonlyArray<SmartAccountExitReason>, random: () => number): SmartAccountExitReason[] {
+  const rest = list.filter(([id]) => id !== 'other');
+  const other = list.filter(([id]) => id === 'other');
   for (let i = rest.length - 1; i > 0; i -= 1) {
     const j = Math.floor(random() * (i + 1));
     [rest[i], rest[j]] = [rest[j], rest[i]];
   }
   return [...rest, ...other];
+}
+
+/**
+ * The question to show: the server's when it was read, else the built-in one,
+ * where "Me falta verificarme" is only for someone the screen told to verify.
+ */
+export function smartAccountExitQuestion(needsVerify: boolean, random: () => number = Math.random): {
+  title: string; reasons: SmartAccountExitReason[];
+} {
+  if (serverQuestion) return { title: serverQuestion.title, reasons: shuffled(serverQuestion.reasons, random) };
+  return {
+    title: SMART_ACCOUNT_EXIT_TITLE,
+    reasons: shuffled(SMART_ACCOUNT_EXIT_REASONS.filter(([id]) => needsVerify || id !== 'verify'), random),
+  };
 }
 
 // A quick back tap is not a decision: only a visit at least this long is asked about.
@@ -107,7 +164,7 @@ export function requestSmartAccountExitQuestion(
         const last = askedAt !== null ? askedAt : await preloadSmartAccountExitAsked();
         if (!listener || now - last < WEEK_MS) return resolve(false);
         askedAt = now;
-        listener({ reasons: smartAccountExitReasons(needsVerify), plan });
+        listener({ ...smartAccountExitQuestion(needsVerify), plan });
         void store.write(now).catch(() => {});
         resolve(true);
       } catch {
@@ -121,6 +178,7 @@ export function resetSmartAccountExitForTests(testStore?: AskedStore): void {
   askedAt = null;
   askedRead = null;
   listener = null;
+  serverQuestion = null;
   store = testStore || keychainStore;
 }
 
@@ -140,6 +198,7 @@ export function useAskWhyOnSmartAccountLeave(
   }, [ready]);
   useEffect(() => {
     void preloadSmartAccountExitAsked();
+    void preloadSmartAccountExitQuestion();
     return () => {
       const long = shownAt.current > 0 && Date.now() - shownAt.current >= MIN_VISIT_MS;
       if (long && !stayed.current && context.current.eligible) {

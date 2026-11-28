@@ -518,6 +518,8 @@ def _has_balance(viewer) -> bool:
 
 class Query(graphene.ObjectType):
     smart_account_offer = graphene.Field(SmartAccountOfferType)
+    # The "¿Qué te hizo esperar?" sheet after the subscribe screen closes (funnel.exit_question).
+    smart_account_exit_question = graphene.Field(lambda: SmartAccountExitQuestionType)
     smart_account = graphene.Field(SmartAccountType)
     smart_account_charges = graphene.Field(
         SmartAccountChargeConnection, first=graphene.Int(default_value=20), after=graphene.String())
@@ -572,6 +574,15 @@ class Query(graphene.ObjectType):
             text=watches.describe(w.kind, asset_key=w.asset_key, currency=w.currency, threshold=w.threshold,
                                   action=w.action or None))
             for w in SmartAccountWatch.objects.filter(smart_account=own, active=True).order_by('-created_at')]
+
+    def resolve_smart_account_exit_question(self, info):
+        user = getattr(info.context, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
+            return None
+        from . import funnel
+        question = funnel.exit_question(user)
+        return SmartAccountExitQuestionType(
+            title=question['title'], options=[SmartAccountExitOptionType(**o) for o in question['options']])
 
     def resolve_smart_account_offer(self, info):
         user = getattr(info.context, 'user', None)
@@ -1045,6 +1056,16 @@ class DeleteSmartAccountWatch(graphene.Mutation):
             return SmartAccountSimpleResultType(success=False, error_code='not_found',
                                                 error_message='Esa alerta ya no existe.')
         return SmartAccountSimpleResultType(success=True)
+
+
+class SmartAccountExitOptionType(graphene.ObjectType):
+    key = graphene.String(required=True)
+    label = graphene.String(required=True)
+
+
+class SmartAccountExitQuestionType(graphene.ObjectType):
+    title = graphene.String(required=True)
+    options = graphene.List(graphene.NonNull(SmartAccountExitOptionType), required=True)
 
 
 class SmartAccountExitReasonType(graphene.ObjectType):

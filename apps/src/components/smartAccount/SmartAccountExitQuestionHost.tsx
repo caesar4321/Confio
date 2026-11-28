@@ -8,7 +8,6 @@ import { colors } from '../../config/theme';
 import {
   RECORD_SMART_ACCOUNT_EXIT_REASON,
   SMART_ACCOUNT_EXIT_SKIPPED,
-  SMART_ACCOUNT_EXIT_TITLE,
   SmartAccountExitAsk,
   subscribeSmartAccountExitQuestion,
 } from '../../services/smartAccountExit';
@@ -36,7 +35,7 @@ export function SmartAccountExitQuestionHost() {
       <View style={local.backdrop}>
         <View style={local.sheet}>
           <View style={local.header}>
-            <Text style={local.title}>{SMART_ACCOUNT_EXIT_TITLE}</Text>
+            <Text style={local.title}>{ask?.title}</Text>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar" testID="smart-exit-close"
               onPress={() => answer(SMART_ACCOUNT_EXIT_SKIPPED)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Icon name="x" size={22} color={colors.textSecondary} />
