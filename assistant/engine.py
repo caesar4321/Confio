@@ -1560,6 +1560,18 @@ class Toolbelt:
                 },
                 'strict': True,
             },
+            *([{
+                'type': 'function',
+                'name': 'get_presale_price',
+                'description': (
+                    'Precio de $CONFIO en la preventa ahora mismo, en dólares, leído del contrato (sube con cada '
+                    'compra, entre el precio inicial y el final que devuelve). Úsala para "¿a cuánto está el token?" o "¿cuánto cuesta '
+                    'hoy?", y di que el precio exacto de su compra se ve en la pantalla de la preventa antes de '
+                    'confirmar. Nunca lo presentes como una cotización de mercado ni como una promesa de precio.'
+                ),
+                'parameters': {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False},
+                'strict': True,
+            }] if self._presale_buyable() else []),
             {
                 'type': 'function',
                 'name': 'read_public_document',
@@ -1907,6 +1919,7 @@ class Toolbelt:
             'get_portfolio': self.get_portfolio,
             'get_futures': self.get_futures,
             'get_exchange_rate': self.get_exchange_rate,
+            'get_presale_price': self.get_presale_price,
             'get_topup_status': self.get_topup_status,
             'search_market_news': self.search_market_news,
             'search_web': self.search_web,
@@ -2140,6 +2153,54 @@ class Toolbelt:
 
     def get_exchange_rate(self, currency=None):
         return exchange_rate_data(self.viewer, currency)
+
+    def _presale_buyable(self):
+        """This person may buy in the presale right now: the sale is on and their country is open
+        (presale_access 'buy', what the screen itself decides). Never a price for someone the sale is
+        closed or geo-blocked to. Read once per turn; False on any doubt."""
+        cached = getattr(self, '_presale_buyable_cache', None)
+        if cached is not None:
+            return cached
+        ok = False
+        viewer = getattr(self, 'viewer', None)
+        if ('presale' in (getattr(self, 'destinations', None) or ()) and viewer is not None
+                and getattr(viewer, 'user', None) is not None and not viewer.is_employee):
+            try:
+                from presale.geo_utils import ACCESS_BUY, presale_access
+                from presale.models import PresaleSettings
+                from security.request_utils import extract_client_ip_from_meta
+                meta = getattr(viewer, 'request_meta', None) or {}
+                ok = bool(PresaleSettings.get_settings().is_presale_active) and presale_access(
+                    viewer.user, client_ip=extract_client_ip_from_meta(meta),
+                    ip_country_hint=meta.get('HTTP_CF_IPCOUNTRY'))['access'] == ACCESS_BUY
+            except Exception:  # noqa: BLE001 - no price, never a failed turn
+                logger.warning('Confio Assistant: presale access unknown', exc_info=True)
+                ok = False
+        self._presale_buyable_cache = ok
+        return ok
+
+    def get_presale_price(self):
+        """The curve price now (presale.price_utils). Only a contract read counts: a phase or floor fallback
+        is not today's price (Jose, 2026-11-28: "¿cuánto cotiza hoy un token?" was answered "no puedo ver")."""
+        if not self._presale_buyable():
+            return {'error': 'herramienta desconocida: get_presale_price'}
+        try:
+            from presale.price_utils import get_confio_price_with_source
+            price, source = get_confio_price_with_source()
+        except Exception:  # noqa: BLE001 - the screen still shows it
+            logger.warning('Confio Assistant: presale price unavailable', exc_info=True)
+            price, source = None, ''
+        if price is None or source not in ('live', 'last_known'):
+            return {'ok': False, 'motivo': 'No pude leer el precio de la preventa ahora. Se ve en la pantalla de la '
+                                            'preventa, antes de confirmar.'}
+        shown = str(price.quantize(Decimal('0.0001'), rounding=ROUND_DOWN)).replace('.', ',')
+        from presale.price_utils import CURVE_FINAL_PRICE, CURVE_START_PRICE
+        out = {'ok': True, 'precio_usd': shown,
+               'rango_usd': f"{Decimal(CURVE_START_PRICE):.2f} a {Decimal(CURVE_FINAL_PRICE):.2f}".replace('.', ','),
+               'nota': 'Sube con cada compra: el precio exacto de su compra se ve en la pantalla antes de confirmar.'}
+        if source == 'last_known':
+            out['nota'] += ' Es el último precio que se pudo leer, no el de este momento: puede haber subido.'
+        return out
 
     def get_topup_status(self):
         return topup_status_data(self.viewer)
@@ -2937,7 +2998,8 @@ _NOT_NOW = re.compile(r'\?|\b(si|cuando|cuanto|una vez que|despu[eé]s|luego|ma�
 _ANY_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _SCREEN_WORDS))
 # A promised card may also name Verificación ("Te dejo aquí el acceso a Verificación:"); kept out of
 # _SCREEN_WORDS so a claim like "Te abro Perfil → Verificación" still opens Perfil.
-_PROMISE_SCREEN_WORDS = {**_SCREEN_WORDS, 'Verificación': 'verification'}
+# Preventa too: "te dejo aquí el acceso a la Preventa de $CONFIO:" with nothing under it (Jose, 2026-11-28).
+_PROMISE_SCREEN_WORDS = {**_SCREEN_WORDS, 'Verificación': 'verification', 'Preventa': 'presale'}
 _PROMISE_SCREEN = re.compile('|'.join(rf'\b{re.escape(k)}\b' for k in _PROMISE_SCREEN_WORDS))
 # "Abro la pantalla para recargar" names Recargar by its verb (Carlos, 2026-11-26: told it was
 # opening, nothing opened). Only right after "pantalla para/de": elsewhere the verb is just a verb.
@@ -3141,6 +3203,41 @@ _CARD_PROMISE = re.compile(
     r'|\b(?:o|no|do|pelo)\s+cart(?:ão|ao)\s+(?:abaixo|aqui embaixo|logo abaixo)\b)')
 
 
+# "Puedes ver el precio entrando a la pantalla de la Preventa:" as the reply's last words, nothing under it
+# (Jose, 2026-11-28). Only at the very end: "En la pantalla de Enviar verás:" opening a list is no promise.
+_SCREEN_COLON_END = re.compile(
+    r'(?i)(?:\b(?:pantalla|secci[oó]n)\s+(?:de\s+)?|\b(?:entra|ve|ingresa)\s+a\s+|\babre\s+)(?:la\s+|el\s+)?'
+    r'(?:\*\*|[«"“])?(?-i:(?:' + '|'.join(re.escape(w) for w in _PROMISE_SCREEN_WORDS)
+    + r'))\b(?:\*\*|[»"”])?[^.!?\n]{0,30}:$')
+
+
+def _last_part(reply):
+    """The reply's last sentence: (index of its line, index of the sentence in it), or None."""
+    lines = reply.split('\n')
+    last = max((i for i, line in enumerate(lines) if line.strip()), default=-1)
+    if last < 0:
+        return None
+    return last, len(re.split(r'(?<=[.!?])[ \t]+', lines[last])) - 1
+
+
+def _ends_on_screen(reply):
+    # "…la pantalla de la Preventa:**" (Gemini bolds it): the closing marks are not words.
+    return bool(_SCREEN_COLON_END.search(re.sub(r'[\s*_»"”]+$', '', reply or '')))
+
+
+def _without_last_part(reply):
+    """The reply minus its last sentence (the screen it points at with nothing under it)."""
+    where = _last_part(reply)
+    if where is None:
+        return reply
+    i, j = where
+    lines = reply.split('\n')
+    parts = re.split(r'(?<=[.!?])[ \t]+', lines[i])
+    kept = parts[:j]
+    lines[i] = ' '.join(kept) if kept and not _LIST_MARK.match(' '.join(kept)) else ''
+    return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+
+
 def _has_card(result):
     return bool(result.actions)
 
@@ -3245,10 +3342,13 @@ def _keep_card_promise(belt, result):
     reply = result.reply or ''
     # Gemini turns only; and never beside another card, a question or a refusal the reply points at.
     if (not getattr(belt, 'card_spec', None) or _has_card(result) or busy(result, count_writes=False)
-            or getattr(result, 'payment_refusal', None) or not _CARD_PROMISE.search(reply)):
+            or getattr(result, 'payment_refusal', None)
+            or not (_CARD_PROMISE.search(reply) or _ends_on_screen(reply))):
         return
     sentences = [part for line in reply.split('\n') for part in re.split(r'(?<=[.!?])[ \t]+', line)]
     promised = [sentence for sentence in sentences if _CARD_PROMISE.search(sentence)]
+    if _ends_on_screen(reply):
+        promised.append(sentences[-1] if sentences[-1].strip() else reply.rstrip().split('\n')[-1])
     if conversation_home(belt.viewer.request_meta):  # older builds open a screen at once: there, no card is made
         # The promise itself may name Verificación; elsewhere in a reply it is usually just the word.
         named = set(_PROMISE_SCREEN.findall(' '.join(promised))) or set(_ANY_SCREEN.findall(reply))
@@ -3262,6 +3362,8 @@ def _keep_card_promise(belt, result):
         _add_cards(belt, result)
     if not _has_card(result):
         kept = _without_promises(reply)
+        if _ends_on_screen(kept):
+            kept = _without_last_part(kept)
         if kept:
             result.reply = kept
 
