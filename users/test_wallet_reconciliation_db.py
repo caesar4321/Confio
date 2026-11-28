@@ -119,17 +119,14 @@ class WalletReconciliationDatabaseTests(TestCase):
 
     def test_background_registration_cannot_undo_committed_reconciliation(self):
         # Reconcile after registration read its Account and before its write.
-        # This forces the stale snapshot without relying on thread timing.
-        original_filter = RetiredWalletAddress.objects.filter
-
-        def reconcile_before_history_check(*args, **kwargs):
-            with patch.object(RetiredWalletAddress.objects, 'filter', original_filter):
-                self.assertTrue(self.complete().success)
-            return original_filter(*args, **kwargs)
+        # This forces the stale snapshot without relying on thread timing:
+        # the address lock is the step every registration takes before it.
+        def reconcile_before_the_check(*args, **kwargs):
+            self.assertTrue(self.complete().success)
 
         with patch('users.jwt_context.get_jwt_business_context_with_validation', return_value={
             'account_type': 'personal', 'account_index': 0,
-        }), patch.object(RetiredWalletAddress.objects, 'filter', side_effect=reconcile_before_history_check):
+        }), patch('users.models.lock_bsc_address', side_effect=reconcile_before_the_check):
             result = UpdateAccountBscAddress.mutate(None, self.info, self.old_address)
         self.assertFalse(result.success)
         self.account.refresh_from_db()

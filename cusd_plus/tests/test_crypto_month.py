@@ -181,7 +181,11 @@ class CryptoMonthTests(SimpleTestCase):
 class ConfirmedTradesTests(TestCase):
     def setUp(self):
         from django.contrib.auth import get_user_model
+        from users.models import Account
         self.user = get_user_model().objects.create(username='cryptomonth', firebase_uid='cryptomonth-uid')
+        # The ledger keeps trades signed by the account holding the wallet.
+        Account.objects.create(user=self.user, account_type='personal', account_index=0, bsc_address=ADDR,
+                               is_keyless_migrated=True)
 
     def batch(self, kind, status='confirmed', block=10, tx='0x' + 'ab' * 32):
         from blockchain.models import SponsoredBatch

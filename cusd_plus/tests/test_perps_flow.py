@@ -738,7 +738,8 @@ class LedgerTests(SimpleTestCase):
         late = datetime(2026, 10, 24, 23, 45, tzinfo=dt_timezone.utc)
         mark = Trade(symbol='PERP:BTC', kind='perps_mark', units=Decimal(1), usd=Decimal(0), when=late)
         prices = mock.Mock()
-        with mock.patch('cusd_plus.stock_month.confirmed_trades', return_value=[]), \
+        with mock.patch('cusd_plus.wallet_signers.address_signer_ids', return_value=frozenset()), \
+                mock.patch('cusd_plus.stock_month.confirmed_trades', return_value=[]), \
                 mock.patch('cusd_plus.crypto_month.confirmed_trades', return_value=[]), \
                 mock.patch('cusd_plus.perps_portfolio.episodes', return_value=[]), \
                 mock.patch('cusd_plus.perps_portfolio.ledger_trades', return_value=[mark]):

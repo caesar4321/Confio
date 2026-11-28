@@ -125,8 +125,11 @@ class EpisodesFromLedgerTests(TestCase):
         from users.models import User
         from users.models_unified import UnifiedTransactionTable
 
+        from users.models import Account
         user = User.objects.create(username='perpsep', firebase_uid='perpsep')
         wallet = '0x' + '55' * 20
+        Account.objects.create(user=user, account_type='personal', account_index=0, bsc_address=wallet,
+                               is_keyless_migrated=True)
         market = PerpMarket.objects.create(coin='BTC', dex='', asset_id=0, sz_decimals=5, max_leverage=40,
                                            collateral='USDC', synced_at=timezone.now())
         batch = SponsoredBatch.objects.create(user=user, user_bsc_address=wallet, kind='perps_open',

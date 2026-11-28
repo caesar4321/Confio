@@ -1,12 +1,12 @@
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxLengthValidator, MinValueValidator, MaxValueValidator
-from django.db import models, router, transaction
+from django.db import IntegrityError, models, router, transaction
 from django.db.models.functions import Lower
 from django.db.models import Q
 from django.conf import settings
 from .country_codes import COUNTRY_CODES
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -674,8 +674,16 @@ class Account(SoftDeleteModel):
             # secret, so a collision is a derivation bug or an attempt to claim
             # someone else's address; neither should be storable. Compared
             # case-insensitively because callers register EIP-55 mixed case
-            # while the scanner lowercases. Soft-deleted accounts are excluded
-            # so a closed account does not lock an address forever.
+            # while the scanner lowercases. Soft-deleted rows are excluded so a
+            # Cuenta inteligente's contract address can pass to its heir's row.
+            # That does NOT free a closed account's address for anyone else:
+            # history is looked up by address, so the registration paths
+            # (UpdateAccountBscAddress, wallet reconciliation, reenrollment)
+            # refuse an address any row holds, closed ones included
+            # (Account.all_objects), or a RetiredWalletAddress records;
+            # Account.soft_delete() and ORM deletes of a keyed account retire
+            # its address (a queryset-update close does not, but its row still
+            # counts at registration).
             models.UniqueConstraint(
                 Lower('bsc_address'),
                 condition=models.Q(bsc_address__isnull=False)
@@ -683,6 +691,11 @@ class Account(SoftDeleteModel):
                 & models.Q(deleted_at__isnull=True),
                 name='uniq_account_bsc_address_ci',
             ),
+        ]
+        # Closed rows included: the registration check counts every row
+        # that holds an address (the unique index above holds live ones).
+        indexes = [
+            models.Index(Lower('bsc_address'), name='account_bsc_lower_idx'),
         ]
         
     def save(self, *args, **kwargs):
@@ -694,6 +707,71 @@ class Account(SoftDeleteModel):
                 User.all_objects.using(using).select_for_update().get(pk=self.user_id)
                 return super().save(*args, **kwargs)
         return super().save(*args, **kwargs)
+
+    def soft_delete(self):
+        """Close the account; its BSC address stays reserved to it.
+
+        Portfolio, ledger and activity reads find history by address, so a
+        closed account's address claimed by another account would show that
+        account the closed one's trades and balances. The retired row keeps
+        it out of every registration path and refuses raw-address sends to
+        it; restoring the account lets sends through again when the retired
+        row is this account's own."""
+        using = router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            # Only an open row closes (a stale copy keeps the first close
+            # time). Locked, then closed through save(): post_save erases the
+            # account's assistant memory (assistant/memory.on_owner_saved).
+            # The address retired is the stored one, never a stale copy's.
+            closed_at, self.bsc_address, self.account_type = (
+                type(self).all_objects.using(using).select_for_update()
+                .values_list('deleted_at', 'bsc_address', 'account_type').get(pk=self.pk))
+            if closed_at is not None:
+                # Already closed: its close time stays; its address is retired
+                # if it was not yet (closed by a queryset update). Idempotent.
+                # post_save as a close would send it (assistant memory is
+                # erased now, not at the nightly sweep), on every repeat
+                # call: its receivers must be idempotent.
+                self.deleted_at = closed_at
+                retire_closed_account_address(self, using=using)
+                post_save.send(sender=type(self), instance=self, created=False,
+                               update_fields=frozenset({'deleted_at'}), raw=False, using=using)
+                return
+            super().soft_delete()
+            retire_closed_account_address(self, using=using)
+
+    def restore(self):
+        """Reopen a closed account, unless its BSC address is another
+        account's now: held by a live one (an answer, not the unique index's
+        IntegrityError), or retired to another (raw-address sends to it
+        would stay refused)."""
+        using = router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            # The stored address, never a stale copy's.
+            self.bsc_address = (type(self).all_objects.using(using).select_for_update()
+                                .values_list('bsc_address', flat=True).get(pk=self.pk))
+            if self.bsc_address:
+                address = self.bsc_address.strip().lower()
+                lock_bsc_address(address, using=using)   # reopening is a claim too
+                if (Account.objects.using(using).annotate(_bsc=Lower('bsc_address'))
+                        .filter(_bsc=address, bsc_address__isnull=False)
+                        .exclude(bsc_address='').exclude(pk=self.pk).exists()):
+                    raise ValueError(f'account {self.pk}: its BSC address is held by another live account')
+                if (RetiredWalletAddress.objects.using(using).select_for_update()
+                        .filter(chain=RetiredWalletAddress.CHAIN_BSC, address=address)
+                        .exclude(account_id=self.pk).exists()):
+                    raise ValueError(f'account {self.pk}: its BSC address is retired to another account')
+            closed_at = self.deleted_at
+            try:
+                with transaction.atomic(using=using):
+                    return super().restore()
+            except IntegrityError as exc:
+                self.deleted_at = closed_at   # still closed: nothing was saved
+                constraint = getattr(getattr(exc.__cause__, 'diag', None), 'constraint_name', None)
+                if self.bsc_address and constraint == 'uniq_account_bsc_address_ci':
+                    # A path that does not take the lock (a signed one) took it.
+                    raise ValueError(f'account {self.pk}: its BSC address is held by another live account') from exc
+                raise
 
     def get_ordering_key(self):
         """Get a key for custom ordering: personal accounts first, then business accounts by index"""
@@ -827,6 +905,79 @@ class RetiredWalletAddress(models.Model):
 
     def __str__(self):
         return f'{self.chain}:{self.address}'
+
+
+# Keyed accounts only. A Cuenta inteligente's bsc_address is its contract,
+# which passes to the heir's row on inheritance (smart_account/reconcile.py);
+# retiring it would refuse raw-address sends to the heir.
+RETIRED_ON_CLOSE_ACCOUNT_TYPES = ('personal', 'business')
+
+
+@receiver(pre_delete, sender='users.Account')
+def _retire_on_hard_delete(sender, instance, using=None, **kwargs):
+    """A hard delete (admin's delete action, a cascade) frees the row, so
+    the registration check no longer sees the address: retire it first,
+    as closing does. The stored address and type, never a stale copy's,
+    locked for the rest of the delete's transaction."""
+    stored = (Account.all_objects.using(using).select_for_update().filter(pk=instance.pk)
+              .values_list('bsc_address', 'account_type').first())
+    if stored is None:
+        return   # already gone: its own delete retired it then
+    instance.bsc_address, instance.account_type = stored
+    retire_closed_account_address(instance, using=using)
+
+
+def lock_bsc_address(address, using=None):
+    """Serialize every claim and retirement of one BSC address until the
+    current transaction ends (a PostgreSQL advisory lock; no-op elsewhere,
+    and outside a transaction it holds for one statement only)."""
+    from django.db import DEFAULT_DB_ALIAS, connections
+
+    connection = connections[using or DEFAULT_DB_ALIAS]
+    if connection.vendor != 'postgresql':
+        return
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(%s)', [bsc_address_lock_key(address)])
+
+
+def bsc_address_lock_key(address) -> int:
+    import hashlib
+
+    digest = hashlib.sha256(f'bsc-address:{(address or "").strip().lower()}'.encode()).digest()
+    return int.from_bytes(digest[:8], 'big', signed=True)
+
+
+def retire_closed_account_address(account, using=None):
+    """Reserve a closed keyed account's BSC address to that account.
+
+    Returns the RetiredWalletAddress row, or None when there is nothing to
+    retire. A row already held by another account is left as it is: the
+    address is reserved either way, and the first owner stays on record.
+    An address another live account holds is not retired (that would refuse
+    raw-address sends to that account); another person's is logged: a row
+    closed before this fix and claimed since (migration 0067 reported those). The row
+    outlives a purge of its account and user (SET_NULL) and keeps the
+    address unclaimable: a purge that means to free the address deletes
+    this row too."""
+    if account.account_type not in RETIRED_ON_CLOSE_ACCOUNT_TYPES or not account.bsc_address:
+        return None
+    address = RetiredWalletAddress.normalize_address(RetiredWalletAddress.CHAIN_BSC, account.bsc_address)
+    lock_bsc_address(address, using=using)   # against a registration of it in flight
+    live = (Account.objects.db_manager(using).annotate(_bsc=Lower('bsc_address'))
+            .filter(_bsc=address, bsc_address__isnull=False).exclude(bsc_address='')
+            .exclude(pk=account.pk).values_list('pk', 'user_id').first())
+    if live is not None:
+        if live[1] != account.user_id:   # the same person's live row needs no review
+            logger.warning(
+                'closed account %s: BSC address held by live account %s, not retired (review by hand)',
+                account.pk, live[0])
+        return None
+    retired, _ = RetiredWalletAddress.objects.db_manager(using).get_or_create(
+        chain=RetiredWalletAddress.CHAIN_BSC,
+        address=address,
+        defaults={'account': account, 'user_id': account.user_id},
+    )
+    return retired
 
 # --- Signals to sync display name ---
 @receiver(post_save, sender=User)

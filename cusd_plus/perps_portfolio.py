@@ -116,14 +116,21 @@ def _after_entry_fee(usd: Decimal) -> Decimal:
     return usd - (usd * bps / Decimal(10_000))
 
 
-def episodes(wallet: str) -> list[Episode]:
-    """Every position whose margin actually left Confío dollars."""
+def episodes(wallet: str, signers=None) -> list[Episode]:
+    """Every position whose margin actually left Confío dollars.
+    `signers`: address_signer_ids(wallet), when the caller has it."""
     from blockchain.models import PerpPosition
 
     from . import perps_catalog
+    from .wallet_signers import address_signer_ids
 
     out = []
-    rows = (PerpPosition.objects.filter(wallet=(wallet or '').lower(), open_batch__status='confirmed')
+    # Opened by the people of the account that holds the wallet (or last
+    # held it: its retired row), never another account's.
+    if signers is None:
+        signers = address_signer_ids(wallet)
+    rows = (PerpPosition.objects.filter(wallet=(wallet or '').lower(), user_id__in=signers,
+                                        open_batch__status='confirmed')
             .exclude(state='failed')
             .select_related('market', 'open_batch__unified_transaction', 'return_batch__unified_transaction')
             .prefetch_related('margin_changes__batch__unified_transaction').order_by('created_at'))

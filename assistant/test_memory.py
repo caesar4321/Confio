@@ -1454,6 +1454,18 @@ class ErasureTests(Base):
             self.assertEqual((row.summary_ids, memory.live_facts(row)), ([], []), type(owner).__name__)
         self.assertFalse(AssistantMemoryFact.all_objects.exclude(value='').exists())
 
+    def test_closing_an_account_a_bulk_update_closed_still_empties_it_now(self):
+        other = self.person('otro2')
+        account = Account.objects.create(user=other, account_type='personal', account_index=0)
+        thread = SupportConversation.objects.create(user=other, account=account, status='OPEN')
+        self.fact(rules.GOAL, 'home', thread=thread)
+        row_id = self.scope(thread).row().pk
+        stale = Account.objects.get(pk=account.pk)
+        Account.all_objects.filter(pk=account.pk).update(deleted_at=timezone.now())   # no signal
+        self.assertTrue(memory.live_facts(AssistantMemory.objects.get(pk=row_id)))
+        stale.soft_delete()
+        self.assertEqual(memory.live_facts(AssistantMemory.objects.get(pk=row_id)), [])
+
     def test_nightly_sweep_catches_a_bulk_delete_with_switches_off(self):
         self.fact(rules.GOAL, 'home')
         User.all_objects.filter(pk=self.user.pk).update(deleted_at=timezone.now())

@@ -200,6 +200,18 @@ def _day_capital(start, flow) -> Decimal | None:
     return Decimal(start) + max(Decimal(flow), Decimal('0')) / 2
 
 
+# A `good=` condition for _runs over PortfolioDailySnapshot only (its SQL
+# reads FROM that table, unaliased; the names below are its db_table and
+# Account's, to change with them). A snapshot day counts only for the
+# person who holds its wallet now: a day of the address's previous account
+# (before it was registered again) is not
+# this member's. Any live personal row of that user holding it (the wallets
+# passed in are already canonical_wallets').
+_OWN_SNAPSHOT_DAY = ('EXISTS (SELECT 1 FROM users_account a WHERE a.user_id = inbox_portfoliodailysnapshot.user_id '
+                     "AND a.account_type = 'personal' "
+                     "AND a.bsc_address IS NOT NULL AND a.bsc_address <> '' AND a.deleted_at IS NULL "
+                     'AND LOWER(a.bsc_address) = inbox_portfoliodailysnapshot.wallet)')
+
 # The same in SQL, for the all-time runs.
 # GREATEST ignores NULL, so an unknown flow is kept unknown explicitly.
 _SNAPSHOT_CAPITAL = ('CASE WHEN net_flow_usd IS NULL THEN NULL '
@@ -255,10 +267,12 @@ def compute_team_day(team, day: date) -> bool:
     wallets = canonical_wallets(eligible)
     owner = {wallet: user_id for user_id, wallet in wallets.items()}
     returns, gains, capitals = {}, {}, {}
-    for wallet, ret, gain, start_usd, flow in (PortfolioDailySnapshot.objects.filter(
+    for wallet, user_id, ret, gain, start_usd, flow in (PortfolioDailySnapshot.objects.filter(
             wallet__in=list(wallets.values()), day=day, ledger_trusted=True, value_start_usd__gte=MIN_SLEEVE_USD)
             .exclude(daily_return__isnull=True).exclude(gain_usd__isnull=True)
-            .values_list('wallet', 'daily_return', 'gain_usd', 'value_start_usd', 'net_flow_usd')):
+            .values_list('wallet', 'user_id', 'daily_return', 'gain_usd', 'value_start_usd', 'net_flow_usd')):
+        if owner.get(wallet) != user_id:
+            continue  # a day of the address's previous account, not this member's
         returns[wallet], gains[wallet] = ret, gain
         capitals[wallet] = _day_capital(start_usd, flow)
     if not returns:
@@ -656,9 +670,13 @@ def investor_table(days: list[date], all_time: bool = False) -> list[Row]:
     if all_time:
         return _investor_table_all_time(days, wallets)
     by_wallet: dict = {}
-    for wallet, day, ret, trusted, start, gain, flow in PortfolioDailySnapshot.objects.filter(
+    owner = {wallet: user_id for user_id, wallet in wallets.items()}
+    for wallet, user_id, day, ret, trusted, start, gain, flow in PortfolioDailySnapshot.objects.filter(
             wallet__in=list(wallets.values()), day__in=days).values_list(
-            'wallet', 'day', 'daily_return', 'ledger_trusted', 'value_start_usd', 'gain_usd', 'net_flow_usd'):
+            'wallet', 'user_id', 'day', 'daily_return', 'ledger_trusted', 'value_start_usd', 'gain_usd',
+            'net_flow_usd'):
+        if owner.get(wallet) != user_id:
+            continue  # a day of the address's previous account, not this member's
         by_wallet.setdefault(wallet, {})[day] = (ret if trusted else None, start, gain if trusted else None,
                                                  _day_capital(start, flow))
     rows = []
@@ -694,7 +712,8 @@ def _investor_table_all_time(days: list[date], wallets: dict) -> list[Row]:
     from inbox.models import PortfolioDailySnapshot
 
     last = days[-1]
-    runs = _runs(PortfolioDailySnapshot, 'wallet', 'daily_return', 'ledger_trusted AND daily_return IS NOT NULL',
+    runs = _runs(PortfolioDailySnapshot, 'wallet', 'daily_return',
+                 f'ledger_trusted AND daily_return IS NOT NULL AND {_OWN_SNAPSHOT_DAY}',
                  wallets.values(), days[0], last, gain='gain_usd', start='value_start_usd',
                  capital=_SNAPSHOT_CAPITAL)
     rows = []
@@ -913,13 +932,17 @@ def month_complete(days) -> bool:
 
     from users.models import Account
 
-    seen = set(PortfolioDailySnapshot.objects.filter(day__in=days[:-1]).values_list('wallet', flat=True).distinct())
+    # (wallet, person) pairs: a day of the address's previous account (before
+    # it was registered again) is not the current holder's and waits for nothing.
+    seen = set(PortfolioDailySnapshot.objects.filter(day__in=days[:-1])
+               .values_list('wallet', 'user_id').distinct())
     # Only wallets still in use: a replaced or deleted wallet never gets its
     # final day and must not hold the award back.
     current = set(Account.objects.filter(account_type='personal', deleted_at__isnull=True)
                   .exclude(bsc_address__isnull=True).exclude(bsc_address='')
-                  .annotate(addr=Lower('bsc_address')).filter(addr__in=seen).values_list('addr', flat=True))
-    last = set(PortfolioDailySnapshot.objects.filter(day=days[-1]).values_list('wallet', flat=True))
+                  .annotate(addr=Lower('bsc_address')).filter(addr__in={w for w, _ in seen})
+                  .values_list('addr', 'user_id')) & seen
+    last = set(PortfolioDailySnapshot.objects.filter(day=days[-1]).values_list('wallet', 'user_id'))
     return current <= last and not has_provisional_days(days)
 
 
@@ -933,12 +956,14 @@ def has_provisional_days(days) -> bool:
     from inbox.models import PortfolioDailySnapshot
     from users.models import Account
 
-    wallets = set(PortfolioDailySnapshot.objects.filter(day__in=days, ledger_sig__endswith='p')
-                  .values_list('wallet', flat=True))
-    if not wallets:
+    pending = set(PortfolioDailySnapshot.objects.filter(day__in=days, ledger_sig__endswith='p')
+                  .values_list('wallet', 'user_id'))
+    if not pending:
         return False
-    return Account.objects.filter(account_type='personal', deleted_at__isnull=True).annotate(
-        addr=Lower('bsc_address')).filter(addr__in=wallets).exists()
+    # Held by the same person still (not the address's previous account's day).
+    return bool(set(Account.objects.filter(account_type='personal', deleted_at__isnull=True).annotate(
+        addr=Lower('bsc_address')).filter(addr__in={w for w, _ in pending}).values_list('addr', 'user_id'))
+        & pending)
 
 
 def badges(*, team_id=None, user_id=None) -> list[str]:

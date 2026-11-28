@@ -17,6 +17,7 @@ then unknowable: the current month degrades to 'value_only' (today's value,
 no gain) and a past month to None. Any missing price, scan or settlement is
 None too — the card hides, never a guessed number.
 """
+import hashlib
 import json
 import logging
 import threading
@@ -92,14 +93,22 @@ def _symbol_by_address() -> dict:
     return out
 
 
-def confirmed_trades(bsc_address: str) -> list[Trade]:
-    """Every confirmed Confío stock trade of this wallet, oldest first."""
+def confirmed_trades(bsc_address: str, signers=None) -> list[Trade]:
+    """Every confirmed Confío stock trade of this wallet, oldest first.
+    `signers`: address_signer_ids(bsc_address), when the caller has it."""
     from django.core.cache import cache
     from django.db.models import Count, Max, Q
     from blockchain.models import SponsoredBatch
 
+    from .wallet_signers import address_signer_ids
+
+    # Signed by the people of the account that holds the address (or last
+    # held it: its retired row): an address registered again must not
+    # inherit its closed account's trades.
+    signers = sorted(address_signer_ids(bsc_address) if signers is None else signers)
     confirmed = SponsoredBatch.objects.filter(
-        user_bsc_address__iexact=bsc_address, kind__in=('stock_buy', 'stock_sell'), status='confirmed')
+        user_bsc_address__iexact=bsc_address, user_id__in=signers,
+        kind__in=('stock_buy', 'stock_sell'), status='confirmed')
     # One cheap aggregate decides whether the decoded ledger is still valid:
     # a new confirmation, a batch edit, a history row added, re-synced (its
     # exact amount) or hidden all change this key. Unchanged → no decoding.
@@ -110,7 +119,8 @@ def confirmed_trades(bsc_address: str) -> list[Trade]:
     if not sig['n']:
         return []
     stamp = lambda v: v.timestamp() if v else 0  # noqa: E731
-    key = (f'gm_trades_v4:{bsc_address.lower()}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
+    signed_by = hashlib.sha256(','.join(map(str, signers)).encode()).hexdigest()[:16]
+    key = (f'gm_trades_v5:{bsc_address.lower()}:{signed_by}:{sig["n"]}:{sig["last"]}:{stamp(sig["touched"])}:'
            f'{sig["rows"]}:{stamp(sig["rows_touched"])}')
     cached = cache.get(key)
     if cached is not None:

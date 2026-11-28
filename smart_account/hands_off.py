@@ -125,17 +125,20 @@ def dollar_usd(token: str, units: int) -> Decimal:
 # ── the cap the person chooses ──────────────────────────────────────────
 
 def biggest_week_of_buys(user) -> Decimal:
-    """The most this person bought in stocks in any 7 days (personal wallet
-    and their account), from the confirmed trade history."""
+    """The most this person bought in stocks in any 7 days on their
+    personal wallet, from its confirmed stock_buy batches. Buys inside the
+    Cuenta inteligente (smart_* batches or relayer transactions, in
+    inbox/account_trades) are not counted here: a gap from before, not a
+    choice."""
     from cusd_plus.stock_month import confirmed_trades
-    from .context import own_account, personal_account
+    from .context import personal_account
+    # Sponsored batches carry the 7702 wallet, never the Cuenta inteligente
+    # contract (its trades live in inbox/account_trades), so only the
+    # personal wallet has any here.
     addresses = []
     personal = personal_account(user)
     if personal is not None and personal.bsc_address:
         addresses.append(personal.bsc_address)
-    own = own_account(user)
-    if own is not None:
-        addresses.append(own.contract_address)
     buys = []
     for address in addresses:
         try:

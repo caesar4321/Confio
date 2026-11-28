@@ -3772,62 +3772,96 @@ class UpdateAccountBscAddress(graphene.Mutation):
                 success=False,
                 error="Esta cuenta ya tiene una dirección BSC registrada distinta.",
             )
+        from .models import lock_bsc_address
+        if account.bsc_address:
+            # Already this account's (the app re-sends it until it hears
+            # success): nothing to claim, so no claim check, only that it is
+            # still the stored one (reconciliation may have moved it since).
+            with db_transaction.atomic():
+                lock_bsc_address(addr)
+                still = Account.objects.filter(pk=account.pk, bsc_address=account.bsc_address).exists()
+            if still:
+                return UpdateAccountBscAddress(success=True, error=None)
+            return UpdateAccountBscAddress(
+                success=False,
+                error="La billetera cambió. Vuelve a iniciar sesión.",
+            )
         # An address belongs to exactly one account. Without this, two accounts
         # could register the same address: the inbound deposit scanner keys a
         # dict on the lowercased address and would credit deposits to whichever
         # account it happened to keep, and reward entitlements aggregated by
         # address would lose per-user attribution. The DB constraint enforces
         # this too; checking here is what turns a 500 into an answer.
-        taken = (
-            Account.objects.filter(bsc_address__iexact=addr, deleted_at__isnull=True)
-            .exclude(pk=account.pk)
-            .exists()
-        )
-        # Historical ownership remains reserved after sign-in reconciliation.
-        # A fresh account must not claim a former wallet of another identity.
+        #
+        # Closed (soft-deleted) accounts count too, unlike the DB constraint:
+        # portfolio, ledger and activity reads find history by address, so a
+        # closed business's address registered here would show its trades and
+        # balances to whoever claimed it. Nothing here proves the caller holds
+        # the key, so an address any row ever held is never claimable again,
+        # as in CompleteWalletReconciliation and CompleteWalletReenrollment.
+        # A closed account comes back only through an operator's
+        # Account.restore(); a hard-deleted one's address stays retired (an
+        # operator re-creating it deletes that RetiredWalletAddress row).
+        from django.db.models.functions import Lower
         from .models import RetiredWalletAddress
-        taken = taken or RetiredWalletAddress.objects.filter(
-            chain=RetiredWalletAddress.CHAIN_BSC, address=addr.lower(),
-        ).exclude(account=account).exists()
-        if taken:
-            logger.warning(
-                "[bsc_address] rejected already-registered address for account=%s user=%s",
-                account.pk,
-                user.id,
-            )
-            return UpdateAccountBscAddress(
-                success=False,
-                error="Esa dirección BSC ya está registrada en otra cuenta.",
-            )
+        refused = UpdateAccountBscAddress(
+            success=False,
+            error="Esa dirección BSC ya está registrada en otra cuenta.",
+        )
         try:
-            # Reconciliation can replace this wallet after the checks above.
-            # A background request holding the old Account must not restore it.
-            updated = Account.objects.filter(
-                pk=account.pk,
-                bsc_address=account.bsc_address,
-                algorand_address=account.algorand_address,
-                is_keyless_migrated=account.is_keyless_migrated,
-            ).update(bsc_address=addr)
-            if not updated:
-                return UpdateAccountBscAddress(
-                    success=False,
-                    error="La billetera cambió. Vuelve a iniciar sesión.",
+            with db_transaction.atomic():
+                # One claim or retirement of this address at a time: a close
+                # committing between these checks and the write cannot slip
+                # past them.
+                lock_bsc_address(addr)
+                taken = (
+                    Account.all_objects.annotate(_bsc=Lower('bsc_address'))
+                    .filter(_bsc=addr.lower(), bsc_address__isnull=False).exclude(bsc_address='')
+                    .exclude(pk=account.pk).exists()
                 )
+                # Historical ownership remains reserved after sign-in
+                # reconciliation. A fresh account must not claim a former
+                # wallet of another identity.
+                taken = taken or RetiredWalletAddress.objects.filter(
+                    chain=RetiredWalletAddress.CHAIN_BSC, address=addr.lower(),
+                ).exclude(account=account).exists()
+                # A Cuenta inteligente's contract, closed ones included (its
+                # row may be gone): never anyone's personal wallet.
+                # Any casing (stored as the chain event gave it); a small table.
+                from smart_account.models import SmartAccount
+                taken = taken or SmartAccount.all_objects.filter(contract_address__iexact=addr).exists()
+                if taken:
+                    logger.warning(
+                        "[bsc_address] rejected already-registered address for account=%s user=%s",
+                        account.pk,
+                        user.id,
+                    )
+                    return refused
+                # Reconciliation can replace this wallet after the checks
+                # above. A background request holding the old Account must
+                # not restore it.
+                updated = Account.objects.filter(
+                    pk=account.pk,
+                    bsc_address=account.bsc_address,
+                    algorand_address=account.algorand_address,
+                    is_keyless_migrated=account.is_keyless_migrated,
+                ).update(bsc_address=addr)
+                if not updated:
+                    return UpdateAccountBscAddress(
+                        success=False,
+                        error="La billetera cambió. Vuelve a iniciar sesión.",
+                    )
         except IntegrityError:
             # Lost the race against a concurrent registration of the same
-            # address: both .exists() checks above passed, the other writer
-            # committed first, and uniq_account_bsc_address_ci rejected this
-            # one. Answer the client the same way the pre-check would have,
-            # instead of surfacing a database error.
+            # address by a path that does not take the lock (the signed
+            # ones): uniq_account_bsc_address_ci rejected this one. Answer the
+            # client the same way the pre-check would have.
             logger.warning(
                 "[bsc_address] lost uniqueness race for account=%s user=%s",
                 account.pk,
                 user.id,
             )
-            return UpdateAccountBscAddress(
-                success=False,
-                error="Esa dirección BSC ya está registrada en otra cuenta.",
-            )
+            return refused
         return UpdateAccountBscAddress(success=True, error=None)
 
 

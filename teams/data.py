@@ -69,8 +69,12 @@ def _returns(user_ids, days) -> dict:
 
     wallets = canonical_wallets(user_ids)
     per: dict = {}
-    for wallet, day, ret, trusted in PortfolioDailySnapshot.objects.filter(
-            wallet__in=list(wallets.values()), day__in=days).values_list('wallet', 'day', 'daily_return', 'ledger_trusted'):
+    owner = {wallet: user_id for user_id, wallet in wallets.items()}
+    for wallet, user_id, day, ret, trusted in PortfolioDailySnapshot.objects.filter(
+            wallet__in=list(wallets.values()), day__in=days).values_list(
+            'wallet', 'user_id', 'day', 'daily_return', 'ledger_trusted'):
+        if owner.get(wallet) != user_id:
+            continue  # a day of the address's previous account, not this member's
         per.setdefault(wallet, {})[day] = ret if trusted else None
     out = {}
     for user_id, wallet in wallets.items():
@@ -160,8 +164,9 @@ def plays(team, limit: int = PLAYS_LIMIT, exclude=()) -> list[dict]:
 
     earliest = min(m.joined_at for m in by_wallet.values())
     batches = list(SponsoredBatch.objects.annotate(addr=Lower('user_bsc_address')).filter(
-        addr__in=list(by_wallet), kind__in=STOCK_KINDS + CRYPTO_KINDS + PERPS_KINDS, status='confirmed',
-        created_at__gte=earliest).select_related('unified_transaction').order_by('-created_at')[:limit * 2])
+        addr__in=list(by_wallet), user_id__in=[m.user_id for m in by_wallet.values()],
+        kind__in=STOCK_KINDS + CRYPTO_KINDS + PERPS_KINDS, status='confirmed', created_at__gte=earliest)
+        .select_related('unified_transaction').order_by('-created_at')[:limit * 2])
     crypto_symbols = dict(CryptoTrade.objects.filter(batch__in=[b for b in batches if b.kind in CRYPTO_KINDS])
                           .values_list('batch_id', 'symbol'))
     perps_by_batch = _perps_positions([b for b in batches if b.kind in PERPS_KINDS])
@@ -169,8 +174,8 @@ def plays(team, limit: int = PLAYS_LIMIT, exclude=()) -> list[dict]:
     out = []
     for batch in batches:
         member = by_wallet.get(batch.user_bsc_address.lower())
-        if member is None or batch.created_at < member.joined_at:
-            continue
+        if member is None or batch.created_at < member.joined_at or batch.user_id != member.user_id:
+            continue  # not this member's (user_id: not the address's previous account's)
         if batch.kind in PERPS_KINDS:
             position = perps_by_batch.get(batch.id)
             if position is None:
@@ -274,8 +279,9 @@ def goal_contributors(team) -> int:
     from .eligibility import canonical_wallets
 
     count = 0
-    for wallet in canonical_wallets([m.user_id for m in _visible(team)]).values():
-        latest = (PortfolioDailySnapshot.objects.filter(wallet=wallet, ledger_trusted=True)
+    for user_id, wallet in canonical_wallets([m.user_id for m in _visible(team)]).items():
+        # user_id: never a day of the address's previous account.
+        latest = (PortfolioDailySnapshot.objects.filter(wallet=wallet, user_id=user_id, ledger_trusted=True)
                   .order_by('-day').values_list('value_end_usd', flat=True).first())
         if latest and latest > 0:
             count += 1
@@ -291,8 +297,9 @@ def goal_progress(team, goal, as_of=None) -> Decimal:
     members_list = _visible(team) if as_of is None else _visible_at(team, as_of)
     if goal.kind == TeamGoalKind.INVESTED_USD:
         total = Decimal('0')
-        for wallet in canonical_wallets([m.user_id for m in members_list]).values():
-            rows = PortfolioDailySnapshot.objects.filter(wallet=wallet, ledger_trusted=True)
+        for user_id, wallet in canonical_wallets([m.user_id for m in members_list]).items():
+            # user_id: never a day of the address's previous account.
+            rows = PortfolioDailySnapshot.objects.filter(wallet=wallet, user_id=user_id, ledger_trusted=True)
             if as_of is not None:
                 rows = rows.filter(day__lte=as_of)
             row = rows.order_by('-day').values_list('value_end_usd', flat=True).first()
@@ -314,7 +321,8 @@ def goal_progress(team, goal, as_of=None) -> Decimal:
     # The longest time a buy can take to settle (crypto swaps: 35 min):
     # anything submitted that close to a boundary is placed by its block.
     IN_FLIGHT_MAX_AGE = max(STOCK_IN_FLIGHT, CRYPTO_IN_FLIGHT)
-    wallets = list(canonical_wallets([m.user_id for m in members_list]).values())
+    owner = {wallet: user_id for user_id, wallet in canonical_wallets([m.user_id for m in members_list]).items()}
+    wallets = list(owner)
     # From a few minutes before the week: a buy submitted on Sunday night
     # that landed on Monday belongs to Monday's week (by its block time).
     batches = (SponsoredBatch.objects.annotate(addr=Lower('user_bsc_address')).filter(
@@ -322,7 +330,9 @@ def goal_progress(team, goal, as_of=None) -> Decimal:
         created_at__gte=week_start - IN_FLIGHT_MAX_AGE, created_at__lt=week_end))
     active = set()
     times: dict = {}
-    for addr, created, block in batches.values_list('addr', 'created_at', 'block_number'):
+    for addr, signer, created, block in batches.values_list('addr', 'user_id', 'created_at', 'block_number'):
+        if owner.get(addr) != signer:
+            continue  # a buy of the address's previous account, not this member's
         if created < week_start:
             settled = _block_time(block, times)
             if settled is None or settled < week_start:
@@ -434,6 +444,7 @@ def copy_play(viewer, batch_id, meta=None):
     # Only plays the member's own profile shows: their one wallet, while
     # they may be shown at all.
     if (owner is None or owner.id == viewer.id
+            or batch.user_id != owner.id   # the address's previous account's buy
             or canonical_wallets([owner.id]).get(owner.id) != batch.user_bsc_address.lower()
             or owner.id not in eligible_user_ids([owner.id])):
         raise CommunityPostError('not_available', 'Esta jugada ya no se puede copiar.')
@@ -499,7 +510,7 @@ def link_copies(hours: int = 24) -> int:
         if not wallet:
             continue
         for batch in (SponsoredBatch.objects.annotate(addr=Lower('user_bsc_address'))
-                      .filter(addr=wallet, status='confirmed', kind__in=('stock_buy', 'crypto_buy'),
+                      .filter(addr=wallet, user_id=copy.user_id, status='confirmed', kind__in=('stock_buy', 'crypto_buy'),
                               created_at__gte=copy.created_at).order_by('created_at')[:10]):
             if batch.kind == 'stock_buy':
                 decoded = _decode_trades([batch])

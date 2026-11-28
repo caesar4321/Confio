@@ -476,10 +476,11 @@ class ConfirmedTradesCacheTests(SimpleTestCase):
     def tearDown(self):
         cache.clear()
 
-    def run_read(self, sig, decoded):
+    def run_read(self, sig, decoded, signers=frozenset({1})):
         qs = mock.MagicMock()
         qs.aggregate.return_value = sig
         with mock.patch('blockchain.models.SponsoredBatch') as model, \
+             mock.patch('cusd_plus.wallet_signers.address_signer_ids', return_value=signers), \
              mock.patch.object(sm, '_decode_trades', return_value=decoded) as decode:
             model.objects.filter.return_value = qs
             return sm.confirmed_trades(ADDR), decode.call_count
@@ -492,6 +493,14 @@ class ConfirmedTradesCacheTests(SimpleTestCase):
         self.assertEqual(self.run_read(sig, one), (one, 0))                       # cached
         self.assertEqual(self.run_read({**sig, 'rows_touched': t0 + timedelta(seconds=1)}, one)[1], 1)  # amount re-synced
         self.assertEqual(self.run_read({**sig, 'n': 2, 'last': 8}, one)[1], 1)    # a new confirmation
+
+    def test_another_signer_set_never_reads_the_cached_ledger(self):
+        t0 = datetime(2026, 10, 1, tzinfo=UTC)
+        sig = {'n': 1, 'last': 7, 'touched': t0, 'rows': 1, 'rows_touched': t0}
+        one = [trade('NVDAon', 'stock_buy', '1', '95', t0)]
+        self.assertEqual(self.run_read(sig, one)[1], 1)
+        self.assertEqual(self.run_read(sig, one)[1], 0)                              # cached
+        self.assertEqual(self.run_read(sig, one, signers=frozenset({2}))[1], 1)      # not that cache
 
     def test_no_trades_skips_decoding_and_unreadable_ones_are_not_cached(self):
         self.assertEqual(self.run_read({'n': 0}, []), ([], 0))

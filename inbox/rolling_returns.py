@@ -191,6 +191,10 @@ def _window_start(wallet: str, ledger, range_key: str, now: datetime) -> tuple[d
         cutoff = now - WINDOWS[range_key]
         if all(t.when >= cutoff for t in ledger.all):
             return cutoff, Decimal('0')            # first trade inside the window
+        # By wallet only: ledger_sig is checked against this wallet's
+        # (signer-filtered) flow_signature, which a snapshot of the address's
+        # previous account (it has flows before `at`, its first trade) does
+        # not match.
         base = (PortfolioValueSnapshot.objects
                 .filter(wallet=wallet, at__lte=cutoff, at__gte=cutoff - START_TOLERANCE)
                 .order_by('-at').first())
@@ -206,6 +210,10 @@ def _window_start(wallet: str, ledger, range_key: str, now: datetime) -> tuple[d
         raise ValueError(range_key)
     if all(t.when >= start for t in ledger.all):
         return start, Decimal('0')
+    # By wallet only: _is_shown compares the row's ledger_sig with this
+    # wallet's (signer-filtered) ledger, so a day of the address's previous
+    # account passes only if both ledgers agree up to that day (its rows
+    # begin at its first trade, so they never do).
     row = PortfolioDailySnapshot.objects.filter(wallet=wallet, day=start.date() - DAY).first()
     if not _is_shown(row, ledger) or row.value_end_usd is None:
         raise Retry(f'no proven close at {start.isoformat()}')
@@ -220,12 +228,20 @@ def _points(wallet: str, ledger, range_key: str, start_at: datetime, value_start
     values = []
     since = start_at
     if range_key != '24h':
+        # By wallet only: _is_shown compares the row's ledger_sig with this
+        # wallet's (signer-filtered) ledger, so a day of the address's previous
+        # account passes only if both ledgers agree up to that day (its rows
+        # begin at its first trade, so they never do).
         for row in PortfolioDailySnapshot.objects.filter(
                 wallet=wallet, day__gte=start_at.date(), day__lt=utc_today(now)).order_by('day'):
             end = day_start(row.day + DAY)
             if start_at < end < now and row.value_end_usd is not None and _is_shown(row, ledger):
                 values.append((end, row.value_end_usd))
         since = max(start_at, day_start(utc_today(now)))
+    # By wallet only: ledger_sig is checked against this wallet's
+    # (signer-filtered) flow_signature, which a snapshot of the address's
+    # previous account (it has flows before `at`, its first trade) does
+    # not match.
     for snap in PortfolioValueSnapshot.objects.filter(wallet=wallet, at__gt=since, at__lt=now).order_by('at'):
         if snap.ledger_sig == flow_signature(ledger, snap.at):
             values.append((snap.at, _snapshot_value(snap, ledger)))

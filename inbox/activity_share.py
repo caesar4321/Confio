@@ -175,6 +175,13 @@ def _personal_account(user, bsc_address):
     return account
 
 
+def _not_own(user, batch) -> bool:
+    """Not this person's own trade to share: the wallet is not their live
+    personal one, or they did not sign it (a trade of the address's
+    previous account, from before it was registered again)."""
+    return _personal_account(user, batch.user_bsc_address) is None or batch.user_id != user.id
+
+
 def _ticker_and_name(symbol: str) -> tuple[str, str]:
     try:
         from cusd_plus import gm_api
@@ -195,10 +202,12 @@ def _wallet_trades(bsc_address):
     wallet, oldest first."""
     from blockchain.models import SponsoredBatch
     from cusd_plus.stock_month import _decode_trades
+    from cusd_plus.wallet_signers import address_signer_ids
 
     batches = list(
         SponsoredBatch.objects.filter(
-            user_bsc_address__iexact=bsc_address, kind__in=(STOCK_BUY, STOCK_SELL), status='confirmed')
+            user_bsc_address__iexact=bsc_address, user_id__in=address_signer_ids(bsc_address),
+            kind__in=(STOCK_BUY, STOCK_SELL), status='confirmed')
         .select_related('unified_transaction').order_by('created_at', 'id')
     )
     return list(zip([b.id for b in batches], _decode_trades(batches)))
@@ -243,7 +252,7 @@ def _stock_snapshot(row, user) -> Snapshot | None:
     batch = row.sponsored_batch
     if batch.kind not in (STOCK_BUY, STOCK_SELL) or batch.status != 'confirmed':
         return None
-    if _personal_account(user, batch.user_bsc_address) is None:
+    if _not_own(user, batch):
         return None
     trades = _wallet_trades(batch.user_bsc_address)
     trade = next((t for bid, t in trades if bid == batch.id), None)
@@ -284,8 +293,11 @@ def _crypto_wallet_trades(bsc_address):
 
     from blockchain.models import SponsoredBatch
 
+    from cusd_plus.wallet_signers import address_signer_ids
+
     wallet = (bsc_address or '').lower()
-    rows = list(CryptoTrade.objects.filter(wallet=wallet, batch__status='confirmed')
+    signers = address_signer_ids(wallet)
+    rows = list(CryptoTrade.objects.filter(wallet=wallet, batch__user_id__in=signers, batch__status='confirmed')
                 .order_by('traded_at', 'batch_id'))
     trades = [(r.batch_id, Trade(symbol=r.symbol, kind=r.kind, units=r.units, usd=r.usd, when=r.traded_at))
               for r in rows]
@@ -294,7 +306,8 @@ def _crypto_wallet_trades(bsc_address):
     # trade ('?' symbol) poisons P&L instead of silently skewing it.
     have = {r.batch_id for r in rows}
     for batch in SponsoredBatch.objects.filter(
-            user_bsc_address__iexact=wallet, kind__in=CRYPTO_KINDS, status='confirmed').exclude(id__in=have):
+            user_bsc_address__iexact=wallet, user_id__in=signers, kind__in=CRYPTO_KINDS,
+            status='confirmed').exclude(id__in=have):
         trades.append((batch.id, Trade(symbol=f'?{batch.id}', kind=batch.kind, units=Decimal('0'),
                                        usd=None, when=batch.created_at)))
     trades.sort(key=lambda item: (item[1].when, item[0]))
@@ -341,7 +354,7 @@ def _crypto_snapshot(row, user) -> Snapshot | None:
     batch = row.sponsored_batch
     if batch.kind not in CRYPTO_KINDS or batch.status != 'confirmed':
         return None
-    if _personal_account(user, batch.user_bsc_address) is None:
+    if _not_own(user, batch):
         return None
     trade = getattr(batch, 'crypto_trade', None)
     if trade is None:
@@ -405,7 +418,7 @@ def _perps_snapshot(row, user) -> Snapshot | None:
     batch = row.sponsored_batch
     if batch.kind not in PERPS_BATCH_KINDS or batch.status != 'confirmed':
         return None
-    if _personal_account(user, batch.user_bsc_address) is None:
+    if _not_own(user, batch):
         return None
     data = _perps_data(batch, _perps_position(batch), _dec(row.amount))
     return Snapshot(data['kind'], data) if data else None
@@ -1075,7 +1088,7 @@ def _stock_preview(user, reference):
     batch = SponsoredBatch.objects.filter(
         tx_hash__iexact=reference, kind__in=(STOCK_BUY, STOCK_SELL),
         status__in=('signed', 'sent', 'confirmed')).first()
-    if batch is None or _personal_account(user, batch.user_bsc_address) is None:
+    if batch is None or _not_own(user, batch):
         return None
     try:
         actions = [a for c in json.loads(batch.calls_json or '[]')
@@ -1183,7 +1196,7 @@ def _crypto_preview(user, reference):
     batch = SponsoredBatch.objects.filter(
         tx_hash__iexact=reference, kind__in=CRYPTO_KINDS,
         status__in=('signed', 'sent', 'confirmed')).first()
-    if batch is None or _personal_account(user, batch.user_bsc_address) is None:
+    if batch is None or _not_own(user, batch):
         return None
     try:
         actions = [a for c in json.loads(batch.calls_json or '[]')
@@ -1227,7 +1240,7 @@ def _perps_preview(user, reference):
     batch = SponsoredBatch.objects.filter(
         tx_hash__iexact=reference, kind__in=PERPS_BATCH_KINDS,
         status__in=('signed', 'sent', 'confirmed')).first()
-    if batch is None or _personal_account(user, batch.user_bsc_address) is None:
+    if batch is None or _not_own(user, batch):
         return None
     position = _perps_position(batch)
     if position is None:

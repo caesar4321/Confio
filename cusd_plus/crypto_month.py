@@ -73,21 +73,26 @@ def display_name(token) -> str:
     return DISPLAY_NAMES.get(token.symbol, token.name)
 
 
-def confirmed_trades(bsc_address: str) -> list[Trade]:
+def confirmed_trades(bsc_address: str, signers=None) -> list[Trade]:
     """Every confirmed Confío crypto/metal swap of this wallet, oldest first.
     A confirmed swap without its CryptoTrade row (receipt had no exact
     settlement event, or not synced yet) is unreadable: a '?' trade, so the
     ledger can never silently skip it."""
     from blockchain.models import CRYPTO_BATCH_KINDS, CryptoTrade, SponsoredBatch
 
+    from .wallet_signers import address_signer_ids
+
     wallet = bsc_address.lower()
-    rows = list(CryptoTrade.objects.filter(wallet=wallet, batch__status='confirmed')
+    # Signed by the people of the account that holds the address (or last
+    # held it: its retired row), never another account's.
+    signers = address_signer_ids(wallet) if signers is None else signers
+    rows = list(CryptoTrade.objects.filter(wallet=wallet, batch__user_id__in=signers, batch__status='confirmed')
                 .select_related('batch').order_by('traded_at', 'batch_id'))
     trades = [Trade(symbol=r.symbol, kind=r.kind, units=r.units, usd=r.usd, when=r.traded_at,
                     block=r.batch.block_number) for r in rows]
     have = {r.batch_id for r in rows}
     for batch in SponsoredBatch.objects.filter(
-            user_bsc_address__iexact=wallet, kind__in=CRYPTO_BATCH_KINDS,
+            user_bsc_address__iexact=wallet, user_id__in=signers, kind__in=CRYPTO_BATCH_KINDS,
             status='confirmed').exclude(id__in=have):
         logger.warning('crypto month: confirmed swap %s has no ledger row', batch.id)
         trades.append(Trade(symbol=f'?{batch.id}', kind=batch.kind, units=Decimal('0'), usd=None,

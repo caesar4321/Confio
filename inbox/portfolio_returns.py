@@ -462,10 +462,13 @@ def load_ledger(wallet: str, prices: PriceBook, addresses: list | None = None, *
 
     wallet = wallet.lower()
     addresses = addresses if addresses is not None else person_addresses(wallet)
+    from cusd_plus.wallet_signers import address_signer_ids
+
     try:
-        stocks = list(stock_month.confirmed_trades(wallet))
-        crypto = list(crypto_month.confirmed_trades(wallet))
-        perps = perps_portfolio.episodes(wallet)
+        signers = address_signer_ids(wallet)   # once for the three ledgers
+        stocks = list(stock_month.confirmed_trades(wallet, signers))
+        crypto = list(crypto_month.confirmed_trades(wallet, signers))
+        perps = perps_portfolio.episodes(wallet, signers)
         for address in addresses:
             if address == wallet:
                 continue
@@ -749,11 +752,21 @@ def _row_values(day: Day | None, sig: str, reason: str = '') -> dict:
             'ledger_sig': sig}
 
 
+def _needs_write(row, ledger, holder, recompute=False) -> bool:
+    """A day to (re)compute: asked to, not final yet, or a final day of
+    another person (the address's previous account), rewritten for the
+    holder like any day that is not final."""
+    return recompute or not _is_final(row, ledger) or row.user_id != holder
+
+
 def _store(user, wallet: str, day: date, values: dict, existing) -> bool:
     """Write the row unless it already says exactly this. True if written."""
     from .models import PortfolioDailySnapshot
 
-    if existing is not None and all(getattr(existing, k) == v for k, v in values.items()):
+    # Same values but another person (the address's previous account's
+    # day) is still rewritten: the row belongs to whoever holds the wallet.
+    if (existing is not None and existing.user_id == getattr(user, 'id', user)
+            and all(getattr(existing, k) == v for k, v in values.items())):
         return False
     PortfolioDailySnapshot.objects.update_or_create(wallet=wallet, day=day, defaults={'user': user, **values})
     return True
@@ -812,7 +825,8 @@ def sync_wallet(user, wallet: str, *, days: int = BACKFILL_DAYS, now: datetime |
             return counts
         wanted = [d for d in wanted if d >= first]
     existing = {r.day: r for r in PortfolioDailySnapshot.objects.filter(wallet=wallet, day__in=wanted)}
-    todo = [d for d in wanted if recompute or not _is_final(existing.get(d), ledger)]
+    holder = getattr(user, 'id', user)
+    todo = [d for d in wanted if _needs_write(existing.get(d), ledger, holder, recompute)]
     counts['unchanged'] = len(wanted) - len(todo)
     if not todo:
         return counts
@@ -948,6 +962,10 @@ def period_return(user, range_key: str, now: datetime | None = None) -> PeriodRe
         return unknown
     today = utc_today(now)
     window = [today - timedelta(days=n) for n in range(n_days, 0, -1)]
+    # By wallet only: _is_shown compares the row's ledger_sig with this
+    # wallet's (signer-filtered) ledger, so a day of the address's previous
+    # account passes only if both ledgers agree up to that day (its rows
+    # begin at its first trade, so they never do).
     rows = {r.day: r for r in PortfolioDailySnapshot.objects.filter(wallet=wallet, day__in=window)}
 
     days: list = []   # (end instant, return, gain)

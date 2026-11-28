@@ -179,3 +179,34 @@ class LegacyWalletWriteDatabaseTests(TransactionTestCase):
         self.account.refresh_from_db()
         self.assertIsNone(self.account.algorand_address)
         self.assertEqual(self.account.bsc_address, '0x' + '1' * 40)
+
+    @skipUnless(connection.vendor == 'postgresql', 'Requires PostgreSQL advisory locks')
+    def test_bsc_address_lock_is_held_until_the_transaction_ends(self):
+        from users.models import bsc_address_lock_key, lock_bsc_address
+
+        address = '0x' + 'Ab' * 20
+        held, release = Event(), Event()
+
+        def hold():
+            try:
+                with transaction.atomic():
+                    lock_bsc_address(address)
+                    held.set()
+                    release.wait(5)
+            finally:
+                connections['default'].close()
+
+        def try_lock(key):
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute('SELECT pg_try_advisory_xact_lock(%s)', [key])
+                return cursor.fetchone()[0]
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(hold)
+            self.assertTrue(held.wait(5))
+            # The same address, any case: taken; another address: free.
+            self.assertFalse(try_lock(bsc_address_lock_key(address.lower())))
+            self.assertTrue(try_lock(bsc_address_lock_key('0x' + 'cd' * 20)))
+            release.set()
+            future.result(timeout=5)
+        self.assertTrue(try_lock(bsc_address_lock_key(address)))
