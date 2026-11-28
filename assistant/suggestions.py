@@ -16,6 +16,7 @@ Assistant as the user's own message when a hint or chip is tapped.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -100,6 +101,124 @@ class Suggestions:
 
 def _s(id_, text, prompt=None, kind='prompt'):
     return Suggestion(id=id_, text=text, prompt=text if prompt is None else prompt, kind=kind)
+
+
+# The chips in Portuguese, for people who write in it (or, before they write,
+# live in Brazil): a Spanish chip tapped is a Spanish message, and is answered
+# in Spanish (Natane, Brazil, 2026-11-28). Keyed by the Spanish text.
+PORTUGUESE = {
+    '¿Qué es una acción? Te lo explico en 1 minuto.': 'O que é uma ação? Te explico em 1 minuto.',
+    '¿Qué es una acción y cómo funciona en Confío?': 'O que é uma ação e como funciona no Confío?',
+    '¿Cómo invierto en acciones de EE.UU.?': 'Como invisto em ações dos EUA?',
+    '¿Cómo invierto en acciones?': 'Como invisto em ações?',
+    '¿Qué significa diversificar?': 'O que significa diversificar?',
+    '¿Qué riesgos tiene invertir en una acción?': 'Quais são os riscos de investir em uma ação?',
+    '¿Qué riesgos tiene invertir en una sola acción?': 'Quais são os riscos de investir em uma só ação?',
+    '¿A quién y cómo puedes enviar? Te guío.': 'Para quem e como você pode enviar? Eu te guio.',
+    '¿Cuáles son las formas de enviar dinero?': 'Quais são as formas de enviar dinheiro?',
+    '¿Cómo retiro a mi cuenta bancaria?': 'Como transfiro para minha conta bancária?',
+    '¿Cómo te pagan desde otro país?': 'Como te pagam de outro país?',
+    '¿Cómo me pueden pagar desde otro país?': 'Como podem me pagar de outro país?',
+    '¿Comparo este mes con el anterior?': 'Comparo este mês com o anterior?',
+    'Compara este mes con el anterior': 'Compare este mês com o anterior',
+    'Personaliza a tu asistente: descríbelo o usa una foto de tu mascota.':
+        'Personalize seu assistente: descreva-o ou use uma foto do seu pet.',
+    '¿Cómo cambio dólares por efectivo?': 'Como troco dólares por dinheiro em espécie?',
+    '¿Cómo cambio mis dólares por efectivo?': 'Como troco meus dólares por dinheiro em espécie?',
+    '¿A cuánto está el dólar hoy?': 'Quanto está o dólar hoje?',
+    '¿Cómo va tu recarga? Te digo en qué estado está.': 'Como vai sua recarga? Te digo em que estado está.',
+    '¿En qué estado está mi recarga?': 'Em que estado está minha recarga?',
+    'Tu documento venció. ¿Te ayudo a verificarte de nuevo?': 'Seu documento venceu. Te ajudo a se verificar de novo?',
+    'Mi documento de identidad venció, ¿cómo me verifico de nuevo?':
+        'Meu documento de identidade venceu, como me verifico de novo?',
+    '¿Te ayudo a terminar tu verificación de identidad?': 'Te ajudo a terminar sua verificação de identidade?',
+    'Empecé mi verificación de identidad y no la terminé, ¿qué hago?':
+        'Comecei minha verificação de identidade e não terminei, o que faço?',
+    '¿Te ayudo con tu verificación de identidad?': 'Te ajudo com sua verificação de identidade?',
+    '¿En qué estado está mi verificación de identidad?': 'Em que estado está minha verificação de identidade?',
+    '¿Cómo cobro a un cliente?': 'Como cobro de um cliente?',
+    '¿Cómo genero un QR para cobrar?': 'Como gero um QR para cobrar?',
+    '¿Qué es Confío y para qué sirve?': 'O que é o Confío e para que serve?',
+    '¿Cómo pongo mis primeros dólares?': 'Como coloco meus primeiros dólares?',
+    '¿Cómo pongo mis primeros dólares en Confío?': 'Como coloco meus primeiros dólares no Confío?',
+    '¿Qué es Confío y para qué me sirve?': 'O que é o Confío e para que me serve?',
+    '¿Cuánto cuesta usar Confío?': 'Quanto custa usar o Confío?',
+    '¿Es seguro? ¿Quién controla mi dinero?': 'É seguro? Quem controla meu dinheiro?',
+    '¿Cuánto rinde Confío Dollar+?': 'Quanto rende o Confío Dollar+?',
+    '¿Cómo ahorro en dólares?': 'Como guardo meu dinheiro em dólares?',
+    '¿Cómo recibo dólares de otra persona?': 'Como recebo dólares de outra pessoa?',
+    '¿Dónde cambio dólares por efectivo?': 'Onde troco dólares por dinheiro em espécie?',
+    '¿Cómo recibes dólares de otra persona? Te explico.': 'Como receber dólares de outra pessoa? Te explico.',
+    '¿Te cuento en qué se fue tu dinero este mes?': 'Te conto para onde foi seu dinheiro este mês?',
+    '¿En qué gasté más este mes?': 'Com o que gastei mais este mês?',
+    '¿Cómo envío dinero a otro país?': 'Como envio dinheiro para outro país?',
+    'Abre QR para pagar': 'Abrir QR para pagar',
+    'Tradúceme un texto': 'Traduza um texto para mim',
+    'Ayúdame a escribir un mensaje': 'Me ajude a escrever uma mensagem',
+    'Explícame un tema en simple': 'Me explique um assunto de forma simples',
+    'Ayúdame a planear un viaje': 'Me ajude a planejar uma viagem',
+    'Dame una idea para cocinar hoy': 'Me dê uma ideia para cozinhar hoje',
+    '¿Qué pasó hoy en las noticias?': 'O que aconteceu hoje nas notícias?',
+}
+_CHIP_TEXTS = frozenset(' '.join(text.lower().split()) for pair in PORTUGUESE.items() for text in pair)
+# The chips written around a ticker (_own_chips): (Spanish, Portuguese).
+_TICKER_CHIPS = ((re.compile(r'^¿Cómo va (\S+) hoy\?$'), '¿Cómo va {} hoy?', 'Como está {} hoje?'),
+                 (re.compile(r'^¿Cómo va (\S+) hoy y por qué se movió\?$'), '¿Cómo va {} hoy y por qué se movió?',
+                  'Como está {} hoje e por que subiu ou caiu?'))
+
+
+def _in_portuguese(text):
+    if text in PORTUGUESE:
+        return PORTUGUESE[text]
+    for pattern, _es, pt in _TICKER_CHIPS:
+        found = pattern.match(text or '')
+        if found:
+            return pt.format(found.group(1))
+    return text
+
+
+def _spanish_of(text):
+    """The Spanish chip a normalized Portuguese chip stands for, or ''."""
+    for es, pt in PORTUGUESE.items():
+        if _norm(pt) == text:
+            return _norm(es)
+    for _pattern, es, pt in _TICKER_CHIPS:
+        head, tail = _norm(pt).split('{}')
+        middle = text[len(head):len(text) - len(tail)] if text.startswith(head) and text.endswith(tail) else ''
+        if len(text) > len(head) + len(tail) and re.fullmatch(r'[a-z0-9.-]{1,10}', middle):  # one ticker
+            return _norm(es.format(middle.upper()))
+    return ''
+
+
+def _is_chip(text):
+    """A normalized message that is one of our chips, in either language: never the person's own words."""
+    if text in _CHIP_TEXTS or _spanish_of(text):
+        return True
+    return bool(re.fullmatch(r'¿cómo va [a-z0-9.-]{1,10} hoy(?: y por qué se movió)?\?', text))
+
+
+def _chip_language(viewer, state):
+    """'pt' or 'es': the language of this person's own recent messages (never a
+    chip they tapped); before they wrote, Portuguese for people in Brazil."""
+    own = [text for text in _own_messages(viewer, since=timezone.now() - timedelta(days=HISTORY_DAYS), limit=20)
+           if not _is_chip(text)]
+    if own:
+        try:
+            from .confirm import _language_of, language
+
+            # "oi", "bom dia", "pix": no word of either language, so where they live decides.
+            if _language_of(own[:5]):
+                return 'pt' if language(own[:5]) == 'pt' else 'es'
+        except Exception:  # noqa: BLE001 - chips are a nicety
+            logger.warning('suggestions: language unknown', exc_info=True)
+    return 'pt' if state.country == 'BR' else 'es'
+
+
+def _translated(items, lang):
+    if lang != 'pt':
+        return items
+    return [Suggestion(id=s.id, text=_in_portuguese(s.text), prompt=_in_portuguese(s.prompt), kind=s.kind)
+            for s in items]
 
 
 # Per-screen help (lowest priority; same content the app shipped with).
@@ -341,6 +460,8 @@ def _own_chips(viewer, state):
 def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
     state = _state(viewer, request_meta)
     asked = _recently_asked(viewer)
+    # A Portuguese chip tapped is that chip asked: it makes room as the Spanish one does.
+    asked |= {es for es in map(_spanish_of, asked) if es}
     attention, situation = [], []
 
     if state.topup_in_progress and not state.employee:
@@ -421,7 +542,9 @@ def build(viewer, screen: str = '', request_meta=None) -> Suggestions:
         starters = personal[:MAX_STARTERS - 1] + [ours]
     else:
         starters = ranked[:MAX_STARTERS]
-    return Suggestions(hints=hints, starters=starters, probe=probe_payload() if wants_probe(state) else None)
+    lang = _chip_language(viewer, state)
+    return Suggestions(hints=_translated(hints, lang), starters=_translated(starters, lang),
+                       probe=probe_payload() if wants_probe(state) else None)
 
 
 def record_probe_answer(user, probe_id, answer, *, funded):

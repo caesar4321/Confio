@@ -836,6 +836,9 @@ RATE_TYPES_ES = {'parallel': 'paralelo', 'average': 'promedio', 'official': 'ofi
 INFORMATIONAL_PROMPTS = {
     '¿cuánto cuesta usar confío?', '¿qué es confío y para qué me sirve?', '¿qué es confío y para qué sirve?',
     '¿es seguro? ¿quién controla mi dinero?', '¿cómo pongo mis primeros dólares en confío?',
+    # The same chips in Portuguese (assistant/suggestions.PORTUGUESE).
+    'quanto custa usar o confío?', 'o que é o confío e para que me serve?', 'o que é o confío e para que serve?',
+    'é seguro? quem controla meu dinheiro?', 'como coloco meus primeiros dólares no confío?',
 }
 def is_tapped_text(message):
     """An informational suggestion or a first-use probe answer, sent by a tap."""
@@ -3187,6 +3190,34 @@ def _keep_button_promise(belt, result):
     result.tools.append({'name': 'act_here:auto', 'ok': True, 'args': {'action': key}})
 
 
+# "Si quieres, toca el botón «Muéstrame»" with no such button (Natane, 2026-11-28): the walk button said by its
+# name, quoted or called a button. Never the person's own "muéstrame cómo", which has neither.
+_SHOW_ME_PROMISE = re.compile(
+    r'(?i)(?:[«"“‘\']|\*\*)\s*(?:mu[eé]strame|mostre-me)\s*(?:[»"”’\']|\*\*)'
+    r'|\b(?:bot[oó]n|bot[aã]o)\s+(?:de\s+|do\s+)?(?:\*\*)?(?:mu[eé]strame|mostre-me)\b')
+
+
+def _keep_show_me_promise(result):
+    """A reply that points at a «Muéstrame» button the turn never made: that
+    sentence is taken out (the steps are already in words)."""
+    if any(isinstance(a, dict) and a.get('type') == 'walk' for a in result.actions):
+        return
+    reply = result.reply or ''
+    if not _SHOW_ME_PROMISE.search(reply):
+        return
+    lines = []
+    for line in reply.split('\n'):
+        parts = re.split(r'(?<=[.!?])[ \t]+', line)
+        kept = [part for part in parts if not _SHOW_ME_PROMISE.search(part)]
+        if len(kept) == len(parts):
+            lines.append(line)
+        elif kept and not _LIST_MARK.match(' '.join(kept)):
+            lines.append(' '.join(kept))
+    kept = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+    if kept:
+        result.reply = kept
+
+
 def _keep_card_promise(belt, result):
     """A reply that promises a card the turn never made (Gemini did, 2026-11-26:
     "te dejo la tarjeta de Recibir" and nothing under it). Code makes it when the
@@ -3413,6 +3444,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
         _keep_form_promise(belt, done)
         _keep_button_promise(belt, done)
         _keep_card_promise(belt, done)
+        _keep_show_me_promise(done)
         return done
     except AssistantUnavailable as exc:
         # Usage already spent (a search, an analysis) is still billed: the
