@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal, ROUND_DOWN
 
+from django.core.serializers.json import DjangoJSONEncoder
 from p2p_exchange.models import P2PPaymentMethod
 from ramps.models import RampPaymentMethod, RampTransaction
 from users.models import Country
@@ -461,6 +463,40 @@ def get_supported_country_codes(*, include_empty_methods: bool = False) -> list[
     return sorted(codes)
 
 
+def _sync_catalog_row(model, lookup: dict, defaults: dict):
+    """Make one catalog row match the code's catalog, writing only what differs.
+
+    A new row is created active. On a row that already exists, ``is_active``
+    is the admin's choice and is never written here: switching a method off in
+    the admin must survive the next person opening the screen. Methods dropped
+    from the catalog are switched off by the caller; one added back to the
+    catalog later has to be switched on again in the admin.
+    """
+    fields = {name: value for name, value in defaults.items() if name != "is_active"}
+    row, created = model.objects.get_or_create(**lookup, defaults={**fields, "is_active": True})
+    if created:
+        return row
+    changed = []
+    for name, value in fields.items():
+        field = model._meta.get_field(name)
+        if field.is_relation:
+            current, wanted = getattr(row, field.attname), (value.pk if value is not None else None)
+        elif field.get_internal_type() == "JSONField":
+            # Compare as stored: tuples come back as lists.
+            current, wanted = getattr(row, name), json.loads(json.dumps(value, cls=DjangoJSONEncoder))
+        else:
+            current, wanted = getattr(row, name), value
+        if current != wanted:
+            setattr(row, name, value)
+            changed.append(name)
+    if changed:
+        update_fields = list(changed)
+        if any(f.name == "updated_at" for f in model._meta.fields):
+            update_fields.append("updated_at")
+        row.save(update_fields=update_fields)
+    return row
+
+
 def sync_country_payment_methods(country_code: str) -> list[P2PPaymentMethod]:
     config = get_country_ramp_config(country_code)
     if not config:
@@ -474,7 +510,6 @@ def sync_country_payment_methods(country_code: str) -> list[P2PPaymentMethod]:
         defaults = {
             "display_name": method["display_name"],
             "provider_type": method["provider_type"],
-            "is_active": True,
             "icon": method["icon"],
             "country": country,
             "description": method["description"],
@@ -483,18 +518,17 @@ def sync_country_payment_methods(country_code: str) -> list[P2PPaymentMethod]:
             "requires_account_number": method["requires_account_number"],
             "display_order": index * 10,
         }
-        payment_method, _ = P2PPaymentMethod.objects.update_or_create(
-            name=method["code"].lower().replace("-", "_"),
-            country_code=country_code.upper(),
-            defaults=defaults,
+        payment_method = _sync_catalog_row(
+            P2PPaymentMethod,
+            {"name": method["code"].lower().replace("-", "_"), "country_code": country_code.upper()},
+            defaults,
         )
-        RampPaymentMethod.objects.update_or_create(
-            code=method["code"],
-            country_code=country_code.upper(),
-            defaults={
+        _sync_catalog_row(
+            RampPaymentMethod,
+            {"code": method["code"], "country_code": country_code.upper()},
+            {
                 "display_name": method["display_name"],
                 "provider_type": method["provider_type"],
-                "is_active": True,
                 "icon": method["icon"],
                 "country": country,
                 "bank": payment_method.bank,
@@ -519,10 +553,11 @@ def sync_country_payment_methods(country_code: str) -> list[P2PPaymentMethod]:
         name__startswith="wire",
     ).exclude(
         name__in=[m["code"].lower().replace("-", "_") for m in config["methods"]]
-    ).update(is_active=False)
+    ).filter(is_active=True).update(is_active=False)
 
     RampPaymentMethod.objects.filter(
-        country_code=country_code.upper()
+        country_code=country_code.upper(),
+        is_active=True,
     ).exclude(
         code__in=[m["code"] for m in config["methods"]]
     ).update(is_active=False)
