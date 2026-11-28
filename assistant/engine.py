@@ -3139,6 +3139,54 @@ def _without_promises(reply):
     return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
 
 
+# "Toca el botón de abajo para abrir WhatsApp" with nothing under it (Pedro, 2026-11-28, twice). Not a card
+# promise: "el botón de abajo" is as often a button of a bank's screen or of a form, and is never deleted.
+_BUTTON_BELOW = re.compile(r'(?i)\bbot[oó]n(?:es)?\s+(?:de\s+abajo|aqu[ií]\s+abajo|m[aá]s\s+abajo)\b')
+# Not a button to make now: told not to tap it, one already used or left before, someone else's screen.
+_BUTTON_NOT_NOW = re.compile(r'(?i)\bno\s+(?:toques|toque|uses|use|hace\s+falta)\b|\bya\s+no\b|\bantes\b'
+                      r'|\bque\s+toque\b|\bsu\s+pantalla\b|\bver[aá]n?\b|\ba\s+la\s+(?:derecha|izquierda)\b'
+                      r'|\ben\s+(?:whatsapp|tu\s+app|la\s+app)\b')
+# Which share button a promise means, by its words (here.SHARE_ACTIONS).
+_SHARE_WORDS = (
+    ('invite_whatsapp', lambda said: re.search(r'(?i)\bwhatsapp\b', said) and re.search(r'(?i)\binvit', said)),
+    ('share_username', lambda said: re.search(r'(?i)\bcompart\w*\b[^.!?\n]{0,40}\busuario\b', said)),
+)
+
+
+def _keep_button_promise(belt, result):
+    """A reply that promises a share button the turn never made ("toca el botón
+    de abajo para abrir WhatsApp", Pedro 2026-11-28): code makes the one button
+    the promise names when this person is offered it. It only adds: a button
+    it cannot name is left as said."""
+    from . import here
+    from .confirm import busy
+
+    reply = result.reply or ''
+    if (result.actions or busy(result, count_writes=False) or getattr(result, 'payment_refusal', None)
+            or getattr(belt, 'waiting_for_team', False) or not _BUTTON_BELOW.search(reply)
+            or _CARD_PROMISE.search(reply)):  # a card promised anywhere is the card check's
+        return
+    sentences = [part for line in reply.split('\n') for part in re.split(r'(?<=[.!?])[ \t]+', line)]
+    promised = [sentence for sentence in sentences if _BUTTON_BELOW.search(sentence)]
+    # A screen named there is the card check's ("el botón de abajo abre Recibir").
+    if any(_BUTTON_NOT_NOW.search(sentence) or _PROMISE_SCREEN.search(sentence)
+           for sentence in promised):
+        return
+    keys = [key for key, says in _SHARE_WORDS if says(' '.join(promised))]
+    if len(keys) != 1:
+        return
+    try:
+        offered = {spec.get('name') for spec in here.specs(belt.viewer, belt)}
+    except Exception:  # noqa: BLE001 - no button, never a failed turn
+        return
+    if 'act_here' not in offered:
+        return
+    (key,) = keys
+    label, _does = here.SHARE_ACTIONS[key]
+    result.actions.append({'type': 'do', 'target': key, 'label': label})
+    result.tools.append({'name': 'act_here:auto', 'ok': True, 'args': {'action': key}})
+
+
 def _keep_card_promise(belt, result):
     """A reply that promises a card the turn never made (Gemini did, 2026-11-26:
     "te dejo la tarjeta de Recibir" and nothing under it). Code makes it when the
@@ -3363,6 +3411,7 @@ def run_turn(viewer: Viewer, history, *, first_name, account_label, country, ana
                              country=country)
         _open_claimed_screen(belt, done)
         _keep_form_promise(belt, done)
+        _keep_button_promise(belt, done)
         _keep_card_promise(belt, done)
         return done
     except AssistantUnavailable as exc:
